@@ -57,6 +57,19 @@ That's it. On the next IDE restart the portal will download itself, spawn its ch
 > [!TIP]
 > The portal replaces individual `project-graph-mcp` and `agent-pool-mcp` entries in your MCP config — you only need this single entry.
 
+<details>
+<summary>Where is my MCP config file?</summary>
+
+| IDE | Config path |
+|-----|------------|
+| Antigravity | `~/.gemini/antigravity/mcp_config.json` |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Cursor | `.cursor/mcp.json` |
+| Windsurf | `.windsurf/mcp.json` |
+| Claude Code | Run: `claude mcp add agent-portal npx -y mcp-agent-portal` |
+
+</details>
+
 ### CLI
 
 ```bash
