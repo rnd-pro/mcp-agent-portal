@@ -244,6 +244,71 @@ export class MCPProxyManager {
     return list;
   }
 
+  /**
+   * Hot-install a new MCP server without restarting the portal.
+   * Registers, spawns, and persists to config.
+   * @param {string} name
+   * @param {{ command: string, args?: string[], env?: object }} def
+   */
+  addServer(name, def) {
+    if (this.servers.has(name)) {
+      throw new Error(`Server "${name}" already installed`);
+    }
+    if (!def.command) {
+      throw new Error('Missing "command" in server definition');
+    }
+    let settings = {
+      ...def,
+      args: def.args || [],
+      color: `hsl(${Math.floor(Math.random() * 360)}, 65%, 55%)`,
+      agents: 0,
+      pid: null,
+      process: null,
+      crashes: 0,
+      respawnTimer: null,
+    };
+    this.servers.set(name, settings);
+    this.spawnServer(name);
+    this._persistConfig();
+    console.error(`✅ [Marketplace] Installed and started "${name}"`);
+  }
+
+  /**
+   * Hot-remove an MCP server — stop and unregister.
+   * @param {string} name
+   */
+  removeServer(name) {
+    if (!this.servers.has(name)) {
+      throw new Error(`Server "${name}" not found`);
+    }
+    this.stopServer(name);
+    this.servers.delete(name);
+    this._persistConfig();
+    console.error(`🗑️ [Marketplace] Removed "${name}"`);
+  }
+
+  /** Persist current server list to config file. */
+  _persistConfig() {
+    try {
+      let config = {};
+      if (fs.existsSync(CONFIG_PATH)) {
+        config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      }
+      config.mcpServers = {};
+      for (let [name, s] of this.servers) {
+        if (s.isRemote) continue; // Don't persist remote WS clients
+        config.mcpServers[name] = {
+          command: s.command,
+          args: s.args,
+          ...(s.env ? { env: s.env } : {}),
+        };
+      }
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+    } catch (err) {
+      console.error('🔴 [Marketplace] Failed to persist config:', err.message);
+    }
+  }
+
   broadcastMonitor(msg) {
     let data = JSON.stringify(msg);
     for (let client of this.monitors) {

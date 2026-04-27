@@ -9,6 +9,7 @@
 import { readConfig, writeConfig } from '../config-store.js';
 import { lintFile } from './lint-service.js';
 import { listAdapterTypes } from '../adapters/index.js';
+import { REGISTRY, getRegistryByCategory, findInRegistry } from './marketplace-registry.js';
 
 /**
  * Parse JSON body from request.
@@ -33,15 +34,7 @@ function parseBody(req, maxBytes = 1024 * 1024) {
   });
 }
 
-/** @type {{ name: string, description: string, command: string, args: string[] }[]} */
-let MOCK_REGISTRY = [
-  { name: 'agent-pool', description: 'Multi-agent task delegation, scheduling, pipelines, and peer review', command: 'npx', args: ['-y', 'agent-pool-mcp'] },
-  { name: 'project-graph', description: 'AST-based codebase analysis, navigation, and documentation', command: 'npx', args: ['-y', 'project-graph-mcp'] },
-  { name: 'sqlite-mcp', description: 'Interact with SQLite databases', command: 'npx', args: ['-y', '@modelcontextprotocol/server-sqlite', '/tmp/test.db'] },
-  { name: 'filesystem-mcp', description: 'Secure local filesystem access', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'] },
-  { name: 'github-mcp', description: 'GitHub API integration', command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
-  { name: 'brave-search', description: 'Web search via Brave API', command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'] },
-];
+
 
 /**
  * Build the route map. Accepts context once at init time.
@@ -83,7 +76,8 @@ export function createRoutes(ctx) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         installed: config.mcpServers || {},
-        available: MOCK_REGISTRY,
+        available: REGISTRY,
+        categories: getRegistryByCategory(),
       }));
     },
 
@@ -128,15 +122,27 @@ export function createRoutes(ctx) {
 
     'POST /api/marketplace/install': async (req, res) => {
       try {
-        let { name, def } = await parseBody(req);
-        if (!name || !def || !def.command) throw new Error('Invalid server definition');
-        let config = readConfig();
-        config.mcpServers = config.mcpServers || {};
-        config.mcpServers[name] = def;
-        writeConfig(config);
+        let { name } = await parseBody(req);
+        if (!name) throw new Error('Missing server name');
+        let entry = findInRegistry(name);
+        if (!entry) throw new Error(`"${name}" not found in registry`);
+        proxyManager.addServer(name, { command: entry.command, args: entry.args });
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-        setTimeout(() => process.exit(2), 500);
+        res.end(JSON.stringify({ ok: true, name, hot: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
+    'POST /api/marketplace/install-custom': async (req, res) => {
+      try {
+        let { name, command, args, env } = await parseBody(req);
+        if (!name || !command) throw new Error('Missing name or command');
+        let def = { command, args: args || [], ...(env ? { env } : {}) };
+        proxyManager.addServer(name, def);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, name, hot: true }));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
@@ -147,14 +153,9 @@ export function createRoutes(ctx) {
       try {
         let { name } = await parseBody(req);
         if (!name) throw new Error('Missing server name');
-        let config = readConfig();
-        if (config.mcpServers && config.mcpServers[name]) {
-          delete config.mcpServers[name];
-          writeConfig(config);
-        }
+        proxyManager.removeServer(name);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-        setTimeout(() => process.exit(2), 500);
+        res.end(JSON.stringify({ ok: true, name, hot: true }));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
