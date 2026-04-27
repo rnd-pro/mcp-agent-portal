@@ -191,6 +191,10 @@ pg-marketplace .mp-card:hover {
   transform: translateY(-1px);
 }
 
+pg-marketplace .mp-card[hidden] {
+  display: none;
+}
+
 pg-marketplace .mp-card-header {
   display: flex;
   align-items: center;

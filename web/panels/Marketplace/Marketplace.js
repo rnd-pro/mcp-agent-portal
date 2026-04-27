@@ -59,7 +59,7 @@ class Marketplace extends Symbiote {
       let cards = this.shadowRoot.querySelectorAll('.mp-card');
       for (let card of cards) {
         let text = card.textContent.toLowerCase();
-        card.style.display = text.includes(q) ? '' : 'none';
+        card.hidden = !text.includes(q);
       }
     };
   }
