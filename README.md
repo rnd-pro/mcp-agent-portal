@@ -193,28 +193,27 @@ By keeping plugins loosely coupled, the Agent Portal acts as the central brain, 
 
 **Prerequisites:** Node.js >= 20.
 
-```bash
-git clone https://github.com/rnd-pro/mcp-agent-portal
-cd mcp-agent-portal
-npm install
-```
-
 Add to your IDE's MCP configuration:
 
 ```json
 {
   "mcpServers": {
-    "mcp-agent-portal": {
-      "command": "node",
-      "args": ["/path/to/mcp-agent-portal/index.js"]
+    "agent-portal": {
+      "command": "npx",
+      "args": ["-y", "mcp-agent-portal"]
     }
   }
 }
 ```
 
+That's it. On the next IDE restart the portal will download itself, spawn its child servers, and expose all tools.
+
+> [!TIP]
+> The portal replaces individual `project-graph-mcp` and `agent-pool-mcp` entries in your MCP config — you only need this single entry.
+
 ### Configuration
 
-Create `~/.gemini/mcp-agent-portal.json`:
+Optionally create `~/.gemini/agent-portal.json` to customize child servers and adapters:
 
 ```json
 {
@@ -234,6 +233,15 @@ Create `~/.gemini/mcp-agent-portal.json`:
     "claude": { "type": "claude-code", "enabled": false, "maxInstances": 2 }
   }
 }
+```
+
+### Local Development
+
+```bash
+git clone https://github.com/rnd-pro/mcp-agent-portal
+cd mcp-agent-portal
+npm install
+node index.js
 ```
 
 ## MCP Ecosystem
