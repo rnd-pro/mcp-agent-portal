@@ -14,7 +14,7 @@ import { ToolIndex } from './tool-index.js';
 let META_TOOLS = [
   {
     name: 'discover_tools',
-    description: 'Search available MCP tools across all connected servers. Use this to find the right tool before calling it. Returns tool names, descriptions, and which server provides them. Call with no arguments to see all available tools, or filter by query/tag/server.',
+    description: 'Search available MCP tools across all connected servers. Use this to find the right tool before calling it. Returns tool names, descriptions, and which server provides them. Call with no arguments to see all available tools, or filter by query/tag/server.\n\n💡 HINT: There are many tools available for code analysis (e.g., get_skeleton, get_ai_context), task delegation (e.g., delegate_task), and infrastructure (e.g., list_skills, create_group). Use this tool to find their exact names and arguments.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -151,11 +151,11 @@ export class MCPMultiplexer {
     }
 
     if (msg.method === 'tools/list') {
-      // Return only our 3 meta-tools
+      // Return our 3 meta-tools, with dynamic hints injected
       this.sendToIde({
         jsonrpc: '2.0',
         id: msg.id,
-        result: { tools: META_TOOLS },
+        result: { tools: this._getDynamicMetaTools() },
       });
       return;
     }
@@ -176,6 +176,37 @@ export class MCPMultiplexer {
     }
 
     // Default: unknown method — silently drop
+  }
+
+  /**
+   * Generates the 3 meta-tools with dynamic hints about currently available tools.
+   */
+  _getDynamicMetaTools() {
+    let discoverDesc = META_TOOLS[0].description;
+    
+    if (this.toolIndex.isReady) {
+      let servers = this.toolIndex.getServers();
+      let hints = [];
+      for (let s of servers) {
+        // Find top 3-4 tools for this server to act as hints
+        let serverTools = [...this.toolIndex.tools.values()]
+          .filter(t => t.server === s.name)
+          .slice(0, 4)
+          .map(t => t.tool.name);
+        if (serverTools.length > 0) {
+          hints.push(`- [${s.name}]: ${serverTools.join(', ')}...`);
+        }
+      }
+      if (hints.length > 0) {
+        discoverDesc += '\n\n💡 HINTS - Available tools include:\n' + hints.join('\n');
+      }
+    }
+
+    return [
+      { ...META_TOOLS[0], description: discoverDesc },
+      META_TOOLS[1],
+      META_TOOLS[2]
+    ];
   }
 
   /**
