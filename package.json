@@ -1,6 +1,6 @@
 {
   "name": "mcp-agent-portal",
-  "version": "1.0.0-alpha.2",
+  "version": "1.0.0-alpha.3",
   "description": "Unified Agent & MCP Control Plane — aggregator for AI agents and MCP tools",
   "type": "module",
   "main": "index.js",
