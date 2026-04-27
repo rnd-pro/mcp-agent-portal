@@ -25,6 +25,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@symbiotejs/symbiote": "^3.5.8",
+    "telegraf": "^4.16.3",
     "ws": "^8.18.0"
   },
   "engines": {

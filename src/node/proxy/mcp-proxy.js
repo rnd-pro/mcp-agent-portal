@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { AdapterPool } from '../adapters/pool.js';
+import { PluginLoader } from '../plugins/plugin-loader.js';
 
 const CONFIG_PATH = path.join(os.homedir(), '.gemini', 'agent-portal.json');
 
@@ -19,6 +20,7 @@ export class MCPProxyManager {
     /** @type {Map<string, { resolve: Function, reject: Function }>} */
     this.pendingRequests = new Map();
     this.adapterPool = new AdapterPool({});
+    this.pluginLoader = new PluginLoader({}, { adapterPool: this.adapterPool, mcpProxy: this, broadcast: (msg) => this.broadcastMonitor(msg) });
     this.loadConfig();
   }
 
@@ -43,6 +45,11 @@ export class MCPProxyManager {
         if (config.adapters) {
           this.adapterPool = new AdapterPool(config.adapters);
         }
+        this.pluginLoader = new PluginLoader(config, {
+          adapterPool: this.adapterPool,
+          mcpProxy: this,
+          broadcast: (msg) => this.broadcastMonitor(msg)
+        });
       }
     } catch (err) {
       console.error('🔴 Failed to load MCP config:', err);
@@ -85,6 +92,7 @@ export class MCPProxyManager {
     for (let serverName of this.servers.keys()) {
       this.spawnServer(serverName);
     }
+    this.pluginLoader.initAll().catch(err => console.error('🔴 [MCPProxy] Plugin init error:', err));
   }
 
   spawnServer(serverName) {
@@ -296,6 +304,9 @@ export class MCPProxyManager {
     }
     if (this.adapterPool) {
       this.adapterPool.destroy();
+    }
+    if (this.pluginLoader) {
+      this.pluginLoader.destroyAll().catch(err => console.error('🔴 [MCPProxy] Plugin destroy error:', err));
     }
   }
 }
