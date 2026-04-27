@@ -1,0 +1,16 @@
+mcp-proxy.js — child MCP process lifecycle manager
+
+class MCPProxyManager
+  constructor()→void|init servers map, monitors set, pending requests
+  loadConfig()→void|read ~/.gemini/agent-portal.json, populate servers map
+  startAllServers(callback)→void|spawn all configured child servers
+  spawnServer(serverName)→void|fork child via spawn, wire stdio, track PID
+  sendToChild(serverName,msg)→void|write JSON-RPC msg to child stdin
+  requestFromChild(serverName,method,params)→Promise<obj>|send request, wait for response (5s timeout)
+  getInstances()→arr|list all servers with name,prefix,command,args,pid
+  broadcastMonitor(msg)→void|send event to all connected WS monitors
+  handleUpgrade(req,socket,head)→bool|route WS upgrade to monitor handler
+  handleMonitor(serverName,req,socket,head)→void|create WS monitor connection
+
+PATTERNS: child process management|stdio JSON-RPC|WS monitoring|pending request map
+DEPS: ws|node:child_process|local config file

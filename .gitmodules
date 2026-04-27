@@ -1,0 +1,9 @@
+[submodule "packages/symbiote-node"]
+	path = packages/symbiote-node
+	url = https://github.com/RND-PRO/symbiote-node.git
+[submodule "packages/agent-pool-mcp"]
+	path = packages/agent-pool-mcp
+	url = https://github.com/rnd-pro/agent-pool-mcp.git
+[submodule "packages/project-graph-mcp"]
+	path = packages/project-graph-mcp
+	url = https://github.com/rnd-pro/project-graph-mcp.git

@@ -1,0 +1,37 @@
+{
+  "name": "agent-portal",
+  "version": "1.0.0-alpha.1",
+  "description": "Unified Agent & MCP Control Plane — aggregator for AI agents and MCP tools",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "agent-portal": "bin/agent-portal.js"
+  },
+  "scripts": {
+    "start": "node bin/agent-portal.js",
+    "dev": "node index.js --dev",
+    "submodules": "git submodule update --init --recursive"
+  },
+  "keywords": [
+    "mcp",
+    "agent",
+    "control-plane",
+    "dashboard",
+    "ai",
+    "marketplace"
+  ],
+  "author": "RND-PRO",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@symbiotejs/symbiote": "^3.5.8",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "globals": "^17.5.0"
+  }
+}

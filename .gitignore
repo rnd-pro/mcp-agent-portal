@@ -1,0 +1,7 @@
+node_modules/
+.project-graph-cache.json
+*.tgz
+.DS_Store
+tmp/
+.gemini/
+*.log

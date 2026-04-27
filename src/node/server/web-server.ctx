@@ -1,0 +1,16 @@
+web-server.js — HTTP API + static file serving for agent-portal
+
+startWebServer(projectRoot)→{server,proxyManager}|boot HTTP server, spawn MCP children, register gateway
+serveStaticFile(reqPath,res)→void|serve static files from web/ or packages/ dirs
+
+ROUTES:
+  POST /api/mcp-call|proxy MCP tool call to child server
+  GET /api/instances|list all registered MCP servers
+  GET /api/project-info|portal metadata (name,path,agents,pid)
+  GET /api/server-status|uptime,agents,monitors
+  POST /api/stop|graceful shutdown exit(0)
+  POST /api/restart|config-change restart exit(2)
+  GET /api/*|fallback HTTP proxy to local-gateway backends
+
+PATTERNS: fail-fast config|exit(2) restart|raw http.createServer|no framework
+DEPS: local-gateway.js|mcp-proxy.js

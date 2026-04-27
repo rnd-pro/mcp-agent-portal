@@ -1,0 +1,20 @@
+mcp-multiplexer.js — stdio MCP aggregator (IDE ↔ children)
+
+class MCPMultiplexer
+  constructor(proxyManager)→void|init request map, tools map
+  listen()→void|start all child servers, read IDE stdin line-by-line
+  sendToIde(msg)→void|write JSON-RPC to stdout, broadcast to monitors
+  handleIdeMessage(msg)→void|route IDE request to appropriate handler
+  aggregateList(ideRequestId,method,key)→Promise<void>|collect list from all children, merge, respond
+  handleChildMessage(serverName,msg)→void|route child response back to IDE with original ID
+
+PROTOCOL:
+  initialize → respond with capabilities, forward to all children
+  initialized → forward to all children
+  tools/list → aggregate from all children, build toolsMap
+  prompts/list → aggregate from all children
+  resources/list → aggregate from all children
+  tools/call → lookup toolsMap, forward to target server with rewritten ID
+
+PATTERNS: ID rewriting|tool→server routing map|list aggregation
+DEPS: mcp-proxy.js (MCPProxyManager)
