@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
-// Override console.log to prevent corrupting stdio MCP communication
-let originalConsoleLog = console.log;
-console.log = function (...args) {
-  console.error(...args);
-};
+// Detect if stdin is piped from IDE (MCP stdio) or interactive terminal
+let isIDEMode = !process.stdin.isTTY;
+
+// Override console.log only in IDE mode to prevent corrupting stdio MCP communication
+if (isIDEMode) {
+  console.log = function (...args) {
+    console.error(...args);
+  };
+}
 
 import { startWebServer } from './src/node/server/web-server.js';
 import { MCPMultiplexer } from './src/node/proxy/mcp-multiplexer.js';
@@ -28,13 +32,19 @@ if (isMaster) {
 let projectRoot = process.cwd();
 let { server, proxyManager } = startWebServer(projectRoot);
 
-// If client mode, connect to master instead of starting stdio multiplexer
 if (connectUrl) {
+  // Client mode — connect to master
   startWSClient(connectUrl, proxyManager);
-} else {
-  // Start the multiplexer on stdio
+} else if (isIDEMode) {
+  // IDE mode (stdin is piped) — start stdio MCP multiplexer
   let multiplexer = new MCPMultiplexer(proxyManager);
   multiplexer.listen();
+} else {
+  // Terminal mode (interactive TTY) — web-only, no stdio
+  console.log('🌐 Running in web-only mode (no IDE detected)');
+  console.log('✅ mcp-agent-portal started. Web UI: http://portal.local/');
 }
 
-console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
+if (isIDEMode) {
+  console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
+}
