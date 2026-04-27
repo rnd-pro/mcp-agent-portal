@@ -1,5 +1,50 @@
 // @ctx mcp-multiplexer.ctx
 import { createInterface } from 'node:readline';
+import { ToolIndex } from './tool-index.js';
+
+/**
+ * Smart Tool Gateway — exposes 3 meta-tools instead of proxying all child tools.
+ * 
+ * Meta-tools:
+ *   discover_tools  — search child tools by keyword, tag, or server
+ *   call_tool        — proxy a call to any child tool by name
+ *   get_portal_status — health, server list, tool counts
+ */
+
+let META_TOOLS = [
+  {
+    name: 'discover_tools',
+    description: 'Search available MCP tools across all connected servers. Use this to find the right tool before calling it. Returns tool names, descriptions, and which server provides them. Call with no arguments to see all available tools, or filter by query/tag/server.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Keyword search across tool names and descriptions. Example: "skeleton", "code analysis", "delegate"' },
+        tag: { type: 'string', description: 'Filter by tag (pre-configured categories). Use get_portal_status to see available tags.' },
+        server: { type: 'string', description: 'Filter by server name. Example: "project-graph", "agent-pool"' },
+      },
+    },
+  },
+  {
+    name: 'call_tool',
+    description: 'Call any tool from any connected MCP server by name. First use discover_tools to find the tool name, then call it here with its arguments. The call is transparently proxied to the correct server.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Tool name (as returned by discover_tools). Example: "get_skeleton", "delegate_task"' },
+        arguments: { type: 'object', description: 'Arguments to pass to the tool (matches the tool\'s inputSchema)' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'get_portal_status',
+    description: 'Get the status of the agent-portal: connected MCP servers, their health, total tool count, and available tags for discover_tools filtering.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+];
 
 export class MCPMultiplexer {
   constructor(proxyManager) {
@@ -7,14 +52,26 @@ export class MCPMultiplexer {
     /** @type {Map<number, { serverName: string, originalId: number }>} */
     this.requestMap = new Map();
     this.nextInternalId = 1;
-    /** @type {Map<string, string>} */
-    this.toolsMap = new Map();
+    this.toolIndex = new ToolIndex();
   }
 
   listen() {
     this.proxyManager.startAllServers((serverName, msg) => {
       this.handleChildMessage(serverName, msg);
     });
+
+    // Rebuild tool index and notify IDE when servers change
+    this.proxyManager.onServerChange = async (action, serverName) => {
+      console.error(`🔄 [multiplexer] Server ${action}: "${serverName}" — rebuilding tool index`);
+      // Wait for new server to initialize before indexing
+      setTimeout(async () => {
+        await this._rebuildIndex();
+        this.notifyToolsChanged();
+      }, action === 'add' ? 3000 : 100);
+    };
+
+    // Build tool index after servers are initialized
+    setTimeout(() => this._rebuildIndex(), 3000);
 
     let rl = createInterface({
       input: process.stdin,
@@ -32,6 +89,18 @@ export class MCPMultiplexer {
     });
   }
 
+  async _rebuildIndex() {
+    await this.toolIndex.rebuild(this.proxyManager);
+    // Load tags from config if available
+    try {
+      let { readConfig } = await import('../config-store.js');
+      let config = readConfig();
+      if (config.toolTags) {
+        this.toolIndex.setTags(config.toolTags);
+      }
+    } catch {}
+  }
+
   sendToIde(msg) {
     process.stdout.write(JSON.stringify(msg) + '\n');
     // Broadcast events to the dashboard
@@ -39,6 +108,14 @@ export class MCPMultiplexer {
       jsonrpc: '2.0',
       method: 'event',
       params: msg,
+    });
+  }
+
+  /** Notify IDE that tools list has changed (after hot install/remove). */
+  notifyToolsChanged() {
+    this.sendToIde({
+      jsonrpc: '2.0',
+      method: 'notifications/tools/list_changed',
     });
   }
 
@@ -55,7 +132,7 @@ export class MCPMultiplexer {
         id: msg.id,
         result: {
           protocolVersion: '2025-06-18',
-          capabilities: { tools: {}, resources: {} },
+          capabilities: { tools: { listChanged: true }, resources: {} },
           serverInfo: { name: 'agent-portal', version: '2.0.0' },
         },
       });
@@ -74,7 +151,12 @@ export class MCPMultiplexer {
     }
 
     if (msg.method === 'tools/list') {
-      this.aggregateList(msg.id, 'tools/list', 'tools');
+      // Return only our 3 meta-tools
+      this.sendToIde({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: { tools: META_TOOLS },
+      });
       return;
     }
 
@@ -89,24 +171,109 @@ export class MCPMultiplexer {
     }
 
     if (msg.method === 'tools/call') {
-      let toolName = msg.params?.name;
-      let targetServer = this.toolsMap.get(toolName);
-      if (!targetServer) {
-        this.sendToIde({
-          jsonrpc: '2.0',
-          id: msg.id,
-          error: { code: -32601, message: `Unknown tool: ${toolName}` },
-        });
-        return;
-      }
-
-      let internalId = this.nextInternalId++;
-      this.requestMap.set(internalId, { serverName: targetServer, originalId: msg.id });
-      this.proxyManager.sendToChild(targetServer, { ...msg, id: internalId });
+      this._handleToolCall(msg);
       return;
     }
 
     // Default: unknown method — silently drop
+  }
+
+  /**
+   * Handle tools/call — dispatch to meta-tool handlers or proxy to child.
+   * @param {object} msg
+   */
+  async _handleToolCall(msg) {
+    let toolName = msg.params?.name;
+    let args = msg.params?.arguments || {};
+
+    try {
+      if (toolName === 'discover_tools') {
+        let result = this.toolIndex.search(args);
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          },
+        });
+        return;
+      }
+
+      if (toolName === 'get_portal_status') {
+        let status = {
+          servers: this.toolIndex.getServers(),
+          health: this.proxyManager.getHealthStatus(),
+          totalTools: this.toolIndex.tools.size,
+          tags: this.toolIndex.getAvailableTags(),
+          mode: process.env.PORTAL_MODE || 'standalone',
+        };
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: {
+            content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
+          },
+        });
+        return;
+      }
+
+      if (toolName === 'call_tool') {
+        let realToolName = args.name;
+        let realArgs = args.arguments || {};
+
+        if (!realToolName) {
+          this.sendToIde({
+            jsonrpc: '2.0',
+            id: msg.id,
+            error: { code: -32602, message: 'Missing "name" argument — specify which tool to call' },
+          });
+          return;
+        }
+
+        let entry = this.toolIndex.get(realToolName);
+        if (!entry) {
+          // Try rebuild and check again
+          await this._rebuildIndex();
+          entry = this.toolIndex.get(realToolName);
+        }
+
+        if (!entry) {
+          this.sendToIde({
+            jsonrpc: '2.0',
+            id: msg.id,
+            error: { code: -32601, message: `Unknown tool: "${realToolName}". Use discover_tools to find available tools.` },
+          });
+          return;
+        }
+
+        // Proxy the call to the child server
+        let internalId = this.nextInternalId++;
+        this.requestMap.set(internalId, { serverName: entry.server, originalId: msg.id });
+        this.proxyManager.sendToChild(entry.server, {
+          jsonrpc: '2.0',
+          id: internalId,
+          method: 'tools/call',
+          params: { name: realToolName, arguments: realArgs },
+        });
+        return;
+      }
+
+      // Unknown meta-tool
+      this.sendToIde({
+        jsonrpc: '2.0',
+        id: msg.id,
+        error: { code: -32601, message: `Unknown tool: ${toolName}` },
+      });
+    } catch (err) {
+      this.sendToIde({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: {
+          content: [{ type: 'text', text: `Error: ${err.message}` }],
+          isError: true,
+        },
+      });
+    }
   }
 
   /**
@@ -124,9 +291,6 @@ export class MCPMultiplexer {
         if (response && response[key]) {
           for (let item of response[key]) {
             allItems.push(item);
-            if (key === 'tools') {
-              this.toolsMap.set(item.name, serverName);
-            }
           }
         }
       } catch (err) {

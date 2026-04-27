@@ -21,6 +21,8 @@ export class MCPProxyManager {
     this.pendingRequests = new Map();
     this.adapterPool = new AdapterPool({});
     this.pluginLoader = new PluginLoader({}, { adapterPool: this.adapterPool, mcpProxy: this, broadcast: (msg) => this.broadcastMonitor(msg) });
+    /** @type {Function|null} Called when servers are added/removed */
+    this.onServerChange = null;
     this.loadConfig();
   }
 
@@ -271,6 +273,7 @@ export class MCPProxyManager {
     this.servers.set(name, settings);
     this.spawnServer(name);
     this._persistConfig();
+    if (this.onServerChange) this.onServerChange('add', name);
     console.error(`✅ [Marketplace] Installed and started "${name}"`);
   }
 
@@ -285,6 +288,7 @@ export class MCPProxyManager {
     this.stopServer(name);
     this.servers.delete(name);
     this._persistConfig();
+    if (this.onServerChange) this.onServerChange('remove', name);
     console.error(`🗑️ [Marketplace] Removed "${name}"`);
   }
 
