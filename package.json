@@ -5,10 +5,10 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "agent-portal": "bin/agent-portal.js"
+    "mcp-agent-portal": "bin/mcp-agent-portal.js"
   },
   "scripts": {
-    "start": "node bin/agent-portal.js",
+    "start": "node bin/mcp-agent-portal.js",
     "dev": "node index.js --dev",
     "test:unit": "node --test --test-timeout 10000 test/unit/*.test.js",
     "test:integration": "node --test --test-timeout 20000 test/integration/*.test.js",

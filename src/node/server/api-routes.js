@@ -1,5 +1,5 @@
 /**
- * API route map — declarative HTTP routing for agent-portal.
+ * API route map — declarative HTTP routing for mcp-agent-portal.
  * Each handler receives (req, res, ctx) where ctx provides proxyManager etc.
  *
  * Pattern from cloud-images-toolkit: cmdMap[cmd]?.(data) — one-liner dispatch.
@@ -54,7 +54,7 @@ export function createRoutes(ctx) {
     'GET /api/project-info': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        name: 'agent-portal',
+        name: 'mcp-agent-portal',
         path: projectRoot,
         agents: proxyManager.servers.size,
         pid: process.pid,

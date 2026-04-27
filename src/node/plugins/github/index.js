@@ -20,7 +20,7 @@ export async function init(portalAPI, config) {
   let parts = config.repo.split('/');
   owner = parts[0];
   repo = parts[1];
-  labels = config.labels || ['agent-portal', 'alert'];
+  labels = config.labels || ['mcp-agent-portal', 'alert'];
   console.log(`✅ [GitHubPlugin] Initialized for ${config.repo}.`);
 }
 
@@ -52,7 +52,7 @@ export function onAlert(alert) {
     alert.message,
     '```',
     '',
-    '_Auto-created by agent-portal GitHub plugin._',
+    '_Auto-created by mcp-agent-portal GitHub plugin._',
   ].join('\n');
 
   let payload = JSON.stringify({ title, body, labels });
@@ -66,7 +66,7 @@ export function onAlert(alert) {
       'Accept': 'application/vnd.github+json',
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(payload),
-      'User-Agent': 'agent-portal',
+      'User-Agent': 'mcp-agent-portal',
       'X-GitHub-Api-Version': '2022-11-28',
     },
   };

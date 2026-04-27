@@ -173,7 +173,7 @@ export function startWebServer(projectRoot) {
     let gateway = registerService('portal', port);
 
     setTimeout(() => {
-      console.error(`\n  ⬡ agent-portal`);
+      console.error(`\n  ⬡ mcp-agent-portal`);
       console.error('  ─────────────────────────────');
       console.error(`  → ${gateway.url}`);
       console.error(`  → ${gateway.directUrl}  (direct)\n`);
@@ -181,7 +181,7 @@ export function startWebServer(projectRoot) {
   });
 
   function shutdown() {
-    console.error('\n🟡 Shutting down agent-portal...');
+    console.error('\n🟡 Shutting down mcp-agent-portal...');
     proxyManager.stopAll();
     server.close();
     process.exit(0);

@@ -14,13 +14,13 @@ function startServer() {
   child = spawn('node', [scriptPath], { stdio: 'inherit' });
 
   child.on('error', (err) => {
-    console.error('🔴 Failed to start agent-portal:', err);
+    console.error('🔴 Failed to start mcp-agent-portal:', err);
     process.exit(1);
   });
 
   child.on('exit', (code) => {
     if (code === 2) {
-      console.log('🔄 Restarting agent-portal...');
+      console.log('🔄 Restarting mcp-agent-portal...');
       startServer();
     } else if (code !== 0 && code !== null) {
       process.exit(code);

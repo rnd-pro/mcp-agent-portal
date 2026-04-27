@@ -1,7 +1,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 
-# agent-portal
+# mcp-agent-portal
 
 **Unified MCP aggregator + AI agent runtime.** A single MCP server that proxies any number of child MCP servers — your IDE sees one `tools/list` combined from all of them. Runs a web dashboard in parallel for visual management, agent chat, and live monitoring.
 
@@ -12,7 +12,7 @@
 └────────────┬────────────────────┘
              │ MCP (stdio)
 ┌────────────▼────────────────────┐
-│  agent-portal                   │  ← This server
+│  mcp-agent-portal                   │  ← This server
 │  (MCP aggregator + web UI)      │
 └──┬────────┬────────┬────────────┘
    │        │        │
@@ -33,7 +33,7 @@ Agent Portal works in **two modes simultaneously**:
 | **IDE** | stdio (JSON-RPC) | Unified `tools/list`, `resources/list`, `prompts/list` from all children |
 | **Web** | HTTP + WebSocket | Dashboard, Marketplace, AI Chat, Graph, live monitoring |
 
-The IDE talks to agent-portal as a normal MCP server. The web UI runs in the background on a random port, accessible via `portal.local` (local gateway).
+The IDE talks to mcp-agent-portal as a normal MCP server. The web UI runs in the background on a random port, accessible via `portal.local` (local gateway).
 
 ### MCP Aggregation
 
@@ -128,7 +128,7 @@ New sections are registered via `RouterRegistry` — MCP servers can inject thei
 
 Discover and manage MCP servers. The Marketplace panel shows all configured servers with live status, PID, and tool count. Planned features:
 
-- Add/remove servers via UI (edits `agent-portal.json`)
+- Add/remove servers via UI (edits `mcp-agent-portal.json`)
 - Tool explorer — browse `tools/list` per server
 - Start/stop/restart individual servers
 - Public registry (ClawHub-inspired)
@@ -194,8 +194,8 @@ By keeping plugins loosely coupled, the Agent Portal acts as the central brain, 
 **Prerequisites:** Node.js >= 20.
 
 ```bash
-git clone https://github.com/rnd-pro/agent-portal
-cd agent-portal
+git clone https://github.com/rnd-pro/mcp-agent-portal
+cd mcp-agent-portal
 npm install
 ```
 
@@ -204,9 +204,9 @@ Add to your IDE's MCP configuration:
 ```json
 {
   "mcpServers": {
-    "agent-portal": {
+    "mcp-agent-portal": {
       "command": "node",
-      "args": ["/path/to/agent-portal/index.js"]
+      "args": ["/path/to/mcp-agent-portal/index.js"]
     }
   }
 }
@@ -214,7 +214,7 @@ Add to your IDE's MCP configuration:
 
 ### Configuration
 
-Create `~/.gemini/agent-portal.json`:
+Create `~/.gemini/mcp-agent-portal.json`:
 
 ```json
 {
@@ -267,8 +267,8 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 ## Project Structure
 
 ```
-agent-portal/
-├── bin/agent-portal.js           # Restart wrapper (exit code 2 = respawn)
+mcp-agent-portal/
+├── bin/mcp-agent-portal.js           # Restart wrapper (exit code 2 = respawn)
 ├── index.js                     # Entry point: web server + stdio MCP
 ├── package.json
 ├── eslint.config.js             # Flat ESLint config for IDE highlighting
@@ -354,7 +354,7 @@ Align **all related repositories** to the unified coding standard defined in [BE
 
 | # | Project | Key Refactoring | Priority |
 |---|---------|-----------------|----------|
-| 0.1 | **agent-portal** (this repo) | `iso/node/ui/` source layout; `let`-first; single quotes; JSDoc `@type` on all exports | 🔴 Critical |
+| 0.1 | **mcp-agent-portal** (this repo) | `iso/node/ui/` source layout; `let`-first; single quotes; JSDoc `@type` on all exports | 🔴 Critical |
 | 0.2 | **project-graph-mcp** | Code style audit (let/const, arrow conventions); generate `.ctx` docs for every `src/` file | 🔴 Critical |
 | 0.3 | **agent-pool-mcp** | Same code style audit; `.ctx` docs generation; verify plain-object patterns (no unnecessary classes) | 🔴 Critical |
 | 0.4 | **symbiote-node** | Verify Triple-File Partitioning; audit token-based theming; ensure `iso/node/ui/` boundary compliance | 🟡 High |
@@ -447,7 +447,7 @@ Multi-node topology (client/master):
 
 | # | Task | Scope |
 |---|------|-------|
-| 5.1 | **Add/remove servers via UI** | Marketplace edits `agent-portal.json` + triggers exit(2) restart |
+| 5.1 | **Add/remove servers via UI** | Marketplace edits `mcp-agent-portal.json` + triggers exit(2) restart |
 | 5.2 | **Tool explorer** | Browse `tools/list` per server with input playground |
 | 5.3 | **Public registry API** | ClawHub-inspired server discovery and one-click install |
 

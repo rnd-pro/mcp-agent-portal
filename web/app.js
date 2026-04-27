@@ -200,7 +200,7 @@ async function u(){
     if("agent_connect"===e.type||"agent_disconnect"===e.type)return g(e.agents),void emit("agent-event",e);
     state.monitorEvents.push(e),state.monitorEvents.length>500&&state.monitorEvents.shift(),emit("tool-event",e)
   });
-  // NOTE: In agent-portal context, state.js WS connect is disabled.
+  // NOTE: In mcp-agent-portal context, state.js WS connect is disabled.
   // All API calls go through HTTP /api/mcp-call multiplexer.
   // c();
 }

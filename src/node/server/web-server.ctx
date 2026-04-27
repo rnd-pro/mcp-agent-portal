@@ -1,4 +1,4 @@
-web-server.js — HTTP API + static file serving for agent-portal
+web-server.js — HTTP API + static file serving for mcp-agent-portal
 
 startWebServer(projectRoot)→{server,proxyManager}|boot HTTP server, spawn MCP children, register gateway
 serveStaticFile(reqPath,res)→void|serve static files from web/ or packages/ dirs

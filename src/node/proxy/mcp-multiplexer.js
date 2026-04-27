@@ -38,7 +38,7 @@ let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the agent-portal: connected MCP servers, their health, total tool count, and available tags for discover_tools filtering.',
+    description: 'Get the status of the mcp-agent-portal: connected MCP servers, their health, total tool count, and available tags for discover_tools filtering.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -136,7 +136,7 @@ export class MCPMultiplexer {
         result: {
           protocolVersion: '2025-06-18',
           capabilities: { tools: { listChanged: true }, resources: {} },
-          serverInfo: { name: 'agent-portal', version: '2.0.0' },
+          serverInfo: { name: 'mcp-agent-portal', version: '2.0.0' },
         },
       });
       // Broadcast initialize to all children

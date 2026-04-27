@@ -37,4 +37,4 @@ if (connectUrl) {
   multiplexer.listen();
 }
 
-console.error('✅ agent-portal aggregator started. Web UI available at http://portal.local/');
+console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
