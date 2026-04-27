@@ -1,2 +1,1 @@
-// @ctx .context/web/panels/ProjectList/ProjectList.css.ctx
-export default"\n:host {\n  display: block;\n  height: 100%;\n  overflow-y: auto;\n  padding: 10px;\n  background: var(--sn-bg-primary);\n  color: var(--sn-fg-primary);\n}\n.empty {\n  color: var(--sn-fg-muted);\n  padding: 24px;\n  text-align: center;\n}\n";
+export default"\n:host {\n  display: block;\n  height: 100%;\n  overflow-y: auto;\n  padding: 10px;\n  background: var(--sn-panel-bg);\n  color: var(--sn-text);\n}\n.empty {\n  color: var(--sn-text-dim);\n  padding: 24px;\n  text-align: center;\n}\n";

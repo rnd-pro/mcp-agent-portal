@@ -1,8 +1,12 @@
 // @ctx TopologyPanel.css.ctx
 export default /*css*/ `
+:host {
+  display: block;
+  height: 100%;
+}
 .topology-panel {
   padding: 20px;
-  color: #fff;
+  color: var(--sn-text);
   height: 100%;
   overflow-y: auto;
   box-sizing: border-box;
@@ -11,18 +15,20 @@ export default /*css*/ `
 .topology-panel h2 {
   margin-top: 0;
   font-weight: 500;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--sn-node-border);
   padding-bottom: 10px;
   display: flex;
   align-items: center;
   gap: 10px;
+  color: var(--sn-text-dim);
 }
 
 .node-table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 20px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--sn-node-bg);
+  border: 1px solid var(--sn-node-border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -30,19 +36,21 @@ export default /*css*/ `
 .node-table th {
   text-align: left;
   padding: 12px 15px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--sn-panel-bg);
   font-weight: 500;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--sn-node-border);
+  color: var(--sn-text-dim);
 }
 
 .node-table td {
   padding: 12px 15px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--sn-node-hover);
 }
 
 .node-table tr:last-child td {
   border-bottom: none;
 }
+
 
 .badge {
   display: inline-block;
@@ -53,9 +61,9 @@ export default /*css*/ `
   text-transform: uppercase;
 }
 
-.badge.local { background: rgba(50, 205, 50, 0.2); color: #32CD32; }
-.badge.remote { background: rgba(30, 144, 255, 0.2); color: #1E90FF; }
-.badge.master { background: rgba(138, 43, 226, 0.2); color: #8A2BE2; }
+.badge.local { background: hsla(150, 55%, 38%, 0.2); color: var(--sn-success-color, hsl(150, 55%, 38%)); }
+.badge.remote { background: hsla(210, 55%, 45%, 0.2); color: var(--sn-node-selected, hsl(210, 55%, 45%)); }
+.badge.master { background: hsla(280, 55%, 45%, 0.2); color: var(--sn-cat-server, hsl(280, 55%, 45%)); }
 
 .node-color {
   display: inline-block;
