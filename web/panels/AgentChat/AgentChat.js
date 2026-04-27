@@ -22,6 +22,10 @@ export class AgentChat extends Symbiote {
       }
     },
     
+    onInput: (e) => {
+      this.$.inputVal = e.target.value;
+    },
+    
     onSend: async () => {
       const prompt = this.$.inputVal.trim();
       if (!prompt) return;
@@ -95,7 +99,7 @@ export class AgentChat extends Symbiote {
 AgentChat.template = `
 <div class="chat-wrapper">
   <div class="chat-header">
-    <sym-icon icon="robot"></sym-icon>
+    <span class="material-symbols-outlined" style="font-size:18px">smart_toy</span>
     <span>Agent Chat</span>
     <select class="mode-select" set="onchange: onModeChange">
       <option value="pool">Pool (MCP)</option>
@@ -114,9 +118,9 @@ AgentChat.template = `
   </div>
   
   <div class="chat-input-bar">
-    <input type="text" bind="inputVal" set="onkeydown: onKeyDown" placeholder="Delegate a task to the pool...">
+    <input type="text" bind="value: inputVal" set="oninput: onInput; onkeydown: onKeyDown" placeholder="Delegate a task to the pool...">
     <button set="onclick: onSend">
-      <sym-icon icon="send"></sym-icon>
+      <span class="material-symbols-outlined" style="font-size:18px">send</span>
     </button>
   </div>
 </div>
