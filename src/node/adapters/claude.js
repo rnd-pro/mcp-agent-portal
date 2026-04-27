@@ -1,7 +1,7 @@
-// @ctx adapter-claude.ctx
+// @ctx claude.ctx
 import { spawn } from 'node:child_process';
 
-const DEFAULT_TIMEOUT_SEC = 300;
+let DEFAULT_TIMEOUT_SEC = 300;
 
 /**
  * Create a Claude Code CLI adapter instance.

@@ -28,6 +28,11 @@ if (isMaster) {
 let projectRoot = process.cwd();
 let { server, proxyManager } = startWebServer(projectRoot);
 
+// Start all configured child MCP servers (needed in ALL modes)
+proxyManager.startAllServers((serverName, msg) => {
+  // Callback wired below by multiplexer or ws-client
+});
+
 // If client mode, connect to master instead of starting stdio multiplexer
 if (connectUrl) {
   startWSClient(connectUrl, proxyManager);

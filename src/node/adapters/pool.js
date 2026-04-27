@@ -54,8 +54,12 @@ export class AdapterPool {
     }
 
     // Create new
-    const factory = resolveAdapter(type);
-    if (!factory) return null;
+    let factory;
+    try {
+      factory = resolveAdapter(type);
+    } catch {
+      return null;
+    }
 
     const instance = factory(this.config[type] || {});
     const wrapper = {

@@ -13,7 +13,7 @@ let WEB_DIR = path.join(ROOT_DIR, 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
 
 /** @type {Record<string, string>} */
-const MIME_TYPES = {
+let MIME_TYPES = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',

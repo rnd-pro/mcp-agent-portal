@@ -1,9 +1,9 @@
-// @ctx adapters-registry.ctx
+// @ctx index.ctx
 import { createGeminiAdapter } from './gemini.js';
 import { createClaudeAdapter } from './claude.js';
 import { createOpencodeAdapter } from './opencode.js';
 
-const ADAPTERS = {
+let ADAPTERS = {
   gemini: createGeminiAdapter,
   claude: createClaudeAdapter,
   opencode: createOpencodeAdapter,
@@ -12,10 +12,15 @@ const ADAPTERS = {
 /**
  * Resolve an adapter factory by name.
  * @param {string} type - 'gemini' | 'claude' | 'opencode'
- * @returns {Function|null}
+ * @returns {Function}
+ * @throws {Error} if type is unknown
  */
 export function resolveAdapter(type) {
-  return ADAPTERS[type] || null;
+  let factory = ADAPTERS[type];
+  if (!factory) {
+    throw new Error(`Unknown adapter type "${type}". Valid types: ${Object.keys(ADAPTERS).join(', ')}`);
+  }
+  return factory;
 }
 
 export function listAdapterTypes() {

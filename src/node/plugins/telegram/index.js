@@ -1,4 +1,4 @@
-// @ctx telegram-plugin.ctx
+// @ctx telegram.ctx
 import { Telegraf } from 'telegraf';
 
 let bot;
@@ -12,11 +12,11 @@ export async function init(portalAPI, config) {
   
   bot = new Telegraf(config.token);
   alertChatId = config.alertChatId || null;
-  const targetAdapterType = config.adapterType || 'gemini';
+  let targetAdapterType = config.adapterType || 'gemini';
 
   bot.on('text', async (ctx) => {
-    const prompt = ctx.message.text;
-    const adapter = portalAPI.adapterPool?.acquire(targetAdapterType);
+    let prompt = ctx.message.text;
+    let adapter = portalAPI.adapterPool?.acquire(targetAdapterType);
     
     if (!adapter) {
       await ctx.reply(`⚠️ The ${targetAdapterType} agent pool is currently at capacity or disabled.`);
@@ -41,10 +41,10 @@ export async function init(portalAPI, config) {
         timeout: config.timeout || 300
       });
       
-      const replyText = result.text || result.toString();
+      let replyText = result.response || '';
       
       // Telegraf message max length is 4096, but we will just truncate for the alpha if it's too long
-      const safeText = replyText.length > 4000 ? replyText.substring(0, 4000) + '...[truncated]' : replyText;
+      let safeText = replyText.length > 4000 ? replyText.substring(0, 4000) + '...[truncated]' : replyText;
       
       await ctx.telegram.editMessageText(
         ctx.chat.id, 

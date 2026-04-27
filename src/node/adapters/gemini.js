@@ -1,7 +1,7 @@
-// @ctx adapter-gemini.ctx
+// @ctx gemini.ctx
 import { spawn } from 'node:child_process';
 
-const DEFAULT_TIMEOUT_SEC = 300;
+let DEFAULT_TIMEOUT_SEC = 300;
 
 export function createGeminiAdapter(config = {}) {
   let busy = false;
