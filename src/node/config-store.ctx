@@ -1,0 +1,15 @@
+# config-store.js — DRY Config Utility
+
+## Purpose
+Centralized read/write for `~/.gemini/agent-portal.json`.
+Eliminates path duplication across mcp-proxy, api-routes, etc.
+
+## Exports
+- `CONFIG_PATH` — resolved absolute path to config file
+- `readConfig()` → `object` — reads + parses, returns `{}` on missing/error
+- `writeConfig(obj)` — atomic JSON.stringify + writeFileSync
+
+## Consumers
+- `mcp-proxy.js` — loadConfig() reads server list
+- `api-routes.js` — install/remove handlers write config
+- `web-server.js` — startup config validation

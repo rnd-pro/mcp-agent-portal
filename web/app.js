@@ -20,6 +20,7 @@ import"./panels/SettingsPanel/SettingsPanel.js?v=2";
 import"./panels/AgentChat/AgentChat.js?v=2";
 import"./panels/Marketplace/Marketplace.js?v=1";
 import"./panels/Topology/TopologyPanel.js";
+import"./panels/ToolExplorer/ToolExplorer.js";
 import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=2";
 
 export const state={skeleton:null,activeFile:null,ws:null,monitorEvents:[]};
@@ -61,11 +62,12 @@ export async function api(endpoint, params = {}) {
     });
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     const data = await res.json();
-    if (data.isError) throw new Error(data.content?.[0]?.text || "Tool error");
+    if (data.isError) throw new Error(data.content?.[0]?.text || data.error || "Tool error");
+    const resultText = data.content?.[0]?.text || data.text || data.response || JSON.stringify(data);
     try {
-      return JSON.parse(data.content[0].text);
+      return JSON.parse(resultText);
     } catch {
-      return data.content[0].text;
+      return resultText;
     }
   }
 

@@ -49,7 +49,7 @@ The browser uses the same mechanism via `POST /api/mcp-call`.
 ### Heterogeneous Agent Pool
 
 > [!NOTE]
-> **Roadmap** — designed but not yet implemented. Currently the portal aggregates MCP tools only; the adapter pool is the next major milestone.
+> The adapter pool infrastructure (`src/node/adapters/`) is fully implemented with `BaseAdapter`, `AdapterPool` (acquire/release), and three functional adapters: `gemini`, `claude`, and `opencode`. All three use stream-json parsing with timeout and process group management.
 
 Multiple CLI agents will run **in parallel** — not just one at a time. The pool is heterogeneous: different providers handle different tasks simultaneously.
 
@@ -80,7 +80,7 @@ Each adapter type will have configurable capacity limits. The orchestrator can a
 ### Three Operating Modes
 
 > [!NOTE]
-> Only **Standalone** mode is currently implemented. Client and Master modes are on the roadmap.
+> **Standalone** and **Client** modes are fully implemented. **Master** mode accepts remote client connections via WebSocket (`/ws/client`) and aggregates their tools.
 
 ```
 node index.js                  # standalone (default, implemented)
@@ -91,8 +91,8 @@ node index.js --master         # master — orchestrates client nodes (planned)
 | Mode | What it does | Status |
 |------|-------------|--------|
 | **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE | ✅ Implemented |
-| **Client** | Connects to a master via WebSocket, registers its local tools, executes delegated tasks | 🔮 Planned |
-| **Master** | Aggregates tools from local children AND remote client nodes. IDE sees everything. | 🔮 Planned |
+| **Client** | Connects to a master via WebSocket, registers its local tools, executes delegated tasks | ✅ Implemented |
+| **Master** | Aggregates tools from local children AND remote client nodes. IDE sees everything. | ✅ Implemented |
 
 ```
 IDE ──stdio──→ Portal (master)
@@ -113,6 +113,8 @@ Built-in web UI with extensible section registry:
 | Dashboard | `#dashboard` | `dashboard` | Server list, action board, agent chat |
 | AI Chat | `#chat` | `smart_toy` | Full-screen agent chat with adapter selection |
 | Marketplace | `#marketplace` | `storefront` | MCP server management — status, start/stop, tool explorer |
+| Topology | `#topology` | `hub` | Network visualization of connected nodes (local + remote) |
+| Tool Explorer | `#tool-explorer` | `build` | Browse `tools/list` per server with input schema viewer |
 | Explorer | `#explorer` | `folder_open` | File browser with code viewer and docs |
 | Graph | `#graph` | `developer_board` | Force-directed dependency graph (canvas) |
 | Follow | `#follow` | `smart_toy` | Combined graph + code + monitor view for live agent tracking |
@@ -134,9 +136,9 @@ Discover and manage MCP servers. The Marketplace panel shows all configured serv
 ### CLI Adapters
 
 > [!NOTE]
-> **Roadmap** — adapter interfaces are designed, implementation pending. The `src/adapters/` directory will be created when work begins.
+> The adapter infrastructure is fully implemented in `src/node/adapters/`. All three adapters (Gemini, Claude, OpenCode) are functional with stream-json parsing, timeout handling, and detached process group management.
 
-Planned abstract interface for any CLI agent runtime:
+Abstract interface for any CLI agent runtime:
 
 ```javascript
 class BaseAdapter {
@@ -149,21 +151,21 @@ class BaseAdapter {
 }
 ```
 
-Concrete adapters to be built from existing projects:
+Concrete adapters:
 
-| Adapter | Source project | CLI |
-|---------|---------------|-----|
-| `gemini-adapter` | agent-pool-mcp | `gemini --model X -p "prompt"` |
-| `claude-adapter` | agent2agent | `@anthropic-ai/claude-code` |
-| `opencode-adapter` | agicoder | OpenCode/Crush MCP host |
-| `openrouter-adapter` | AgentAggregator | Direct API calls |
+| Adapter | CLI | Status |
+|---------|-----|--------|
+| `gemini-adapter` | `gemini -p "prompt" --output-format stream-json` | ✅ Functional |
+| `claude-adapter` | `claude -p "prompt" --output-format stream-json` | ✅ Functional |
+| `opencode-adapter` | OpenCode/Crush MCP host | ✅ Functional |
+| `openrouter-adapter` | Direct API calls | 🔴 Not started |
 
 The `AdapterPool` will manage instances — `acquire(type)` gets an idle adapter or spawns a new one, `release()` returns it to the pool.
 
-## Plugin Architecture (External Integrations) — Planned
+## Plugin Architecture (External Integrations)
 
 > [!NOTE]
-> **Roadmap** — plugin architecture is designed based on reference implementations. No plugin loader exists yet.
+> Plugin architecture is implemented: `PluginLoader` scans and initializes plugins, supports `{ init, destroy, onAlert }` interface. Telegram bot plugin is functional. Error alerting (crash → plugin dispatch) is wired.
 
 The Agent Portal will support a modular **Plugin System** designed to bridge the portal's unified agent pool and MCP tools to external platforms (e.g., Telegram, Slack, GitHub). 
 
@@ -242,6 +244,10 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |
+| browser-x-mcp | Browser automation, form testing | 🟡 Beta |
+| terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
+| context-x-mcp | Context enrichment with auto-topic detection | 🔴 Alpha |
+| crypto-mcp | Crypto market analysis, trend lines, auto-trading | 🟡 Beta |
 
 > [!IMPORTANT]
 > Each child server runs as an independent process. Portal manages their lifecycle — auto-start on boot, log anomalies on crash, graceful shutdown on exit. Auto-restart on crash is planned but not yet implemented.
@@ -262,30 +268,49 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 
 ```
 agent-portal/
-├── index.js                          # Entry point: web server + stdio MCP
-├── bin/agent-portal.js               # CLI wrapper with exit(2) restart
+├── bin/agent-portal.js           # Restart wrapper (exit code 2 = respawn)
+├── index.js                     # Entry point: web server + stdio MCP
 ├── package.json
-├── packages/                         # Git submodules
-│   ├── symbiote-node/                # UI framework (layout, canvas, themes)
-│   ├── project-graph-mcp/            # Codebase analysis MCP
-│   └── agent-pool-mcp/               # Agent orchestration MCP
-├── src/
-│   ├── iso/                          # Isomorphic: runs in both Node.js and browser
-│   ├── node/
-│   │   ├── server/web-server.js      # HTTP API + static file serving
-│   │   ├── server/web-server.ctx     # ← colocated documentation
-│   │   ├── server/local-gateway.js   # DNS-like service discovery (minified)
-│   │   ├── server/mdns.js            # mDNS service registration helper
-│   │   ├── proxy/mcp-proxy.js        # MCPProxyManager (child process mgmt)
-│   │   ├── proxy/mcp-proxy.ctx       # ← colocated documentation
-│   │   ├── proxy/mcp-multiplexer.js  # MCPMultiplexer (stdio ↔ children)
-│   │   └── proxy/mcp-multiplexer.ctx
-│   └── discovery/                    # (reserved for distributed mode)
-├── web/                              # Frontend SPA (browser tier)
-│   ├── app.js                        # Main app (RouterRegistry)
-│   ├── router-registry.js            # Extensible section/panel registry
-│   ├── components/                   # Shared UI components (canvas-graph, code-block, etc.)
-│   └── panels/                       # UI panels (Marketplace, AgentChat, etc.)
+├── eslint.config.js             # Flat ESLint config for IDE highlighting
+├── packages/                    # Git submodules
+│   ├── symbiote-node/           # UI framework (layout, canvas, themes)
+│   ├── project-graph-mcp/       # Codebase analysis MCP
+│   └── agent-pool-mcp/          # Agent orchestration MCP
+├── src/node/
+│   ├── config-store.js          # Config read/write utility (DRY)
+│   ├── server/
+│   │   ├── web-server.js        # HTTP server + route dispatch + static files
+│   │   ├── api-routes.js        # Declarative API route map (CIT pattern)
+│   │   ├── lint-service.js      # ESLint integration for server-side linting
+│   │   ├── local-gateway.js     # DNS-like service discovery
+│   │   └── web-server.ctx       # ← colocated documentation
+│   ├── proxy/
+│   │   ├── mcp-proxy.js         # MCPProxyManager (child lifecycle + auto-restart)
+│   │   ├── mcp-multiplexer.js   # MCPMultiplexer (stdio ↔ children)
+│   │   ├── mcp-proxy.ctx
+│   │   └── mcp-multiplexer.ctx
+│   ├── adapters/
+│   │   ├── index.js             # resolveAdapter() registry
+│   │   ├── base.js              # BaseAdapter interface
+│   │   ├── gemini.js            # Gemini CLI adapter
+│   │   ├── stubs.js             # Claude + OpenCode stubs
+│   │   └── pool.js              # AdapterPool (acquire/release)
+│   ├── plugins/
+│   │   ├── plugin-loader.js     # Plugin discovery + lifecycle + alert dispatch
+│   │   └── telegram/index.js    # Telegram bot plugin (chat + alerts)
+│   └── discovery/
+│       └── ws-client.js         # WebSocket client for --connect mode
+├── web/                         # Frontend SPA
+│   ├── app.js                   # Main app (RouterRegistry)
+│   ├── router-registry.js       # Extensible section/panel registry
+│   ├── state.js                 # Reactive state store + WS connection
+│   ├── WsClient.js              # Static WS singleton (CIT pattern)
+│   ├── components/              # code-block (with lint overlay), canvas-graph
+│   └── panels/                  # 9 panel dirs + 6 standalone panels
+├── test/
+│   ├── unit/                    # node --test unit tests
+│   └── integration/             # node --test API tests
+└── tmp/                         # Drafts (gitignored)
 ```
 
 > [!TIP]
@@ -298,35 +323,63 @@ Since Agent Portal acts as an aggregation hub for multiple child processes and p
 ### Implemented
 
 1. **Process Lifecycle Tracking**: 
-   The `MCPProxyManager` spawns child servers and tracks their PID and process state. On crash, the manager logs the exit event and cleans up the process reference.
+   The `MCPProxyManager` spawns child servers and tracks their PID and process state.
 
 2. **Log Multiplexing & Live Telemetry**: 
    Standard error (stderr) streams from all child servers are logged to the portal's console. JSON-RPC messages from children are broadcast to connected WebSocket clients via `broadcastMonitor()`. The Web Dashboard's **Monitor** panel subscribes to this feed, providing a real-time event stream.
 
-### Planned
-
 3. **Auto-Restart on Crash**: 
-   Automatic respawning of crashed child processes with exponential backoff and anomaly counting. Currently the exit handler only nullifies the process reference.
+   Crashed child processes are automatically respawned with exponential backoff (1s → 2s → 4s → ... → 30s max). Crash counter resets after 10s of stable uptime. Crash events are broadcast to WebSocket monitors and dispatched to plugins.
 
 4. **Error Notifications & Alerting**:
-   Critical system events (e.g., repeated child process crashes, adapter exhaustion, or unhandled exceptions) will trigger internal alerts. By coupling the monitoring system with the **Plugin Architecture**, these alerts can be pushed to external channels (e.g., a DevOps Telegram group via the Telegram plugin).
+   Crash events trigger `pluginLoader.dispatchAlert()`, which forwards alerts to all plugins implementing `onAlert()`. The Telegram plugin sends alerts to a configured `alertChatId`.
 
-## UI Error Highlighting (Server-Side Linting) — Planned
+## UI Error Highlighting (Server-Side Linting)
 
-> [!NOTE]
-> ESLint is in `devDependencies` but the API endpoint and UI overlay are not yet implemented.
+Server-side linting is fully implemented:
 
-To maintain a lightweight UI bundle without pulling in heavy tools like ESLint to the browser, the Agent Portal will implement **Server-Side Linting for IDE parity**:
-1. **Backend Integration**: A minimal `/api/lint-file` endpoint will run Node.js-based ESLint directly against the local file system. This ensures the UI uses the exact same flat config (`eslint.config.js`) that the IDE and `npm run lint` use.
-2. **UI Component (`code-block.js`)**: The frontend will fetch the error arrays asynchronously and render absolutely positioned overlay markers (squiggles/tooltips) over the highlighted source code.
+1. **Backend Integration**: The `/api/lint-file` endpoint runs Node.js-based ESLint (`lint-service.js`) against the local file system using the project's `eslint.config.js`.
+2. **UI Component (`code-block.js`)**: The `code-viewer.js` panel calls `_lintCurrentFile()` on every file load, passing results to `code-block.setDiagnostics()`. The `_renderSquiggles()` method renders absolutely positioned wavy underlines (red for errors, yellow for warnings) with hover tooltips showing rule IDs and messages.
 
 ## Roadmap
 
 Implementation phases in strict execution order. Each phase depends on the previous one being complete.
 
+### Phase 0 — Cross-Project Best Practices Refactoring ✅ (this repo)
 
+> [!IMPORTANT]
+> This phase is **prerequisite** for all feature work. Without it, new code will inherit inconsistent patterns from upstream projects.
 
-### Phase 1 — Portal Core Stabilization
+Align **all related repositories** to the unified coding standard defined in [BEST-PRACTICES.md](./BEST-PRACTICES.md):
+
+| # | Project | Key Refactoring | Priority |
+|---|---------|-----------------|----------|
+| 0.1 | **agent-portal** (this repo) | `iso/node/ui/` source layout; `let`-first; single quotes; JSDoc `@type` on all exports | 🔴 Critical |
+| 0.2 | **project-graph-mcp** | Code style audit (let/const, arrow conventions); generate `.ctx` docs for every `src/` file | 🔴 Critical |
+| 0.3 | **agent-pool-mcp** | Same code style audit; `.ctx` docs generation; verify plain-object patterns (no unnecessary classes) | 🔴 Critical |
+| 0.4 | **symbiote-node** | Verify Triple-File Partitioning; audit token-based theming; ensure `iso/node/ui/` boundary compliance | 🟡 High |
+| 0.5 | **browser-x-mcp** | Code style pass; add `.ctx` docs | 🟢 Normal |
+| 0.6 | **terminal-x-mcp** | Code style pass; add `.ctx` docs | 🟢 Normal |
+
+**Per-project checklist** (from BEST-PRACTICES §10):
+- [ ] `let` over `const` (const only for true constants: `CONFIG_FILE`, `REQUIRED_FIELDS`)
+- [ ] Single quotes + semicolons + 2-space indent
+- [ ] Arrow functions for callbacks; `function` only for named exports and hoisted helpers
+- [ ] Max 30 lines per utility file; split if larger
+- [ ] Plain objects for adapters/connectors — no class hierarchies
+- [ ] `resolveX()` registry pattern with error messages listing valid options
+- [ ] JSDoc `@type` inline casts; full `@param`/`@returns` blocks on public exports only
+- [ ] Emoji log prefixes (✅🟡🔴🔄)
+- [ ] Dual exports (named + default) on every module
+- [ ] **Colocated `.ctx`** — documentation generated next to source files (`src/proxy/mcp-proxy.ctx`), not in `.context/`
+- [ ] `node --test` — no test framework dependency (no Jest/Mocha/Vitest)
+- [ ] `eslint.config.js` matching conventional style for IDE highlighting only
+
+**Deliverable**: All repos pass a unified style audit. `.ctx` docs generated. Ready for feature work.
+
+---
+
+### Phase 1 — Portal Core Stabilization ✅
 
 Harden the implemented MCP aggregator core:
 
@@ -343,7 +396,7 @@ Harden the implemented MCP aggregator core:
 
 ---
 
-### Phase 2 — CLI Adapter Pool
+### Phase 2 — CLI Adapter Pool ✅ (core)
 
 Implement the heterogeneous agent pool:
 
@@ -360,7 +413,7 @@ Implement the heterogeneous agent pool:
 
 ---
 
-### Phase 3 — Plugin System
+### Phase 3 — Plugin System ✅
 
 External integrations via loosely coupled plugins:
 
@@ -375,7 +428,7 @@ External integrations via loosely coupled plugins:
 
 ---
 
-### Phase 4 — Distributed Mode
+### Phase 4 — Distributed Mode ✅ (core)
 
 Multi-node topology (client/master):
 
@@ -390,7 +443,7 @@ Multi-node topology (client/master):
 
 ---
 
-### Phase 5 — Marketplace & Public Registry
+### Phase 5 — Marketplace & Public Registry ✅ (local)
 
 | # | Task | Scope |
 |---|------|-------|

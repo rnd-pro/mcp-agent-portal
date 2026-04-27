@@ -64,4 +64,21 @@ export class PluginLoader {
     }
     this.activePlugins.clear();
   }
+
+  /**
+   * Dispatch an alert to all plugins that implement onAlert().
+   * Called by MCPProxyManager on crash, repeated failures, etc.
+   * @param {{ type: string, server?: string, message: string, [key: string]: any }} alert
+   */
+  dispatchAlert(alert) {
+    for (let [pluginName, instance] of this.activePlugins) {
+      if (typeof instance.onAlert === 'function') {
+        try {
+          instance.onAlert(alert);
+        } catch (err) {
+          console.error(`🔴 [PluginLoader] Alert dispatch error in '${pluginName}':`, err);
+        }
+      }
+    }
+  }
 }

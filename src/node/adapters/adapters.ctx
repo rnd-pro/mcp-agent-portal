@@ -1,0 +1,32 @@
+# adapters/ — CLI Adapter Registry
+
+## Purpose
+Provides a unified interface for spawning and interacting with
+different AI CLI tools (Gemini, Claude, OpenCode).
+
+## Files
+| File | Type | Transport |
+|------|------|-----------|
+| `base.js` | JSDoc typedefs | — |
+| `gemini.js` | `createGeminiAdapter(config)` | CLI spawn `gemini -p` |
+| `claude.js` | `createClaudeAdapter(config)` | CLI spawn `claude -p` |
+| `opencode.js` | `createOpencodeAdapter(config)` | HTTP to local OpenCode |
+| `pool.js` | `AdapterPool` | acquire/release lifecycle |
+| `index.js` | `resolveAdapter(type)` | Factory registry |
+
+## AdapterInstance interface (from base.js)
+```
+{ type, busy, run({ prompt, cwd, model, timeout }) → RunResult, destroy() }
+```
+
+## RunResult
+```
+{ response: string, exitCode: number|null, errors: string[], totalEvents: number }
+```
+
+## Pool usage
+```js
+let adapter = pool.acquire('gemini');
+let result = await adapter.run({ prompt: '...', cwd: '/project' });
+pool.release(adapter);
+```

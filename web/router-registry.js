@@ -21,6 +21,7 @@ export const panelTypes = {
   'agent-chat':   { title: 'Agent Chat',    icon: 'smart_toy',     component: 'pg-agent-chat' },
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
   'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
+  'tool-explorer':{ title: 'Tool Explorer', icon: 'build',         component: 'pg-tool-explorer' },
 };
 
 /**
@@ -90,6 +91,11 @@ registerSection('marketplace', {
 registerSection('topology', {
   icon: 'hub', label: 'Topology', order: 27,
   layout: () => LayoutTree.createPanel('topology-panel')
+});
+
+registerSection('tool-explorer', {
+  icon: 'build', label: 'Tool Explorer', order: 28,
+  layout: () => LayoutTree.createPanel('tool-explorer')
 });
 
 registerSection('explorer', {

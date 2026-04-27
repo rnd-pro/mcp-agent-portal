@@ -1,9 +1,9 @@
 // @ctx TopologyPanel.ctx
-import { BaseComponent } from '@symbiotejs/symbiote';
-import template from './TopologyPanel.tpl.html';
+import { Symbiote } from '@symbiotejs/symbiote';
+import template from './TopologyPanel.tpl.js';
 import css from './TopologyPanel.css.js';
 
-export class TopologyPanel extends BaseComponent {
+export class TopologyPanel extends Symbiote {
   init$ = {
     instances: [],
   };

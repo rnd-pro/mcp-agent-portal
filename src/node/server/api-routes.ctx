@@ -1,0 +1,30 @@
+# api-routes.js — Declarative API Route Map
+
+## Purpose
+Centralized HTTP route handlers extracted from web-server.js.
+Follows the CIT `cmdMap` pattern: `{ 'METHOD /path': handler }`.
+
+## Exports
+- `createRoutes(ctx)` → builds route map with proxyManager/projectRoot closure
+- `dispatch(routes, req, res)` → one-liner dispatch, returns boolean
+
+## Routes (14 total)
+| Key | Handler |
+|-----|---------|
+| `GET /api/instances` | List running MCP servers |
+| `GET /api/project-info` | Portal metadata (name, path, pid) |
+| `GET /api/server-status` | Uptime, agent count, monitor count |
+| `GET /api/marketplace` | Installed servers + mock registry |
+| `GET /api/adapter/status` | Adapter pool status |
+| `GET /api/adapter/types` | Available adapter types |
+| `POST /api/stop` | Graceful shutdown (exit 0) |
+| `POST /api/restart` | Config-change restart (exit 2) |
+| `POST /api/mcp-call` | Proxy MCP call to child server |
+| `POST /api/marketplace/install` | Add server + restart |
+| `POST /api/marketplace/remove` | Remove server + restart |
+| `POST /api/lint-file` | ESLint server-side linting |
+| `POST /api/adapter/run` | Execute prompt via adapter pool |
+
+## Internal
+- `parseBody(req, maxBytes)` — JSON body parser with size limit
+- `MOCK_REGISTRY` — hardcoded available servers (future: registry API)

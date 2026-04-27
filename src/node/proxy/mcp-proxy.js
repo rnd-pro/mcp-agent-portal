@@ -143,6 +143,14 @@ export class MCPProxyManager {
         params: { type: 'crash', server: serverName, code, attempt: settings.crashes, delay },
       });
 
+      this.pluginLoader.dispatchAlert({
+        type: 'crash',
+        server: serverName,
+        message: `Server "${serverName}" crashed (code=${code}). Respawning in ${delay}ms (attempt ${settings.crashes}).`,
+        code,
+        attempt: settings.crashes,
+      });
+
       settings.respawnTimer = setTimeout(() => {
         this.spawnServer(serverName);
         // Reset crash counter after 10s stable uptime

@@ -40,13 +40,24 @@ pg-marketplace .mp-header-count {
 }
 
 pg-marketplace .mp-grid {
-  flex: 1;
-  overflow-y: auto;
   padding: 16px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
   align-content: start;
+}
+
+pg-marketplace .mp-section {
+  display: flex;
+  flex-direction: column;
+}
+
+pg-marketplace .mp-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 20px 18px 0 18px;
+  margin: 0;
+  opacity: 0.8;
 }
 
 pg-marketplace .mp-card {

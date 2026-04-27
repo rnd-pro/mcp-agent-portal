@@ -2,6 +2,7 @@
 import { Telegraf } from 'telegraf';
 
 let bot;
+let alertChatId;
 
 export async function init(portalAPI, config) {
   if (!config.token) {
@@ -10,6 +11,7 @@ export async function init(portalAPI, config) {
   }
   
   bot = new Telegraf(config.token);
+  alertChatId = config.alertChatId || null;
   const targetAdapterType = config.adapterType || 'gemini';
 
   bot.on('text', async (ctx) => {
@@ -79,4 +81,14 @@ export async function destroy() {
   }
 }
 
-export default { init, destroy };
+/**
+ * Receive system alerts (crash, error, etc.) and forward to alertChatId.
+ * @param {{ type: string, server?: string, message: string }} alert
+ */
+export function onAlert(alert) {
+  if (!bot || !alertChatId) return;
+  let text = `⚠️ *Portal Alert*\n\`${alert.type}\`: ${alert.message}`;
+  bot.telegram.sendMessage(alertChatId, text, { parse_mode: 'Markdown' }).catch(() => {});
+}
+
+export default { init, destroy, onAlert };

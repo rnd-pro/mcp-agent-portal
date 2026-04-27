@@ -10,6 +10,9 @@
   "scripts": {
     "start": "node bin/agent-portal.js",
     "dev": "node index.js --dev",
+    "test:unit": "node --test --test-timeout 10000 test/unit/*.test.js",
+    "test:integration": "node --test --test-timeout 20000 test/integration/*.test.js",
+    "test": "npm run test:unit && npm run test:integration",
     "submodules": "git submodule update --init --recursive"
   },
   "keywords": [

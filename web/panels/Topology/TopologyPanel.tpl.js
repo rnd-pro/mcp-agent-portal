@@ -1,3 +1,6 @@
+import { html } from '@symbiotejs/symbiote';
+
+export default html`
 <div class="topology-panel">
   <h2><span class="material-icons">hub</span> Network Topology</h2>
   <p>Connected nodes participating in the Distributed Agent Pool.</p>
@@ -17,3 +20,4 @@
     </tbody>
   </table>
 </div>
+`;

@@ -1,6 +1,7 @@
 // @ctx adapters-registry.ctx
 import { createGeminiAdapter } from './gemini.js';
-import { createClaudeAdapter, createOpencodeAdapter } from './stubs.js';
+import { createClaudeAdapter } from './claude.js';
+import { createOpencodeAdapter } from './opencode.js';
 
 const ADAPTERS = {
   gemini: createGeminiAdapter,

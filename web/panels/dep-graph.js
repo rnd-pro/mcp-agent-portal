@@ -1685,6 +1685,16 @@ export class DepGraph extends Symbiote {
       if (this._canvas) this._canvas.style.display = 'none';
       if (this._pgCanvasGraph) {
         this._pgCanvasGraph.style.display = 'block';
+        
+        // Listen to canvas-graph for first tick or done to hide loader
+        const hideCanvasLoader = () => {
+          this._pgCanvasGraph.removeEventListener('layout-tick', hideCanvasLoader);
+          this._pgCanvasGraph.removeEventListener('layout-done', hideCanvasLoader);
+          this._hideLoader();
+        };
+        this._pgCanvasGraph.addEventListener('layout-tick', hideCanvasLoader);
+        this._pgCanvasGraph.addEventListener('layout-done', hideCanvasLoader);
+        
         this._pgCanvasGraph.setSkeleton(skeleton);
         
         // Restore path from URL
@@ -1695,8 +1705,9 @@ export class DepGraph extends Symbiote {
         }
         const pathStr = hashParams.join('/');
         this._pgCanvasGraph.setPath(pathStr);
+      } else {
+        this._hideLoader();
       }
-      this._hideLoader();
       this._graphBuilt = true;
       return;
     }

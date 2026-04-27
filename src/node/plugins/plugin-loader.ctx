@@ -1,0 +1,27 @@
+# plugin-loader.js — Plugin Discovery & Lifecycle
+
+## Purpose
+Scans `config.plugins` for enabled plugins, dynamically imports them from
+`src/node/plugins/{name}/index.js`, and manages their lifecycle.
+
+## Plugin Interface
+```
+{ init(portalAPI, config), destroy(), onAlert?(alert) }
+```
+
+## Exports
+- `PluginLoader` class
+  - `constructor(config, portalAPI)` — receives full config + portal API object
+  - `initAll()` — discover + init all enabled plugins
+  - `destroyAll()` — graceful shutdown of all active plugins
+  - `dispatchAlert(alert)` — forward system events to plugins with `onAlert()`
+
+## Portal API (passed to plugins)
+- `adapterPool` — AdapterPool instance for LLM calls
+- `mcpProxy` — MCPProxyManager for tool access
+- `broadcast(msg)` — WebSocket broadcast to all monitors
+
+## Alert Schema
+```
+{ type: 'crash'|'error', server?: string, message: string, ...extra }
+```

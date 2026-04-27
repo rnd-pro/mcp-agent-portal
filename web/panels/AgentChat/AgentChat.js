@@ -114,7 +114,7 @@ AgentChat.template = `
   </div>
   
   <div class="chat-input-bar">
-    <input type="text" set="value: inputVal, onkeydown: onKeyDown" placeholder="Delegate a task to the pool...">
+    <input type="text" bind="inputVal" set="onkeydown: onKeyDown" placeholder="Delegate a task to the pool...">
     <button set="onclick: onSend">
       <sym-icon icon="send"></sym-icon>
     </button>
