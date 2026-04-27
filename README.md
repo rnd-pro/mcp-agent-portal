@@ -116,59 +116,6 @@ Agent Portal aggregates the RND-PRO MCP ecosystem:
 | terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
 | context-x-mcp | Context enrichment with auto-topic detection | 🔴 Alpha |
 
-## HTTP API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/mcp-call` | POST | Proxy an MCP call to a child server |
-| `/api/instances` | GET | List all registered MCP servers with status |
-| `/api/marketplace` | GET | Installed and available servers |
-| `/api/project-info` | GET | Portal metadata |
-| `/api/server-status` | GET | Uptime, server count, monitor count |
-| `/api/stop` | POST | Graceful shutdown |
-| `/api/restart` | POST | Restart portal |
-
-## Web Dashboard
-
-Built-in web UI with extensible section registry:
-
-| Section | Description |
-|---------|-------------|
-| Dashboard | Server list, action board, agent chat |
-| AI Chat | Full-screen agent chat with adapter selection |
-| Marketplace | MCP server management — status, start/stop, tool explorer |
-| Topology | Network visualization of connected nodes |
-| Explorer | File browser with code viewer and docs |
-| Graph | Force-directed dependency graph |
-| Monitor | Live event stream from all MCP servers |
-
-New sections can be registered via `RouterRegistry` — MCP servers can inject their own UI panels at runtime.
-
-## Project Structure
-
-```
-mcp-agent-portal/
-├── bin/mcp-agent-portal.js       # CLI entry point (config, status, help, server start)
-├── index.js                      # Entry point: web server + stdio MCP
-├── src/node/
-│   ├── config-store.js           # Config read/write (~/.gemini/agent-portal.json)
-│   ├── server/
-│   │   ├── web-server.js         # HTTP server + route dispatch + static files
-│   │   ├── api-routes.js         # Declarative API route map
-│   │   ├── local-gateway.js      # DNS-like service discovery
-│   │   └── marketplace-registry.js
-│   ├── proxy/
-│   │   ├── mcp-proxy.js          # MCPProxyManager (child lifecycle + auto-restart)
-│   │   ├── mcp-multiplexer.js    # MCPMultiplexer (stdio ↔ children)
-│   │   └── tool-index.js         # Tool search and discovery
-│   ├── adapters/                 # CLI agent adapters (gemini, claude, opencode)
-│   ├── plugins/                  # External integrations (telegram, slack, github)
-│   └── discovery/                # WebSocket client for distributed mode
-├── web/                          # Frontend SPA (Symbiote.js components)
-├── test/                         # node --test (unit + integration)
-└── packages/                     # Git submodules (project-graph-mcp, etc.)
-```
-
 ### Local Development
 
 ```bash
