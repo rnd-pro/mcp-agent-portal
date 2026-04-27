@@ -93,6 +93,7 @@ export class MCPProxyManager {
       this.spawnServer(serverName);
     }
     this.pluginLoader.initAll().catch(err => console.error('🔴 [MCPProxy] Plugin init error:', err));
+    this.startHealthCheck();
   }
 
   spawnServer(serverName) {
@@ -424,8 +425,89 @@ export class MCPProxyManager {
     if (s.process) s.process.kill('SIGTERM');
   }
 
+  // ── Health Check ────────────────────────────────────
+
+  /**
+   * Start periodic health checks for all running servers.
+   * Pings every 30s, alerts after 3 consecutive failures.
+   */
+  startHealthCheck() {
+    if (this._healthInterval) return;
+    this._healthFailures = new Map();
+    this._healthInterval = setInterval(() => this._runHealthCheck(), 30000);
+    // First check after 10s (let servers initialize)
+    setTimeout(() => this._runHealthCheck(), 10000);
+    console.error('💓 [HealthCheck] Started (30s interval)');
+  }
+
+  stopHealthCheck() {
+    if (this._healthInterval) {
+      clearInterval(this._healthInterval);
+      this._healthInterval = null;
+    }
+  }
+
+  async _runHealthCheck() {
+    let results = {};
+
+    for (let [name, s] of this.servers) {
+      if (s.isRemote || !s.process) {
+        results[name] = { status: s.isRemote ? 'remote' : 'stopped' };
+        continue;
+      }
+
+      try {
+        let start = Date.now();
+        await this.requestFromChild(name, 'tools/list', {});
+        let latency = Date.now() - start;
+        this._healthFailures.set(name, 0);
+        results[name] = { status: 'healthy', latency };
+      } catch (err) {
+        let fails = (this._healthFailures.get(name) || 0) + 1;
+        this._healthFailures.set(name, fails);
+        results[name] = { status: 'unhealthy', failures: fails, error: err.message };
+
+        if (fails === 3) {
+          console.error(`🔴 [HealthCheck] "${name}" unresponsive (3 consecutive failures)`);
+          this.pluginLoader.dispatchAlert({
+            type: 'health',
+            server: name,
+            message: `Server "${name}" failed 3 consecutive health checks. Last error: ${err.message}`,
+            failures: fails,
+          });
+        }
+      }
+    }
+
+    this.broadcastMonitor({
+      jsonrpc: '2.0',
+      method: 'health',
+      params: results,
+    });
+  }
+
+  /**
+   * Get current health status snapshot.
+   * @returns {Record<string, { status: string, latency?: number, failures?: number }>}
+   */
+  getHealthStatus() {
+    let results = {};
+    for (let [name, s] of this.servers) {
+      if (s.isRemote) {
+        results[name] = { status: 'remote' };
+      } else if (!s.process) {
+        results[name] = { status: 'stopped' };
+      } else {
+        let fails = this._healthFailures?.get(name) || 0;
+        results[name] = { status: fails > 0 ? 'degraded' : 'healthy', failures: fails };
+      }
+    }
+    return results;
+  }
+
   /** Stop all servers and adapters. */
   stopAll() {
+    this.stopHealthCheck();
     for (let name of this.servers.keys()) {
       this.stopServer(name);
     }
@@ -439,3 +521,4 @@ export class MCPProxyManager {
 }
 
 export default MCPProxyManager;
+

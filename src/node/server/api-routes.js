@@ -81,6 +81,11 @@ export function createRoutes(ctx) {
       }));
     },
 
+    'GET /api/health': (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(proxyManager.getHealthStatus()));
+    },
+
     'GET /api/adapter/status': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(proxyManager.adapterPool?.getStatus() || { adapters: {} }));
