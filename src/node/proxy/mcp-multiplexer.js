@@ -70,8 +70,11 @@ export class MCPMultiplexer {
       }, action === 'add' ? 3000 : 100);
     };
 
-    // Build tool index after servers are initialized
-    setTimeout(() => this._rebuildIndex(), 3000);
+    // Build tool index after servers are initialized, then notify IDE so it gets the dynamic hints
+    setTimeout(async () => {
+      await this._rebuildIndex();
+      this.notifyToolsChanged();
+    }, 3000);
 
     let rl = createInterface({
       input: process.stdin,
