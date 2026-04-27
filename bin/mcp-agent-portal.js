@@ -69,6 +69,7 @@ let CLI = {
           console.log(`  ⚠ Config parse error: ${e.message}`);
         }
       }
+      console.log(`  Web UI:  http://portal.local/`);
       console.log();
     },
   },
@@ -107,8 +108,8 @@ Options:
   --master               Start in master mode (distributed topology)
   --connect <url>        Start in client mode, connect to master
 
-Quick Start:
-  npx mcp-agent-portal config           # Get MCP config for your IDE
+Web Dashboard:
+  http://portal.local/   Available while the server is running
 
 Examples:
   npx mcp-agent-portal config
