@@ -19,6 +19,7 @@ import"./panels/ActionBoard/ActionBoard.js?v=2";
 import"./panels/SettingsPanel/SettingsPanel.js?v=2";
 import"./panels/AgentChat/AgentChat.js?v=2";
 import"./panels/Marketplace/Marketplace.js?v=1";
+import"./panels/Topology/TopologyPanel.js";
 import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=2";
 
 export const state={skeleton:null,activeFile:null,ws:null,monitorEvents:[]};

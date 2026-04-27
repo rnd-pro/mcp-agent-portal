@@ -250,6 +250,12 @@ export class MCPProxyManager {
   handleUpgrade(req, socket, head) {
     let url = new URL(req.url, 'http://localhost');
     let parts = url.pathname.split('/').filter(Boolean);
+    
+    if (parts[0] === 'ws' && parts[1] === 'client') {
+      this.handleRemoteClient(req, socket, head);
+      return true;
+    }
+
     let serverName = parts[0];
 
     if (this.servers.has(serverName)) {
@@ -282,6 +288,54 @@ export class MCPProxyManager {
         },
       }));
       ws.on('close', () => this.monitors.delete(ws));
+    });
+  }
+
+  handleRemoteClient(req, socket, head) {
+    let wss = new WebSocketServer({ noServer: true });
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      let remoteId = `remote-${Math.random().toString(36).substr(2, 6)}`;
+      
+      let virtualServer = {
+        command: 'remote-client',
+        args: [req.socket.remoteAddress],
+        color: `hsl(${Math.floor(Math.random() * 360)}, 70%, 50%)`,
+        agents: 1,
+        pid: 'remote',
+        isRemote: true,
+        process: {
+          stdin: {
+            writable: true,
+            write: (data) => {
+              if (ws.readyState === 1) ws.send(data.trim());
+            }
+          },
+          kill: () => ws.close()
+        }
+      };
+      
+      this.servers.set(remoteId, virtualServer);
+      console.log(`✅ [Master] Remote client connected: ${remoteId}`);
+
+      ws.on('message', (data) => {
+        try {
+          let msg = JSON.parse(data.toString());
+          if (msg.id && this.pendingRequests.has(`${remoteId}:${msg.id}`)) {
+            let reqPending = this.pendingRequests.get(`${remoteId}:${msg.id}`);
+            this.pendingRequests.delete(`${remoteId}:${msg.id}`);
+            reqPending.resolve(msg.result || msg);
+            return;
+          }
+          if (this.multiplexerCallback) {
+            this.multiplexerCallback(remoteId, msg);
+          }
+        } catch (e) {}
+      });
+
+      ws.on('close', () => {
+        console.log(`🟡 [Master] Remote client disconnected: ${remoteId}`);
+        this.servers.delete(remoteId);
+      });
     });
   }
   /**

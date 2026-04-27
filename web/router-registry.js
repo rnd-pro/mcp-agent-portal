@@ -20,6 +20,7 @@ export const panelTypes = {
   'action-board': { title: 'Action Board',  icon: 'monitor_heart', component: 'pg-action-board' },
   'agent-chat':   { title: 'Agent Chat',    icon: 'smart_toy',     component: 'pg-agent-chat' },
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
+  'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
 };
 
 /**
@@ -84,6 +85,11 @@ registerSection('chat', {
 registerSection('marketplace', {
   icon: 'storefront', label: 'Marketplace', order: 25,
   layout: () => LayoutTree.createPanel('marketplace')
+});
+
+registerSection('topology', {
+  icon: 'hub', label: 'Topology', order: 27,
+  layout: () => LayoutTree.createPanel('topology-panel')
 });
 
 registerSection('explorer', {
