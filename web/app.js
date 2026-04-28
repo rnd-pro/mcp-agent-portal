@@ -141,7 +141,6 @@ async function u(){
   let sb=e.querySelector("layout-sidebar");
   if(!sb){sb=document.createElement("layout-sidebar");e.prepend(sb);}
   const _c=e.querySelector(".app-content"),nLayout=document.createElement("panel-layout");
-  nLayout.setAttribute("storage-key","pg-layout-v2");
   nLayout.setAttribute("min-panel-size","150");
   nLayout.id="main-layout";
   _c.appendChild(nLayout);
@@ -149,19 +148,58 @@ async function u(){
   requestAnimationFrame(async ()=>{
     for(const[e,t]of Object.entries(panelTypes)) nLayout.registerPanelType(e,t);
     let lastSection="";
+
+    // Per-section layout storage key
+    function sectionStorageKey(section) {
+      return `pg-layout-${section}`;
+    }
+
     function handleRoute(){
       const e=location.hash.replace("#","")||"dashboard",t=e.indexOf("?");
       const n=t>=0?e.substring(0,t):e,o=n.indexOf("/");
       const a=o>=0?n.substring(0,o):n,i=o>=0?n.substring(o+1):"";
       if(hasSection(a)&&a!==lastSection){
+        // Save current section's layout before switching
+        if(lastSection) {
+          let currentTree = nLayout.getLayout();
+          if(currentTree) {
+            localStorage.setItem(sectionStorageKey(lastSection), JSON.stringify(currentTree));
+          }
+        }
+
         lastSection=a;
-        const layout=getLayout(a);
-        if(layout) nLayout.setLayout(layout);
+
+        // Try to restore saved layout for this section
+        let savedLayout = localStorage.getItem(sectionStorageKey(a));
+        if(savedLayout) {
+          try {
+            nLayout.setLayout(JSON.parse(savedLayout));
+          } catch(err) {
+            // Corrupted — fall back to default
+            let layout = getLayout(a);
+            if(layout) nLayout.setLayout(layout);
+          }
+        } else {
+          // No saved layout — use default
+          let layout = getLayout(a);
+          if(layout) nLayout.setLayout(layout);
+        }
       }
       if("explorer"===a&&i){
         requestAnimationFrame(()=>{state.activeFile=i,emit("file-selected",{path:i,fromRoute:!0})});
       }
     }
+
+    // Save layout on any change (resize, split, join, collapse, etc.)
+    nLayout.addEventListener('layout-change', () => {
+      if(lastSection) {
+        let currentTree = nLayout.getLayout();
+        if(currentTree) {
+          localStorage.setItem(sectionStorageKey(lastSection), JSON.stringify(currentTree));
+        }
+      }
+    });
+
     sb.setSections(getSections());
     window.addEventListener("hashchange",handleRoute);
     
@@ -173,12 +211,9 @@ async function u(){
       if(t&&_sec==="explorer")history.replaceState(null,"",`#explorer/${t}`);
     });
     
-    // Clean up stale v1 key
+    // Clean up stale keys
     localStorage.removeItem("pg-explorer-layout");
-
-    if(!localStorage.getItem("pg-layout-v2")) {
-       nLayout.setLayout(getLayout('dashboard'));
-    }
+    localStorage.removeItem("pg-layout-v2");
     
     if(location.hash&&"#"!==location.hash) {
       handleRoute();
