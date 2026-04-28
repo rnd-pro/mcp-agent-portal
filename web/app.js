@@ -141,7 +141,7 @@ async function u(){
   let sb=e.querySelector("layout-sidebar");
   if(!sb){sb=document.createElement("layout-sidebar");e.prepend(sb);}
   const _c=e.querySelector(".app-content"),nLayout=document.createElement("panel-layout");
-  nLayout.setAttribute("storage-key","pg-explorer-layout");
+  nLayout.setAttribute("storage-key","pg-layout-v2");
   nLayout.setAttribute("min-panel-size","150");
   nLayout.id="main-layout";
   _c.appendChild(nLayout);
@@ -173,7 +173,10 @@ async function u(){
       if(t&&_sec==="explorer")history.replaceState(null,"",`#explorer/${t}`);
     });
     
-    if(!localStorage.getItem("pg-explorer-layout")) {
+    // Clean up stale v1 key
+    localStorage.removeItem("pg-explorer-layout");
+
+    if(!localStorage.getItem("pg-layout-v2")) {
        nLayout.setLayout(getLayout('dashboard'));
     }
     
