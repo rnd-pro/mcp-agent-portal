@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { registerService } from './local-gateway.js';
 import { MCPProxyManager } from '../proxy/mcp-proxy.js';
 import { createRoutes, dispatch } from './api-routes.js';
+import { createProjectRoutes } from './api-routes-projects.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
@@ -133,6 +134,8 @@ function proxyToBackend(req, res, url, proxyManager) {
 export function startWebServer(projectRoot) {
   let proxyManager = new MCPProxyManager();
   let routes = createRoutes({ proxyManager, projectRoot });
+  let projectRoutes = createProjectRoutes();
+  let allRoutes = { ...routes, ...projectRoutes };
 
   let server = http.createServer((req, res) => {
     let url = new URL(req.url, 'http://localhost');
@@ -149,7 +152,7 @@ export function startWebServer(projectRoot) {
     }
 
     // Route map dispatch — one-liner routing (CIT pattern)
-    if (dispatch(routes, req, res)) return;
+    if (dispatch(allRoutes, req, res)) return;
 
     // Fallback: proxy unknown /api/ to backend MCP servers
     if (url.pathname.startsWith('/api/')) {

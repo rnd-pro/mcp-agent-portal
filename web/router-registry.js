@@ -22,6 +22,7 @@ export const panelTypes = {
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
   'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
   'tool-explorer':{ title: 'Tool Explorer', icon: 'build',         component: 'pg-tool-explorer' },
+  'chat-list':    { title: 'Chats',         icon: 'forum',         component: 'pg-chat-list' },
 };
 
 /**
@@ -70,12 +71,10 @@ export function hasSection(id) {
 
 registerSection('dashboard', {
   icon: 'dashboard', label: 'Dashboard', order: 10,
-  layout: () => LayoutTree.createSplit('vertical',
-    LayoutTree.createPanel('project-list'),
-    LayoutTree.createSplit('horizontal',
-      LayoutTree.createPanel('action-board'),
-      LayoutTree.createPanel('agent-chat'), 0.5
-    ), 0.3)
+  layout: () => LayoutTree.createSplit('horizontal',
+    LayoutTree.createPanel('chat-list'),
+    LayoutTree.createPanel('agent-chat'), 0.28
+  )
 });
 
 registerSection('chat', {

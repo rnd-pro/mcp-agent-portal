@@ -26,22 +26,17 @@ pg-agent-chat {
   color: var(--sn-text-dim, #a0a0a0);
 }
 
-.mode-select {
+.chat-adapter-badge {
   margin-left: auto;
-  background: var(--sn-panel-bg, hsl(228, 14%, 18%));
-  color: var(--sn-text, #e0e0e0);
-  border: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
   border-radius: 4px;
-  padding: 4px 8px;
-  font-family: inherit;
-  font-size: 11px;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-}
-
-.mode-select:hover, .mode-select:focus {
-  border-color: var(--sn-cat-server, hsl(210, 45%, 45%));
+  background: rgba(76, 139, 245, 0.1);
+  color: var(--sn-node-selected, #4c8bf5);
+  font-family: var(--sn-font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .chat-messages {

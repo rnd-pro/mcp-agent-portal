@@ -1,56 +1,61 @@
 import { Symbiote } from "@symbiotejs/symbiote";
-import { state } from "../../dashboard-state.js";
+import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
 import css from "./AgentChat.css.js";
 
 export class AgentChat extends Symbiote {
   init$ = {
-    messages: [
-      { role: "system", text: "Agent Chat ready. Select mode above." }
-    ],
+    messages: [],
     inputVal: "",
-    mode: "pool", // "pool" | "gemini" | "claude" | "opencode"
-    
-    onModeChange: (e) => {
-      this.$.mode = e.target.value;
-      this.$.messages.push({ role: "system", text: `Switched to ${this.$.mode} mode.` });
-      this.$.messages = [...this.$.messages];
-    },
-    
+    chatName: "No chat selected",
+    chatAdapter: "pool",
+    hasChatId: false,
+
     onKeyDown: (e) => {
       if (e.key === "Enter") {
         this.$.onSend();
       }
     },
-    
+
     onInput: (e) => {
       this.$.inputVal = e.target.value;
     },
-    
+
     onSend: async () => {
-      const prompt = this.$.inputVal.trim();
+      let chatId = dashState.activeChatId;
+      if (!chatId) return;
+
+      let prompt = this.$.inputVal.trim();
       if (!prompt) return;
-      
-      this.$.messages.push({ role: "user", text: prompt });
-      this.$.messages = [...this.$.messages];
+
+      // Append user message locally
+      this.$.messages = [...this.$.messages, { role: "user", text: prompt }];
       this.$.inputVal = "";
-      
+
+      // Persist to server
+      await fetch("/api/chats/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, role: "user", text: prompt }),
+      });
+
       try {
+        let adapter = this.$.chatAdapter || "pool";
         let reply = "";
-        
-        if (this.$.mode === "pool") {
-          const res = await fetch("/api/mcp-call", {
+
+        if (adapter === "pool") {
+          let res = await fetch("/api/mcp-call", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               serverName: "agent-pool",
               method: "tools/call",
-              params: { 
-                name: "delegate_task", 
-                arguments: { prompt, timeout: 600 } 
-              }
-            })
+              params: {
+                name: "delegate_task",
+                arguments: { prompt, timeout: 600 },
+              },
+            }),
           });
-          const data = await res.json();
+          let data = await res.json();
           reply = "Task dispatched.";
           if (data.content && data.content.length > 0) {
             reply = data.content[0].text;
@@ -59,19 +64,18 @@ export class AgentChat extends Symbiote {
           }
         } else {
           // Direct adapter mode
-          this.$.messages.push({ role: "system", text: "Processing..." });
-          this.$.messages = [...this.$.messages];
-          
-          const res = await fetch("/api/adapter/run", {
+          this.$.messages = [...this.$.messages, { role: "system", text: "Processing..." }];
+
+          let res = await fetch("/api/adapter/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: this.$.mode, prompt, timeout: 300 })
+            body: JSON.stringify({ type: adapter, prompt, timeout: 300 }),
           });
-          const data = await res.json();
-          
-          // Remove the "Processing..." system message
-          this.$.messages.pop();
-          
+          let data = await res.json();
+
+          // Remove "Processing..." 
+          this.$.messages = this.$.messages.filter(m => m.text !== "Processing...");
+
           if (data.error) {
             reply = `Error: ${data.error}`;
           } else {
@@ -81,17 +85,67 @@ export class AgentChat extends Symbiote {
             }
           }
         }
-        
-        this.$.messages.push({ role: "agent", text: reply });
-        this.$.messages = [...this.$.messages];
+
+        this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
+
+        // Persist agent reply
+        await fetch("/api/chats/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId, role: "agent", text: reply }),
+        });
+
+        dashEmit("chats-updated");
       } catch (err) {
-        // Remove "Processing..." if it was added
-        if (this.$.messages[this.$.messages.length-1].text === "Processing...") {
-          this.$.messages.pop();
-        }
-        this.$.messages.push({ role: "system", text: `Error: ${err.message}` });
-        this.$.messages = [...this.$.messages];
+        this.$.messages = [...this.$.messages, { role: "system", text: `Error: ${err.message}` }];
       }
+    },
+  };
+
+  renderCallback() {
+    dashEvents.addEventListener("active-chat-changed", (e) => {
+      this._loadChat(e.detail?.id);
+    });
+
+    // Load initial chat if any
+    if (dashState.activeChatId) {
+      this._loadChat(dashState.activeChatId);
+    }
+  }
+
+  async _loadChat(chatId) {
+    if (!chatId) {
+      this.$.messages = [];
+      this.$.chatName = "No chat selected";
+      this.$.chatAdapter = "pool";
+      this.$.hasChatId = false;
+      return;
+    }
+
+    try {
+      let res = await fetch("/api/chats/get", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: chatId }),
+      });
+      let chat = await res.json();
+      if (chat.error) {
+        this.$.messages = [{ role: "system", text: chat.error }];
+        return;
+      }
+
+      this.$.chatName = chat.name || "Chat";
+      this.$.chatAdapter = chat.adapter || "pool";
+      this.$.messages = chat.messages || [];
+      this.$.hasChatId = true;
+
+      // Auto-scroll
+      requestAnimationFrame(() => {
+        let msgEl = this.shadowRoot.querySelector('.chat-messages');
+        if (msgEl) msgEl.scrollTop = msgEl.scrollHeight;
+      });
+    } catch (err) {
+      this.$.messages = [{ role: "system", text: `Load error: ${err.message}` }];
     }
   }
 }
@@ -100,13 +154,8 @@ AgentChat.template = `
 <div class="chat-wrapper">
   <div class="chat-header">
     <span class="material-symbols-outlined" style="font-size:18px">smart_toy</span>
-    <span>Agent Chat</span>
-    <select class="mode-select" set="onchange: onModeChange">
-      <option value="pool">Pool (MCP)</option>
-      <option value="gemini">Direct: gemini</option>
-      <option value="claude">Direct: claude</option>
-      <option value="opencode">Direct: opencode</option>
-    </select>
+    <span ${{ textContent: 'chatName' }}></span>
+    <span class="chat-adapter-badge" ${{ textContent: 'chatAdapter' }}></span>
   </div>
   
   <div class="chat-messages" itemize="messages">
@@ -118,7 +167,7 @@ AgentChat.template = `
   </div>
   
   <div class="chat-input-bar">
-    <input type="text" bind="value: inputVal" set="oninput: onInput; onkeydown: onKeyDown" placeholder="Delegate a task to the pool...">
+    <input type="text" bind="value: inputVal" set="oninput: onInput; onkeydown: onKeyDown" placeholder="Type a message...">
     <button set="onclick: onSend">
       <span class="material-symbols-outlined" style="font-size:18px">send</span>
     </button>

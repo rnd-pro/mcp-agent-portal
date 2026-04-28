@@ -17,11 +17,13 @@ import"./components/canvas-graph.js";
 import"./panels/ProjectList/ProjectList.js?v=2";
 import"./panels/ActionBoard/ActionBoard.js?v=2";
 import"./panels/SettingsPanel/SettingsPanel.js?v=2";
-import"./panels/AgentChat/AgentChat.js?v=2";
+import"./panels/AgentChat/AgentChat.js?v=3";
 import"./panels/Marketplace/Marketplace.js?v=1";
 import"./panels/Topology/TopologyPanel.js";
 import"./panels/ToolExplorer/ToolExplorer.js";
-import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=2";
+import"./panels/ChatList/ChatList.js";
+import"./components/ProjectTabs/ProjectTabs.js";
+import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=3";
 
 export const state={skeleton:null,activeFile:null,ws:null,monitorEvents:[]};
 export{formatStats}from"./stats-format.js";
@@ -187,6 +189,25 @@ async function u(){
     dashState.projects = list.map(t=>({prefix:t.prefix,...t,connected:!1,agents:0}));
     dashEmit("projects-updated",dashState.projects);
     initDashboardWS(dashState.projects);
+
+    // Initialize project history & CLI config
+    try {
+      const [histRes, cliRes, chatRes] = await Promise.all([
+        fetch('/api/projects/history').then(r => r.json()),
+        fetch('/api/cli/config').then(r => r.json()),
+        fetch('/api/chats').then(r => r.json()),
+      ]);
+      dashState.projectHistory = histRes.projects || [];
+      dashState.openProjectIds = histRes.activeIds || [];
+      dashState.activeProjectId = dashState.openProjectIds[0] || null;
+      dashState.globalCli = cliRes.global || {};
+      dashState.chats = chatRes.chats || [];
+      dashEmit('projects-history-updated', dashState.projectHistory);
+      dashEmit('chats-updated');
+      if (dashState.activeProjectId) dashEmit('active-project-changed', { id: dashState.activeProjectId });
+    } catch (err) {
+      console.warn('[app] project/chat init error:', err);
+    }
   });
   
   // Also keep original Explorer websocket events alive conceptually
