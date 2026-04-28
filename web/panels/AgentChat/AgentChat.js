@@ -19,7 +19,7 @@ export class AgentChat extends Symbiote {
     inputVal: "",
     chatName: "Select a chat",
     chatAdapter: "",
-    navExpanded: false,
+    navCollapsed: false,
 
     onKeyDown: (e) => {
       if (e.key === "Enter") this._sendMessage();
@@ -34,7 +34,7 @@ export class AgentChat extends Symbiote {
     },
 
     onToggleNav: () => {
-      this.$.navExpanded = !this.$.navExpanded;
+      this.$.navCollapsed = !this.$.navCollapsed;
     },
 
     onNewChat: () => {
@@ -43,10 +43,10 @@ export class AgentChat extends Symbiote {
   };
 
   renderCallback() {
-    // Reflect nav expanded state
-    this.sub('navExpanded', (val) => {
+    // Reflect nav collapsed state (mirrors layout-sidebar pattern)
+    this.sub('navCollapsed', (val) => {
       let nav = this.querySelector('.chat-nav');
-      if (nav) nav.toggleAttribute('expanded', val);
+      if (nav) nav.toggleAttribute('collapsed', val);
     });
 
     // Fetch chats and render nav
@@ -260,12 +260,13 @@ AgentChat.template = `
 <div class="chat-shell">
   <div class="chat-nav">
     <div class="chat-nav-header">
-      <button class="nav-btn" set="onclick: onToggleNav" title="Toggle chat list">
-        <span class="material-symbols-outlined">forum</span>
+      <button class="nav-btn nav-btn-add" set="onclick: onNewChat" title="New chat">
+        <span class="material-symbols-outlined">add</span>
       </button>
       <span class="nav-title">Chats</span>
-      <button class="nav-btn" set="onclick: onNewChat" title="New chat">
-        <span class="material-symbols-outlined">add</span>
+      <div class="nav-spacer"></div>
+      <button class="nav-btn" set="onclick: onToggleNav">
+        <span class="material-symbols-outlined chat-nav-collapse-icon">chevron_left</span>
       </button>
     </div>
     <div class="chat-items"></div>

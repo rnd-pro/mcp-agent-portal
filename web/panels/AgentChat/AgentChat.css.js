@@ -14,30 +14,48 @@ pg-agent-chat {
   font-size: 13px;
 }
 
-/* ── Chat Nav (sidebar-style) ─────────────── */
+/* ── Chat Nav (mirrors layout-sidebar pattern) ── */
 
 .chat-nav {
-  width: 48px;
+  width: 200px;
+  min-width: 200px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
-  background: var(--sn-bg, #1a1a1a);
+  border-right: 1px solid var(--sn-node-border, rgba(255, 255, 255, 0.06));
+  background: var(--sn-bg, #1e1e1e);
   overflow: hidden;
-  transition: width 0.2s ease;
+  transition: width 0.2s ease, min-width 0.2s ease;
+  user-select: none;
 }
 
-.chat-nav[expanded] {
-  width: 200px;
+.chat-nav[collapsed] {
+  width: 48px;
+  min-width: 48px;
 }
 
 .chat-nav-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px;
-  border-bottom: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
+  gap: 2px;
+  padding: 2px 4px;
+  min-height: 28px;
+  background: var(--bg-header, var(--sn-bg, #1e1e1e));
+  border-bottom: 1px solid var(--sn-node-border, rgba(255, 255, 255, 0.06));
   flex-shrink: 0;
+}
+
+.chat-nav[collapsed] .chat-nav-header {
+  justify-content: center;
+  padding: 2px 0;
+}
+
+.chat-nav-header .nav-spacer {
+  flex: 1;
+}
+
+.chat-nav[collapsed] .nav-spacer {
+  display: none;
 }
 
 .chat-nav-header .nav-title {
@@ -46,15 +64,27 @@ pg-agent-chat {
   color: var(--sn-text-dim, #888);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  flex: 1;
-  overflow: hidden;
   white-space: nowrap;
+  overflow: hidden;
 }
 
-.chat-nav:not([expanded]) .nav-title,
-.chat-nav:not([expanded]) .chat-item-label,
-.chat-nav:not([expanded]) .chat-item-adapter,
-.chat-nav:not([expanded]) .chat-item-delete {
+.chat-nav[collapsed] .nav-title {
+  display: none;
+}
+
+.chat-nav-collapse-icon {
+  transition: transform 0.2s ease;
+}
+
+.chat-nav[collapsed] .chat-nav-collapse-icon {
+  transform: rotate(180deg);
+}
+
+/* Hide labels, adapters, delete when collapsed */
+.chat-nav[collapsed] .chat-item-label,
+.chat-nav[collapsed] .chat-item-adapter,
+.chat-nav[collapsed] .chat-item-delete,
+.chat-nav[collapsed] .nav-btn-add {
   display: none;
 }
 
@@ -62,23 +92,22 @@ pg-agent-chat {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
+  padding: 4px 6px;
   background: transparent;
-  color: var(--sn-text-dim, #666);
-  cursor: pointer;
+  border: none;
   border-radius: 4px;
-  transition: background 0.12s, color 0.12s;
+  cursor: pointer;
+  color: var(--text-dim, var(--sn-text-dim, #888));
+  font-size: 0.75rem;
+  transition: background 0.1s, color 0.1s;
   flex-shrink: 0;
-  padding: 0;
 }
 
-.nav-btn .material-symbols-outlined { font-size: 18px; }
+.nav-btn .material-symbols-outlined { font-size: 16px; }
 
 .nav-btn:hover {
-  background: var(--sn-node-bg, #2a2a2a);
-  color: var(--sn-text, #e0e0e0);
+  background: var(--bg-hover, var(--sn-node-hover, rgba(255, 255, 255, 0.06)));
+  color: var(--text-main, var(--sn-text, #d4d4d4));
 }
 
 .chat-items {
@@ -90,25 +119,30 @@ pg-agent-chat {
 .chat-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 6px 14px;
+  min-height: 28px;
   cursor: pointer;
-  transition: background 0.12s;
-  min-height: 32px;
+  color: var(--text-dim, var(--sn-text-dim, #888));
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .chat-item:hover {
-  background: var(--sn-node-bg, #2a2a2a);
+  background: var(--bg-hover, var(--sn-node-hover, rgba(255, 255, 255, 0.06)));
+  color: var(--text-main, var(--sn-text, #d4d4d4));
 }
 
 .chat-item[active] {
-  background: var(--sn-node-bg, #2a2a2a);
-  border-left: 2px solid var(--sn-node-selected, #4c8bf5);
+  color: var(--text-main, var(--sn-text, #d4d4d4));
+  background: var(--bg-hover, var(--sn-node-hover, rgba(255, 255, 255, 0.06)));
+  border-left: 2px solid var(--sn-cat-server, #5cb8ff);
+  padding-left: 12px;
 }
 
 .chat-item .material-symbols-outlined {
   font-size: 16px;
-  color: var(--sn-text-dim, #666);
   flex-shrink: 0;
 }
 
