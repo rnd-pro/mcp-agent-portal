@@ -310,6 +310,7 @@ export class AgentChat extends Symbiote {
                 params: { name: "get_task_result", arguments: { task_id: taskId } },
               }),
             });
+            if (!pollRes.ok) continue; // server error — retry next poll
             let pollData = await pollRes.json();
             let pollText = pollData.content?.[0]?.text || "";
 
@@ -404,6 +405,10 @@ export class AgentChat extends Symbiote {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: chatId }),
       });
+      if (!res.ok) {
+        this.$.messages = [{ role: "system", text: `Server error: ${res.status}` }];
+        return;
+      }
       let chat = await res.json();
       if (chat.error) {
         this.$.messages = [{ role: "system", text: chat.error }];
