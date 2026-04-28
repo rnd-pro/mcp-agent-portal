@@ -1,5 +1,6 @@
 import { Symbiote } from "@symbiotejs/symbiote";
 import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
+import template from "./AgentChat.tpl.js";
 import css from "./AgentChat.css.js";
 
 const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
@@ -45,13 +46,11 @@ export class AgentChat extends Symbiote {
   };
 
   renderCallback() {
-    // Restore collapsed state (default: false / expanded)
+    // Restore collapsed state from localStorage
     if (typeof localStorage !== 'undefined') {
       let stored = localStorage.getItem(STORAGE_KEY_CHAT_NAV);
       if (stored === 'true') {
         this.$.navCollapsed = true;
-      } else if (stored === 'false') {
-        this.$.navCollapsed = false;
       }
     }
 
@@ -59,22 +58,11 @@ export class AgentChat extends Symbiote {
     this.sub('navCollapsed', (val) => {
       let nav = this.querySelector('.chat-nav');
       if (nav) nav.toggleAttribute('collapsed', val);
-      
+
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_CHAT_NAV, val);
+        localStorage.setItem(STORAGE_KEY_CHAT_NAV, String(val));
       }
     });
-
-    // Wire nav buttons
-    this.ref.toggleNavBtn.onclick = () => {
-      this.$.navCollapsed = !this.$.navCollapsed;
-    };
-    this.ref.newChatBtn.onclick = () => this._createChat();
-
-    // Wire chat input
-    this.ref.chatInput.oninput = (e) => { this.$.inputVal = e.target.value; };
-    this.ref.chatInput.onkeydown = (e) => { if (e.key === 'Enter') this._sendMessage(); };
-    this.ref.sendBtn.onclick = () => this._sendMessage();
 
     // Fetch chats and render nav
     this._fetchChats();
@@ -216,7 +204,7 @@ export class AgentChat extends Symbiote {
 
     this.$.messages = [...this.$.messages, { role: "user", text: prompt }];
     this.$.inputVal = "";
-    this.ref.chatInput.value = '';
+    if (this.ref.chatInput) this.ref.chatInput.value = '';
 
     // Persist
     await fetch("/api/chats/message", {
@@ -299,40 +287,6 @@ export class AgentChat extends Symbiote {
   }
 }
 
-AgentChat.template = `
-<div class="chat-shell">
-  <div class="chat-nav">
-    <div class="chat-nav-header">
-      <button class="nav-btn nav-btn-add" ref="newChatBtn" title="New chat">
-        <span class="material-symbols-outlined">add</span>
-      </button>
-      <span class="nav-title">Chats</span>
-      <div class="nav-spacer"></div>
-      <button class="nav-btn" ref="toggleNavBtn">
-        <span class="material-symbols-outlined chat-nav-collapse-icon">chevron_left</span>
-      </button>
-    </div>
-    <div class="chat-items"></div>
-  </div>
-
-  <div class="chat-view">
-    <div class="chat-header">
-      <span class="material-symbols-outlined" style="font-size:18px">smart_toy</span>
-      <span set="textContent: chatName"></span>
-      <span class="chat-adapter-badge" set="textContent: chatAdapter"></span>
-    </div>
-
-    <div class="chat-messages"></div>
-
-    <div class="chat-input-bar">
-      <input type="text" ref="chatInput" placeholder="Type a message...">
-      <button ref="sendBtn">
-        <span class="material-symbols-outlined" style="font-size:18px">send</span>
-      </button>
-    </div>
-  </div>
-</div>
-`;
-
+AgentChat.template = template;
 AgentChat.rootStyles = css;
 AgentChat.reg("pg-agent-chat");
