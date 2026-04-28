@@ -22,7 +22,6 @@ export const panelTypes = {
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
   'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
   'tool-explorer':{ title: 'Tool Explorer', icon: 'build',         component: 'pg-tool-explorer' },
-  'chat-list':    { title: 'Chats',         icon: 'forum',         component: 'pg-chat-list' },
 };
 
 /**
@@ -76,10 +75,7 @@ registerSection('dashboard', {
       LayoutTree.createPanel('project-list'),
       LayoutTree.createPanel('action-board'), 0.35
     );
-    let chat = LayoutTree.createSplit('vertical',
-      LayoutTree.createPanel('chat-list'),
-      LayoutTree.createPanel('agent-chat'), 0.35
-    );
+    let chat = LayoutTree.createPanel('agent-chat');
     chat.global = true;
     return LayoutTree.createSplit('horizontal', workspace, chat, 0.65);
   }

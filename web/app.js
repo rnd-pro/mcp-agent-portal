@@ -17,11 +17,10 @@ import"./components/canvas-graph.js";
 import"./panels/ProjectList/ProjectList.js?v=2";
 import"./panels/ActionBoard/ActionBoard.js?v=2";
 import"./panels/SettingsPanel/SettingsPanel.js?v=2";
-import"./panels/AgentChat/AgentChat.js?v=3";
+import"./panels/AgentChat/AgentChat.js?v=4";
 import"./panels/Marketplace/Marketplace.js?v=1";
 import"./panels/Topology/TopologyPanel.js";
 import"./panels/ToolExplorer/ToolExplorer.js";
-import"./panels/ChatList/ChatList.js";
 import"./components/ProjectTabs/ProjectTabs.js";
 import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=3";
 
