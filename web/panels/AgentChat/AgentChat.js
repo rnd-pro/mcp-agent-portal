@@ -49,6 +49,17 @@ export class AgentChat extends Symbiote {
       if (nav) nav.toggleAttribute('collapsed', val);
     });
 
+    // Wire nav buttons
+    this.ref.toggleNavBtn.onclick = () => {
+      this.$.navCollapsed = !this.$.navCollapsed;
+    };
+    this.ref.newChatBtn.onclick = () => this._createChat();
+
+    // Wire chat input
+    this.ref.chatInput.oninput = (e) => { this.$.inputVal = e.target.value; };
+    this.ref.chatInput.onkeydown = (e) => { if (e.key === 'Enter') this._sendMessage(); };
+    this.ref.sendBtn.onclick = () => this._sendMessage();
+
     // Fetch chats and render nav
     this._fetchChats();
 
@@ -63,6 +74,30 @@ export class AgentChat extends Symbiote {
     if (dashState.activeChatId) {
       this._loadChat(dashState.activeChatId);
     }
+
+    // Re-render messages when they change
+    this.sub('messages', () => this._renderMessages());
+  }
+
+  _renderMessages() {
+    let container = this.querySelector('.chat-messages');
+    if (!container) return;
+    container.innerHTML = '';
+
+    let messages = this.$.messages || [];
+    for (let msg of messages) {
+      let div = document.createElement('div');
+      div.className = `message ${msg.role}`;
+      let content = document.createElement('div');
+      content.className = 'msg-content';
+      content.textContent = msg.text;
+      div.appendChild(content);
+      container.appendChild(div);
+    }
+
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
   }
 
   async _fetchChats() {
@@ -165,10 +200,7 @@ export class AgentChat extends Symbiote {
 
     this.$.messages = [...this.$.messages, { role: "user", text: prompt }];
     this.$.inputVal = "";
-
-    // Clear input
-    let input = this.querySelector('.chat-input-bar input');
-    if (input) input.value = '';
+    this.ref.chatInput.value = '';
 
     // Persist
     await fetch("/api/chats/message", {
@@ -245,11 +277,6 @@ export class AgentChat extends Symbiote {
       this.$.chatName = chat.name || "Chat";
       this.$.chatAdapter = chat.adapter || "pool";
       this.$.messages = chat.messages || [];
-
-      requestAnimationFrame(() => {
-        let msgEl = this.querySelector('.chat-messages');
-        if (msgEl) msgEl.scrollTop = msgEl.scrollHeight;
-      });
     } catch (err) {
       this.$.messages = [{ role: "system", text: `Load error: ${err.message}` }];
     }
@@ -260,12 +287,12 @@ AgentChat.template = `
 <div class="chat-shell">
   <div class="chat-nav">
     <div class="chat-nav-header">
-      <button class="nav-btn nav-btn-add" set="onclick: onNewChat" title="New chat">
+      <button class="nav-btn nav-btn-add" ref="newChatBtn" title="New chat">
         <span class="material-symbols-outlined">add</span>
       </button>
       <span class="nav-title">Chats</span>
       <div class="nav-spacer"></div>
-      <button class="nav-btn" set="onclick: onToggleNav">
+      <button class="nav-btn" ref="toggleNavBtn">
         <span class="material-symbols-outlined chat-nav-collapse-icon">chevron_left</span>
       </button>
     </div>
@@ -275,21 +302,15 @@ AgentChat.template = `
   <div class="chat-view">
     <div class="chat-header">
       <span class="material-symbols-outlined" style="font-size:18px">smart_toy</span>
-      <span ${{ textContent: 'chatName' }}></span>
-      <span class="chat-adapter-badge" ${{ textContent: 'chatAdapter' }}></span>
+      <span ${{textContent: 'chatName'}}></span>
+      <span class="chat-adapter-badge" ${{textContent: 'chatAdapter'}}></span>
     </div>
 
-    <div class="chat-messages" itemize="messages">
-      <template>
-        <div class="message {{role}}">
-          <div class="msg-content">{{text}}</div>
-        </div>
-      </template>
-    </div>
+    <div class="chat-messages"></div>
 
     <div class="chat-input-bar">
-      <input type="text" set="oninput: onInput; onkeydown: onKeyDown" placeholder="Type a message...">
-      <button set="onclick: onSend">
+      <input type="text" ref="chatInput" placeholder="Type a message...">
+      <button ref="sendBtn">
         <span class="material-symbols-outlined" style="font-size:18px">send</span>
       </button>
     </div>
