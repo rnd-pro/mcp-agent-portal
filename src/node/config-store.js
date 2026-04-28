@@ -216,3 +216,16 @@ export function deleteChat(chatId) {
   let file = path.join(CHATS_DIR, `${chatId}.json`);
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
+
+/**
+ * Update session ID for a chat (for Gemini CLI session continuity).
+ * @param {string} chatId
+ * @param {string} sessionId
+ */
+export function updateChatSession(chatId, sessionId) {
+  let chat = getChat(chatId);
+  if (!chat) return;
+  chat.sessionId = sessionId;
+  chat.updatedAt = Date.now();
+  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+}

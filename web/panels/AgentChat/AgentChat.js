@@ -260,13 +260,19 @@ export class AgentChat extends Symbiote {
         // Show processing indicator
         this.$.messages = [...this.$.messages, { role: "system", text: "⏳ Delegating task..." }];
 
+        // Build delegate_task arguments — resume existing session if available
+        let delegateArgs = { prompt, timeout: 600 };
+        if (this._sessionId) {
+          delegateArgs.session_id = this._sessionId;
+        }
+
         let res = await fetch("/api/mcp-call", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             serverName: "agent-pool",
             method: "tools/call",
-            params: { name: "delegate_task", arguments: { prompt, timeout: 600 } },
+            params: { name: "delegate_task", arguments: delegateArgs },
           }),
         });
         let data = await res.json();
@@ -312,6 +318,18 @@ export class AgentChat extends Symbiote {
 
             // Done or error — extract response
             reply = pollText;
+
+            // Extract and persist sessionId for session continuity
+            let sessionMatch = pollText.match(/Session ID:\s*`([a-f0-9-]+)`/);
+            if (sessionMatch) {
+              this._sessionId = sessionMatch[1];
+              // Save to server
+              fetch("/api/chats/session", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatId, sessionId: this._sessionId }),
+              }).catch(() => {});
+            }
             break;
           }
 
@@ -376,6 +394,7 @@ export class AgentChat extends Symbiote {
       this.$.messages = [];
       this.$.chatName = "Select a chat";
       this.$.chatAdapter = "";
+      this._sessionId = null;
       return;
     }
 
@@ -394,6 +413,7 @@ export class AgentChat extends Symbiote {
       this.$.chatName = chat.name || "Chat";
       this.$.chatAdapter = chat.adapter || "pool";
       this.$.messages = chat.messages || [];
+      this._sessionId = chat.sessionId || null;
     } catch (err) {
       this.$.messages = [{ role: "system", text: `Load error: ${err.message}` }];
     }
