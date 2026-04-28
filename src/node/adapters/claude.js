@@ -4,6 +4,34 @@ import { spawn } from 'node:child_process';
 let DEFAULT_TIMEOUT_SEC = 300;
 
 /**
+ * Extract structured content blocks from Claude stream-json events.
+ * Returns an array of { type, text?, name?, input?, result? } blocks.
+ * @param {Array} events - raw stream-json events
+ * @returns {Array}
+ */
+function extractContentBlocks(events) {
+  let blocks = [];
+  for (let ev of events) {
+    if (ev.type === 'assistant' && ev.message?.content) {
+      for (let block of ev.message.content) {
+        if (block.type === 'text' && block.text) {
+          blocks.push({ type: 'text', text: block.text });
+        } else if (block.type === 'tool_use') {
+          blocks.push({ type: 'tool_use', name: block.name, input: block.input, id: block.id });
+        }
+      }
+    } else if (ev.type === 'tool_result' || ev.type === 'result_tool_use') {
+      // Match tool result to its call by id
+      let existingTool = blocks.find(b => b.type === 'tool_use' && b.id === ev.tool_use_id);
+      if (existingTool) {
+        existingTool.result = ev.content?.map?.(c => c.text)?.join('') ?? ev.output ?? '';
+      }
+    }
+  }
+  return blocks;
+}
+
+/**
  * Create a Claude Code CLI adapter instance.
  * Uses @anthropic-ai/claude-code — `claude -p "prompt" --output-format stream-json`
  *
@@ -66,6 +94,7 @@ export function createClaudeAdapter(config = {}) {
                 exitCode: null,
                 errors: stderrData ? [stderrData] : [],
                 totalEvents: events.length,
+                events: extractContentBlocks(events),
               });
 
               if (childProc && childProc.pid) {
@@ -113,6 +142,7 @@ export function createClaudeAdapter(config = {}) {
               exitCode: code,
               errors: errors.map((e) => e.error?.message ?? JSON.stringify(e)).concat(stderrData ? [stderrData] : []),
               totalEvents: events.length,
+              events: extractContentBlocks(events),
             });
           });
 

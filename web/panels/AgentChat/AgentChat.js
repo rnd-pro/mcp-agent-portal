@@ -92,16 +92,53 @@ export class AgentChat extends Symbiote {
     for (let msg of messages) {
       let div = document.createElement('div');
       div.className = `message ${msg.role}`;
-      let content = document.createElement('div');
-      content.className = 'msg-content';
-      content.textContent = msg.text;
-      div.appendChild(content);
+
+      if (msg.role === 'tool') {
+        // Tool call card
+        let details = document.createElement('details');
+        details.className = 'tool-card';
+
+        let summary = document.createElement('summary');
+        summary.className = 'tool-header';
+        summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:14px">build</span> ${this._escapeHtml(msg.name || 'tool')}`;
+        details.appendChild(summary);
+
+        if (msg.input) {
+          let inputBlock = document.createElement('div');
+          inputBlock.className = 'tool-section';
+          inputBlock.innerHTML = `<div class="tool-label">Input</div><pre class="tool-code">${this._escapeHtml(typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input, null, 2))}</pre>`;
+          details.appendChild(inputBlock);
+        }
+
+        if (msg.result) {
+          let resultBlock = document.createElement('div');
+          resultBlock.className = 'tool-section';
+          let resultText = typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result, null, 2);
+          // Truncate long results
+          let truncated = resultText.length > 500 ? resultText.slice(0, 500) + '\n...' : resultText;
+          resultBlock.innerHTML = `<div class="tool-label">Result</div><pre class="tool-code">${this._escapeHtml(truncated)}</pre>`;
+          details.appendChild(resultBlock);
+        }
+
+        div.appendChild(details);
+      } else {
+        // Regular message
+        let content = document.createElement('div');
+        content.className = 'msg-content';
+        content.textContent = msg.text;
+        div.appendChild(content);
+      }
+
       container.appendChild(div);
     }
 
     requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight;
     });
+  }
+
+  _escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   async _fetchChats() {
@@ -216,6 +253,7 @@ export class AgentChat extends Symbiote {
     try {
       let adapter = this.$.chatAdapter || "pool";
       let reply = "";
+      let structuredEvents = null;
 
       if (adapter === "pool") {
         let res = await fetch("/api/mcp-call", {
@@ -240,12 +278,35 @@ export class AgentChat extends Symbiote {
         let data = await res.json();
         this.$.messages = this.$.messages.filter(m => m.text !== "Processing...");
 
-        reply = data.error ? `Error: ${data.error}` : data.response;
+        if (data.error) {
+          reply = `Error: ${data.error}`;
+        } else {
+          reply = data.response;
+          structuredEvents = data.events;
+        }
         if (data.errors?.length) reply += `\n\n[Warnings]:\n${data.errors.join('\n')}`;
       }
 
-      this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
+      // If we have structured events, render tool calls as separate messages
+      if (structuredEvents?.length) {
+        let newMessages = [];
+        for (let block of structuredEvents) {
+          if (block.type === 'tool_use') {
+            newMessages.push({ role: 'tool', name: block.name, input: block.input, result: block.result });
+          }
+        }
+        // Add text blocks as agent message
+        let textBlocks = structuredEvents.filter(b => b.type === 'text').map(b => b.text).join('\n');
+        let finalText = textBlocks || reply;
+        if (finalText) {
+          newMessages.push({ role: 'agent', text: finalText });
+        }
+        this.$.messages = [...this.$.messages, ...newMessages];
+      } else {
+        this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
+      }
 
+      // Persist the final agent reply
       await fetch("/api/chats/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

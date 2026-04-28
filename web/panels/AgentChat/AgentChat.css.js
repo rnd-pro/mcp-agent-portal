@@ -328,4 +328,96 @@ pg-agent-chat {
   font-size: 40px;
   opacity: 0.3;
 }
+
+/* ── Tool Call Cards ─────────────────────── */
+
+.message.tool {
+  align-self: flex-start;
+  max-width: 92%;
+  width: 100%;
+}
+
+.tool-card {
+  border: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
+  border-left: 3px solid var(--sn-cat-tool, #e9a33a);
+  border-radius: 6px;
+  background: var(--sn-node-bg, hsl(228, 14%, 22%));
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.tool-card[open] {
+  border-left-color: var(--sn-cat-server, #5cb8ff);
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sn-cat-tool, #e9a33a);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.tool-header::-webkit-details-marker { display: none; }
+
+.tool-header::before {
+  content: '▸';
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  color: var(--sn-text-dim, #888);
+}
+
+.tool-card[open] .tool-header::before {
+  transform: rotate(90deg);
+}
+
+.tool-header .material-symbols-outlined {
+  color: var(--sn-cat-tool, #e9a33a);
+}
+
+.tool-card[open] .tool-header {
+  border-bottom: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
+  color: var(--sn-cat-server, #5cb8ff);
+}
+
+.tool-card[open] .tool-header .material-symbols-outlined {
+  color: var(--sn-cat-server, #5cb8ff);
+}
+
+.tool-section {
+  padding: 6px 10px;
+}
+
+.tool-section + .tool-section {
+  border-top: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
+}
+
+.tool-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--sn-text-dim, #888);
+  margin-bottom: 4px;
+}
+
+.tool-code {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--sn-panel-bg, hsl(228, 14%, 18%));
+  border-radius: 4px;
+  font-family: var(--sn-font-mono, 'JetBrains Mono', 'Fira Code', monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--sn-text, #e0e0e0);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
 `;

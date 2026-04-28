@@ -21,4 +21,5 @@
  * @property {number|null} exitCode
  * @property {string[]} errors
  * @property {number} totalEvents
+ * @property {Array<{type: string, content?: any, name?: string, input?: any, result?: string}>} [events] - structured stream events (tool_use, text blocks)
  */

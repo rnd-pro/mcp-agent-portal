@@ -3,6 +3,44 @@ import { spawn } from 'node:child_process';
 
 let DEFAULT_TIMEOUT_SEC = 300;
 
+/**
+ * Extract structured content blocks from Gemini stream-json events.
+ * @param {Array} events - raw stream-json events
+ * @returns {Array}
+ */
+function extractGeminiBlocks(events) {
+  let blocks = [];
+  for (let ev of events) {
+    if (ev.type === 'message' && ev.role === 'assistant') {
+      let content = ev.content ?? ev.text ?? '';
+      if (typeof content === 'string' && content) {
+        blocks.push({ type: 'text', text: content });
+      }
+    }
+    // Gemini function calls
+    if (ev.type === 'functionCall' || ev.functionCall) {
+      let fc = ev.functionCall || ev;
+      blocks.push({ type: 'tool_use', name: fc.name, input: fc.args || fc.arguments || {} });
+    }
+    if (ev.type === 'functionResponse' || ev.functionResponse) {
+      let fr = ev.functionResponse || ev;
+      let lastTool = [...blocks].reverse().find(b => b.type === 'tool_use' && !b.result);
+      if (lastTool) {
+        lastTool.result = typeof fr.response === 'string' ? fr.response : JSON.stringify(fr.response ?? '');
+      }
+    }
+    // Also handle tool_use/tool_result if Gemini uses same format
+    if (ev.type === 'tool_use') {
+      blocks.push({ type: 'tool_use', name: ev.name, input: ev.input || {}, id: ev.id });
+    }
+    if (ev.type === 'tool_result') {
+      let match = blocks.find(b => b.type === 'tool_use' && b.id === ev.tool_use_id && !b.result);
+      if (match) match.result = ev.content?.map?.(c => c.text)?.join('') ?? ev.output ?? '';
+    }
+  }
+  return blocks;
+}
+
 export function createGeminiAdapter(config = {}) {
   let busy = false;
   let childProc = null;
@@ -60,6 +98,7 @@ export function createGeminiAdapter(config = {}) {
                 exitCode: null,
                 errors: stderrData ? [stderrData] : [],
                 totalEvents: events.length,
+                events: extractGeminiBlocks(events),
               });
               
               if (childProc && childProc.pid) {
@@ -112,6 +151,7 @@ export function createGeminiAdapter(config = {}) {
               exitCode: code,
               errors: errors.map((e) => e.message ?? e.error ?? JSON.stringify(e)).concat(stderrData ? [stderrData] : []),
               totalEvents: events.length,
+              events: extractGeminiBlocks(events),
             });
           });
 
