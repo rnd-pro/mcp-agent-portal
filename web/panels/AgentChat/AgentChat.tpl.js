@@ -26,7 +26,7 @@ export default html`
     <div class="chat-messages"></div>
 
     <div class="chat-input-bar">
-      <input type="text" ref="chatInput" set="oninput: onInput; onkeydown: onKeyDown" placeholder="Type a message...">
+      <input type="text" ref="chatInput" ${{ oninput: 'onInput', onkeydown: 'onKeyDown' }} placeholder="Type a message...">
       <button ${{ onclick: 'onSend' }}>
         <span class="material-symbols-outlined" style="font-size:18px">send</span>
       </button>
