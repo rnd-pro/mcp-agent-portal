@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './Marketplace.tpl.js';
-import css from './Marketplace.css.js';
+import cssLocal from './Marketplace.css.js';
+import cssShared from '../../common/ui-shared.css.js';
 
 /**
  * MCP Marketplace — curated catalog with categories, hot install/remove,
@@ -56,7 +57,7 @@ class Marketplace extends Symbiote {
   _setupSearch() {
     this.ref.searchInput.oninput = () => {
       let q = this.ref.searchInput.value.toLowerCase();
-      let cards = this.shadowRoot.querySelectorAll('.mp-card');
+      let cards = this.shadowRoot.querySelectorAll('.ui-card');
       for (let card of cards) {
         let text = card.textContent.toLowerCase();
         card.hidden = !text.includes(q);
@@ -84,7 +85,7 @@ class Marketplace extends Symbiote {
       this._renderCatalog();
     } catch (err) {
       console.error('🔴 [marketplace] Failed to load:', err);
-      this.ref.installedGrid.innerHTML = `<div class="mp-empty">Failed to load MCP servers</div>`;
+      this.ref.installedGrid.innerHTML = `<div class="ui-empty-state">Failed to load MCP servers</div>`;
     }
   }
 
@@ -94,12 +95,12 @@ class Marketplace extends Symbiote {
     let gradient = CATEGORY_META[server.category]?.gradient || 'linear-gradient(135deg, #6b7280, #4b5563)';
 
     let card = document.createElement('div');
-    card.className = 'mp-card';
+    card.className = 'ui-card';
     card.innerHTML = `
       <div class="mp-card-header">
         <div class="mp-card-icon" style="background:${gradient}">${icon}</div>
         <div>
-          <div class="mp-card-title">${key}</div>
+          <div class="ui-card-title" style="margin-bottom:0">${key}</div>
           ${server.source ? `<div class="mp-card-source">${new URL(server.source).hostname}</div>` : ''}
         </div>
       </div>
@@ -117,7 +118,7 @@ class Marketplace extends Symbiote {
     grid.innerHTML = '';
 
     if (!servers.length) {
-      grid.innerHTML = `<div class="mp-empty"><span class="material-symbols-outlined">inventory_2</span><span>No MCP servers installed</span></div>`;
+      grid.innerHTML = `<div class="ui-empty-state"><span class="material-symbols-outlined" style="margin-right:8px">inventory_2</span><span>No MCP servers installed</span></div>`;
       return;
     }
 
@@ -292,7 +293,7 @@ class Marketplace extends Symbiote {
 }
 
 Marketplace.template = template;
-Marketplace.shadowStyles = css;
+Marketplace.shadowStyles = cssShared + cssLocal;
 Marketplace.reg('pg-marketplace');
 
 export { Marketplace };

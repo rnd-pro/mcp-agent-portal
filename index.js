@@ -42,6 +42,14 @@ if (connectUrl) {
 } else {
   // Terminal mode (interactive TTY) — web-only, no stdio
   console.log('🌐 Running in web-only mode (no IDE detected)');
+  // Start all configured MCP servers — without this, /api/mcp-call returns 500
+  proxyManager.startAllServers((serverName, msg) => {
+    proxyManager.broadcastMonitor({
+      jsonrpc: '2.0',
+      method: 'event',
+      params: { type: msg.method, server: serverName, ...msg.params },
+    });
+  });
   console.log('✅ mcp-agent-portal started. Web UI: http://portal.local/');
 }
 

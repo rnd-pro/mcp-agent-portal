@@ -15,6 +15,8 @@ export class MCPProxyManager {
     this.servers = new Map();
     /** @type {Set<import('ws').WebSocket>} */
     this.monitors = new Set();
+    /** @type {Map<string, Set<import('ws').WebSocket>>} taskId → chat WS clients */
+    this.chatSubscriptions = new Map();
     this.multiplexerCallback = null;
     this.nextRequestId = 1;
     /** @type {Map<string, { resolve: Function, reject: Function }>} */
@@ -118,7 +120,20 @@ export class MCPProxyManager {
     settings.pid = child.pid;
 
     child.stderr.on('data', (data) => {
-      console.error(`🟡 [${serverName}]`, data.toString().trim());
+      let text = data.toString();
+      // Parse task notifications from stderr side-channel
+      for (let line of text.split('\n')) {
+        if (line.startsWith('__TASK_NOTIFY__')) {
+          try {
+            let msg = JSON.parse(line.slice('__TASK_NOTIFY__'.length));
+            this.routeTaskNotification(msg);
+          } catch {}
+          continue;
+        }
+        if (line.trim()) {
+          console.error(`🟡 [${serverName}]`, line.trim());
+        }
+      }
     });
 
     child.on('error', (err) => {
@@ -180,6 +195,12 @@ export class MCPProxyManager {
               this.pendingRequests.delete(`${serverName}:${msg.id}`);
               req.resolve(msg.result || msg);
               continue;
+            }
+
+            // Route task notifications to chat WebSocket clients
+            if (msg.method === 'notifications/task/event') {
+              console.error(`📡 [ChatWS] Task notification: ${msg.params?.type} for ${msg.params?.taskId?.substring(0, 8)}`);
+              this.routeTaskNotification(msg);
             }
 
             if (this.multiplexerCallback) {
@@ -334,6 +355,11 @@ export class MCPProxyManager {
       return true;
     }
 
+    if (parts[0] === 'ws' && parts[1] === 'chat') {
+      this.handleChatWs(req, socket, head);
+      return true;
+    }
+
     let serverName = parts[0];
 
     if (this.servers.has(serverName)) {
@@ -415,6 +441,118 @@ export class MCPProxyManager {
         this.servers.delete(remoteId);
       });
     });
+  }
+
+  /**
+   * WebSocket chat handler — clients send prompts, receive streaming task events.
+   * Replaces HTTP polling for AgentChat.
+   */
+  handleChatWs(req, socket, head) {
+    let wss = new WebSocketServer({ noServer: true });
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.on('message', async (data) => {
+        try {
+          let msg = JSON.parse(data.toString());
+          if (msg.method === 'chat.send') {
+            let { chatId, prompt, sessionId, timeout, model } = msg.params || {};
+            console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, model=${model}`);
+            if (!prompt) return;
+
+            // Delegate to agent-pool
+            let delegateArgs = { prompt, timeout: timeout || 600 };
+            if (sessionId) delegateArgs.session_id = sessionId;
+            if (model) delegateArgs.model = model;
+
+            try {
+              console.log(`💬 [Chat] Calling delegate_task...`, delegateArgs);
+              let result = await this.requestFromChild('agent-pool', 'tools/call', {
+                name: 'delegate_task',
+                arguments: delegateArgs,
+              });
+              
+              console.log(`💬 [Chat] delegate_task returned`, result);
+
+              let delegateText = result.content?.[0]?.text || '';
+              let taskIdMatch = delegateText.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+              let taskId = taskIdMatch?.[1];
+
+              // Subscribe this WS to task notifications
+              if (taskId) {
+                console.log(`💬 [Chat] Subscribing WS to taskId=${taskId}`);
+                if (!this.chatSubscriptions.has(taskId)) {
+                  this.chatSubscriptions.set(taskId, new Set());
+                }
+                this.chatSubscriptions.get(taskId).add(ws);
+              }
+              
+              ws.send(JSON.stringify({
+                method: 'chat.delegated',
+                params: { chatId, taskId, text: delegateText },
+              }));
+            } catch (err) {
+              console.error(`❌ [Chat] Error in delegate_task:`, err);
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({
+                  method: 'chat.error',
+                  params: { chatId, error: err.message || 'Server error' },
+                }));
+              }
+            }
+          }
+        } catch (e) {}
+      });
+
+      ws.on('close', () => {
+        // Cleanup subscriptions for this client
+        for (let [taskId, clients] of this.chatSubscriptions) {
+          clients.delete(ws);
+          if (clients.size === 0) this.chatSubscriptions.delete(taskId);
+        }
+      });
+    });
+  }
+
+  /**
+   * Route a task notification from agent-pool to subscribed chat WS clients.
+   * Called from the multiplexer when a 'notifications/task/event' message arrives.
+   * @param {object} notification
+   */
+  routeTaskNotification(notification) {
+    let { taskId, type, data } = notification.params || {};
+    if (!taskId) return;
+
+    let clients = this.chatSubscriptions.get(taskId);
+    if (!clients || clients.size === 0) return;
+
+    let method = type === 'done' ? 'chat.done'
+      : type === 'error' ? 'chat.error'
+      : 'chat.event';
+
+    // For 'done', fetch the full formatted result
+    let payload;
+    if (type === 'done' || type === 'error') {
+      // Get the formatted result via get_task_result
+      this.requestFromChild('agent-pool', 'tools/call', {
+        name: 'get_task_result',
+        arguments: { task_id: taskId },
+      }).then(result => {
+        let text = result.content?.[0]?.text || '';
+        for (let client of clients) {
+          if (client.readyState === 1) {
+            client.send(JSON.stringify({ method, params: { taskId, text } }));
+          }
+        }
+        this.chatSubscriptions.delete(taskId);
+      }).catch(() => {
+        this.chatSubscriptions.delete(taskId);
+      });
+    } else {
+      // Stream event
+      payload = JSON.stringify({ method, params: { taskId, event: data } });
+      for (let client of clients) {
+        if (client.readyState === 1) client.send(payload);
+      }
+    }
   }
   /**
    * Intentionally stop a server (no respawn).

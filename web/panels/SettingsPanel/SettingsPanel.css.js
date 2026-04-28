@@ -1,2 +1,43 @@
-// @ctx .context/web/panels/SettingsPanel/SettingsPanel.css.ctx
-export default"\npg-settings-panel {\n  display: block;\n  height: 100%;\n  overflow-y: auto;\n  padding: 16px;\n  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);\n}\n\n.pg-stg-card {\n  background: var(--sn-node-bg);\n  border: 1px solid var(--sn-node-border);\n  border-radius: 8px;\n  padding: 14px;\n  margin-bottom: 12px;\n}\n\n.pg-stg-title {\n  font-size: 11px;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.5px;\n  color: var(--sn-text-dim);\n  margin-bottom: 8px;\n}\n\n.pg-stg-metric {\n  display: flex;\n  justify-content: space-between;\n  padding: 5px 0;\n  border-bottom: 1px solid var(--sn-node-hover);\n  font-size: 12px;\n  color: var(--sn-text);\n}\n\n.pg-stg-metric:last-child {\n  border-bottom: none;\n}\n\n.pg-stg-val {\n  font-weight: 600;\n  font-family: 'JetBrains Mono', 'Fira Code', monospace;\n}\n\n.pg-stg-ok {\n  color: var(--sn-success-color, #4caf50);\n}\n\n.pg-stg-warn {\n  color: var(--sn-warning-color, #ff9800);\n}\n\n.pg-stg-btn {\n  background: var(--sn-node-bg);\n  border: 1px solid var(--sn-node-border);\n  color: var(--sn-text);\n  padding: 6px 14px;\n  border-radius: 8px;\n  cursor: pointer;\n  font-size: 12px;\n  font-family: inherit;\n  transition: border-color 0.15s;\n}\n\n.pg-stg-btn:hover {\n  border-color: var(--sn-node-selected, #4c8bf5);\n}\n\n.pg-stg-btn-danger {\n  border-color: var(--sn-danger-color, #f44336);\n  color: var(--sn-danger-color, #f44336);\n}\n\n.pg-stg-btn-danger:hover {\n  background: var(--sn-danger-color, #f44336);\n  color: #fff;\n  border-color: var(--sn-danger-color, #f44336);\n}\n\n.pg-stg-placeholder {\n  color: var(--sn-text-dim);\n  text-align: center;\n  padding: 20px;\n  font-style: italic;\n  font-size: 13px;\n}\n\n.pg-stg-pulse {\n  animation: pg-stg-pulse 1.5s ease infinite;\n}\n\n@keyframes pg-stg-pulse {\n  0%, 100% { opacity: 1; }\n  50% { opacity: 0.4; }\n}\n";
+export default`
+:host {
+  display: block;
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.pg-stg-metric {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--sn-node-hover);
+  font-size: 12px;
+  color: var(--sn-text);
+}
+
+.pg-stg-metric:last-child {
+  border-bottom: none;
+}
+
+.pg-stg-val {
+  font-weight: 600;
+  font-family: var(--sn-font-mono, 'JetBrains Mono', 'Fira Code', monospace);
+}
+
+.pg-stg-ok {
+  color: var(--sn-success-color, #4caf50);
+}
+
+.pg-stg-warn {
+  color: var(--sn-warning-color, #ff9800);
+}
+
+.pg-stg-pulse {
+  animation: pg-stg-pulse 1.5s ease infinite;
+}
+
+@keyframes pg-stg-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+`;

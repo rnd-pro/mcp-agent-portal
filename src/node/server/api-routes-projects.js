@@ -6,7 +6,7 @@ import {
   getProjectHistory, addProject, removeProject, updateProject,
   getActiveProjectIds, setActiveProjectIds,
   getGlobalCli, setGlobalCli,
-  listChats, getChat, createChat, appendChatMessage, deleteChat, updateChatSession,
+  listChats, getChat, createChat, appendChatMessage, replaceChatMessages, deleteChat, updateChatSession,
 } from '../config-store.js';
 
 /**
@@ -152,6 +152,17 @@ export function createProjectRoutes() {
         let { chatId, role, text } = await parseBody(req);
         if (!chatId || !role || !text) return json(res, { error: 'Missing chatId, role, or text' }, 400);
         appendChatMessage(chatId, { role, text });
+        json(res, { ok: true });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'PUT /api/chats/messages': async (req, res) => {
+      try {
+        let { chatId, messages } = await parseBody(req);
+        if (!chatId || !Array.isArray(messages)) return json(res, { error: 'Missing chatId or messages array' }, 400);
+        replaceChatMessages(chatId, messages);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);

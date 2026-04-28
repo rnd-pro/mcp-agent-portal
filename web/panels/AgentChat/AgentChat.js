@@ -1,5 +1,6 @@
-import { Symbiote } from "@symbiotejs/symbiote";
+import { Symbiote, PubSub } from "@symbiotejs/symbiote";
 import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
+import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
 import template from "./AgentChat.tpl.js";
 import css from "./AgentChat.css.js";
 
@@ -65,43 +66,94 @@ export class AgentChat extends Symbiote {
       }
     });
 
-    // Fetch chats and render nav
-    this._fetchChats();
+    // Fetch chats, then sync from URL — component is ready when fetch completes
+    this._fetchChats().then(() => {
+      console.log("[AgentChat] _fetchChats completed. Calling _syncChatFromRouter");
+      this._syncChatFromRouter();
+    });
 
     dashEvents.addEventListener('chats-updated', () => this._fetchChats());
     dashEvents.addEventListener('active-chat-changed', (e) => {
+      console.log("[AgentChat] active-chat-changed received:", e.detail);
       this._loadChat(e.detail?.id);
       this._renderNavItems();
     });
     dashEvents.addEventListener('active-project-changed', () => this._renderNavItems());
 
-    // Load initial chat if any
-    if (dashState.activeChatId) {
-      this._loadChat(dashState.activeChatId);
-    }
+    // Self-register with router: react to ?chat= URL param changes
+    this.sub('ROUTER/query', (query) => {
+      console.log("[AgentChat] ROUTER/query changed:", query);
+      this._syncChatFromRouter();
+    });
 
     // Re-render messages when they change
     this.sub('messages', () => this._renderMessages());
   }
 
+  _syncChatFromRouter() {
+    let route = getRoute();
+    let globals = parseQuery(route.query || '');
+    let chatId = globals.chat || null;
+    console.log("[AgentChat] _syncChatFromRouter: route=", route, "chatId=", chatId, "dashState.activeChatId=", dashState.activeChatId);
+
+    if (chatId && chatId !== dashState.activeChatId) {
+      console.log("[AgentChat] Emitting active-chat-changed for", chatId);
+      dashState.activeChatId = chatId;
+      dashEmit('active-chat-changed', { id: chatId, fromRoute: true });
+    }
+  }
+
+  _formatMarkdown(text) {
+    if (!text) return '';
+    let html = this._escapeHtml(text);
+    
+    // Code blocks
+    html = html.replace(/```([\s\S]*?)```/g, '<pre class="markdown-pre"><code>$1</code></pre>');
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code class="markdown-code">$1</code>');
+    // Bold
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Italic
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // Links
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="markdown-link">$1</a>');
+    // Newlines
+    html = html.split('\n').join('<br>');
+    // Restore newlines inside pre
+    html = html.replace(/<pre class="markdown-pre"><code>([\s\S]*?)<\/code><\/pre>/g, (match, p1) => {
+      return `<pre class="markdown-pre"><code>${p1.split('<br>').join('\n')}</code></pre>`;
+    });
+
+    return html;
+  }
+
   _renderMessages() {
     let container = this.querySelector('.chat-messages');
     if (!container) return;
+    
+    // Check if user has scrolled up
+    let isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 10;
+    
     container.innerHTML = '';
 
     let messages = this.$.messages || [];
     for (let msg of messages) {
       let div = document.createElement('div');
       div.className = `message ${msg.role}`;
+      if (msg.streaming) div.classList.add('streaming');
 
       if (msg.role === 'tool') {
         // Tool call card
         let details = document.createElement('details');
         details.className = 'tool-card';
+        if (msg.streaming) details.setAttribute('open', ''); // Auto-open while running
 
         let summary = document.createElement('summary');
         summary.className = 'tool-header';
-        summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:14px">build</span> ${this._escapeHtml(msg.name || 'tool')}`;
+        
+        let icon = msg.streaming ? 'build_circle' : 'build';
+        let spinClass = msg.streaming ? 'spin-icon' : '';
+        summary.innerHTML = `<span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> ${this._escapeHtml(msg.name || 'tool')}`;
         details.appendChild(summary);
 
         if (msg.input) {
@@ -119,6 +171,11 @@ export class AgentChat extends Symbiote {
           let truncated = resultText.length > 500 ? resultText.slice(0, 500) + '\n...' : resultText;
           resultBlock.innerHTML = `<div class="tool-label">Result</div><pre class="tool-code">${this._escapeHtml(truncated)}</pre>`;
           details.appendChild(resultBlock);
+        } else if (msg.streaming) {
+          let waitBlock = document.createElement('div');
+          waitBlock.className = 'tool-section tool-waiting';
+          waitBlock.innerHTML = `<em>Running...</em>`;
+          details.appendChild(waitBlock);
         }
 
         div.appendChild(details);
@@ -126,7 +183,12 @@ export class AgentChat extends Symbiote {
         // Regular message
         let content = document.createElement('div');
         content.className = 'msg-content';
-        content.textContent = msg.text;
+        content.innerHTML = this._formatMarkdown(msg.text);
+        if (msg.streaming) {
+          let cursor = document.createElement('span');
+          cursor.className = 'streaming-cursor';
+          content.appendChild(cursor);
+        }
         div.appendChild(content);
       }
 
@@ -134,9 +196,12 @@ export class AgentChat extends Symbiote {
     }
 
     requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
+      if (isAtBottom) {
+        container.scrollTop = container.scrollHeight;
+      }
     });
   }
+
 
   _escapeHtml(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -183,6 +248,7 @@ export class AgentChat extends Symbiote {
       div.addEventListener('click', (e) => {
         if (e.target.closest('.chat-item-delete')) return;
         dashState.activeChatId = chat.id;
+        setGlobalParam('chat', chat.id);
         dashEmit('active-chat-changed', { id: chat.id });
       });
 
@@ -195,6 +261,7 @@ export class AgentChat extends Symbiote {
         });
         if (dashState.activeChatId === chat.id) {
           dashState.activeChatId = null;
+          setGlobalParam('chat', null);
           dashEmit('active-chat-changed', { id: null });
         }
         this._fetchChats();
@@ -225,6 +292,7 @@ export class AgentChat extends Symbiote {
       let data = await res.json();
       if (data.ok) {
         dashState.activeChatId = data.id;
+        setGlobalParam('chat', data.id);
         dashEmit('active-chat-changed', { id: data.id });
         await this._fetchChats();
       }
@@ -260,84 +328,11 @@ export class AgentChat extends Symbiote {
         // Show processing indicator
         this.$.messages = [...this.$.messages, { role: "system", text: "⏳ Delegating task..." }];
 
-        // Build delegate_task arguments — resume existing session if available
-        let delegateArgs = { prompt, timeout: 600 };
-        if (this._sessionId) {
-          delegateArgs.session_id = this._sessionId;
-        }
+        reply = await this._sendViaWs(chatId, prompt);
 
-        let res = await fetch("/api/mcp-call", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            serverName: "agent-pool",
-            method: "tools/call",
-            params: { name: "delegate_task", arguments: delegateArgs },
-          }),
-        });
-        let data = await res.json();
-        let delegateText = data.content?.[0]?.text || "";
-
-        // Extract task_id from response
-        let taskIdMatch = delegateText.match(/`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`/);
-        let taskId = taskIdMatch?.[1];
-
-        if (!taskId) {
-          // No task_id — show raw response
-          reply = delegateText || data.error?.message || "Task dispatched (no task ID).";
-          this.$.messages = this.$.messages.filter(m => m.role !== 'system' || !m.text.startsWith('⏳'));
-        } else {
-          // Poll get_task_result until done
-          let maxPolls = 120; // 10 min max (5s intervals)
-          let pollInterval = 5000;
-          let startTime = Date.now();
-
-          for (let i = 0; i < maxPolls; i++) {
-            await new Promise(r => setTimeout(r, pollInterval));
-            let elapsed = Math.round((Date.now() - startTime) / 1000);
-            this.$.messages = this.$.messages.map(m =>
-              (m.role === 'system' && m.text.startsWith('⏳'))
-                ? { ...m, text: `⏳ Processing... (${elapsed}s)` }
-                : m
-            );
-
-            let pollRes = await fetch("/api/mcp-call", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                serverName: "agent-pool",
-                method: "tools/call",
-                params: { name: "get_task_result", arguments: { task_id: taskId } },
-              }),
-            });
-            if (!pollRes.ok) continue; // server error — retry next poll
-            let pollData = await pollRes.json();
-            let pollText = pollData.content?.[0]?.text || "";
-
-            // Still running?
-            if (pollText.includes("Task is still running")) continue;
-
-            // Done or error — extract response
-            reply = pollText;
-
-            // Extract and persist sessionId for session continuity
-            let sessionMatch = pollText.match(/Session ID:\s*`([a-f0-9-]+)`/);
-            if (sessionMatch) {
-              this._sessionId = sessionMatch[1];
-              // Save to server
-              fetch("/api/chats/session", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chatId, sessionId: this._sessionId }),
-              }).catch(() => {});
-            }
-            break;
-          }
-
-          // Remove processing indicator
-          this.$.messages = this.$.messages.filter(m => m.role !== 'system' || !m.text.startsWith('⏳'));
-          if (!reply) reply = "⏳ Task is still running after timeout. Check manually.";
-        }
+        // Remove processing indicator
+        this.$.messages = this.$.messages.filter(m => m.role !== 'system' || !m.text.startsWith('⏳'));
+        if (!reply) reply = "⏳ Task is still running after timeout. Check manually.";
       } else {
         this.$.messages = [...this.$.messages, { role: "system", text: "Processing..." }];
 
@@ -358,30 +353,31 @@ export class AgentChat extends Symbiote {
         if (data.errors?.length) reply += `\n\n[Warnings]:\n${data.errors.join('\n')}`;
       }
 
-      // If we have structured events, render tool calls as separate messages
-      if (structuredEvents?.length) {
-        let newMessages = [];
-        for (let block of structuredEvents) {
-          if (block.type === 'tool_use') {
-            newMessages.push({ role: 'tool', name: block.name, input: block.input, result: block.result });
+      // If we used HTTP adapter and got structured events, render them
+      if (adapter !== "pool") {
+        if (structuredEvents?.length) {
+          let newMessages = [];
+          for (let block of structuredEvents) {
+            if (block.type === 'tool_use') {
+              newMessages.push({ role: 'tool', name: block.name, input: block.input, result: block.result });
+            }
           }
+          let textBlocks = structuredEvents.filter(b => b.type === 'text').map(b => b.text).join('\n');
+          let finalText = textBlocks || reply;
+          if (finalText) {
+            newMessages.push({ role: 'agent', text: finalText });
+          }
+          this.$.messages = [...this.$.messages, ...newMessages];
+        } else {
+          this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
         }
-        // Add text blocks as agent message
-        let textBlocks = structuredEvents.filter(b => b.type === 'text').map(b => b.text).join('\n');
-        let finalText = textBlocks || reply;
-        if (finalText) {
-          newMessages.push({ role: 'agent', text: finalText });
-        }
-        this.$.messages = [...this.$.messages, ...newMessages];
-      } else {
-        this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
       }
 
-      // Persist the final agent reply
-      await fetch("/api/chats/message", {
-        method: "POST",
+      // Persist the full chat state (including tools and live streaming results)
+      await fetch("/api/chats/messages", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, role: "agent", text: reply }),
+        body: JSON.stringify({ chatId, messages: this.$.messages }),
       });
 
       dashEmit("chats-updated");
@@ -390,7 +386,196 @@ export class AgentChat extends Symbiote {
     }
   }
 
+  /**
+   * Ensure a WebSocket connection to /ws/chat is open.
+   * Reuses existing connection if alive.
+   */
+  _ensureChatWs() {
+    if (this._chatWs && this._chatWs.readyState === WebSocket.OPEN) return this._chatWs;
+    if (this._chatWs) {
+      try { this._chatWs.close(); } catch {}
+    }
+
+    let base = new URL('.', location.href).href.replace(/^http/, 'ws');
+    this._chatWs = new WebSocket(`${base}ws/chat`);
+    this._chatWs.onclose = () => { this._chatWs = null; };
+    this._chatWs.onerror = () => {};
+    return this._chatWs;
+  }
+
+  /**
+   * Send a prompt via WebSocket and wait for the final response.
+   * Streams progress events to the UI in real-time.
+   *
+   * @param {string} chatId
+   * @param {string} prompt
+   * @returns {Promise<string>} Final reply text
+   */
+  _sendViaWs(chatId, prompt) {
+    return new Promise((resolve, reject) => {
+      let ws = this._ensureChatWs();
+      let startTime = Date.now();
+      
+      let timerInterval = setInterval(() => {
+        let elapsed = Math.round((Date.now() - startTime) / 1000);
+        this.$.messages = this.$.messages.map(m =>
+          (m.role === 'system' && m.text.startsWith('⏳'))
+            ? { ...m, text: `⏳ Processing... (${elapsed}s)` }
+            : m
+        );
+      }, 1000);
+
+      let send = () => {
+        let params = { chatId, prompt, timeout: 600 };
+        if (this._sessionId) params.sessionId = this._sessionId;
+        if (dashState.globalCli?.model) params.model = dashState.globalCli.model;
+        ws.send(JSON.stringify({ method: 'chat.send', params }));
+      };
+
+      let onMessage = (e) => {
+        try {
+          let msg = JSON.parse(e.data);
+          
+          switch (msg.method) {
+            case 'chat.delegated':
+              break;
+
+            case 'chat.event': {
+              let ev = msg.params?.event;
+              if (!ev) break;
+              
+              // Live streaming logic
+              if (ev.type === 'message' && ev.role === 'assistant') {
+                let msgs = [...this.$.messages];
+                let lastMsg = msgs[msgs.length - 1];
+                if (!lastMsg || lastMsg.role !== 'agent' || !lastMsg.streaming) {
+                  msgs.push({ role: 'agent', text: ev.content || '', streaming: true });
+                } else {
+                  lastMsg.text += (ev.content || '');
+                }
+                this.$.messages = msgs;
+              } else if (ev.type === 'tool_use') {
+                let msgs = [...this.$.messages];
+                msgs.push({
+                  role: 'tool',
+                  name: ev.name || ev.tool_name,
+                  input: ev.parameters || ev.arguments,
+                  result: null,
+                  streaming: true
+                });
+                this.$.messages = msgs;
+              } else if (ev.type === 'tool_result') {
+                let msgs = [...this.$.messages];
+                for (let i = msgs.length - 1; i >= 0; i--) {
+                  if (msgs[i].role === 'tool' && msgs[i].streaming) {
+                    msgs[i].result = ev.output || ev.status;
+                    msgs[i].streaming = false;
+                    break;
+                  }
+                }
+                this.$.messages = msgs;
+              }
+              break;
+            }
+
+            case 'chat.done': {
+              clearInterval(timerInterval);
+              ws.removeEventListener('message', onMessage);
+              
+              // Remove streaming flags from all messages
+              this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
+              
+              let text = msg.params?.text || '';
+
+              // Extract and persist sessionId
+              let sessionMatch = text.match(/Session ID:\s*`([a-f0-9-]+)`/);
+              if (sessionMatch) {
+                this._sessionId = sessionMatch[1];
+                fetch("/api/chats/session", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ chatId, sessionId: this._sessionId }),
+                }).catch(() => {});
+              }
+
+              // Remove streaming text blocks, finalize tool blocks
+              let finalMessages = [];
+              for (let m of this.$.messages) {
+                if (m.role === 'tool') {
+                  finalMessages.push({ ...m, streaming: false });
+                } else if (!m.streaming) {
+                  finalMessages.push(m);
+                }
+              }
+              this.$.messages = finalMessages;
+
+              resolve(text);
+              break;
+            }
+
+            case 'chat.error': {
+              clearInterval(timerInterval);
+              ws.removeEventListener('message', onMessage);
+              
+              // Remove streaming flags from all messages
+              this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
+              
+              let errText = msg.params?.text || msg.params?.error || 'Unknown error';
+
+              // Extract sessionId even from error responses
+              let errSessionMatch = errText.match(/Session ID:\s*`([a-f0-9-]+)`/);
+              if (errSessionMatch) {
+                this._sessionId = errSessionMatch[1];
+                fetch("/api/chats/session", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ chatId, sessionId: this._sessionId }),
+                }).catch(() => {});
+              }
+
+              // Remove streaming text blocks, finalize tool blocks
+              let finalMessages = [];
+              for (let m of this.$.messages) {
+                if (m.role === 'tool') {
+                  finalMessages.push({ ...m, streaming: false });
+                } else if (!m.streaming) {
+                  finalMessages.push(m);
+                }
+              }
+              this.$.messages = finalMessages;
+
+              resolve(errText);
+              break;
+            }
+          }
+        } catch {}
+      };
+
+      ws.addEventListener('message', onMessage);
+
+      // Timeout safety net (10 minutes)
+      let timeout = setTimeout(() => {
+        clearInterval(timerInterval);
+        ws.removeEventListener('message', onMessage);
+        resolve('');
+      }, 600_000);
+
+      // If WS is already open — send immediately, else wait for open
+      if (ws.readyState === WebSocket.OPEN) {
+        send();
+      } else {
+        ws.addEventListener('open', () => send(), { once: true });
+        ws.addEventListener('error', () => {
+          clearInterval(timerInterval);
+          ws.removeEventListener('message', onMessage);
+          reject(new Error('WebSocket connection failed'));
+        }, { once: true });
+      }
+    });
+  }
+
   async _loadChat(chatId) {
+    console.log("[AgentChat] _loadChat called with", chatId);
     if (!chatId) {
       this.$.messages = [];
       this.$.chatName = "Select a chat";
@@ -400,26 +585,31 @@ export class AgentChat extends Symbiote {
     }
 
     try {
+      console.log("[AgentChat] Fetching /api/chats/get for", chatId);
       let res = await fetch("/api/chats/get", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: chatId }),
       });
       if (!res.ok) {
+        console.error("[AgentChat] Server error:", res.status);
         this.$.messages = [{ role: "system", text: `Server error: ${res.status}` }];
         return;
       }
       let chat = await res.json();
       if (chat.error) {
+        console.error("[AgentChat] API error:", chat.error);
         this.$.messages = [{ role: "system", text: chat.error }];
         return;
       }
 
+      console.log("[AgentChat] Successfully loaded chat:", chat);
       this.$.chatName = chat.name || "Chat";
       this.$.chatAdapter = chat.adapter || "pool";
       this.$.messages = chat.messages || [];
       this._sessionId = chat.sessionId || null;
     } catch (err) {
+      console.error("[AgentChat] Catch error:", err);
       this.$.messages = [{ role: "system", text: `Load error: ${err.message}` }];
     }
   }

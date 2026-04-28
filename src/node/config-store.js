@@ -209,6 +209,19 @@ export function appendChatMessage(chatId, msg) {
 }
 
 /**
+ * Replace all messages in a chat.
+ * @param {string} chatId
+ * @param {Array<object>} messages
+ */
+export function replaceChatMessages(chatId, messages) {
+  let chat = getChat(chatId);
+  if (!chat) return;
+  chat.messages = messages;
+  chat.updatedAt = Date.now();
+  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+}
+
+/**
  * Delete a chat.
  * @param {string} chatId
  */

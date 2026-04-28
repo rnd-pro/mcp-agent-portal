@@ -420,4 +420,68 @@ pg-agent-chat {
   max-height: 200px;
   overflow-y: auto;
 }
+
+/* ── Streaming & Markdown Polish ── */
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+  color: var(--sn-cat-server, #5cb8ff) !important;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+.tool-waiting {
+  color: var(--sn-text-dim, #888);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background-color: var(--sn-cat-server, #5cb8ff);
+  vertical-align: middle;
+  margin-left: 4px;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.markdown-pre {
+  background: var(--sn-bg, #1e1e1e);
+  border: 1px solid var(--sn-node-border, rgba(255, 255, 255, 0.06));
+  border-radius: 4px;
+  padding: 10px;
+  overflow-x: auto;
+  margin: 6px 0;
+  font-family: var(--sn-font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+}
+
+.markdown-code {
+  background: var(--sn-bg, #1e1e1e);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: var(--sn-font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  color: var(--sn-cat-tool, #e9a33a);
+}
+
+.markdown-link {
+  color: var(--sn-cat-server, #5cb8ff);
+  text-decoration: none;
+}
+
+.markdown-link:hover {
+  text-decoration: underline;
+}
+
+.message.agent .msg-content {
+  line-height: 1.5;
+}
 `;

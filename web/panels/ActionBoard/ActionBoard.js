@@ -1,5 +1,20 @@
-// @ctx .context/web/panels/ActionBoard/ActionBoard.ctx
-import{Symbiote as t}from"@symbiotejs/symbiote";import{state as e,events as o}from"../../dashboard-state.js";import s from"./ActionBoard.css.js";import n from"./ActionBoard.tpl.js";
-import"../EventItem/EventItem.js";
-export class ActionBoard extends t{init$={eventsItems:[]};initCallback(){o.addEventListener("global-tool-event",t=>{const o=[...e.events].reverse();this.$.eventsItems=o}),this.$.eventsItems=[...e.events].reverse()}}
-ActionBoard.template=n,ActionBoard.rootStyles=s,ActionBoard.reg("pg-action-board");
+import { Symbiote } from "@symbiotejs/symbiote";
+import { state, events } from "../../dashboard-state.js";
+import cssShared from "../../common/ui-shared.css.js";
+import template from "./ActionBoard.tpl.js";
+import "../EventItem/EventItem.js";
+
+export class ActionBoard extends Symbiote {
+  init$ = { eventsItems: [] };
+  
+  initCallback() {
+    events.addEventListener("global-tool-event", () => {
+      this.$.eventsItems = [...state.events].reverse();
+    });
+    this.$.eventsItems = [...state.events].reverse();
+  }
+}
+
+ActionBoard.template = template;
+ActionBoard.rootStyles = cssShared;
+ActionBoard.reg("pg-action-board");

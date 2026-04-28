@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './ToolExplorer.tpl.js';
-import css from './ToolExplorer.css.js';
+import cssLocal from './ToolExplorer.css.js';
+import cssShared from '../../common/ui-shared.css.js';
 
 class ToolExplorer extends Symbiote {
   init$ = {
@@ -22,17 +23,17 @@ class ToolExplorer extends Symbiote {
       let runningServers = servers.filter(s => s.pid);
       
       if (!runningServers.length) {
-        this.ref.serverList.innerHTML = `<div style="padding:10px; opacity:0.5; font-size:12px;">No running servers</div>`;
+        this.ref.serverList.innerHTML = `<div class="ui-empty-state">No running servers</div>`;
         return;
       }
       
       for (let server of runningServers) {
         let el = document.createElement('div');
-        el.className = 'te-server-item';
-        el.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px">api</span> ${server.name}`;
+        el.className = 'ui-item';
+        el.innerHTML = `<div class="ui-item-title" style="display:flex;align-items:center;gap:6px"><span class="material-symbols-outlined" style="font-size:16px">api</span> ${server.name}</div>`;
         el.onclick = () => {
-          this.shadowRoot.querySelectorAll('.te-server-item').forEach(e => e.removeAttribute('data-active'));
-          el.setAttribute('data-active', 'true');
+          this.shadowRoot.querySelectorAll('.ui-item').forEach(e => e.classList.remove('active'));
+          el.classList.add('active');
           this.selectServer(server.name);
         };
         this.ref.serverList.appendChild(el);
@@ -44,7 +45,7 @@ class ToolExplorer extends Symbiote {
 
   async selectServer(name) {
     this.$.selectedServerName = name;
-    this.ref.toolsGrid.innerHTML = `<div class="te-empty">Loading tools...</div>`;
+    this.ref.toolsGrid.innerHTML = `<div class="ui-empty-state">Loading tools...</div>`;
     
     try {
       let res = await fetch('/api/mcp-call', {
@@ -57,7 +58,7 @@ class ToolExplorer extends Symbiote {
       
       this.renderTools(result.tools || []);
     } catch (err) {
-      this.ref.toolsGrid.innerHTML = `<div class="te-empty">Failed to load tools: ${err.message}</div>`;
+      this.ref.toolsGrid.innerHTML = `<div class="ui-empty-state">Failed to load tools: ${err.message}</div>`;
     }
   }
 
@@ -66,13 +67,13 @@ class ToolExplorer extends Symbiote {
     grid.innerHTML = '';
     
     if (!tools.length) {
-      grid.innerHTML = `<div class="te-empty">No tools found for this server</div>`;
+      grid.innerHTML = `<div class="ui-empty-state">No tools found for this server</div>`;
       return;
     }
     
     for (let tool of tools) {
       let card = document.createElement('div');
-      card.className = 'te-tool-card';
+      card.className = 'ui-card';
       
       let schemaJson = JSON.stringify(tool.inputSchema || {}, null, 2);
       
@@ -90,7 +91,7 @@ class ToolExplorer extends Symbiote {
 }
 
 ToolExplorer.template = template;
-ToolExplorer.shadowStyles = css;
+ToolExplorer.shadowStyles = cssShared + cssLocal;
 ToolExplorer.reg('pg-tool-explorer');
 
 export { ToolExplorer };

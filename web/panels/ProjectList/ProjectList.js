@@ -1,5 +1,28 @@
-// @ctx .context/web/panels/ProjectList/ProjectList.ctx
-import{Symbiote as t}from"@symbiotejs/symbiote";import{state as s,events as e}from"../../dashboard-state.js";import r from"./ProjectList.css.js";import o from"./ProjectList.tpl.js";
-import"../ProjectItem/ProjectItem.js";
-export class ProjectList extends t{init$={projects:[],hasProjects:!1};initCallback(){e.addEventListener("projects-updated",t=>{this.$.projects=t.detail,this.$.hasProjects=t.detail.length>0}),this.$.projects=s.projects,this.$.hasProjects=s.projects.length>0}renderCallback(){this.sub("hasProjects",t=>{this.ref.emptyMsg.hidden=t})}}
-ProjectList.template=o,ProjectList.rootStyles=r,ProjectList.reg("pg-project-list");
+import { Symbiote } from "@symbiotejs/symbiote";
+import { state, events } from "../../dashboard-state.js";
+import cssShared from "../../common/ui-shared.css.js";
+import template from "./ProjectList.tpl.js";
+import "../ProjectItem/ProjectItem.js";
+
+export class ProjectList extends Symbiote {
+  init$ = { projects: [], hasProjects: false };
+
+  initCallback() {
+    events.addEventListener("projects-updated", (evt) => {
+      this.$.projects = evt.detail;
+      this.$.hasProjects = evt.detail.length > 0;
+    });
+    this.$.projects = state.projects;
+    this.$.hasProjects = state.projects.length > 0;
+  }
+
+  renderCallback() {
+    this.sub("hasProjects", (has) => {
+      this.ref.emptyMsg.hidden = has;
+    });
+  }
+}
+
+ProjectList.template = template;
+ProjectList.rootStyles = cssShared;
+ProjectList.reg("pg-project-list");

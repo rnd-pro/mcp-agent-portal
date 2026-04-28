@@ -1,6 +1,8 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
-import css from './ChatList.css.js';
+import { setGlobalParam } from 'symbiote-node';
+import cssLocal from './ChatList.css.js';
+import cssShared from '../../common/ui-shared.css.js';
 import tpl from './ChatList.tpl.js';
 
 export class ChatList extends Symbiote {
@@ -62,6 +64,7 @@ export class ChatList extends Symbiote {
       let data = await res.json();
       if (data.ok) {
         dashState.activeChatId = data.id;
+        setGlobalParam('chat', data.id);
         dashEmit('active-chat-changed', { id: data.id });
         await this._fetchChats();
       }
@@ -102,8 +105,8 @@ export class ChatList extends Symbiote {
 
     if (chats.length === 0) {
       container.innerHTML = `
-        <div class="empty-state">
-          <span class="material-symbols-outlined">chat_bubble_outline</span>
+        <div class="ui-empty-state">
+          <span class="material-symbols-outlined" style="font-size:32px;display:block;margin-bottom:8px;opacity:0.3">chat_bubble_outline</span>
           No chats yet. Click "New" to start.
         </div>
       `;
@@ -112,8 +115,8 @@ export class ChatList extends Symbiote {
 
     for (let chat of chats) {
       let div = document.createElement('div');
-      div.className = 'chat-item';
-      if (chat.id === dashState.activeChatId) div.setAttribute('active', '');
+      div.className = 'ui-item';
+      if (chat.id === dashState.activeChatId) div.classList.add('active');
 
       let projectName = '';
       if (chat.projectId) {
@@ -138,6 +141,7 @@ export class ChatList extends Symbiote {
       div.addEventListener('click', (e) => {
         if (e.target.closest('.chat-delete')) return;
         dashState.activeChatId = chat.id;
+        setGlobalParam('chat', chat.id);
         dashEmit('active-chat-changed', { id: chat.id });
       });
 
@@ -151,6 +155,7 @@ export class ChatList extends Symbiote {
         });
         if (dashState.activeChatId === chat.id) {
           dashState.activeChatId = null;
+          setGlobalParam('chat', null);
           dashEmit('active-chat-changed', { id: null });
         }
         this._fetchChats();
@@ -162,5 +167,5 @@ export class ChatList extends Symbiote {
 }
 
 ChatList.template = tpl;
-ChatList.rootStyles = css;
+ChatList.rootStyles = cssShared + cssLocal;
 ChatList.reg('pg-chat-list');

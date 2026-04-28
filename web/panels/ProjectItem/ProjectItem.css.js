@@ -1,1 +1,69 @@
-export default"\n:host {\n  display: block;\n}\n.card {\n  background: var(--sn-node-bg);\n  border: 1px solid var(--sn-node-border);\n  border-radius: 8px;\n  padding: 10px 12px;\n  margin-bottom: 8px;\n  transition: border-color 0.2s;\n}\n.card:hover {\n  border-color: var(--project-accent, #7878ff);\n}\n.title {\n  font-size: 14px;\n  font-weight: 500;\n  margin-bottom: 2px;\n  display: flex;\n  align-items: center;\n  gap: 8px;\n}\n.token-badge {\n  font-size: 10px;\n  font-weight: 500;\n  color: #64b5f6;\n  padding: 1px 6px;\n  border-radius: 8px;\n  background: rgba(100, 181, 246, 0.1);\n  border: 1px solid rgba(100, 181, 246, 0.15);\n  font-family: var(--sn-font-mono, monospace);\n  white-space: nowrap;\n}\n.token-badge:empty {\n  display: none;\n}\n.delete-btn {\n  margin-left: auto;\n  background: none;\n  border: none;\n  color: var(--sn-text-dim);\n  font-size: 16px;\n  cursor: pointer;\n  padding: 0 4px;\n  line-height: 1;\n  opacity: 0;\n  transition: opacity 0.2s, color 0.2s;\n}\n.card:hover .delete-btn {\n  opacity: 1;\n}\n.delete-btn:hover {\n  color: var(--sn-danger-color, #ef5350);\n}\n.path {\n  font-size: 11px;\n  font-family: var(--sn-font-mono, monospace);\n  color: var(--sn-text-dim);\n  word-break: break-all;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\na {\n  color: var(--project-accent, #7878ff);\n  text-decoration: none;\n}\na:hover {\n  text-decoration: underline;\n}\n";
+export default`
+:host {
+  display: block;
+}
+.ui-card {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  transition: border-color 0.2s;
+}
+.ui-card:hover {
+  border-color: var(--project-accent, #7878ff);
+}
+.project-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.token-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: #64b5f6;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(100, 181, 246, 0.1);
+  border: 1px solid rgba(100, 181, 246, 0.15);
+  font-family: var(--sn-font-mono, monospace);
+  white-space: nowrap;
+}
+.token-badge:empty {
+  display: none;
+}
+.delete-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--sn-text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+.ui-card:hover .delete-btn {
+  opacity: 1;
+}
+.delete-btn:hover {
+  color: var(--sn-danger-color, #ef5350);
+}
+.path {
+  font-size: 11px;
+  font-family: var(--sn-font-mono, monospace);
+  color: var(--sn-text-dim);
+  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a {
+  color: var(--project-accent, #7878ff);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+`;

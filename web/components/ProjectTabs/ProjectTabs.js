@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
+import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
 import css from './ProjectTabs.css.js';
 import tpl from './ProjectTabs.tpl.js';
 
@@ -38,15 +39,35 @@ export class ProjectTabs extends Symbiote {
       this._highlightActive();
     });
 
+    // Self-register with router: react to ?project= URL param changes
+    this.sub('ROUTER/query', () => {
+      this._syncProjectFromRouter();
+    });
+
+    // Initial sync
+    this._syncProjectFromRouter();
+
     // Home tab click
     let homeTab = this.querySelector('.tab[active]');
     homeTab?.addEventListener('click', () => {
       dashState.activeProjectId = null;
+      setGlobalParam('project', null);
       dashEmit('active-project-changed', { id: null });
     });
 
     // Add button
     this.ref.addBtn.addEventListener('click', () => this._showAddDialog());
+  }
+
+  _syncProjectFromRouter() {
+    let route = getRoute();
+    let globals = parseQuery(route.query || '');
+    let projectId = globals.project || null;
+
+    if (projectId && projectId !== dashState.activeProjectId) {
+      dashState.activeProjectId = projectId;
+      dashEmit('active-project-changed', { id: projectId, fromRoute: true });
+    }
   }
 
   /** Get the main panel-layout element */
@@ -115,6 +136,7 @@ export class ProjectTabs extends Symbiote {
       btn.addEventListener('click', (e) => {
         if (e.target.closest('.tab-close')) return;
         dashState.activeProjectId = id;
+        setGlobalParam('project', id);
         dashEmit('active-project-changed', { id, project: proj });
       });
 
@@ -132,6 +154,7 @@ export class ProjectTabs extends Symbiote {
 
         if (dashState.activeProjectId === id) {
           dashState.activeProjectId = null;
+          setGlobalParam('project', null);
           dashEmit('active-project-changed', { id: null });
         }
         this._renderTabs();
@@ -187,6 +210,7 @@ export class ProjectTabs extends Symbiote {
         dashState.openProjectIds.push(id);
       }
       dashState.activeProjectId = id;
+      setGlobalParam('project', id);
       dashEmit('active-project-changed', { id, project: proj });
       this._renderTabs();
     }
@@ -207,6 +231,7 @@ export class ProjectTabs extends Symbiote {
         dashState.openProjectIds.push(data.id);
       }
       dashEmit('active-project-changed', { id: data.id });
+      setGlobalParam('project', data.id);
       this._renderTabs();
     }
   }

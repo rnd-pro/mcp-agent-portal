@@ -1,5 +1,5 @@
 // @ctx .context/web/app.ctx
-import{Layout as e,LayoutTree as t,applyTheme as n,CARBON as o}from"symbiote-node";
+import{Layout as e,LayoutTree as t,applyTheme as n,CARBON as o,registerGlobalParam,setDefaultPanel,updateParams,getRoute,parseQuery,buildHash}from"symbiote-node";
 import{panelTypes,getSections,getLayout,hasSection}from"./router-registry.js";
 import{followController}from"./follow-controller.js";
 import"./components/follow-ribbon.js";
@@ -21,6 +21,11 @@ import"./panels/AgentChat/AgentChat.js?v=4";
 import"./panels/Marketplace/Marketplace.js?v=1";
 import"./panels/Topology/TopologyPanel.js";
 import"./panels/ToolExplorer/ToolExplorer.js";
+import"./panels/ActiveTasks/ActiveTasks.js";
+import"./panels/PipelineManager/PipelineManager.js";
+import"./panels/GroupManager/GroupManager.js";
+import"./panels/SkillManager/SkillManager.js";
+import"./panels/PeerReview/PeerReview.js";
 import"./components/ProjectTabs/ProjectTabs.js";
 import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=3";
 
@@ -149,32 +154,32 @@ async function u(){
     for(const[e,t]of Object.entries(panelTypes)) nLayout.registerPanelType(e,t);
     let lastSection="";
 
+    // Register project & chat as global params — they persist across section switches
+    registerGlobalParam('project', 'chat');
+
     function handleRoute(){
-      const e=location.hash.replace("#","")||"dashboard",t=e.indexOf("?");
-      const n=t>=0?e.substring(0,t):e,o=n.indexOf("/");
-      const a=o>=0?n.substring(0,o):n,i=o>=0?n.substring(o+1):"";
-      if(hasSection(a)&&a!==lastSection){
-        lastSection=a;
-
-        // Switch storage key BEFORE setLayout — Layout.js handles save/load
-        nLayout.$['@storage-key'] = `pg-layout-${a}`;
-
-        // Try loading from localStorage (Layout._loadLayout uses storage-key)
-        let saved = localStorage.getItem(`pg-layout-${a}`);
+      let route = getRoute();
+      let section = route.panel;
+      let subPath = route.subpath;
+      if(hasSection(section)&&section!==lastSection){
+        lastSection=section;
+        nLayout.$['@storage-key'] = `pg-layout-${section}`;
+        let saved = localStorage.getItem(`pg-layout-${section}`);
         if(saved) {
           try {
             nLayout.setLayout(JSON.parse(saved));
           } catch(err) {
-            let layout = getLayout(a);
+            let layout = getLayout(section);
             if(layout) nLayout.setLayout(layout);
           }
         } else {
-          let layout = getLayout(a);
+          let layout = getLayout(section);
           if(layout) nLayout.setLayout(layout);
         }
       }
-      if("explorer"===a&&i){
-        requestAnimationFrame(()=>{state.activeFile=i,emit("file-selected",{path:i,fromRoute:!0})});
+      // Explorer file routing (section-specific)
+      if("explorer"===section&&subPath){
+        requestAnimationFrame(()=>{state.activeFile=subPath,emit("file-selected",{path:subPath,fromRoute:!0})});
       }
     }
 
@@ -184,19 +189,21 @@ async function u(){
     events.addEventListener("file-selected",e=>{
       if(e.detail.fromRoute)return;
       if(e.detail.source==="canvas")return;
-      const t=e.detail.path;
-      const _sec=(location.hash.replace("#","").split("?")[0].split("/")[0])||"dashboard";
-      if(t&&_sec==="explorer")history.replaceState(null,"",`#explorer/${t}`);
+      let filePath=e.detail.path;
+      let route=getRoute();
+      if(filePath&&route.panel==="explorer"){
+        let currentParams=parseQuery(route.query);
+        history.replaceState(null,"","#"+buildHash('explorer',filePath,currentParams));
+      }
     });
     
-    // Clean up stale keys
     localStorage.removeItem("pg-explorer-layout");
     localStorage.removeItem("pg-layout-v2");
     
     if(location.hash&&"#"!==location.hash) {
       handleRoute();
     } else {
-      location.hash="dashboard";
+      setDefaultPanel('dashboard');
     }
     
     // Initialize Dashboard data
@@ -205,7 +212,6 @@ async function u(){
     dashEmit("projects-updated",dashState.projects);
     initDashboardWS(dashState.projects);
 
-    // Initialize project history & CLI config
     try {
       const [histRes, cliRes, chatRes] = await Promise.all([
         fetch('/api/projects/history').then(r => r.json()),
@@ -214,7 +220,9 @@ async function u(){
       ]);
       dashState.projectHistory = histRes.projects || [];
       dashState.openProjectIds = histRes.activeIds || [];
-      dashState.activeProjectId = dashState.openProjectIds[0] || null;
+      if (!dashState.activeProjectId) {
+        dashState.activeProjectId = dashState.openProjectIds[0] || null;
+      }
       dashState.globalCli = cliRes.global || {};
       dashState.chats = chatRes.chats || [];
       dashEmit('projects-history-updated', dashState.projectHistory);

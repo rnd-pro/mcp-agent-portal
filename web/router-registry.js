@@ -22,6 +22,11 @@ export const panelTypes = {
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
   'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
   'tool-explorer':{ title: 'Tool Explorer', icon: 'build',         component: 'pg-tool-explorer' },
+  'active-tasks': { title: 'Active Tasks',  icon: 'memory',        component: 'pg-active-tasks' },
+  'pipeline-mgr': { title: 'Pipelines',     icon: 'schema',        component: 'pg-pipeline-mgr' },
+  'group-mgr':    { title: 'Group Manager', icon: 'groups',        component: 'pg-group-manager' },
+  'skill-mgr':    { title: 'Skills Manager',icon: 'school',        component: 'pg-skill-manager' },
+  'peer-review':  { title: 'Peer Review',   icon: 'forum',         component: 'pg-peer-review' },
 };
 
 /**
@@ -94,6 +99,25 @@ registerSection('topology', {
 registerSection('tool-explorer', {
   icon: 'build', label: 'Tool Explorer', order: 28,
   layout: () => LayoutTree.createPanel('tool-explorer')
+});
+
+registerSection('orchestration', {
+  icon: 'account_tree', label: 'Orchestration', order: 29,
+  layout: () => LayoutTree.createSplit('horizontal',
+    LayoutTree.createSplit('vertical',
+      LayoutTree.createPanel('active-tasks'),
+      LayoutTree.createPanel('group-mgr'), 0.5
+    ),
+    LayoutTree.createPanel('pipeline-mgr'), 0.4
+  )
+});
+
+registerSection('skills', {
+  icon: 'school', label: 'Skills & Policies', order: 30,
+  layout: () => LayoutTree.createSplit('horizontal',
+    LayoutTree.createPanel('skill-mgr'),
+    LayoutTree.createPanel('peer-review'), 0.6
+  )
 });
 
 registerSection('explorer', {
