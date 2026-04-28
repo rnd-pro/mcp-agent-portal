@@ -18,7 +18,7 @@ export class ProjectTabs extends Symbiote {
     });
 
     // Home tab click
-    let homeTab = this.shadowRoot.querySelector('.tab[active]');
+    let homeTab = this.querySelector('.tab[active]');
     homeTab?.addEventListener('click', () => {
       dashState.activeProjectId = null;
       dashEmit('active-project-changed', { id: null });
@@ -77,7 +77,7 @@ export class ProjectTabs extends Symbiote {
   }
 
   _highlightActive() {
-    let tabs = this.shadowRoot.querySelectorAll('.tab');
+    let tabs = this.querySelectorAll('.tab');
     tabs.forEach(tab => {
       let isHome = !tab.dataset.id;
       let isActive = isHome

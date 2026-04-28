@@ -141,7 +141,7 @@ export class AgentChat extends Symbiote {
 
       // Auto-scroll
       requestAnimationFrame(() => {
-        let msgEl = this.shadowRoot.querySelector('.chat-messages');
+        let msgEl = this.querySelector('.chat-messages');
         if (msgEl) msgEl.scrollTop = msgEl.scrollHeight;
       });
     } catch (err) {

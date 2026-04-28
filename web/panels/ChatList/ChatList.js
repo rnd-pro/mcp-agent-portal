@@ -12,9 +12,9 @@ export class ChatList extends Symbiote {
     this._fetchChats();
 
     // Filter buttons
-    this.shadowRoot.querySelectorAll('.filter-btn').forEach(btn => {
+    this.querySelectorAll('.filter-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.shadowRoot.querySelectorAll('.filter-btn').forEach(b => b.removeAttribute('active'));
+        this.querySelectorAll('.filter-btn').forEach(b => b.removeAttribute('active'));
         btn.setAttribute('active', '');
         this.$.filter = btn.dataset.filter;
         this._renderItems();
