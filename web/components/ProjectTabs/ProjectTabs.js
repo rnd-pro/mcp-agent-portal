@@ -1,19 +1,33 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
+import { panelTypes, getLayout } from '../../router-registry.js';
 import css from './ProjectTabs.css.js';
 import tpl from './ProjectTabs.tpl.js';
 
+/**
+ * ProjectTabs — browser-style tab bar for switching between project workspaces.
+ *
+ * Each tab owns a separate `panel-layout` instance inside `.app-content`.
+ * Switching tabs shows/hides the corresponding layout.
+ */
 export class ProjectTabs extends Symbiote {
   init$ = {
     activeId: null,
   };
 
+  /** @type {Map<string|null, HTMLElement>} projectId → panel-layout element */
+  _layouts = new Map();
+
   renderCallback() {
+    this._contentEl = document.querySelector('.app-content');
+    this._initHomeLayout();
     this._renderTabs();
 
     dashEvents.addEventListener('projects-history-updated', () => this._renderTabs());
     dashEvents.addEventListener('active-project-changed', (e) => {
-      this.$.activeId = e.detail?.id || null;
+      let id = e.detail?.id || null;
+      this.$.activeId = id;
+      this._switchLayout(id);
       this._highlightActive();
     });
 
@@ -28,6 +42,60 @@ export class ProjectTabs extends Symbiote {
     this.ref.addBtn.addEventListener('click', () => this._showAddDialog());
   }
 
+  /** Create the "Home" layout (dashboard) */
+  _initHomeLayout() {
+    // Adopt existing #main-layout as the Home layout
+    let existing = this._contentEl.querySelector('#main-layout');
+    if (existing) {
+      existing.dataset.tabId = 'home';
+      this._layouts.set(null, existing);
+    }
+  }
+
+  /** Create a panel-layout for a project tab */
+  _createProjectLayout(projectId) {
+    if (this._layouts.has(projectId)) return this._layouts.get(projectId);
+
+    let layout = document.createElement('panel-layout');
+    layout.setAttribute('storage-key', `pg-project-${projectId}`);
+    layout.setAttribute('min-panel-size', '150');
+    layout.dataset.tabId = projectId;
+    layout.style.display = 'none';
+    layout.style.width = '100%';
+    layout.style.height = '100%';
+
+    this._contentEl.appendChild(layout);
+
+    // Register all panel types
+    requestAnimationFrame(() => {
+      for (let [name, config] of Object.entries(panelTypes)) {
+        layout.registerPanelType(name, config);
+      }
+
+      // If no saved layout, use default project workspace layout
+      if (!localStorage.getItem(`pg-project-${projectId}`)) {
+        let defaultProjectLayout = getLayout('dashboard');
+        if (defaultProjectLayout) layout.setLayout(defaultProjectLayout);
+      }
+    });
+
+    this._layouts.set(projectId, layout);
+    return layout;
+  }
+
+  /** Switch visible layout */
+  _switchLayout(projectId) {
+    // Ensure project layout exists
+    if (projectId && !this._layouts.has(projectId)) {
+      this._createProjectLayout(projectId);
+    }
+
+    // Hide all, show target
+    for (let [id, el] of this._layouts) {
+      el.style.display = (id === projectId) ? '' : 'none';
+    }
+  }
+
   _renderTabs() {
     let container = this.ref.tabsContainer;
     container.innerHTML = '';
@@ -38,6 +106,9 @@ export class ProjectTabs extends Symbiote {
     for (let id of openIds) {
       let proj = history.find(p => p.id === id);
       if (!proj) continue;
+
+      // Ensure layout exists
+      this._createProjectLayout(id);
 
       let btn = document.createElement('button');
       btn.className = 'tab';
@@ -65,6 +136,14 @@ export class ProjectTabs extends Symbiote {
           body: JSON.stringify({ id }),
         });
         dashState.openProjectIds = dashState.openProjectIds.filter(i => i !== id);
+
+        // Remove the layout from DOM
+        let layout = this._layouts.get(id);
+        if (layout) {
+          layout.remove();
+          this._layouts.delete(id);
+        }
+
         if (dashState.activeProjectId === id) {
           dashState.activeProjectId = null;
           dashEmit('active-project-changed', { id: null });
@@ -94,7 +173,6 @@ export class ProjectTabs extends Symbiote {
     let available = history.filter(p => !openIds.has(p.id));
 
     if (available.length > 0) {
-      // Show quick picker from history
       let names = available.map((p, i) => `${i + 1}. ${p.name} (${p.path})`).join('\n');
       let choice = prompt(`Open project:\n${names}\n\nOr enter a new path:`);
       if (!choice) return;
@@ -137,7 +215,6 @@ export class ProjectTabs extends Symbiote {
     });
     let data = await res.json();
     if (data.ok) {
-      // Refresh history
       await this._fetchHistory();
       dashState.activeProjectId = data.id;
       if (!dashState.openProjectIds.includes(data.id)) {
