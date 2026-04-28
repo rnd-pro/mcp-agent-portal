@@ -257,6 +257,9 @@ export class AgentChat extends Symbiote {
       let structuredEvents = null;
 
       if (adapter === "pool") {
+        // Show processing indicator
+        this.$.messages = [...this.$.messages, { role: "system", text: "⏳ Delegating task..." }];
+
         let res = await fetch("/api/mcp-call", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -267,7 +270,55 @@ export class AgentChat extends Symbiote {
           }),
         });
         let data = await res.json();
-        reply = data.content?.[0]?.text || data.error?.message || "Task dispatched.";
+        let delegateText = data.content?.[0]?.text || "";
+
+        // Extract task_id from response
+        let taskIdMatch = delegateText.match(/`([0-9a-f]{8}-[0-9a-f-]{27}[0-9a-f])`/);
+        let taskId = taskIdMatch?.[1];
+
+        if (!taskId) {
+          // No task_id — show raw response
+          reply = delegateText || data.error?.message || "Task dispatched (no task ID).";
+          this.$.messages = this.$.messages.filter(m => m.role !== 'system' || !m.text.startsWith('⏳'));
+        } else {
+          // Poll get_task_result until done
+          let maxPolls = 120; // 10 min max (5s intervals)
+          let pollInterval = 5000;
+          let startTime = Date.now();
+
+          for (let i = 0; i < maxPolls; i++) {
+            await new Promise(r => setTimeout(r, pollInterval));
+            let elapsed = Math.round((Date.now() - startTime) / 1000);
+            this.$.messages = this.$.messages.map(m =>
+              (m.role === 'system' && m.text.startsWith('⏳'))
+                ? { ...m, text: `⏳ Processing... (${elapsed}s)` }
+                : m
+            );
+
+            let pollRes = await fetch("/api/mcp-call", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                serverName: "agent-pool",
+                method: "tools/call",
+                params: { name: "get_task_result", arguments: { task_id: taskId } },
+              }),
+            });
+            let pollData = await pollRes.json();
+            let pollText = pollData.content?.[0]?.text || "";
+
+            // Still running?
+            if (pollText.includes("Task is still running")) continue;
+
+            // Done or error — extract response
+            reply = pollText;
+            break;
+          }
+
+          // Remove processing indicator
+          this.$.messages = this.$.messages.filter(m => m.role !== 'system' || !m.text.startsWith('⏳'));
+          if (!reply) reply = "⏳ Task is still running after timeout. Check manually.";
+        }
       } else {
         this.$.messages = [...this.$.messages, { role: "system", text: "Processing..." }];
 
