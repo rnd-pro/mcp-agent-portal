@@ -149,38 +149,26 @@ async function u(){
     for(const[e,t]of Object.entries(panelTypes)) nLayout.registerPanelType(e,t);
     let lastSection="";
 
-    // Per-section layout storage key
-    function sectionStorageKey(section) {
-      return `pg-layout-${section}`;
-    }
-
     function handleRoute(){
       const e=location.hash.replace("#","")||"dashboard",t=e.indexOf("?");
       const n=t>=0?e.substring(0,t):e,o=n.indexOf("/");
       const a=o>=0?n.substring(0,o):n,i=o>=0?n.substring(o+1):"";
       if(hasSection(a)&&a!==lastSection){
-        // Save current section's layout before switching
-        if(lastSection) {
-          let currentTree = nLayout.getLayout();
-          if(currentTree) {
-            localStorage.setItem(sectionStorageKey(lastSection), JSON.stringify(currentTree));
-          }
-        }
-
         lastSection=a;
 
-        // Try to restore saved layout for this section
-        let savedLayout = localStorage.getItem(sectionStorageKey(a));
-        if(savedLayout) {
+        // Switch storage key BEFORE setLayout — Layout.js handles save/load
+        nLayout.$['@storage-key'] = `pg-layout-${a}`;
+
+        // Try loading from localStorage (Layout._loadLayout uses storage-key)
+        let saved = localStorage.getItem(`pg-layout-${a}`);
+        if(saved) {
           try {
-            nLayout.setLayout(JSON.parse(savedLayout));
+            nLayout.setLayout(JSON.parse(saved));
           } catch(err) {
-            // Corrupted — fall back to default
             let layout = getLayout(a);
             if(layout) nLayout.setLayout(layout);
           }
         } else {
-          // No saved layout — use default
           let layout = getLayout(a);
           if(layout) nLayout.setLayout(layout);
         }
@@ -189,16 +177,6 @@ async function u(){
         requestAnimationFrame(()=>{state.activeFile=i,emit("file-selected",{path:i,fromRoute:!0})});
       }
     }
-
-    // Save layout on any change (resize, split, join, collapse, etc.)
-    nLayout.addEventListener('layout-change', () => {
-      if(lastSection) {
-        let currentTree = nLayout.getLayout();
-        if(currentTree) {
-          localStorage.setItem(sectionStorageKey(lastSection), JSON.stringify(currentTree));
-        }
-      }
-    });
 
     sb.setSections(getSections());
     window.addEventListener("hashchange",handleRoute);
