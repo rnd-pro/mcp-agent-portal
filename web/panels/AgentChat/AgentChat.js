@@ -273,7 +273,7 @@ export class AgentChat extends Symbiote {
         let delegateText = data.content?.[0]?.text || "";
 
         // Extract task_id from response
-        let taskIdMatch = delegateText.match(/`([0-9a-f]{8}-[0-9a-f-]{27}[0-9a-f])`/);
+        let taskIdMatch = delegateText.match(/`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`/);
         let taskId = taskIdMatch?.[1];
 
         if (!taskId) {
