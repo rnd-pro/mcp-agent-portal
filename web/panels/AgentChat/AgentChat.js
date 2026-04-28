@@ -318,8 +318,8 @@ AgentChat.template = `
   <div class="chat-view">
     <div class="chat-header">
       <span class="material-symbols-outlined" style="font-size:18px">smart_toy</span>
-      <span ${{textContent: 'chatName'}}></span>
-      <span class="chat-adapter-badge" ${{textContent: 'chatAdapter'}}></span>
+      <span set="textContent: chatName"></span>
+      <span class="chat-adapter-badge" set="textContent: chatAdapter"></span>
     </div>
 
     <div class="chat-messages"></div>
