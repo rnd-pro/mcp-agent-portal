@@ -6,3 +6,4 @@ tmp/
 .gemini/
 .agents/
 *.log
+logs.txt
