@@ -71,10 +71,18 @@ export function hasSection(id) {
 
 registerSection('dashboard', {
   icon: 'dashboard', label: 'Dashboard', order: 10,
-  layout: () => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('project-list'),
-    LayoutTree.createPanel('action-board'), 0.35
-  )
+  layout: () => {
+    let workspace = LayoutTree.createSplit('horizontal',
+      LayoutTree.createPanel('project-list'),
+      LayoutTree.createPanel('action-board'), 0.35
+    );
+    let chat = LayoutTree.createSplit('vertical',
+      LayoutTree.createPanel('chat-list'),
+      LayoutTree.createPanel('agent-chat'), 0.35
+    );
+    chat.global = true;
+    return LayoutTree.createSplit('horizontal', workspace, chat, 0.65);
+  }
 });
 
 registerSection('marketplace', {

@@ -1,33 +1,40 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
-import { panelTypes, getLayout } from '../../router-registry.js';
 import css from './ProjectTabs.css.js';
 import tpl from './ProjectTabs.tpl.js';
 
 /**
  * ProjectTabs — browser-style tab bar for switching between project workspaces.
  *
- * Each tab owns a separate `panel-layout` instance inside `.app-content`.
- * Switching tabs shows/hides the corresponding layout.
+ * Uses a SINGLE panel-layout instance. The layout tree root is always:
+ *   split(horizontal, [workspace], [globalChat], ratio)
+ *
+ * The `second` child (marked global:true) stays constant across tab switches.
+ * Only the `first` child (workspace) is swapped per project.
+ * All layout features (resize, collapse, fullscreen) work naturally.
  */
 export class ProjectTabs extends Symbiote {
   init$ = {
     activeId: null,
   };
 
-  /** @type {Map<string|null, HTMLElement>} projectId → panel-layout element */
-  _layouts = new Map();
+  /** @type {Map<string|null, object>} projectId → saved workspace subtree */
+  _workspaceTrees = new Map();
+
+  /** @type {HTMLElement|null} */
+  _layout = null;
 
   renderCallback() {
-    this._contentEl = document.querySelector('.app-content');
-    this._initHomeLayout();
     this._renderTabs();
 
     dashEvents.addEventListener('projects-history-updated', () => this._renderTabs());
     dashEvents.addEventListener('active-project-changed', (e) => {
-      let id = e.detail?.id || null;
-      this.$.activeId = id;
-      this._switchLayout(id);
+      let newId = e.detail?.id || null;
+      let oldId = this.$.activeId;
+      if (newId === oldId) return;
+
+      this._switchProject(oldId, newId);
+      this.$.activeId = newId;
       this._highlightActive();
     });
 
@@ -42,57 +49,43 @@ export class ProjectTabs extends Symbiote {
     this.ref.addBtn.addEventListener('click', () => this._showAddDialog());
   }
 
-  /** Create the "Home" layout (dashboard) */
-  _initHomeLayout() {
-    // Adopt existing #main-layout as the Home layout
-    let existing = this._contentEl.querySelector('#main-layout');
-    if (existing) {
-      existing.dataset.tabId = 'home';
-      this._layouts.set(null, existing);
+  /** Get the main panel-layout element */
+  _getLayout() {
+    if (!this._layout) {
+      this._layout = document.querySelector('#main-layout');
     }
+    return this._layout;
   }
 
-  /** Create a panel-layout for a project tab */
-  _createProjectLayout(projectId) {
-    if (this._layouts.has(projectId)) return this._layouts.get(projectId);
+  /**
+   * Switch workspace subtree when changing project tabs.
+   * Saves current workspace tree, restores target's tree.
+   * The global portion (chat) is never touched.
+   */
+  _switchProject(oldId, newId) {
+    let layout = this._getLayout();
+    if (!layout || !layout.$.layoutTree) return;
 
-    let layout = document.createElement('panel-layout');
-    layout.setAttribute('storage-key', `pg-project-${projectId}`);
-    layout.setAttribute('min-panel-size', '150');
-    layout.dataset.tabId = projectId;
-    layout.style.display = 'none';
-    layout.style.width = '100%';
-    layout.style.height = '100%';
+    let tree = layout.$.layoutTree;
 
-    this._contentEl.appendChild(layout);
-
-    // Register all panel types
-    requestAnimationFrame(() => {
-      for (let [name, config] of Object.entries(panelTypes)) {
-        layout.registerPanelType(name, config);
-      }
-
-      // If no saved layout, use default project workspace layout
-      if (!localStorage.getItem(`pg-project-${projectId}`)) {
-        let defaultProjectLayout = getLayout('dashboard');
-        if (defaultProjectLayout) layout.setLayout(defaultProjectLayout);
-      }
-    });
-
-    this._layouts.set(projectId, layout);
-    return layout;
-  }
-
-  /** Switch visible layout */
-  _switchLayout(projectId) {
-    // Ensure project layout exists
-    if (projectId && !this._layouts.has(projectId)) {
-      this._createProjectLayout(projectId);
+    // Save current workspace subtree (tree.first) for old project
+    if (tree.type === 'split' && tree.first) {
+      this._workspaceTrees.set(oldId, JSON.parse(JSON.stringify(tree.first)));
     }
 
-    // Hide all, show target
-    for (let [id, el] of this._layouts) {
-      el.style.display = (id === projectId) ? '' : 'none';
+    // Restore workspace subtree for new project
+    let savedWorkspace = this._workspaceTrees.get(newId);
+
+    if (tree.type === 'split') {
+      if (savedWorkspace) {
+        tree.first = savedWorkspace;
+      }
+      // If no saved workspace for this project, keep current workspace
+      // (user can rearrange as needed)
+
+      // Trigger layout re-render
+      layout.$.layoutTree = { ...tree };
+      layout._saveLayout();
     }
   }
 
@@ -106,9 +99,6 @@ export class ProjectTabs extends Symbiote {
     for (let id of openIds) {
       let proj = history.find(p => p.id === id);
       if (!proj) continue;
-
-      // Ensure layout exists
-      this._createProjectLayout(id);
 
       let btn = document.createElement('button');
       btn.className = 'tab';
@@ -135,14 +125,10 @@ export class ProjectTabs extends Symbiote {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id }),
         });
-        dashState.openProjectIds = dashState.openProjectIds.filter(i => i !== id);
 
-        // Remove the layout from DOM
-        let layout = this._layouts.get(id);
-        if (layout) {
-          layout.remove();
-          this._layouts.delete(id);
-        }
+        // Clean up saved tree
+        this._workspaceTrees.delete(id);
+        dashState.openProjectIds = dashState.openProjectIds.filter(i => i !== id);
 
         if (dashState.activeProjectId === id) {
           dashState.activeProjectId = null;
