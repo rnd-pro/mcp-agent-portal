@@ -17,6 +17,7 @@ const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
  * Can be collapsed/fullscreened via standard layout panel controls.
  */
 export class AgentChat extends Symbiote {
+  static isoMode = true;
   init$ = {
     messages: [],
     inputVal: "",

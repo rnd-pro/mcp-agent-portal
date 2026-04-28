@@ -19,8 +19,8 @@ export default html`
   <div class="chat-view">
     <div class="chat-header">
       <span class="material-symbols-outlined" style="font-size:18px">smart_toy</span>
-      <span set="textContent: chatName"></span>
-      <span class="chat-adapter-badge" set="textContent: chatAdapter"></span>
+      <span>{{chatName}}</span>
+      <span class="chat-adapter-badge">{{chatAdapter}}</span>
     </div>
 
     <div class="chat-messages"></div>
