@@ -2,6 +2,8 @@ import { Symbiote } from "@symbiotejs/symbiote";
 import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
 import css from "./AgentChat.css.js";
 
+const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
+
 /**
  * AgentChat — single layout panel with integrated chat-nav sidebar.
  *
@@ -43,10 +45,24 @@ export class AgentChat extends Symbiote {
   };
 
   renderCallback() {
-    // Reflect nav collapsed state (mirrors layout-sidebar pattern)
+    // Restore collapsed state (default: false / expanded)
+    if (typeof localStorage !== 'undefined') {
+      let stored = localStorage.getItem(STORAGE_KEY_CHAT_NAV);
+      if (stored === 'true') {
+        this.$.navCollapsed = true;
+      } else if (stored === 'false') {
+        this.$.navCollapsed = false;
+      }
+    }
+
+    // Reflect nav collapsed state and persist to localStorage
     this.sub('navCollapsed', (val) => {
       let nav = this.querySelector('.chat-nav');
       if (nav) nav.toggleAttribute('collapsed', val);
+      
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY_CHAT_NAV, val);
+      }
     });
 
     // Wire nav buttons
