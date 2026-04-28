@@ -72,14 +72,9 @@ export function hasSection(id) {
 registerSection('dashboard', {
   icon: 'dashboard', label: 'Dashboard', order: 10,
   layout: () => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('chat-list'),
-    LayoutTree.createPanel('agent-chat'), 0.28
+    LayoutTree.createPanel('project-list'),
+    LayoutTree.createPanel('action-board'), 0.35
   )
-});
-
-registerSection('chat', {
-  icon: 'smart_toy', label: 'AI Chat', order: 20,
-  layout: () => LayoutTree.createPanel('agent-chat')
 });
 
 registerSection('marketplace', {
