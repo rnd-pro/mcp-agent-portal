@@ -738,7 +738,30 @@ export class AgentChat extends Symbiote {
 
   async _sendMessage() {
     let chatId = dashState.activeChatId;
-    if (!chatId) return;
+
+    // Auto-create chat on first message (quick-start flow)
+    if (!chatId) {
+      try {
+        let adapter = this.$.chatAdapter || 'pool';
+        let res = await fetch('/api/chats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adapter }),
+        });
+        let data = await res.json();
+        if (data.ok) {
+          chatId = data.id;
+          dashState.activeChatId = chatId;
+          setGlobalParam('chat', chatId);
+          dashEmit('active-chat-changed', { id: chatId });
+          this._fetchChats();
+        } else {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
 
     let prompt = this.$.inputVal.trim();
     if (!prompt) return;
@@ -1122,10 +1145,12 @@ export class AgentChat extends Symbiote {
     console.log("[AgentChat] _loadChat called with", chatId);
     if (!chatId) {
       this.$.messages = [];
-      this.$.chatName = "Select a chat";
-      this.$.chatAdapter = "";
+      this.$.chatName = "New Chat";
+      this.$.chatAdapter = "pool";
+      this.$.chatParams = {};
       this._sessionId = null;
       this.$.sessionMetaHtml = '';
+      this._updateComposerFooter();
       return;
     }
 
