@@ -15,7 +15,8 @@ process.on('SIGINT', () => { cleanup(); process.exit(); });
 process.on('SIGTERM', () => { cleanup(); process.exit(); });
 
 // Start the web server and MCP Proxy Manager
-const { server } = startWebServer(projectRoot);
+const { server, proxyManager } = startWebServer(projectRoot);
+proxyManager.startAllServers();
 
 // Wait for port to be assigned, then write port file
 const checkInterval = setInterval(() => {

@@ -12,7 +12,7 @@
 └────────────┬────────────────────┘
              │ MCP (stdio)
 ┌────────────▼────────────────────┐
-│  mcp-agent-portal                   │  ← This server
+│  mcp-agent-portal               │  ← This server
 │  (MCP aggregator + web UI)      │
 └──┬────────┬────────┬────────────┘
    │        │        │

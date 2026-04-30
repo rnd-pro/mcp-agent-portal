@@ -1,6 +1,6 @@
 // @ctx backend-lifecycle.ctx
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -80,7 +80,6 @@ export function listBackends() {
 function _srcChanged(startedAt) {
   try {
     const dir = join(__dirname, '..'); // point to src/
-    const { statSync, readdirSync } = require('fs');
     function check(d) {
       const files = readdirSync(d, { withFileTypes: true });
       for (const f of files) {
@@ -247,9 +246,11 @@ export function startStdioProxy(port, buffered = []) {
       } else if (frame.opcode === 8) { // close
         process.exit(0);
       } else if (frame.opcode === 9) { // ping
-        const pong = Buffer.alloc(2);
+        const mask = randomBytes(4);
+        const pong = Buffer.alloc(6);
         pong[0] = 0x8a;
-        pong[1] = 0x00;
+        pong[1] = 0x80; // masked, 0-length payload
+        mask.copy(pong, 2);
         ws.write(pong);
       }
     }
