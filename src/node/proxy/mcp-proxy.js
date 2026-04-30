@@ -22,7 +22,8 @@ export class MCPProxyManager {
     this.chatSubscriptions = new Map();
     /** @type {Map<string, string>} taskId → chatId */
     this.taskChatMap = new Map();
-    this.multiplexerCallback = null;
+    /** @type {Set<Function>} */
+    this.multiplexerCallbacks = new Set();
     this.nextRequestId = 1;
     /** @type {Map<string, { resolve: Function, reject: Function }>} */
     this.pendingRequests = new Map();
@@ -96,8 +97,7 @@ export class MCPProxyManager {
     return errors;
   }
 
-  startAllServers(callback) {
-    this.multiplexerCallback = callback;
+  startAllServers() {
     for (let serverName of this.servers.keys()) {
       this.spawnServer(serverName);
     }
@@ -228,8 +228,8 @@ export class MCPProxyManager {
               this.routeTaskNotification(msg);
             }
 
-            if (this.multiplexerCallback) {
-              this.multiplexerCallback(serverName, msg);
+            for (let cb of this.multiplexerCallbacks) {
+              cb(serverName, msg);
             }
           } catch (e) {}
         }
@@ -375,6 +375,11 @@ export class MCPProxyManager {
     let url = new URL(req.url, 'http://localhost');
     let parts = url.pathname.split('/').filter(Boolean);
     
+    if (parts[0] === 'mcp-ws') {
+      this.handleIdeWs(req, socket, head);
+      return true;
+    }
+
     if (parts[0] === 'ws' && parts[1] === 'client') {
       this.handleRemoteClient(req, socket, head);
       return true;
@@ -394,6 +399,15 @@ export class MCPProxyManager {
       }
     }
     return false;
+  }
+
+  handleIdeWs(req, socket, head) {
+    let wss = new WebSocketServer({ noServer: true });
+    wss.handleUpgrade(req, socket, head, async (ws) => {
+      const { MCPMultiplexer } = await import('./mcp-multiplexer.js');
+      let multiplexer = new MCPMultiplexer(this, ws);
+      multiplexer.listen();
+    });
   }
 
   handleMonitor(serverName, req, socket, head) {
@@ -455,8 +469,8 @@ export class MCPProxyManager {
             reqPending.resolve(msg.result || msg);
             return;
           }
-          if (this.multiplexerCallback) {
-            this.multiplexerCallback(remoteId, msg);
+          for (let cb of this.multiplexerCallbacks) {
+            cb(remoteId, msg);
           }
         } catch (e) {}
       });

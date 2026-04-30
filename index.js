@@ -1,92 +1,86 @@
 #!/usr/bin/env node
 
-// Detect if stdin is piped from IDE (MCP stdio) or interactive terminal
 let isIDEMode = !process.stdin.isTTY;
 
-// Override console.log only in IDE mode to prevent corrupting stdio MCP communication
 if (isIDEMode) {
   console.log = function (...args) {
     console.error(...args);
   };
 }
 
-import { startWebServer } from './src/node/server/web-server.js';
-import { MCPMultiplexer } from './src/node/proxy/mcp-multiplexer.js';
-import { startWSClient } from './src/node/discovery/ws-client.js';
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-
-// P4: Singleton enforcement via PID lockfile (only for standalone mode)
-let LOCKFILE = path.join(os.homedir(), '.gemini', 'agent-portal.pid');
-if (!isIDEMode) {
-  if (fs.existsSync(LOCKFILE)) {
-    let oldPid = parseInt(fs.readFileSync(LOCKFILE, 'utf8'), 10);
-    try {
-      process.kill(oldPid, 0); // Check if alive
-      console.error(`⚠️ Portal already running (PID ${oldPid}). Exiting.`);
-      process.exit(1);
-    } catch {} // Dead PID — stale lock, continue
-  }
-  fs.mkdirSync(path.dirname(LOCKFILE), { recursive: true });
-  fs.writeFileSync(LOCKFILE, String(process.pid));
-}
+import process from 'node:process';
+import { ensureBackend, startStdioProxy, writePortFile, removePortFile } from './src/node/server/backend-lifecycle.js';
 
 let isMaster = process.argv.includes('--master');
 let connectArgIndex = process.argv.indexOf('--connect');
 let connectUrl = connectArgIndex > -1 ? process.argv[connectArgIndex + 1] : null;
 
-if (isMaster) {
-  process.env.PORTAL_MODE = 'master';
-  console.log('🌐 Starting in MASTER mode');
-} else if (connectUrl) {
-  process.env.PORTAL_MODE = 'client';
-  console.log(`🌐 Starting in CLIENT mode, connecting to: ${connectUrl}`);
-} else {
-  process.env.PORTAL_MODE = 'standalone';
+async function main() {
+  let projectRoot = process.cwd();
+
+  if (isIDEMode) {
+    try {
+      // 1. Ensure backend is running (singleton pattern)
+      let port = await ensureBackend(projectRoot);
+      
+      // 2. Start thin proxy connecting to the backend's /mcp-ws
+      console.error(`✅ [portal] Connected to singleton backend on port ${port}`);
+      console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
+      startStdioProxy(port);
+    } catch (err) {
+      console.error(`🔴 [portal] Failed to connect to backend:`, err.message);
+      process.exit(1);
+    }
+  } else {
+    // Terminal mode: run the backend directly (attached)
+    console.log('🌐 Running in web-only mode (no IDE detected)');
+    const { startWebServer } = await import('./src/node/server/web-server.js');
+    
+    if (isMaster) {
+      process.env.PORTAL_MODE = 'master';
+      console.log('🌐 Starting in MASTER mode');
+    } else if (connectUrl) {
+      process.env.PORTAL_MODE = 'client';
+      console.log(`🌐 Starting in CLIENT mode, connecting to: ${connectUrl}`);
+    } else {
+      process.env.PORTAL_MODE = 'standalone';
+    }
+
+    let { server, proxyManager } = startWebServer(projectRoot);
+    
+    if (connectUrl) {
+      const { startWSClient } = await import('./src/node/discovery/ws-client.js');
+      startWSClient(connectUrl, proxyManager);
+    } else {
+      proxyManager.startAllServers();
+    }
+
+    const checkInterval = setInterval(() => {
+      const addr = server.address();
+      if (addr) {
+        clearInterval(checkInterval);
+        writePortFile(projectRoot, addr.port);
+        console.log(`✅ mcp-agent-portal started. Web UI: http://portal.local/`);
+      }
+    }, 50);
+
+    let shuttingDown = false;
+    function cleanup() {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.error('\n🛑 Shutting down...');
+      removePortFile(projectRoot);
+      proxyManager.stopAll();
+      setTimeout(() => process.exit(0), 500);
+    }
+    
+    process.on('exit', cleanup);
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+  }
 }
 
-// Start the web server (dashboard) in the background
-let projectRoot = process.cwd();
-let { server, proxyManager } = startWebServer(projectRoot);
-
-if (connectUrl) {
-  // Client mode — connect to master
-  startWSClient(connectUrl, proxyManager);
-} else if (isIDEMode) {
-  // IDE mode (stdin is piped) — start stdio MCP multiplexer
-  let multiplexer = new MCPMultiplexer(proxyManager);
-  multiplexer.listen();
-} else {
-  // Terminal mode (interactive TTY) — web-only, no stdio
-  console.log('🌐 Running in web-only mode (no IDE detected)');
-  // Start all configured MCP servers — without this, /api/mcp-call returns 500
-  proxyManager.startAllServers((serverName, msg) => {
-    proxyManager.broadcastMonitor({
-      jsonrpc: '2.0',
-      method: 'event',
-      params: { type: msg.method, server: serverName, ...msg.params },
-    });
-  });
-  console.log('✅ mcp-agent-portal started. Web UI: http://portal.local/');
-}
-
-if (isIDEMode) {
-  console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
-}
-
-// Ensure child servers are killed on exit to prevent zombie accumulation
-let shuttingDown = false;
-function gracefulShutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.error('🛑 Shutting down — killing child servers...');
-  proxyManager.stopAll();
-  setTimeout(() => process.exit(0), 500);
-}
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
-process.on('exit', () => {
-  if (!shuttingDown) proxyManager.stopAll();
-  try { fs.unlinkSync(LOCKFILE); } catch {}
+main().catch(err => {
+  console.error('Fatal error:', err);
+  process.exit(1);
 });

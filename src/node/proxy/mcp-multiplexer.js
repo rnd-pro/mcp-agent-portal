@@ -47,18 +47,21 @@ let META_TOOLS = [
 ];
 
 export class MCPMultiplexer {
-  constructor(proxyManager) {
+  constructor(proxyManager, ws = null) {
     this.proxyManager = proxyManager;
+    this.ws = ws;
     /** @type {Map<number, { serverName: string, originalId: number }>} */
     this.requestMap = new Map();
     this.nextInternalId = 1;
     this.toolIndex = new ToolIndex();
+    
+    this.childMessageHandler = (serverName, msg) => {
+      this.handleChildMessage(serverName, msg);
+    };
   }
 
   listen() {
-    this.proxyManager.startAllServers((serverName, msg) => {
-      this.handleChildMessage(serverName, msg);
-    });
+    this.proxyManager.multiplexerCallbacks.add(this.childMessageHandler);
 
     // Rebuild tool index and notify IDE when servers change
     this.proxyManager.onServerChange = async (action, serverName) => {
@@ -76,20 +79,34 @@ export class MCPMultiplexer {
       this.notifyToolsChanged();
     }, 3000);
 
-    let rl = createInterface({
-      input: process.stdin,
-      terminal: false,
-    });
+    if (this.ws) {
+      this.ws.on('message', (data) => {
+        try {
+          let msg = JSON.parse(data.toString());
+          this.handleIdeMessage(msg);
+        } catch (err) {
+          console.error('🔴 [multiplexer] Failed to parse WS msg:', err);
+        }
+      });
+      this.ws.on('close', () => {
+        this.proxyManager.multiplexerCallbacks.delete(this.childMessageHandler);
+      });
+    } else {
+      let rl = createInterface({
+        input: process.stdin,
+        terminal: false,
+      });
 
-    rl.on('line', (line) => {
-      if (!line.trim()) return;
-      try {
-        let msg = JSON.parse(line);
-        this.handleIdeMessage(msg);
-      } catch (err) {
-        console.error('🔴 [multiplexer] Failed to parse IDE msg:', err);
-      }
-    });
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        try {
+          let msg = JSON.parse(line);
+          this.handleIdeMessage(msg);
+        } catch (err) {
+          console.error('🔴 [multiplexer] Failed to parse IDE msg:', err);
+        }
+      });
+    }
   }
 
   async _rebuildIndex() {
@@ -105,7 +122,12 @@ export class MCPMultiplexer {
   }
 
   sendToIde(msg) {
-    process.stdout.write(JSON.stringify(msg) + '\n');
+    let str = JSON.stringify(msg) + '\n';
+    if (this.ws) {
+      this.ws.send(str);
+    } else {
+      process.stdout.write(str);
+    }
     // Broadcast events to the dashboard
     this.proxyManager.broadcastMonitor({
       jsonrpc: '2.0',
