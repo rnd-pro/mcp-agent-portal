@@ -6,9 +6,9 @@
  *
  * @module api-routes
  */
-import { readConfig, writeConfig } from '../config-store.js';
+import { readConfig, writeConfig, getAllProviderModels, setProviderModels } from '../config-store.js';
 import { lintFile } from './lint-service.js';
-import { listAdapterTypes } from '../adapters/index.js';
+import { listAdapterTypes, discoverOpenCodeModels, getCLIModels } from '../adapters/index.js';
 import { REGISTRY, getRegistryByCategory, findInRegistry } from './marketplace-registry.js';
 
 /**
@@ -93,7 +93,42 @@ export function createRoutes(ctx) {
 
     'GET /api/adapter/types': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ types: listAdapterTypes() }));
+      res.end(JSON.stringify(listAdapterTypes()));
+    },
+
+    'GET /api/settings/models': (req, res) => {
+      let userModels = getAllProviderModels();
+      let cliModels = getCLIModels();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ userModels, cliModels }));
+    },
+
+    'POST /api/settings/models': async (req, res) => {
+      try {
+        let { provider, models } = await parseBody(req);
+        if (!provider || !Array.isArray(models)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing provider or models array' }));
+          return;
+        }
+        setProviderModels(provider, models);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
+    'POST /api/settings/models/refresh': async (req, res) => {
+      try {
+        let models = await discoverOpenCodeModels();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, count: models.length, models }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
     },
 
     'POST /api/stop': (req, res) => {

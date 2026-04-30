@@ -14,11 +14,11 @@ import"./components/quick-open.js";
 import"./components/canvas-graph.js";
 
 // Dashboard panels
-import"./panels/ProjectList/ProjectList.js?v=2";
-import"./panels/ActionBoard/ActionBoard.js?v=2";
-import"./panels/SettingsPanel/SettingsPanel.js?v=2";
-import"./panels/AgentChat/AgentChat.js?v=4";
-import"./panels/Marketplace/Marketplace.js?v=1";
+import"./panels/ProjectList/ProjectList.js";
+import"./panels/ActionBoard/ActionBoard.js";
+import"./panels/SettingsPanel/SettingsPanel.js";
+import"./panels/AgentChat/AgentChat.js";
+import"./panels/Marketplace/Marketplace.js";
 import"./panels/Topology/TopologyPanel.js";
 import"./panels/ToolExplorer/ToolExplorer.js";
 import"./panels/ActiveTasks/ActiveTasks.js";
@@ -27,7 +27,7 @@ import"./panels/GroupManager/GroupManager.js";
 import"./panels/SkillManager/SkillManager.js";
 import"./panels/PeerReview/PeerReview.js";
 import"./components/ProjectTabs/ProjectTabs.js";
-import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js?v=3";
+import{state as dashState, events as dashEvents, emit as dashEmit}from"./dashboard-state.js";
 
 export const state={skeleton:null,activeFile:null,ws:null,monitorEvents:[]};
 export{formatStats}from"./stats-format.js";

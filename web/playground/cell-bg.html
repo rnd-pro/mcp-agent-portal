@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cell BG Playground</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--sn-bg, #1a1a1a);
+    color: #ccc;
+    font-family: 'Inter', system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    padding: 12px 20px;
+    background: rgba(255,255,255,0.04);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    align-items: center;
+    flex-wrap: wrap;
+    z-index: 10;
+  }
+  .toolbar label {
+    font-size: 12px;
+    color: #888;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .toolbar input[type="range"] { width: 100px; accent-color: #4a9eff; }
+  .toolbar input[type="color"] {
+    width: 28px; height: 28px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+  }
+  .toolbar input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+  .toolbar input[type="color"]::-webkit-color-swatch { border-radius: 2px; border: none; }
+  .toolbar button {
+    padding: 6px 16px;
+    border: 1px solid rgba(74,158,255,0.3);
+    background: rgba(74,158,255,0.1);
+    color: #4a9eff;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .toolbar button:hover { background: rgba(74,158,255,0.2); }
+  .toolbar button.active {
+    background: rgba(74,158,255,0.3);
+    border-color: #4a9eff;
+    box-shadow: 0 0 12px rgba(74,158,255,0.2);
+  }
+
+  .rule-badge {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: rgba(74,158,255,0.08);
+    border: 1px solid rgba(74,158,255,0.2);
+    color: #4a9eff;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .rule-badge:hover { background: rgba(74,158,255,0.15); }
+  .rule-badge .rule-name {
+    color: #888;
+    font-size: 10px;
+    margin-left: 6px;
+  }
+
+  .toolbar .stats {
+    margin-left: auto;
+    font-size: 11px;
+    font-family: 'SF Mono', monospace;
+    color: #666;
+  }
+  .toolbar .stats span { color: #4a9eff; }
+
+  .canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Simulated chat overlay */
+  .chat-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 480px;
+    max-height: 60vh;
+    background: rgba(20, 20, 30, 0.85);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 24px;
+    font-size: 14px;
+    line-height: 1.6;
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  .chat-overlay h3 {
+    font-size: 13px;
+    color: #4a9eff;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .chat-overlay .msg {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .chat-overlay .msg.user {
+    background: rgba(74,158,255,0.1);
+    border: 1px solid rgba(74,158,255,0.15);
+  }
+  .chat-overlay .msg.agent {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.05);
+    color: #999;
+  }
+  .chat-overlay .thinking {
+    color: #4a9eff;
+    font-size: 12px;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button id="btn-toggle" onclick="toggleSimulation()">▶ Start</button>
+  <button id="btn-reset" onclick="resetGrid()">↺ Reset</button>
+  <button id="btn-seed" onclick="seedRandom()">🎲 Seed + Rule</button>
+  <button id="btn-copy" onclick="copyConfig()">📋 Copy Config</button>
+
+  <div class="rule-badge" id="rule-badge" onclick="randomizeRule()" title="Click to randomize rule">
+    B3/S23 <span class="rule-name">Conway</span>
+  </div>
+
+  <label>Cell Size
+    <input type="range" id="sl-cell" min="8" max="40" value="20" oninput="updateParam()">
+    <span id="v-cell">20</span>px
+  </label>
+
+  <label>Speed
+    <input type="range" id="sl-speed" min="50" max="1000" value="200" oninput="updateParam()">
+    <span id="v-speed">200</span>ms
+  </label>
+
+  <label>Min Radius
+    <input type="range" id="sl-min-radius" min="0" max="5" step="0.5" value="1" oninput="updateParam()">
+    <span id="v-min-radius">1</span>px
+  </label>
+
+  <label>Max Radius
+    <input type="range" id="sl-radius" min="1" max="10" step="0.5" value="4" oninput="updateParam()">
+    <span id="v-radius">4</span>px
+  </label>
+
+  <label>Fade
+    <input type="range" id="sl-fade" min="0" max="100" value="15" oninput="updateParam()">
+    <span id="v-fade">15</span>%
+  </label>
+
+  <label>BG
+    <input type="color" id="cl-bg" value="#1a1a1a" oninput="updateColors()">
+  </label>
+
+  <label>Dots
+    <input type="color" id="cl-dot" value="#ffffff" oninput="updateColors()">
+  </label>
+
+  <div class="stats">
+    FPS: <span id="stat-fps">0</span> |
+    Cells: <span id="stat-cells">0</span> |
+    Alive: <span id="stat-alive">0</span> |
+    Gen: <span id="stat-gen">0</span> |
+    CPU: <span id="stat-cpu">0</span>ms
+  </div>
+</div>
+
+<div class="canvas-wrap">
+  <canvas id="bg"></canvas>
+
+  <div class="chat-overlay">
+    <h3>Agent Chat (overlay preview)</h3>
+    <div class="msg user">Refactor the authentication module to use JWT tokens</div>
+    <div class="msg agent thinking">⏳ Thinking...</div>
+  </div>
+</div>
+
+<script>
+// ─── Config ─────────────────────────────────────
+let CELL_SIZE = 20;
+let STEP_MS = 200;
+let MAX_RADIUS = 4;
+let BASE_RADIUS = 1;
+let FADE_RATE = 0.15;
+let DOT_COLOR = [255, 255, 255]; // grey on --sn-bg, matches --sn-grid-dot
+let BASE_ALPHA = 0.06;
+
+// ─── Life-like Rule System ──────────────────────
+// B = birth conditions (dead cell becomes alive if neighbor count ∈ birth)
+// S = survival conditions (alive cell stays alive if neighbor count ∈ survival)
+
+/** Curated Life-like rules — each produces a distinct visual pattern */
+const RULE_CATALOG = [
+  { b: [3],       s: [2,3],       name: 'Conway',       density: 0.15 },
+  { b: [3,6],     s: [2,3],       name: 'HighLife',     density: 0.15 },
+  { b: [3,6,8],   s: [2,4,6,8],   name: 'Morley',       density: 0.12 },
+  { b: [3,6,7,8], s: [3,4,6,7,8], name: 'DayNight',     density: 0.10 },
+  { b: [3,5,6,7,8],s:[5,6,7,8],   name: 'Diamoeba',     density: 0.40 },
+  { b: [4,6,7,8], s: [3,5,6,7,8], name: 'Anneal',       density: 0.48 },
+  { b: [3],       s: [1,2,3,4,5], name: 'Maze',         density: 0.02 },
+  { b: [3,4],     s: [3,4],       name: '34 Life',      density: 0.15 },
+  { b: [3,5,8],   s: [2,4,6],     name: 'Coral',        density: 0.12 },
+  { b: [4,5,6],   s: [2,3,4,5],   name: 'Assimilation', density: 0.18 },
+  { b: [2,3],     s: [2,3],       name: 'Bloom',        density: 0.20 },
+  { b: [1,3,5,7], s: [1,3,5,7],   name: 'Fredkin',      density: 0.08 },
+];
+
+/** Sequential index — cycles through catalog */
+let ruleIndex = 0;
+
+/** Current active rule */
+let birthSet = new Set([3]);
+let survivalSet = new Set([2, 3]);
+let currentRuleName = 'Conway';
+let generation = 0;
+
+/** Apply a rule to the engine */
+function applyRule(rule) {
+  birthSet = new Set(rule.b);
+  survivalSet = new Set(rule.s);
+  currentRuleName = rule.name;
+  generation = 0;
+
+  let bStr = rule.b.join('');
+  let sStr = rule.s.join('');
+  let badge = document.getElementById('rule-badge');
+  let idx = RULE_CATALOG.indexOf(rule);
+  let counter = idx >= 0 ? ` ${idx + 1}/${RULE_CATALOG.length}` : '';
+  badge.innerHTML = `B${bStr}/S${sStr} <span class="rule-name">${rule.name}${counter}</span>`;
+
+  return rule;
+}
+
+/** Advance to next rule in catalog (sequential rotation) */
+function randomizeRule() {
+  ruleIndex = (ruleIndex + 1) % RULE_CATALOG.length;
+  return applyRule(RULE_CATALOG[ruleIndex]);
+}
+
+// ─── State ──────────────────────────────────────
+let canvas, ctx;
+let cols, rows;
+let grid;
+let radii;
+let running = false;
+let stepTimer = null;
+
+let frameCount = 0;
+let lastFpsTime = 0;
+let lastStepCpu = 0;
+
+// ─── Init ───────────────────────────────────────
+let BG_COLOR = '#1a1a1a';
+
+function init() {
+  canvas = document.getElementById('bg');
+  ctx = canvas.getContext('2d');
+
+  // Read --sn-bg from CSS for canvas fill
+  BG_COLOR = getComputedStyle(document.body).getPropertyValue('--sn-bg').trim() || '#1a1a1a';
+
+  resize();
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(renderLoop);
+}
+
+function resize() {
+  let dpr = window.devicePixelRatio || 1;
+  let w = canvas.parentElement.clientWidth;
+  let h = canvas.parentElement.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvas._w = w;
+  canvas._h = h;
+
+  let oldGrid = grid;
+  let oldRadii = radii;
+  let oldCols = cols;
+  let oldRows = rows;
+
+  cols = Math.ceil(w / CELL_SIZE) + 1;
+  rows = Math.ceil(h / CELL_SIZE) + 1;
+
+  grid = new Uint8Array(cols * rows);
+  radii = new Float32Array(cols * rows);
+  radii.fill(BASE_RADIUS);
+
+  if (oldGrid) {
+    let mc = Math.min(cols, oldCols);
+    let mr = Math.min(rows, oldRows);
+    for (let y = 0; y < mr; y++) {
+      for (let x = 0; x < mc; x++) {
+        grid[y * cols + x] = oldGrid[y * oldCols + x];
+        radii[y * cols + x] = oldRadii[y * oldCols + x];
+      }
+    }
+  }
+
+  updateStats();
+}
+
+// ─── Cellular Automaton (Life-like rules) ───────
+function step() {
+  let t0 = performance.now();
+  let next = new Uint8Array(cols * rows);
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let neighbors = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          let nx = (x + dx + cols) % cols;
+          let ny = (y + dy + rows) % rows;
+          neighbors += grid[ny * cols + nx];
+        }
+      }
+
+      let idx = y * cols + x;
+      let alive = grid[idx];
+
+      // Life-like rule: birth/survival sets
+      if (alive) {
+        next[idx] = survivalSet.has(neighbors) ? 1 : 0;
+      } else {
+        next[idx] = birthSet.has(neighbors) ? 1 : 0;
+      }
+    }
+  }
+
+  grid = next;
+  generation++;
+  lastStepCpu = performance.now() - t0;
+}
+
+// ─── Color Palette (pre-computed opaque blends) ─
+const PALETTE_SIZE = 32;
+let palette = []; // pre-baked '#rrggbb' strings
+
+/** Rebuild palette: blend DOT_COLOR onto BG_COLOR at PALETTE_SIZE alpha levels */
+function rebuildPalette() {
+  // Parse BG hex to RGB
+  let bg = BG_COLOR;
+  let br = parseInt(bg.slice(1, 3), 16) || 0;
+  let bgG = parseInt(bg.slice(3, 5), 16) || 0;
+  let bb = parseInt(bg.slice(5, 7), 16) || 0;
+
+  palette = [];
+  for (let i = 0; i < PALETTE_SIZE; i++) {
+    let t = i / (PALETTE_SIZE - 1);
+    let alpha = BASE_ALPHA + t * 0.18;
+    // Pre-blend: result = bg * (1-a) + dot * a
+    let r = Math.round(br * (1 - alpha) + DOT_COLOR[0] * alpha);
+    let g = Math.round(bgG * (1 - alpha) + DOT_COLOR[1] * alpha);
+    let b = Math.round(bb * (1 - alpha) + DOT_COLOR[2] * alpha);
+    palette.push(`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
+  }
+}
+
+// Build initial palette
+rebuildPalette();
+
+// ─── Render ─────────────────────────────────────
+function renderLoop(ts) {
+  frameCount++;
+  if (ts - lastFpsTime > 1000) {
+    document.getElementById('stat-fps').textContent = frameCount;
+    frameCount = 0;
+    lastFpsTime = ts;
+    updateStats();
+  }
+
+  draw();
+  requestAnimationFrame(renderLoop);
+}
+
+function draw() {
+  let w = canvas._w;
+  let h = canvas._h;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = BG_COLOR;
+  ctx.fillRect(0, 0, w, h);
+
+  let maxIdx = PALETTE_SIZE - 1;
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let idx = y * cols + x;
+      let alive = grid[idx];
+
+      let targetR = alive ? MAX_RADIUS : BASE_RADIUS;
+      let currentR = radii[idx];
+
+      if (alive) {
+        radii[idx] = currentR + (targetR - currentR) * 0.2;
+      } else {
+        radii[idx] = currentR + (targetR - currentR) * FADE_RATE;
+      }
+
+      let r = radii[idx];
+      let cx = x * CELL_SIZE;
+      let cy = y * CELL_SIZE;
+
+      // Map radius to palette index (opaque, no alpha blending)
+      let t = (r - BASE_RADIUS) / (MAX_RADIUS - BASE_RADIUS);
+      let pi = (t * maxIdx + 0.5) | 0; // fast round
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = palette[pi];
+      ctx.fill();
+    }
+  }
+}
+
+// ─── Controls ───────────────────────────────────
+function toggleSimulation() {
+  running = !running;
+  let btn = document.getElementById('btn-toggle');
+  if (running) {
+    btn.textContent = '⏸ Pause';
+    btn.classList.add('active');
+    startStepping();
+  } else {
+    btn.textContent = '▶ Start';
+    btn.classList.remove('active');
+    stopStepping();
+  }
+}
+
+function startStepping() {
+  stopStepping();
+  stepTimer = setInterval(step, STEP_MS);
+}
+
+function stopStepping() {
+  if (stepTimer) clearInterval(stepTimer);
+  stepTimer = null;
+}
+
+function resetGrid() {
+  grid = new Uint8Array(cols * rows);
+  radii = new Float32Array(cols * rows);
+  radii.fill(BASE_RADIUS);
+  generation = 0;
+  updateStats();
+}
+
+/** Seed grid AND randomize rule */
+function seedRandom() {
+  let rule = randomizeRule();
+  let density = rule.density ?? 0.15;
+
+  for (let i = 0; i < grid.length; i++) {
+    grid[i] = Math.random() < density ? 1 : 0;
+    if (grid[i]) radii[i] = BASE_RADIUS;
+  }
+  generation = 0;
+  updateStats();
+
+  // Auto-start if not running
+  if (!running) toggleSimulation();
+}
+
+function updateParam() {
+  CELL_SIZE = parseInt(document.getElementById('sl-cell').value);
+  STEP_MS = parseInt(document.getElementById('sl-speed').value);
+  MAX_RADIUS = parseFloat(document.getElementById('sl-radius').value);
+  BASE_RADIUS = parseFloat(document.getElementById('sl-min-radius').value);
+  FADE_RATE = parseInt(document.getElementById('sl-fade').value) / 100;
+
+  document.getElementById('v-cell').textContent = CELL_SIZE;
+  document.getElementById('v-speed').textContent = STEP_MS;
+  document.getElementById('v-radius').textContent = MAX_RADIUS;
+  document.getElementById('v-min-radius').textContent = BASE_RADIUS;
+  document.getElementById('v-fade').textContent = Math.round(FADE_RATE * 100);
+
+  if (running) startStepping();
+  resize();
+}
+
+function updateColors() {
+  BG_COLOR = document.getElementById('cl-bg').value;
+  let hex = document.getElementById('cl-dot').value;
+  DOT_COLOR = [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+  rebuildPalette();
+}
+
+function updateStats() {
+  let alive = 0;
+  for (let i = 0; i < grid.length; i++) alive += grid[i];
+  document.getElementById('stat-cells').textContent = grid.length;
+  document.getElementById('stat-alive').textContent = alive;
+  document.getElementById('stat-gen').textContent = generation;
+  document.getElementById('stat-cpu').textContent = lastStepCpu.toFixed(1);
+}
+
+function copyConfig() {
+  const config = {
+    rule: currentRuleName,
+    birth: Array.from(birthSet),
+    survival: Array.from(survivalSet),
+    cellSize: CELL_SIZE,
+    stepMs: STEP_MS,
+    minRadius: BASE_RADIUS,
+    maxRadius: MAX_RADIUS,
+    fadeRate: FADE_RATE,
+    bgColor: BG_COLOR,
+    dotColor: document.getElementById('cl-dot').value
+  };
+  
+  navigator.clipboard.writeText(JSON.stringify(config, null, 2)).then(() => {
+    let btn = document.getElementById('btn-copy');
+    btn.textContent = '✅ Copied!';
+    setTimeout(() => { btn.textContent = '📋 Copy Config'; }, 2000);
+  });
+}
+
+// Canvas click: toggle cells with brush
+canvas?.parentElement?.addEventListener('click', (e) => {
+  let rect = canvas.getBoundingClientRect();
+  let mx = e.clientX - rect.left;
+  let my = e.clientY - rect.top;
+  let cx = Math.round(mx / CELL_SIZE);
+  let cy = Math.round(my / CELL_SIZE);
+
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      let x = cx + dx;
+      let y = cy + dy;
+      if (x >= 0 && x < cols && y >= 0 && y < rows) {
+        let idx = y * cols + x;
+        grid[idx] = 1;
+        radii[idx] = BASE_RADIUS;
+      }
+    }
+  }
+});
+
+init();
+</script>
+</body>
+</html>

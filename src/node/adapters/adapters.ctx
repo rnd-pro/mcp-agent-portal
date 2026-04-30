@@ -10,7 +10,6 @@ different AI CLI tools (Gemini, Claude, OpenCode).
 | `base.js` | JSDoc typedefs | — |
 | `gemini.js` | `createGeminiAdapter(config)` | CLI spawn `gemini -p` |
 | `claude.js` | `createClaudeAdapter(config)` | CLI spawn `claude -p` |
-| `opencode.js` | `createOpencodeAdapter(config)` | HTTP to local OpenCode |
 | `pool.js` | `AdapterPool` | acquire/release lifecycle |
 | `index.js` | `resolveAdapter(type)` | Factory registry |
 

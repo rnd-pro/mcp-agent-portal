@@ -7,6 +7,7 @@ import { registerService } from './local-gateway.js';
 import { MCPProxyManager } from '../proxy/mcp-proxy.js';
 import { createRoutes, dispatch } from './api-routes.js';
 import { createProjectRoutes } from './api-routes-projects.js';
+import { discoverOpenCodeModels } from '../adapters/index.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
@@ -181,6 +182,9 @@ export function startWebServer(projectRoot) {
       console.error(`  → ${gateway.url}`);
       console.error(`  → ${gateway.directUrl}  (direct)\n`);
     }, 200);
+
+    // Fire-and-forget: populate OpenCode model cache
+    discoverOpenCodeModels().catch(() => {});
   });
 
   function shutdown() {

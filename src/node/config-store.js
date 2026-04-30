@@ -231,6 +231,30 @@ export function deleteChat(chatId) {
 }
 
 /**
+ * Update a chat's fields.
+ * @param {string} chatId
+ * @param {object} updates
+ */
+export function updateChat(chatId, updates) {
+  let chat = getChat(chatId);
+  if (!chat) return;
+
+  // Whitelist of keys that can be updated via API
+  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId']);
+
+  for (let key of Object.keys(updates)) {
+    if (!allowedKeys.has(key)) continue;
+    let val = updates[key];
+    // Reject template garbage (unresolved Symbiote bindings)
+    if (typeof val === 'string' && val.includes('{{')) continue;
+    chat[key] = val;
+  }
+
+  chat.updatedAt = Date.now();
+  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+}
+
+/**
  * Update session ID for a chat (for Gemini CLI session continuity).
  * @param {string} chatId
  * @param {string} sessionId
@@ -241,4 +265,55 @@ export function updateChatSession(chatId, sessionId) {
   chat.sessionId = sessionId;
   chat.updatedAt = Date.now();
   fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+}
+
+/**
+ * Set or clear the pending task ID for a chat.
+ * Allows reconnection to a running agent-pool task after browser reload.
+ * @param {string} chatId
+ * @param {string|null} taskId
+ */
+export function updateChatTask(chatId, taskId) {
+  let chat = getChat(chatId);
+  if (!chat) return;
+  if (taskId) {
+    chat.pendingTaskId = taskId;
+  } else {
+    delete chat.pendingTaskId;
+  }
+  chat.updatedAt = Date.now();
+  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+}
+
+// ── Provider Models ─────────────────────────────────────
+
+/**
+ * Get user-configured models for a provider.
+ * @param {string} provider
+ * @returns {string[]}
+ */
+export function getProviderModels(provider) {
+  let config = readConfig();
+  return config.providerModels?.[provider] || [];
+}
+
+/**
+ * Get all provider model configs.
+ * @returns {Record<string, string[]>}
+ */
+export function getAllProviderModels() {
+  let config = readConfig();
+  return config.providerModels || {};
+}
+
+/**
+ * Set user-configured models for a provider.
+ * @param {string} provider
+ * @param {string[]} models
+ */
+export function setProviderModels(provider, models) {
+  let config = readConfig();
+  if (!config.providerModels) config.providerModels = {};
+  config.providerModels[provider] = models;
+  writeConfig(config);
 }

@@ -6,7 +6,7 @@ import {
   getProjectHistory, addProject, removeProject, updateProject,
   getActiveProjectIds, setActiveProjectIds,
   getGlobalCli, setGlobalCli,
-  listChats, getChat, createChat, appendChatMessage, replaceChatMessages, deleteChat, updateChatSession,
+  listChats, getChat, createChat, appendChatMessage, replaceChatMessages, deleteChat, updateChat, updateChatSession,
 } from '../config-store.js';
 
 /**
@@ -162,7 +162,24 @@ export function createProjectRoutes() {
       try {
         let { chatId, messages } = await parseBody(req);
         if (!chatId || !Array.isArray(messages)) return json(res, { error: 'Missing chatId or messages array' }, 400);
-        replaceChatMessages(chatId, messages);
+        // Strip transient system status messages before persisting
+        let cleaned = messages.filter(m => {
+          if (m.role !== 'system') return true;
+          let t = m.text || '';
+          return !t.startsWith('⏳') && !t.startsWith('✅') && !t.startsWith('⚠️') && t !== 'Processing...';
+        });
+        replaceChatMessages(chatId, cleaned);
+        json(res, { ok: true });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/chats/update': async (req, res) => {
+      try {
+        let { id, ...updates } = await parseBody(req);
+        if (!id) return json(res, { error: 'Missing id' }, 400);
+        updateChat(id, updates);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);

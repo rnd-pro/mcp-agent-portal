@@ -18,6 +18,7 @@ export class SettingsPanel extends Symbiote {
   _statusInterval = null;
 
   renderCallback() {
+    this._initProviderModels();
     this.ref.refreshBtn.onclick = () => this.fetchInfo();
     this.ref.restartBtn.onclick = () => this.restartServer();
     this.ref.stopBtn.onclick = () => this.stopServer();
@@ -102,10 +103,16 @@ export class SettingsPanel extends Symbiote {
   async fetchInfo() {
     this.ref.backendCard.innerHTML = '<div class="ui-empty-state pg-stg-pulse">Loading…</div>';
     try {
-      const [info, instances] = await Promise.all([
+      const [info, instances, modelsInfo] = await Promise.all([
         fetch("/api/project-info").then((res) => res.json()),
         fetch("/api/instances").then((res) => res.json()),
+        fetch("/api/settings/models").then((res) => res.json()).catch(() => ({ userModels: {}, cliModels: [] })),
       ]);
+      
+      this._userModels = modelsInfo.userModels || {};
+      this._cliModels = modelsInfo.cliModels || [];
+      this._renderProviderTabs();
+      
       this.ref.backendCard.innerHTML = [
         renderMetric("Status", "Running", "pg-stg-ok"),
         renderMetric("Project", info.name || "—"),
@@ -137,6 +144,239 @@ export class SettingsPanel extends Symbiote {
       console.error("[SettingsPanel] fetch error:", t);
       this.ref.backendCard.innerHTML = `<div class="ui-empty-state" style="color:var(--sn-danger-color)">Error: ${t.message}</div>`;
     }
+  }
+
+  // ── Provider Models ──
+
+  _activeProvider = 'opencode';
+  _userModels = {};
+  _cliModels = [];
+  
+  _initProviderModels() {
+    this.ref.syncCliBtn.onclick = () => this._syncFromCli();
+    this.ref.saveModelsBtn.onclick = () => this._saveProviderModels();
+    
+    this.ref.searchInput.oninput = (e) => {
+      this._filterQuery = e.target.value.toLowerCase();
+      this._renderDirectory();
+    };
+  }
+
+  _renderProviderTabs() {
+    const providers = ['opencode', 'gemini', 'claude'];
+    if (!providers.includes(this._activeProvider)) this._activeProvider = providers[0];
+    
+    this.ref.providerTabs.innerHTML = providers.map(p => 
+      `<button class="pm-provider-tab ${p === this._activeProvider ? 'active' : ''}" data-p="${p}">${p}</button>`
+    ).join('');
+    
+    this.ref.providerTabs.querySelectorAll('.pm-provider-tab').forEach(b => {
+      b.onclick = () => {
+        this._activeProvider = b.dataset.p;
+        this.ref.searchInput.value = '';
+        this._filterQuery = '';
+        this._renderProviderTabs();
+      };
+    });
+    
+    if (this._activeProvider !== 'opencode') {
+      this.ref.directoryEl.style.display = 'none';
+    } else {
+      this.ref.directoryEl.style.display = 'flex';
+      this._renderDirectory();
+    }
+    
+    this._renderModelList();
+  }
+
+  _renderModelList() {
+    const models = this._userModels[this._activeProvider] || [];
+    if (models.length === 0) {
+      this.ref.modelList.innerHTML = `<div class="ui-empty-state" style="padding:4px">No custom models. Showing defaults.</div>`;
+    } else {
+      this.ref.modelList.innerHTML = models.map(m => 
+        `<div class="pm-model-chip">
+           ${m} <span class="remove" data-m="${m}">×</span>
+         </div>`
+      ).join('');
+      
+      this.ref.modelList.querySelectorAll('.remove').forEach(btn => {
+        btn.onclick = () => {
+          this._userModels[this._activeProvider] = models.filter(x => x !== btn.dataset.m);
+          this._renderModelList();
+          if (this._activeProvider === 'opencode') this._renderDirectory();
+        };
+      });
+    }
+  }
+
+  _filterQuery = '';
+  _sortCol = 'name';
+  _sortDir = 1; // 1 for ASC, -1 for DESC
+
+  _renderDirectory() {
+    if (!this._cliModels || this._cliModels.length === 0) {
+      this.ref.directoryList.innerHTML = `<div class="ui-empty-state">No models discovered. Click 'Discover & Update'.</div>`;
+      return;
+    }
+    
+    // Update headers UI
+    this.ref.sortHeaders.querySelectorAll('.sortable').forEach(el => {
+      let col = el.dataset.sort;
+      el.classList.toggle('active', this._sortCol === col);
+      let icon = el.querySelector('.s-icon');
+      if (icon) {
+        icon.textContent = this._sortCol === col ? (this._sortDir === 1 ? '↓' : '↑') : '';
+      }
+      el.onclick = () => {
+        if (this._sortCol === col) {
+          this._sortDir *= -1;
+        } else {
+          this._sortCol = col;
+          this._sortDir = col === 'name' || col === 'price_asc' ? 1 : -1;
+        }
+        this._renderDirectory();
+      };
+    });
+    
+    const favs = this._userModels['opencode'] || [];
+    let items = this._cliModels;
+    
+    if (this._filterQuery) {
+      items = items.filter(m => {
+        let n = (m.name || '').toLowerCase();
+        let i = (m.id || '').toLowerCase();
+        return n.includes(this._filterQuery) || i.includes(this._filterQuery);
+      });
+    }
+    
+    // Sort logic
+    items.sort((a, b) => {
+      // 1. Favorites always on top
+      let aFav = favs.includes(a.id);
+      let bFav = favs.includes(b.id);
+      if (aFav !== bFav) return aFav ? -1 : 1;
+      
+      // 2. Main sort criteria
+      let diff = 0;
+      if (this._sortCol === 'price_asc') {
+        let pA = a.rawPrompt ?? 999999;
+        let pB = b.rawPrompt ?? 999999;
+        diff = pA - pB;
+      } else if (this._sortCol === 'price_asc_out') {
+        let pA = a.rawCompletion ?? 999999;
+        let pB = b.rawCompletion ?? 999999;
+        diff = pA - pB;
+      } else if (this._sortCol === 'context_desc') {
+        let cA = a.context ?? -1;
+        let cB = b.context ?? -1;
+        diff = cB - cA; // Descending base
+      } else if (this._sortCol === 'newest') {
+        let dA = a.created ?? 0;
+        let dB = b.created ?? 0;
+        diff = dB - dA;
+      } else {
+        diff = (a.name || a.id).localeCompare(b.name || b.id);
+      }
+      
+      if (diff !== 0) return diff * this._sortDir;
+      
+      // 3. Fallback: Free first, then alphabetical
+      if (a.isFree !== b.isFree) return a.isFree ? -1 : 1;
+      return (a.name || a.id).localeCompare(b.name || b.id);
+    });
+    
+    this.ref.directoryList.innerHTML = items.map(m => {
+      let isFav = favs.includes(m.id);
+      let ctx = m.context ? `${Math.round(m.context / 1000)}k` : '—';
+      let pp = m.pricePrompt ? `$${m.pricePrompt}` : '—';
+      let pc = m.priceCompletion ? `$${m.priceCompletion}` : '—';
+      
+      let dateStr = '—';
+      if (m.created && m.created > 0) {
+        const d = new Date(m.created * 1000);
+        dateStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      }
+      
+      if (m.isFree) {
+        pp = `<span class="pm-price-free">FREE</span>`;
+        pc = '';
+      }
+      
+      let tags = [];
+      if (m.isVision) tags.push('<span class="pm-tag">👁️ Vision</span>');
+      if (m.isTools) tags.push('<span class="pm-tag">🛠️ Tools</span>');
+      if (m.maxOutput) tags.push(`<span class="pm-tag">⏱️ ${Math.round(m.maxOutput / 1000)}k Out</span>`);
+      
+      return `
+        <div class="pm-grid-row">
+          <div class="pm-col-star ${isFav ? 'active' : ''}" data-id="${m.id}">${isFav ? '★' : '☆'}</div>
+          <div class="pm-col-name" title="${m.name || m.id}">
+            <div class="pm-model-name">${m.name || m.id}</div>
+            <div class="pm-model-id">${m.id}</div>
+            ${tags.length > 0 ? `<div class="pm-tags">${tags.join('')}</div>` : ''}
+          </div>
+          <div class="pm-col-ctx">${ctx}</div>
+          <div class="pm-col-ctx">${dateStr}</div>
+          <div class="pm-col-price">${pp}</div>
+          <div class="pm-col-price">${pc}</div>
+        </div>
+      `;
+    }).join('');
+    
+    this.ref.directoryList.querySelectorAll('.pm-col-star').forEach(star => {
+      star.onclick = () => {
+        let id = star.dataset.id;
+        if (!this._userModels['opencode']) this._userModels['opencode'] = [];
+        
+        let arr = this._userModels['opencode'];
+        if (arr.includes(id)) {
+          this._userModels['opencode'] = arr.filter(x => x !== id);
+        } else {
+          arr.push(id);
+        }
+        
+        this._renderModelList();
+        this._renderDirectory();
+      };
+    });
+  }
+
+  async _saveProviderModels() {
+    this._setStatus("Saving...", "var(--sn-text-dim)");
+    try {
+      await fetch('/api/settings/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: this._activeProvider, models: this._userModels[this._activeProvider] || [] })
+      });
+      this._setStatus("Saved successfully", "var(--sn-success-color)");
+    } catch (e) {
+      this._setStatus(`Error: ${e.message}`, "var(--sn-danger-color)");
+    }
+  }
+
+  async _syncFromCli() {
+    const btn = this.ref.syncCliBtn;
+    btn.innerHTML = `<span class="material-symbols-outlined" style="animation:spin 1s linear infinite;font-size:14px">sync</span> Discovering...`;
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
+      this._cliModels = r.models || [];
+      this._renderDirectory();
+      this._setStatus(`Discovered ${r.count} models`, "var(--sn-node-selected)");
+    } catch (e) {
+      this._setStatus(`Sync failed: ${e.message}`, "var(--sn-danger-color)");
+    } finally {
+      btn.innerHTML = `⟳ Discover & Update`;
+      btn.disabled = false;
+    }
+  }
+  
+  _setStatus(msg, color) {
+    this.ref.modelStatus.textContent = msg;
+    this.ref.modelStatus.style.color = color;
+    setTimeout(() => { if (this.ref.modelStatus.textContent === msg) this.ref.modelStatus.textContent = ''; }, 3000);
   }
 }
 

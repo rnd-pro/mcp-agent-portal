@@ -13,6 +13,24 @@ if (isIDEMode) {
 import { startWebServer } from './src/node/server/web-server.js';
 import { MCPMultiplexer } from './src/node/proxy/mcp-multiplexer.js';
 import { startWSClient } from './src/node/discovery/ws-client.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+// P4: Singleton enforcement via PID lockfile (only for standalone mode)
+let LOCKFILE = path.join(os.homedir(), '.gemini', 'agent-portal.pid');
+if (!isIDEMode) {
+  if (fs.existsSync(LOCKFILE)) {
+    let oldPid = parseInt(fs.readFileSync(LOCKFILE, 'utf8'), 10);
+    try {
+      process.kill(oldPid, 0); // Check if alive
+      console.error(`⚠️ Portal already running (PID ${oldPid}). Exiting.`);
+      process.exit(1);
+    } catch {} // Dead PID — stale lock, continue
+  }
+  fs.mkdirSync(path.dirname(LOCKFILE), { recursive: true });
+  fs.writeFileSync(LOCKFILE, String(process.pid));
+}
 
 let isMaster = process.argv.includes('--master');
 let connectArgIndex = process.argv.indexOf('--connect');
@@ -56,3 +74,19 @@ if (connectUrl) {
 if (isIDEMode) {
   console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
 }
+
+// Ensure child servers are killed on exit to prevent zombie accumulation
+let shuttingDown = false;
+function gracefulShutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error('🛑 Shutting down — killing child servers...');
+  proxyManager.stopAll();
+  setTimeout(() => process.exit(0), 500);
+}
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+process.on('exit', () => {
+  if (!shuttingDown) proxyManager.stopAll();
+  try { fs.unlinkSync(LOCKFILE); } catch {}
+});

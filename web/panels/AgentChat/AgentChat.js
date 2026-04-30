@@ -1,8 +1,9 @@
 import { Symbiote, PubSub } from "@symbiotejs/symbiote";
 import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
 import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
-import template from "./AgentChat.tpl.js";
+import template from './AgentChat.tpl.js';
 import css from "./AgentChat.css.js";
+import '../../common/CellBg/CellBg.js';
 
 const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
 
@@ -24,14 +25,42 @@ export class AgentChat extends Symbiote {
     inputVal: "",
     chatName: "Select a chat",
     chatAdapter: "",
+    adapterMeta: {},
+    adapterOptionsHtml: '',
+    composerFooterHtml: '',
+    chatParams: {},
+    attachedContext: [],
     navCollapsed: false,
+    isInputDisabled: true,
+    inputPlaceholder: "Ask anything, @ to mention, / for workflows",
+    sessionMetaHtml: '',
 
     onKeyDown: (e) => {
-      if (e.key === "Enter") this._sendMessage();
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this._sendMessage();
+      }
+      if (e.key === 'Escape') this._hideAutocomplete();
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (this._acVisible) {
+          e.preventDefault();
+          this._navigateAutocomplete(e.key === 'ArrowDown' ? 1 : -1);
+        }
+      }
+      if (e.key === 'Tab' && this._acVisible) {
+        e.preventDefault();
+        this._selectAutocomplete();
+      }
     },
 
     onInput: (e) => {
-      this.$.inputVal = e.target.value;
+      let ta = e.target;
+      this.$.inputVal = ta.value;
+      // Auto-grow
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+      // Autocomplete trigger
+      this._checkAutocomplete(ta.value, ta.selectionStart);
     },
 
     onSend: () => {
@@ -45,6 +74,71 @@ export class AgentChat extends Symbiote {
     onNewChat: () => {
       this._createChat();
     },
+
+    onParamChangeDelegated: (e) => {
+      let select = e.target;
+      if (!select || !select.classList.contains('composer-footer-select')) return;
+      
+      let id = select.dataset.param;
+      let val = select.value;
+
+      let currentParams = this.$.chatParams || {};
+      let updatedParams = { ...currentParams, [id]: val };
+
+      // Cascade: when provider changes, reset model
+      if (id === 'provider') {
+        delete updatedParams.model;
+      }
+
+      this.$.chatParams = updatedParams;
+
+      let chatId = dashState.activeChatId;
+      if (chatId) {
+        let saveData = { id: chatId, [id]: val };
+        if (id === 'provider') saveData.model = null;
+        fetch('/api/chats/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(saveData)
+        });
+      }
+    },
+
+    onAttachClick: () => {
+      let path = prompt("Enter file or folder path to attach:");
+      if (path && path.trim()) {
+        this.$.attachedContext = [...this.$.attachedContext, { path: path.trim() }];
+      }
+    },
+
+    onRemoveContext: (e) => {
+      let path = e.target.dataset.path;
+      let ctx = this.$.attachedContext.filter(c => c.path !== path);
+      this.$.attachedContext = ctx;
+    },
+
+    onDragOver: (e) => {
+      e.preventDefault();
+      e.currentTarget.classList.add('drag-over');
+    },
+
+    onDragLeave: (e) => {
+      e.currentTarget.classList.remove('drag-over');
+    },
+
+    onDrop: (e) => {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+
+      let path = e.dataTransfer.getData('text/plain');
+      if (path && path.trim()) {
+        // Prevent duplicates
+        let ctx = this.$.attachedContext || [];
+        if (!ctx.find(c => c.path === path.trim())) {
+          this.$.attachedContext = [...ctx, { path: path.trim() }];
+        }
+      }
+    },
   };
 
   renderCallback() {
@@ -56,6 +150,9 @@ export class AgentChat extends Symbiote {
       }
     }
 
+    // Initial empty state
+    queueMicrotask(() => this._updateEmptyState());
+
     // Reflect nav collapsed state and persist to localStorage
     this.sub('navCollapsed', (val) => {
       let nav = this.querySelector('.chat-nav');
@@ -65,6 +162,9 @@ export class AgentChat extends Symbiote {
         localStorage.setItem(STORAGE_KEY_CHAT_NAV, String(val));
       }
     });
+
+    // Fetch adapter metadata
+    this._fetchAdapterMeta();
 
     // Fetch chats, then sync from URL — component is ready when fetch completes
     this._fetchChats().then(() => {
@@ -87,7 +187,306 @@ export class AgentChat extends Symbiote {
     });
 
     // Re-render messages when they change
-    this.sub('messages', () => this._renderMessages());
+    this.sub('messages', (msgs) => {
+      this._renderMessages();
+      this._updateEmptyState();
+      // Re-evaluate adapter options to lock provider when messages appear.
+      queueMicrotask(() => this._updateComposerFooter());
+    });
+
+    // Update available options when adapter or metadata changes
+    this.sub('chatAdapter', () => {
+      this._updateComposerFooter();
+      this._updateInputState();
+    });
+    this.sub('adapterMeta', () => this._updateComposerFooter());
+    this.sub('chatParams', () => {
+      if (!this._updatingOptions) this._updateComposerFooter();
+      this._updateInputState();
+    });
+  }
+
+  _updateInputState() {
+    let adapter = this.$.chatAdapter || "pool";
+    let isModelRequired = adapter === "pool" || adapter === "opencode";
+    let hasModel = !!this.$.chatParams?.model;
+    
+    let disabled = isModelRequired && !hasModel;
+    this.$.isInputDisabled = disabled;
+    this.$.inputPlaceholder = disabled 
+      ? "Select a model to start..." 
+      : "Ask anything, @ to mention, / for workflows";
+  }
+
+  /**
+   * Build compact HTML for the session metadata shown in the chat header.
+   * @param {string} text - Formatted markdown result from get_task_result
+   * @returns {string} HTML string
+   */
+  _buildSessionMetaHtml(text) {
+    if (!text) return '';
+    let chips = [];
+    let modeMatch = text.match(/- Mode:\s*(.+)/i);
+    if (modeMatch) {
+      let mode = modeMatch[1].trim();
+      let iconName = mode === 'yolo' ? 'bolt' : mode === 'plan' ? 'lock' : 'settings';
+      chips.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${this._esc(mode)}</span>`);
+    }
+    let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
+    if (exitMatch) {
+      let code = parseInt(exitMatch[1]);
+      let cls = code === 0 ? 'meta-ok' : 'meta-err';
+      chips.push(`<span class="meta-chip ${cls}">exit ${code}</span>`);
+    }
+    let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
+    if (sidMatch) {
+      chips.push(`<span class="meta-chip meta-sid" title="${this._esc(sidMatch[1])}">${this._esc(sidMatch[1].substring(0, 12))}…</span>`);
+    }
+    return chips.join('');
+  }
+
+  /** Toggle empty attribute on chat-view based on message count */
+  _updateEmptyState() {
+    let view = this.ref.chatView;
+    if (view) {
+      let hasMessages = this.$.messages && this.$.messages.length > 0;
+      view.toggleAttribute('empty', !hasMessages);
+    }
+  }
+
+  /** Toggle send button between arrow_upward and stop */
+  _setSending(active) {
+    this._isSending = active;
+    let btn = this.ref.btnSend;
+    let icon = this.ref.sendIcon;
+    if (btn && icon) {
+      if (active) {
+        btn.classList.add('btn-stop');
+        icon.textContent = 'stop';
+      } else {
+        btn.classList.remove('btn-stop');
+        icon.textContent = 'arrow_upward';
+      }
+    }
+  }
+
+  /* ── Autocomplete (@, /) ── */
+
+  _acVisible = false;
+  _acItems = [];
+  _acIndex = -1;
+  _acTrigger = null; // '@' or '/'
+  _acStartPos = 0;
+
+  _checkAutocomplete(value, cursorPos) {
+    // Find trigger character before cursor
+    let before = value.substring(0, cursorPos);
+    let atMatch = before.match(/@([\w./\-]*)$/);
+    let slashMatch = before.match(/^\/([\w]*)$/);
+
+    if (atMatch) {
+      this._acTrigger = '@';
+      this._acStartPos = cursorPos - atMatch[0].length;
+      this._showAutocomplete(atMatch[1]);
+    } else if (slashMatch) {
+      this._acTrigger = '/';
+      this._acStartPos = 0;
+      this._showAutocomplete(slashMatch[1]);
+    } else {
+      this._hideAutocomplete();
+    }
+  }
+
+  async _showAutocomplete(query) {
+    let items = [];
+    if (this._acTrigger === '/') {
+      // Workflows
+      items = [
+        { label: 'publish', hint: 'Cross-project publication', icon: 'rocket_launch' },
+      ];
+      if (query) items = items.filter(i => i.label.startsWith(query));
+    } else if (this._acTrigger === '@') {
+      // Files from project
+      try {
+        let res = await fetch('/api/files/list');
+        if (res.ok) {
+          let data = await res.json();
+          items = (data.files || []).map(f => ({
+            label: f.path || f, hint: f.type || 'file', icon: f.type === 'directory' ? 'folder' : 'description'
+          }));
+        }
+      } catch {}
+      // Fallback: allow typing arbitrary paths
+      if (items.length === 0) {
+        items = [{ label: query || 'path/to/file', hint: 'type a path', icon: 'description' }];
+      }
+      if (query) items = items.filter(i => i.label.toLowerCase().includes(query.toLowerCase()));
+      items = items.slice(0, 12);
+    }
+
+    this._acItems = items;
+    this._acIndex = items.length > 0 ? 0 : -1;
+    this._renderAutocomplete();
+  }
+
+  _hideAutocomplete() {
+    this._acVisible = false;
+    this._acItems = [];
+    this._acIndex = -1;
+    let popup = this.ref.autocompletePopup;
+    if (popup) popup.classList.remove('visible');
+  }
+
+  _renderAutocomplete() {
+    let popup = this.ref.autocompletePopup;
+    if (!popup) return;
+    if (this._acItems.length === 0) {
+      this._hideAutocomplete();
+      return;
+    }
+    this._acVisible = true;
+    let header = this._acTrigger === '@' ? 'Files' : 'Workflows';
+    popup.innerHTML = `<div class="autocomplete-header">${header}</div>` +
+      this._acItems.map((item, i) => `
+        <div class="autocomplete-item${i === this._acIndex ? ' active' : ''}" data-index="${i}">
+          <span class="material-symbols-outlined">${item.icon}</span>
+          <span class="autocomplete-item-label">${this._esc(item.label)}</span>
+          <span class="autocomplete-item-hint">${this._esc(item.hint)}</span>
+        </div>
+      `).join('');
+    popup.classList.add('visible');
+
+    // Click handler
+    popup.onclick = (e) => {
+      let el = e.target.closest('.autocomplete-item');
+      if (el) {
+        this._acIndex = parseInt(el.dataset.index);
+        this._selectAutocomplete();
+      }
+    };
+  }
+
+  _navigateAutocomplete(dir) {
+    if (this._acItems.length === 0) return;
+    this._acIndex = (this._acIndex + dir + this._acItems.length) % this._acItems.length;
+    this._renderAutocomplete();
+  }
+
+  _selectAutocomplete() {
+    let item = this._acItems[this._acIndex];
+    if (!item) return;
+
+    let ta = this.ref.chatInput;
+    let value = ta.value;
+
+    if (this._acTrigger === '@') {
+      // Insert file as context attachment
+      let before = value.substring(0, this._acStartPos);
+      let after = value.substring(ta.selectionStart);
+      ta.value = before + after;
+      this.$.inputVal = ta.value;
+      // Add to attachedContext
+      let ctx = this.$.attachedContext || [];
+      if (!ctx.find(c => c.path === item.label)) {
+        this.$.attachedContext = [...ctx, { path: item.label }];
+      }
+    } else if (this._acTrigger === '/') {
+      // Insert workflow command
+      ta.value = '/' + item.label + ' ';
+      this.$.inputVal = ta.value;
+    }
+
+    this._hideAutocomplete();
+    ta.focus();
+  }
+
+  /** Simple HTML entity escaper for user-facing text in innerHTML */
+  _esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /** Format seconds into human-readable elapsed time */
+  _formatElapsed(sec) {
+    if (sec < 60) return `${sec}s`;
+    let m = Math.floor(sec / 60);
+    let s = sec % 60;
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  }
+
+  async _fetchAdapterMeta() {
+    try {
+      let res = await fetch('/api/adapter/types');
+      let data = await res.json();
+      this.$.adapterMeta = data.metadata || {};
+    } catch (err) {
+      console.error('[AgentChat] fetch adapter meta error:', err);
+    }
+  }
+
+  _updateComposerFooter() {
+    let adapter = this.$.chatAdapter;
+    let meta = this.$.adapterMeta || {};
+    let currentParams = this.$.chatParams || {};
+    let paramsToMap = [];
+
+    if (adapter === 'pool') {
+      let providers = Object.keys(meta).filter(k => k !== 'pool');
+      let currentProvider = currentParams.provider ?? providers[0];
+
+      paramsToMap.push({
+        id: 'provider', label: 'Provider', type: 'select', options: providers
+      });
+
+      if (currentProvider && meta[currentProvider]?.parameters) {
+        paramsToMap.push(...meta[currentProvider].parameters);
+      }
+
+      if (meta.pool?.parameters) {
+        paramsToMap.push(...meta.pool.parameters);
+      }
+    } else if (adapter && meta[adapter]?.parameters) {
+      paramsToMap = [...meta[adapter].parameters];
+    }
+
+    this._updatingOptions = true;
+    if (paramsToMap.length > 0) {
+      let htmlStr = paramsToMap.map(p => {
+        if (p.type === 'select' && Array.isArray(p.options)) {
+          let paramValue = currentParams[p.id];
+          if (!paramValue && p.options.length > 0 && p.id !== 'model') {
+            let firstOpt = p.options[0];
+            paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
+          }
+          
+          let optionsHtml = '';
+          if (p.id === 'model' && !paramValue) {
+            optionsHtml += `<option value="" disabled selected>-- Model --</option>`;
+          }
+          
+          optionsHtml += p.options.map(opt => {
+            let val = typeof opt === 'string' ? opt : opt.val;
+            let text = typeof opt === 'string' ? opt : opt.text;
+            let sel = val === paramValue ? 'selected' : '';
+            return `<option value="${this._esc(val)}" ${sel}>${this._esc(text)}</option>`;
+          }).join('');
+          
+          let disabledAttr = '';
+          if (p.id === 'provider' && this.$.messages && this.$.messages.length > 0) {
+            disabledAttr = 'disabled title="Locked"';
+          }
+
+          let iconName = p.id === 'provider' ? 'dns' : p.id === 'model' ? 'smart_toy' : 'tune';
+          
+          return `<span class="composer-footer-btn"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${this._esc(p.id)}" ${disabledAttr}>${optionsHtml}</select></span>`;
+        }
+        return '';
+      }).join('');
+      this.$.composerFooterHtml = htmlStr;
+    } else {
+      this.$.composerFooterHtml = '';
+    }
+    this._updatingOptions = false;
   }
 
   _syncChatFromRouter() {
@@ -179,8 +578,44 @@ export class AgentChat extends Symbiote {
         }
 
         div.appendChild(details);
+      } else if (msg.role === 'thinking') {
+        // "Thinking for Xs" / "Worked for Xm" collapsible
+        let details = document.createElement('details');
+        details.className = msg.done ? 'work-summary' : 'thinking-block';
+        if (!msg.done) details.setAttribute('open', '');
+
+        let summary = document.createElement('summary');
+        let label = msg.done ? 'Worked for' : 'Thinking for';
+        let timeStr = this._formatElapsed(msg.elapsed || 0);
+        if (msg.done) {
+          summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;color:hsl(140,40%,50%)">check_circle</span>${label} ${timeStr}`;
+        } else {
+          summary.innerHTML = `<span class="material-symbols-outlined spin-icon" style="font-size:16px">pending</span>${label} ${timeStr}`;
+        }
+        details.appendChild(summary);
+
+        if (msg.done && msg.meta) {
+          let body = document.createElement('div');
+          body.className = 'work-body';
+          let items = [];
+          if (msg.meta.mode) {
+            let iconName = msg.meta.mode === 'yolo' ? 'bolt' : 'settings';
+            items.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${this._escapeHtml(msg.meta.mode)}</span>`);
+          }
+          if (msg.meta.exitCode != null) {
+            let cls = msg.meta.exitCode === 0 ? 'meta-ok' : 'meta-err';
+            items.push(`<span class="meta-chip ${cls}">exit ${msg.meta.exitCode}</span>`);
+          }
+          if (msg.meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${this._escapeHtml(msg.meta.sessionId)}">${this._escapeHtml(msg.meta.sessionId.substring(0, 16))}\u2026</span>`);
+          if (msg.meta.tools) items.push(`<span class="meta-chip">${msg.meta.tools} tool call${msg.meta.tools > 1 ? 's' : ''}</span>`);
+          if (msg.meta.errors) items.push(`<span class="meta-chip meta-err">${this._escapeHtml(msg.meta.errors)}</span>`);
+          body.innerHTML = items.join('');
+          details.appendChild(body);
+        }
+
+        div.appendChild(details);
       } else {
-        // Regular message
+        // Regular text message
         let content = document.createElement('div');
         content.className = 'msg-content';
         content.innerHTML = this._formatMarkdown(msg.text);
@@ -225,12 +660,12 @@ export class AgentChat extends Symbiote {
 
     let chats = dashState.chats || [];
 
-    // Filter by active project if any
     let projectId = dashState.activeProjectId;
     if (projectId) {
+      // Show project-bound chats first, then unbound (no projectId) chats
       let projectChats = chats.filter(c => c.projectId === projectId);
-      let otherChats = chats.filter(c => c.projectId !== projectId);
-      chats = [...projectChats, ...otherChats];
+      let unboundChats = chats.filter(c => !c.projectId);
+      chats = [...projectChats, ...unboundChats];
     }
 
     for (let chat of chats) {
@@ -308,9 +743,43 @@ export class AgentChat extends Symbiote {
     let prompt = this.$.inputVal.trim();
     if (!prompt) return;
 
+    // Sync any default/unsaved params from the UI dropdowns
+    if (this.ref.composer) {
+      let selects = this.ref.composer.querySelectorAll('.composer-footer-select');
+      let paramsObj = { ...this.$.chatParams };
+      let hasChanges = false;
+      for (let select of selects) {
+        let id = select.dataset.param;
+        // Don't sync empty values like '-- Model --'
+        if (select.value && select.value !== '' && paramsObj[id] !== select.value) {
+          paramsObj[id] = select.value;
+          hasChanges = true;
+        }
+      }
+      if (hasChanges) {
+        this.$.chatParams = paramsObj;
+        fetch('/api/chats/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: chatId, ...paramsObj })
+        });
+      }
+    }
+
+    // Prepend context if present
+    if (this.$.attachedContext && this.$.attachedContext.length > 0) {
+      let contextText = '[Attached Context]:\n' + this.$.attachedContext.map(c => `- ${c.path}`).join('\n') + '\n\n';
+      prompt = contextText + prompt;
+    }
+
     this.$.messages = [...this.$.messages, { role: "user", text: prompt }];
     this.$.inputVal = "";
-    if (this.ref.chatInput) this.ref.chatInput.value = '';
+    this.$.attachedContext = []; // Clear context after send
+    if (this.ref.chatInput) {
+      this.ref.chatInput.value = '';
+      this.ref.chatInput.style.height = 'auto';
+    }
+    this._setSending(true);
 
     // Persist
     await fetch("/api/chats/message", {
@@ -325,21 +794,20 @@ export class AgentChat extends Symbiote {
       let structuredEvents = null;
 
       if (adapter === "pool") {
-        // Show processing indicator
-        this.$.messages = [...this.$.messages, { role: "system", text: "⏳ Delegating task..." }];
+        if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
         reply = await this._sendViaWs(chatId, prompt);
 
-        // Remove processing indicator
-        this.$.messages = this.$.messages.filter(m => m.role !== 'system' || !m.text.startsWith('⏳'));
-        if (!reply) reply = "⏳ Task is still running after timeout. Check manually.";
+        // _sendViaWs handles thinking block, final messages, and persistence
       } else {
         this.$.messages = [...this.$.messages, { role: "system", text: "Processing..." }];
+        if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
+        let payload = { type: adapter, prompt, timeout: 300, ...this.$.chatParams };
         let res = await fetch("/api/adapter/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: adapter, prompt, timeout: 300 }),
+          body: JSON.stringify(payload),
         });
         let data = await res.json();
         this.$.messages = this.$.messages.filter(m => m.text !== "Processing...");
@@ -353,7 +821,7 @@ export class AgentChat extends Symbiote {
         if (data.errors?.length) reply += `\n\n[Warnings]:\n${data.errors.join('\n')}`;
       }
 
-      // If we used HTTP adapter and got structured events, render them
+      // If we got structured events from HTTP adapter, render them
       if (adapter !== "pool") {
         if (structuredEvents?.length) {
           let newMessages = [];
@@ -371,19 +839,25 @@ export class AgentChat extends Symbiote {
         } else {
           this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
         }
+      } else {
+        // Pool adapter: Handler in _sendViaWs already merged the final result
+        // into the last streamed agent message. Nothing to do here.
       }
 
-      // Persist the full chat state (including tools and live streaming results)
-      await fetch("/api/chats/messages", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, messages: this.$.messages }),
-      });
-
-      dashEmit("chats-updated");
+      // Persist the full chat state (pool adapter persists inside _sendViaWs handler)
+      if (adapter !== 'pool') {
+        await fetch("/api/chats/messages", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId, messages: this.$.messages }),
+        });
+        dashEmit("chats-updated");
+      }
     } catch (err) {
       this.$.messages = [...this.$.messages, { role: "system", text: `Error: ${err.message}` }];
     }
+    this._setSending(false);
+    if (this.ref.cellBg) this.ref.cellBg.toggle(false);
   }
 
   /**
@@ -416,21 +890,35 @@ export class AgentChat extends Symbiote {
       let ws = this._ensureChatWs();
       let startTime = Date.now();
       
+      // Insert a "thinking" block that updates in-place
+      let thinkingMsg = { role: 'thinking', elapsed: 0, done: false };
+      this.$.messages = [...this.$.messages, thinkingMsg];
+
       let timerInterval = setInterval(() => {
-        let elapsed = Math.round((Date.now() - startTime) / 1000);
-        this.$.messages = this.$.messages.map(m =>
-          (m.role === 'system' && m.text.startsWith('⏳'))
-            ? { ...m, text: `⏳ Processing... (${elapsed}s)` }
-            : m
-        );
+        thinkingMsg.elapsed = Math.round((Date.now() - startTime) / 1000);
+        // Trigger re-render by reassigning array
+        this.$.messages = [...this.$.messages];
       }, 1000);
 
       let send = () => {
-        let params = { chatId, prompt, timeout: 600 };
+        let params = { chatId, prompt, timeout: 600, ...this.$.chatParams };
         if (this._sessionId) params.sessionId = this._sessionId;
-        if (dashState.globalCli?.model) params.model = dashState.globalCli.model;
         ws.send(JSON.stringify({ method: 'chat.send', params }));
       };
+
+      let isFinished = false;
+
+      let onClose = () => {
+        if (isFinished) return;
+        isFinished = true;
+        clearInterval(timerInterval);
+        ws.removeEventListener('message', onMessage);
+        
+        // Remove streaming flags
+        this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
+        resolve('⏳ Process crashed or connection closed unexpectedly.');
+      };
+      ws.addEventListener('close', onClose);
 
       let onMessage = (e) => {
         try {
@@ -445,7 +933,16 @@ export class AgentChat extends Symbiote {
               if (!ev) break;
               
               // Live streaming logic
-              if (ev.type === 'message' && ev.role === 'assistant') {
+              if (ev.type === 'message' && ev.role === 'system') {
+                let msgs = [...this.$.messages];
+                let lastMsg = msgs[msgs.length - 1];
+                if (lastMsg && lastMsg.role === 'system' && lastMsg.text.startsWith('⏳')) {
+                  lastMsg.text = ev.content || '';
+                } else {
+                  msgs.push({ role: 'system', text: ev.content || '' });
+                }
+                this.$.messages = msgs;
+              } else if (ev.type === 'message' && ev.role === 'assistant') {
                 let msgs = [...this.$.messages];
                 let lastMsg = msgs[msgs.length - 1];
                 if (!lastMsg || lastMsg.role !== 'agent' || !lastMsg.streaming) {
@@ -479,8 +976,10 @@ export class AgentChat extends Symbiote {
             }
 
             case 'chat.done': {
+              isFinished = true;
               clearInterval(timerInterval);
               ws.removeEventListener('message', onMessage);
+              ws.removeEventListener('close', onClose);
               
               // Remove streaming flags from all messages
               this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
@@ -498,24 +997,69 @@ export class AgentChat extends Symbiote {
                 }).catch(() => {});
               }
 
-              // Remove streaming text blocks, finalize tool blocks
-              let finalMessages = [];
-              for (let m of this.$.messages) {
-                if (m.role === 'tool') {
-                  finalMessages.push({ ...m, streaming: false });
-                } else if (!m.streaming) {
-                  finalMessages.push(m);
-                }
-              }
-              this.$.messages = finalMessages;
+              // Remove system status messages (⏳, ✅) and the thinking block
+              let cleaned = this.$.messages.filter(m => 
+                !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
+                && !(m.role === 'thinking' && !m.done)
+              );
 
-              resolve(text);
+              // Parse metadata from the formatted result.
+              let meta = {};
+              if (text) {
+                let lastAgent = [...cleaned].reverse().find(m => m.role === 'agent');
+                if (!lastAgent) {
+                  let bodyMatch = text.match(/## Agent Response\n+([\s\S]*?)(?=\n+(?:---|## Tools Used|## Errors|## Stats)|$)/i);
+                  let body = bodyMatch ? bodyMatch[1].trim() : text;
+                  cleaned.push({ role: 'agent', text: body });
+                }
+
+                let modeMatch = text.match(/- Mode:\s*(.+)/i);
+                if (modeMatch) meta.mode = modeMatch[1].trim();
+                let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
+                if (sidMatch) meta.sessionId = sidMatch[1];
+                let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
+                if (exitMatch) meta.exitCode = parseInt(exitMatch[1]);
+                let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
+                if (toolsMatch) meta.tools = parseInt(toolsMatch[1]);
+                let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
+                if (errorsMatch) meta.errors = errorsMatch[1].trim();
+                let failMatch = text.match(/## ⚠️ Agent Failed[\s\S]*?(?=\n+##|$)/i);
+                if (failMatch) meta.errors = failMatch[0].trim();
+
+                // Update header meta
+                this.$.sessionMetaHtml = this._buildSessionMetaHtml(text);
+              }
+
+              // Insert "Worked for Xm" summary block
+              let elapsedSec = Math.round((Date.now() - startTime) / 1000);
+              cleaned.push({
+                role: 'thinking',
+                elapsed: elapsedSec,
+                done: true,
+                meta: Object.keys(meta).length > 0 ? meta : null
+              });
+
+              this.$.messages = cleaned;
+              if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+
+              // Persist final state
+              fetch("/api/chats/messages", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatId, messages: this.$.messages }),
+              }).catch(() => {});
+              dashEmit("chats-updated");
+
+              // Resolve with empty — _sendMessage should NOT add another message
+              resolve('');
               break;
             }
 
             case 'chat.error': {
+              isFinished = true;
               clearInterval(timerInterval);
               ws.removeEventListener('message', onMessage);
+              ws.removeEventListener('close', onClose);
               
               // Remove streaming flags from all messages
               this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
@@ -581,6 +1125,7 @@ export class AgentChat extends Symbiote {
       this.$.chatName = "Select a chat";
       this.$.chatAdapter = "";
       this._sessionId = null;
+      this.$.sessionMetaHtml = '';
       return;
     }
 
@@ -606,12 +1151,176 @@ export class AgentChat extends Symbiote {
       console.log("[AgentChat] Successfully loaded chat:", chat);
       this.$.chatName = chat.name || "Chat";
       this.$.chatAdapter = chat.adapter || "pool";
-      this.$.messages = chat.messages || [];
+      // Filter out stale transient status messages (process artifacts, not conversation content)
+      let msgs = (chat.messages || []).filter(m => {
+        if (m.role !== 'system') return true;
+        let t = m.text || '';
+        return !t.startsWith('⏳') && !t.startsWith('✅') && !t.startsWith('⚠️') && t !== 'Processing...';
+      });
+      this.$.messages = msgs;
       this._sessionId = chat.sessionId || null;
+      
+      // Load saved params — collect all non-base keys that have values
+      let params = {};
+      let baseProps = ['id', 'projectId', 'name', 'adapter', 'messages', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
+      for (let key in chat) {
+        if (!baseProps.includes(key) && chat[key] != null) {
+          params[key] = chat[key];
+        }
+      }
+      this.$.chatParams = params;
+      
+      // Force update options once state is fully set
+      this._updateComposerFooter();
+      
+      // Resume pending task if exists (e.g. browser was reloaded mid-chat)
+      if (chat.pendingTaskId) {
+        console.log(`[AgentChat] Resuming pending task: ${chat.pendingTaskId}`);
+        this._resumeTask(chatId, chat.pendingTaskId);
+      }
+      
     } catch (err) {
       console.error("[AgentChat] Catch error:", err);
       this.$.messages = [{ role: "system", text: `Load error: ${err.message}` }];
     }
+  }
+
+  /**
+   * Resume subscription to an in-flight task after browser reload.
+   * Opens a WS, sends chat.resume, and handles streaming events + final result.
+   */
+  _resumeTask(chatId, taskId) {
+    // Show status
+    this.$.messages = [...this.$.messages, { role: 'system', text: '⏳ Reconnecting to running task...' }];
+    if (this.ref.cellBg) this.ref.cellBg.toggle(true);
+
+    let ws = this._ensureChatWs();
+
+    let send = () => {
+      ws.send(JSON.stringify({ method: 'chat.resume', params: { chatId, taskId } }));
+    };
+
+    if (ws.readyState === WebSocket.OPEN) {
+      send();
+    } else {
+      ws.addEventListener('open', send, { once: true });
+    }
+
+    let onMessage = (e) => {
+      try {
+        let msg = JSON.parse(e.data);
+        switch (msg.method) {
+          case 'chat.resumed': {
+            let msgs = [...this.$.messages];
+            let last = msgs[msgs.length - 1];
+            if (last && last.role === 'system' && last.text.startsWith('⏳ Reconnecting')) {
+              last.text = msg.params?.status === 'running'
+                ? '✅ Reconnected — task still running...'
+                : '⏳ Task status unknown, waiting...';
+            }
+            this.$.messages = msgs;
+            break;
+          }
+
+          case 'chat.event': {
+            let ev = msg.params?.event;
+            if (!ev) break;
+            if (ev.type === 'message' && ev.role === 'system') {
+              let msgs = [...this.$.messages];
+              let last = msgs[msgs.length - 1];
+              if (last && last.role === 'system') {
+                last.text = ev.content || '';
+              } else {
+                msgs.push({ role: 'system', text: ev.content || '' });
+              }
+              this.$.messages = msgs;
+            } else if (ev.type === 'message' && ev.role === 'assistant') {
+              let msgs = [...this.$.messages];
+              let last = msgs[msgs.length - 1];
+              if (!last || last.role !== 'agent' || !last.streaming) {
+                msgs.push({ role: 'agent', text: ev.content || '', streaming: true });
+              } else {
+                last.text += (ev.content || '');
+              }
+              this.$.messages = msgs;
+            } else if (ev.type === 'tool_use') {
+              let msgs = [...this.$.messages];
+              msgs.push({ role: 'tool', name: ev.name || ev.tool_name, input: ev.parameters || ev.arguments, result: null, streaming: true });
+              this.$.messages = msgs;
+            } else if (ev.type === 'tool_result') {
+              let msgs = [...this.$.messages];
+              for (let i = msgs.length - 1; i >= 0; i--) {
+                if (msgs[i].role === 'tool' && msgs[i].streaming) {
+                  msgs[i].result = ev.output || ev.status;
+                  msgs[i].streaming = false;
+                  break;
+                }
+              }
+              this.$.messages = msgs;
+            }
+            break;
+          }
+
+          case 'chat.done': {
+            ws.removeEventListener('message', onMessage);
+            this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
+            if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+
+            let text = msg.params?.text || '';
+            let sessionMatch = text.match(/Session ID:\s*`([a-f0-9-]+)`/);
+            if (sessionMatch) {
+              this._sessionId = sessionMatch[1];
+              fetch("/api/chats/session", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatId, sessionId: this._sessionId }),
+              }).catch(() => {});
+            }
+
+            // Remove system status messages, add final reply
+            let cleaned = this.$.messages.filter(m => !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅'))));
+            if (text) cleaned.push({ role: 'agent', text });
+            this.$.messages = cleaned;
+
+            fetch("/api/chats/messages", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chatId, messages: this.$.messages }),
+            }).catch(() => {});
+
+            dashEmit("chats-updated");
+            this._setSending(false);
+            this._updateEmptyState();
+            break;
+          }
+
+          case 'chat.error': {
+            ws.removeEventListener('message', onMessage);
+            this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
+            if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+            let errText = msg.params?.text || msg.params?.error || 'Task failed';
+            
+            // If it's a "lost task" error, just show a temporary system message
+            if (errText.includes('lost')) {
+              this.$.messages = [...this.$.messages, { role: 'system', text: `⚠️ ${errText}` }];
+              // Clear pending task ID from backend
+              fetch("/api/chats/messages", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatId, messages: this.$.messages }),
+              }).catch(() => {});
+            } else {
+              this.$.messages = [...this.$.messages, { role: 'system', text: `Error: ${errText}` }];
+            }
+            
+            this._setSending(false);
+            this._updateEmptyState();
+            break;
+          }
+        }
+      } catch {}
+    };
+    ws.addEventListener('message', onMessage);
   }
 }
 

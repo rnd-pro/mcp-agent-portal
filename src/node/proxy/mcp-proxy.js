@@ -6,8 +6,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { AdapterPool } from '../adapters/pool.js';
 import { PluginLoader } from '../plugins/plugin-loader.js';
+import { updateChatTask, getChat, replaceChatMessages, updateChatSession } from '../config-store.js';
 
 const CONFIG_PATH = path.join(os.homedir(), '.gemini', 'agent-portal.json');
+
+const MAX_CRASHES = 10;
 
 export class MCPProxyManager {
   constructor() {
@@ -17,6 +20,8 @@ export class MCPProxyManager {
     this.monitors = new Set();
     /** @type {Map<string, Set<import('ws').WebSocket>>} taskId → chat WS clients */
     this.chatSubscriptions = new Map();
+    /** @type {Map<string, string>} taskId → chatId */
+    this.taskChatMap = new Map();
     this.multiplexerCallback = null;
     this.nextRequestId = 1;
     /** @type {Map<string, { resolve: Function, reject: Function }>} */
@@ -144,6 +149,14 @@ export class MCPProxyManager {
       settings.process = null;
       settings.pid = null;
 
+      // P1: Immediately reject all pending requests for this server
+      for (let [key, req] of this.pendingRequests) {
+        if (key.startsWith(`${serverName}:`)) {
+          this.pendingRequests.delete(key);
+          req.reject(new Error(`Server "${serverName}" crashed`));
+        }
+      }
+
       // Intentional shutdown (SIGTERM from stop/restart) — don't respawn
       if (signal === 'SIGTERM' || code === 0) {
         console.error(`🟡 [${serverName}] stopped (code=${code}, signal=${signal})`);
@@ -158,7 +171,13 @@ export class MCPProxyManager {
       this.broadcastMonitor({
         jsonrpc: '2.0',
         method: 'event',
-        params: { type: 'crash', server: serverName, code, attempt: settings.crashes, delay },
+        params: { 
+          type: 'crash', 
+          tool: serverName, 
+          ts: Date.now(),
+          success: false,
+          args: { code, attempt: settings.crashes, delay } 
+        },
       });
 
       this.pluginLoader.dispatchAlert({
@@ -169,12 +188,18 @@ export class MCPProxyManager {
         attempt: settings.crashes,
       });
 
+      // P3: Stop respawning after MAX_CRASHES consecutive failures
+      if (settings.crashes >= MAX_CRASHES) {
+        console.error(`🔴 [${serverName}] Exceeded ${MAX_CRASHES} consecutive crashes — giving up. Restart manually.`);
+        return;
+      }
+
       settings.respawnTimer = setTimeout(() => {
         this.spawnServer(serverName);
-        // Reset crash counter after 10s stable uptime
+        // P2: Reset crash counter after 60s stable uptime (was 10s)
         setTimeout(() => {
           if (settings.process) settings.crashes = 0;
-        }, 10000);
+        }, 60000);
       }, delay);
     });
 
@@ -226,7 +251,7 @@ export class MCPProxyManager {
    * @param {object} params
    * @returns {Promise<object>}
    */
-  requestFromChild(serverName, method, params) {
+  requestFromChild(serverName, method, params, timeout = 5000) {
     return new Promise((resolve, reject) => {
       let s = this.servers.get(serverName);
       if (!s || !s.process) {
@@ -247,7 +272,7 @@ export class MCPProxyManager {
           this.pendingRequests.delete(`${serverName}:${id}`);
           reject(new Error('Timeout'));
         }
-      }, 5000);
+      }, timeout);
     });
   }
 
@@ -454,14 +479,15 @@ export class MCPProxyManager {
         try {
           let msg = JSON.parse(data.toString());
           if (msg.method === 'chat.send') {
-            let { chatId, prompt, sessionId, timeout, model } = msg.params || {};
-            console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, model=${model}`);
+            let { chatId, prompt, sessionId, timeout, model, provider } = msg.params || {};
+            console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, provider=${provider}, model=${model}`);
             if (!prompt) return;
 
             // Delegate to agent-pool
             let delegateArgs = { prompt, timeout: timeout || 600 };
             if (sessionId) delegateArgs.session_id = sessionId;
             if (model) delegateArgs.model = model;
+            if (provider) delegateArgs.provider = provider;
 
             try {
               console.log(`💬 [Chat] Calling delegate_task...`, delegateArgs);
@@ -483,6 +509,19 @@ export class MCPProxyManager {
                   this.chatSubscriptions.set(taskId, new Set());
                 }
                 this.chatSubscriptions.get(taskId).add(ws);
+                // Persist taskId → chatId mapping for recovery
+                this.taskChatMap.set(taskId, chatId);
+                updateChatTask(chatId, taskId);
+
+                // Replay any notifications that arrived before we could subscribe
+                let cached = this.pendingNotifications?.get(taskId);
+                if (cached && cached.length > 0) {
+                  console.log(`💬 [Chat] Replaying ${cached.length} cached notification(s) for taskId=${taskId}`);
+                  for (let note of cached) {
+                    this.routeTaskNotification(note);
+                  }
+                  this.pendingNotifications.delete(taskId);
+                }
               }
               
               ws.send(JSON.stringify({
@@ -497,6 +536,39 @@ export class MCPProxyManager {
                   params: { chatId, error: err.message || 'Server error' },
                 }));
               }
+            }
+          } else if (msg.method === 'chat.resume') {
+            // Re-subscribe to an in-flight task (after browser reload)
+            let { chatId, taskId } = msg.params || {};
+            if (taskId) {
+              console.log(`💬 [Chat] Resuming subscription for taskId=${taskId}, chatId=${chatId}`);
+              if (!this.chatSubscriptions.has(taskId)) {
+                this.chatSubscriptions.set(taskId, new Set());
+              }
+              this.chatSubscriptions.get(taskId).add(ws);
+              this.taskChatMap.set(taskId, chatId);
+
+              // Check if task already completed while we were away
+              this.requestFromChild('agent-pool', 'tools/call', {
+                name: 'get_task_result',
+                arguments: { task_id: taskId },
+              }).then(result => {
+                let text = result.content?.[0]?.text || '';
+                // If result contains actual content, the task is done
+                if (text && !text.includes('still running')) {
+                  if (text.includes('Task not found')) {
+                    ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Task was lost (e.g. server restart). Please try again.' } }));
+                  } else {
+                    ws.send(JSON.stringify({ method: 'chat.done', params: { taskId, text } }));
+                  }
+                  this.chatSubscriptions.delete(taskId);
+                  updateChatTask(chatId, null);
+                } else {
+                  ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
+                }
+              }).catch(() => {
+                ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'unknown' } }));
+              });
             }
           }
         } catch (e) {}
@@ -521,8 +593,33 @@ export class MCPProxyManager {
     let { taskId, type, data } = notification.params || {};
     if (!taskId) return;
 
+    console.log(`💬 [TaskNotify] taskId=${taskId} type=${type}`);
+
     let clients = this.chatSubscriptions.get(taskId);
-    if (!clients || clients.size === 0) return;
+    if (!clients || clients.size === 0) {
+      console.log(`💬 [TaskNotify] No subscribers for taskId=${taskId}, type=${type} — caching for 5s`);
+      
+      // Cache notification in case subscription is still resolving
+      if (!this.pendingNotifications) this.pendingNotifications = new Map();
+      if (!this.pendingNotifications.has(taskId)) {
+        this.pendingNotifications.set(taskId, []);
+        // Clean up after 5s to avoid memory leak if no client ever subscribes
+        setTimeout(() => this.pendingNotifications.delete(taskId), 5000);
+      }
+      this.pendingNotifications.get(taskId).push(notification);
+
+      // Even without subscribers, clear pending task on done/error
+      if (type === 'done' || type === 'error') {
+        let chatId = this.taskChatMap.get(taskId);
+        if (chatId) {
+          this.taskChatMap.delete(taskId);
+          updateChatTask(chatId, null);
+        }
+      }
+      return;
+    }
+
+    console.log(`💬 [TaskNotify] Routing to ${clients.size} client(s)`);
 
     let method = type === 'done' ? 'chat.done'
       : type === 'error' ? 'chat.error'
@@ -543,8 +640,19 @@ export class MCPProxyManager {
           }
         }
         this.chatSubscriptions.delete(taskId);
+        // Persist result into chat and clear pending task
+        let chatId = this.taskChatMap.get(taskId);
+        if (chatId) {
+          this.taskChatMap.delete(taskId);
+          updateChatTask(chatId, null);
+        }
       }).catch(() => {
         this.chatSubscriptions.delete(taskId);
+        let chatId = this.taskChatMap.get(taskId);
+        if (chatId) {
+          this.taskChatMap.delete(taskId);
+          updateChatTask(chatId, null);
+        }
       });
     } else {
       // Stream event
