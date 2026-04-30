@@ -118,6 +118,12 @@ function connectDashboardWS(e,t,o,_att=0){
       return void(r&&t.project&&(Object.assign(r,{projectName:t.project.name,projectPath:t.project.path,color:t.project.color,agents:t.project.agents,pid:t.project.pid,connected:!0}),dashEmit("projects-updated",dashState.projects)))
     }
     if("patch"===o.method&&o.params){
+      if(o.params.path==="chats.created"||o.params.path==="chats.updated"){
+        fetch('/api/chats').then(r=>r.json()).then(d=>{dashState.chats=d.chats||[];dashEmit("chats-updated");});
+      }
+      if(o.params.path==="projects.opened"){
+        fetch('/api/projects/history').then(r=>r.json()).then(d=>{dashState.projectHistory=d.projects||[];dashEmit("projects-history-updated");});
+      }
       const t=dashState.projects.find(t=>t.prefix===e.prefix);
       return void(t&&"project.agents"===o.params.path&&(t.agents=o.params.value,dashEmit("projects-updated",dashState.projects)))
     }

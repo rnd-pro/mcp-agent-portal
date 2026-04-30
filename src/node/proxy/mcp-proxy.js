@@ -13,7 +13,8 @@ const CONFIG_PATH = path.join(os.homedir(), '.gemini', 'agent-portal.json');
 const MAX_CRASHES = 10;
 
 export class MCPProxyManager {
-  constructor() {
+  constructor(projectRoot = process.cwd()) {
+    this.projectRoot = projectRoot;
     /** @type {Map<string, object>} */
     this.servers = new Map();
     /** @type {Set<import('ws').WebSocket>} */
@@ -407,6 +408,15 @@ export class MCPProxyManager {
       const { MCPMultiplexer } = await import('./mcp-multiplexer.js');
       let multiplexer = new MCPMultiplexer(this, ws);
       multiplexer.listen();
+
+      // Automatically register project and notify UI
+      try {
+        let { addProject } = await import('../config-store.js');
+        let proj = addProject({ path: this.projectRoot });
+        this.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'projects.opened', value: proj.id } });
+      } catch (err) {
+        console.error('🔴 [mcp-proxy] Failed to auto-register project:', err);
+      }
     });
   }
 

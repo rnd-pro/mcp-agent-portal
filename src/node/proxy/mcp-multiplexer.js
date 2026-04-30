@@ -44,6 +44,31 @@ let META_TOOLS = [
       properties: {},
     },
   },
+  {
+    name: 'create_chat',
+    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns the newly created chat ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name or title for the new chat.' },
+        adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "gemini"). Optional.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'send_chat_message',
+    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: 'ID of the chat session (returned from create_chat).' },
+        text: { type: 'string', description: 'Text content of the message.' },
+        role: { type: 'string', description: 'Role of the sender (e.g. "agent", "user"). Defaults to "agent".' },
+      },
+      required: ['chatId', 'text'],
+    },
+  },
 ];
 
 export class MCPMultiplexer {
@@ -230,7 +255,9 @@ export class MCPMultiplexer {
     return [
       { ...META_TOOLS[0], description: discoverDesc },
       META_TOOLS[1],
-      META_TOOLS[2]
+      META_TOOLS[2],
+      META_TOOLS[3],
+      META_TOOLS[4]
     ];
   }
 
@@ -269,6 +296,35 @@ export class MCPMultiplexer {
           result: {
             content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
           },
+        });
+        return;
+      }
+
+      if (toolName === 'create_chat') {
+        let { createChat } = await import('../config-store.js');
+        let chat = createChat({ name: args.name, adapter: args.adapter || 'pool' });
+        // Broadcast event so UI reactive tabs open automatically
+        this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: { content: [{ type: 'text', text: `Chat created. ID: ${chat.id}` }] }
+        });
+        return;
+      }
+
+      if (toolName === 'send_chat_message') {
+        let { appendChatMessage } = await import('../config-store.js');
+        appendChatMessage(args.chatId, {
+          role: args.role || 'agent',
+          text: args.text
+        });
+        // Broadcast event for UI reactive updates
+        this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: args.chatId } });
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: { content: [{ type: 'text', text: 'Message sent successfully.' }] }
         });
         return;
       }
