@@ -16,8 +16,8 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
-let CONFIG_PATH = path.join(os.homedir(), '.gemini', 'agent-portal.json');
-let CHATS_DIR = path.join(os.homedir(), '.gemini', 'agent-portal-chats');
+let CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.gemini', 'agent-portal.json');
+let CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(os.homedir(), '.gemini', 'agent-portal-chats');
 
 /** @returns {object} */
 export function readConfig() {
@@ -149,6 +149,7 @@ export function listChats() {
       chats.push({
         id: data.id,
         projectId: data.projectId || null,
+        parentChatId: data.parentChatId || null,
         name: data.name || 'Untitled',
         adapter: data.adapter || 'pool',
         model: data.model || null,
@@ -175,7 +176,7 @@ export function getChat(chatId) {
 
 /**
  * Create a new chat.
- * @param {{ projectId?: string, name?: string, adapter?: string, model?: string }} opts
+ * @param {{ projectId?: string, parentChatId?: string, name?: string, adapter?: string, model?: string }} opts
  * @returns {{ id: string }}
  */
 export function createChat(opts = {}) {
@@ -184,6 +185,7 @@ export function createChat(opts = {}) {
   let chat = {
     id,
     projectId: opts.projectId || null,
+    parentChatId: opts.parentChatId || null,
     name: opts.name || 'New Chat',
     adapter: opts.adapter || 'pool',
     model: opts.model || null,
@@ -240,7 +242,7 @@ export function updateChat(chatId, updates) {
   if (!chat) return;
 
   // Whitelist of keys that can be updated via API
-  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId']);
+  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId', 'parentChatId']);
 
   for (let key of Object.keys(updates)) {
     if (!allowedKeys.has(key)) continue;

@@ -28,8 +28,11 @@
 </div>
 </header>
 <project-tabs></project-tabs>
-<div class="app-workspace">
-<div class="app-content"></div>
+<div id="main-layout" class="app-workspace">
+<layout-sidebar id="app-sidebar"></layout-sidebar>
+<div class="app-content">
+  <panel-layout id="app-layout" min-panel-size="150"></panel-layout>
+</div>
 </div>
 </div>
 <script type="module" src="app.js"></script>

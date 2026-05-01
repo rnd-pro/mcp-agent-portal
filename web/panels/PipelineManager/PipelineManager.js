@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { api } from '../../app.js';
+import { mcpCall } from '../../common/mcp-call.js';
 import template from './PipelineManager.tpl.js';
 import css from '../../common/ui-shared.css.js';
 
@@ -16,26 +16,8 @@ export class PipelineManager extends Symbiote {
     this.loadPipelines();
   }
 
-  async _mcpCall(toolName, args = {}) {
-    const res = await fetch("/api/mcp-call", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        serverName: "agent-pool",
-        method: "tools/call",
-        params: { name: toolName, arguments: args }
-      })
-    });
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
-    const data = await res.json();
-    if (data.isError) throw new Error(data.content?.[0]?.text || data.error || "Tool error");
-    
-    const resultText = data.content?.[0]?.text || data.text || data.response;
-    try {
-      return JSON.parse(resultText);
-    } catch {
-      return resultText;
-    }
+  _mcpCall(toolName, args = {}) {
+    return mcpCall('agent-pool', toolName, args);
   }
 
   async loadPipelines() {
@@ -56,17 +38,17 @@ export class PipelineManager extends Symbiote {
   }
 
   renderSidebar() {
-    const list = this.ref.pipelineList;
+    let list = this.ref.pipelineList;
     list.innerHTML = '';
     
-    const pipelines = this.$.pipelines;
+    let pipelines = this.$.pipelines;
     if (!pipelines || pipelines.length === 0) {
       list.innerHTML = '<div class="ui-empty-state">No pipelines found</div>';
       return;
     }
     
     pipelines.forEach(p => {
-      const item = document.createElement('div');
+      let item = document.createElement('div');
       item.className = 'ui-item' + (this.$.selectedPipelineId === p.name ? ' active' : '');
       item.innerHTML = `<div class="ui-item-title">${p.name}</div>`;
       item.onclick = () => {
@@ -79,10 +61,10 @@ export class PipelineManager extends Symbiote {
   }
 
   showPipelineDetails(pipeline) {
-    const main = this.ref.mainContent;
+    let main = this.ref.mainContent;
     main.innerHTML = '';
     
-    const container = document.createElement('div');
+    let container = document.createElement('div');
     container.className = 'ui-details';
     
     let stepsHtml = pipeline.steps.map(s => `

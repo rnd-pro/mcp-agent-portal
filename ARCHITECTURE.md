@@ -43,6 +43,16 @@ IDE Window 3 ──stdio──┘                 │ (detached process)    │
 2. **Subsequent IDE windows**: Detect the backend via `~/.local-gateway/backends/` port files and connect via WebSocket.
 3. **Zero-Zombie**: The backend outlives the IDE windows and manages all child processes in detached process groups. On shutdown, it cleans up all children automatically.
 
+### Workspace Registration
+
+When an IDE connects, the MCP `initialize` message carries `params.roots` — the workspace directories the IDE has open. The portal extracts these roots and automatically:
+
+1. Creates a project entry in `~/.gemini/agent-portal.json` (deduplication by path)
+2. Adds it to the active project tabs
+3. Broadcasts `projects.opened` to the web UI for real-time tab creation
+
+This means each IDE window registers its **own workspace**, not the portal's install directory. Multiple IDE windows editing different projects all appear as separate tabs in the dashboard.
+
 ### Dual Mode
 
 Agent Portal provides two interfaces to the same singleton backend:
@@ -55,6 +65,12 @@ Agent Portal provides two interfaces to the same singleton backend:
 The IDE connects to the portal's `/mcp-ws` endpoint. The web UI runs on a random port, accessible via `http://portal.local` (local gateway).
 
 ### MCP Aggregation
+
+When your IDE sends `initialize { params: { roots: [...] } }`:
+
+1. Portal extracts workspace roots and registers them as dashboard project tabs
+2. Portal responds with its capabilities (`tools`, `resources`)
+3. Portal broadcasts `initialize` to all child MCP servers
 
 When your IDE sends `tools/call { name: "get_skeleton" }`:
 
@@ -280,14 +296,14 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 | `/api/project-info` | GET | Portal metadata |
 | `/api/server-status` | GET | Uptime, server count, monitor count |
 | `/api/stop` | POST | Graceful shutdown |
-| `/api/restart` | POST | Restart portal |
+| `/api/restart` | POST | Restart portal (spawn-before-exit) |
 | `/api/*` | * | Fallback HTTP proxy to local-gateway backends |
 
 ## Project Structure
 
 ```
 mcp-agent-portal/
-├── bin/mcp-agent-portal.js           # Restart wrapper (exit code 2 = respawn)
+├── bin/mcp-agent-portal.js           # CLI entry point + exit(2) respawn fallback
 ├── index.js                     # Entry point: web server + stdio MCP
 ├── package.json
 ├── eslint.config.js             # Flat ESLint config for IDE highlighting

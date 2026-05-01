@@ -48,16 +48,36 @@ const _layouts = new Map();
  * @param {string} opts.icon — Material Symbols icon name
  * @param {string} opts.label — Sidebar label
  * @param {number} [opts.order=100] — Sort order in sidebar
+ * @param {string} [opts.scope='both'] — 'home' | 'project' | 'both'
  * @param {Function} opts.layout — Factory returning LayoutTree node
  */
-export function registerSection(id, { icon, label, order = 100, layout }) {
-  _sections.set(id, { id, icon, label, order });
+export function registerSection(id, { icon, label, order = 100, scope = 'both', layout }) {
+  _sections.set(id, { id, icon, label, order, scope });
   if (layout) _layouts.set(id, layout);
 }
 
-/** Get sorted sections array for sidebar */
+/** Get sorted sections array for sidebar (all) */
 export function getSections() {
   return [..._sections.values()].sort((a, b) => a.order - b.order);
+}
+
+/** Get sorted sections array for Home workspace */
+export function getHomeSections() {
+  return getSections().filter(s => s.scope === 'home' || s.scope === 'both');
+}
+
+/** Get sorted sections array for Project workspaces */
+export function getProjectSections() {
+  return getSections().filter(s => s.scope === 'project' || s.scope === 'both');
+}
+
+/**
+ * Get sorted sections for the current scope.
+ * @param {string|null} projectId — null for Home, string for Project
+ * @returns {Array}
+ */
+export function getSectionsForScope(projectId) {
+  return projectId ? getProjectSections() : getHomeSections();
 }
 
 /** Get layout tree for a section */
@@ -74,7 +94,7 @@ export function hasSection(id) {
 // ── Core Sections ───────────────────────────────────────────────
 
 registerSection('dashboard', {
-  icon: 'dashboard', label: 'Dashboard', order: 10,
+  icon: 'dashboard', label: 'Dashboard', order: 10, scope: 'home',
   layout: () => {
     let workspace = LayoutTree.createSplit('horizontal',
       LayoutTree.createPanel('project-list'),
@@ -87,22 +107,22 @@ registerSection('dashboard', {
 });
 
 registerSection('marketplace', {
-  icon: 'storefront', label: 'Marketplace', order: 25,
+  icon: 'storefront', label: 'Marketplace', order: 25, scope: 'home',
   layout: () => LayoutTree.createPanel('marketplace')
 });
 
 registerSection('topology', {
-  icon: 'hub', label: 'Topology', order: 27,
+  icon: 'hub', label: 'Topology', order: 27, scope: 'home',
   layout: () => LayoutTree.createPanel('topology-panel')
 });
 
 registerSection('tool-explorer', {
-  icon: 'build', label: 'Tool Explorer', order: 28,
+  icon: 'build', label: 'Tool Explorer', order: 28, scope: 'home',
   layout: () => LayoutTree.createPanel('tool-explorer')
 });
 
 registerSection('orchestration', {
-  icon: 'account_tree', label: 'Orchestration', order: 29,
+  icon: 'account_tree', label: 'Orchestration', order: 29, scope: 'home',
   layout: () => LayoutTree.createSplit('horizontal',
     LayoutTree.createSplit('vertical',
       LayoutTree.createPanel('active-tasks'),
@@ -113,7 +133,7 @@ registerSection('orchestration', {
 });
 
 registerSection('skills', {
-  icon: 'school', label: 'Skills & Policies', order: 30,
+  icon: 'school', label: 'Skills & Policies', order: 30, scope: 'home',
   layout: () => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('skill-mgr'),
     LayoutTree.createPanel('peer-review'), 0.6
@@ -121,7 +141,7 @@ registerSection('skills', {
 });
 
 registerSection('explorer', {
-  icon: 'folder_open', label: 'Explorer', order: 30,
+  icon: 'folder_open', label: 'Explorer', order: 30, scope: 'project',
   layout: () => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('file-tree'),
     LayoutTree.createSplit('horizontal',
@@ -131,14 +151,14 @@ registerSection('explorer', {
 });
 
 registerSection('graph', {
-  icon: 'developer_board', label: 'Graph', order: 40,
+  icon: 'developer_board', label: 'Graph', order: 40, scope: 'project',
   layout: () => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('file-tree'),
     LayoutTree.createPanel('dep-graph'), 0.18)
 });
 
 registerSection('follow', {
-  icon: 'smart_toy', label: 'Follow', order: 50,
+  icon: 'smart_toy', label: 'Follow', order: 50, scope: 'project',
   layout: () => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('file-tree'),
     LayoutTree.createSplit('vertical',
@@ -151,16 +171,21 @@ registerSection('follow', {
 });
 
 registerSection('analysis', {
-  icon: 'analytics', label: 'Analysis', order: 60,
+  icon: 'analytics', label: 'Analysis', order: 60, scope: 'project',
   layout: () => LayoutTree.createPanel('health')
 });
 
 registerSection('monitor', {
-  icon: 'monitor_heart', label: 'Monitor', order: 70,
+  icon: 'monitor_heart', label: 'Monitor', order: 70, scope: 'both',
   layout: () => LayoutTree.createPanel('monitor')
 });
 
 registerSection('settings', {
-  icon: 'settings', label: 'Settings', order: 100,
+  icon: 'settings', label: 'Settings', order: 100, scope: 'both',
   layout: () => LayoutTree.createPanel('settings')
+});
+
+registerSection('agent-chat', {
+  icon: 'smart_toy', label: 'Agent Chat', order: 20, scope: 'project',
+  layout: () => LayoutTree.createPanel('agent-chat')
 });

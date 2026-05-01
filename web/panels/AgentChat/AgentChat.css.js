@@ -171,6 +171,66 @@ pg-agent-chat {
 .chat-item:hover .chat-item-delete { display: flex; }
 .chat-item-delete:hover { color: #ef5350; }
 
+/* ── Chat Hierarchy (delegation tree) ── */
+
+.chat-expand-icon {
+  font-size: 14px !important;
+  transition: transform 0.15s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.chat-expand-icon:hover {
+  opacity: 1;
+}
+
+.chat-item-expanded .chat-expand-icon {
+  transform: rotate(90deg);
+}
+
+.chat-sub-items {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+
+.chat-sub-items[expanded] {
+  max-height: 500px;
+}
+
+.chat-item-child {
+  padding-left: 28px;
+  font-size: 12px;
+  min-height: 24px;
+  position: relative;
+}
+
+.chat-item-child::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-item-child .material-symbols-outlined {
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+.chat-item-child[active] {
+  border-left: 2px solid #666;
+  padding-left: 26px;
+}
+
+.chat-nav[collapsed] .chat-sub-items,
+.chat-nav[collapsed] .chat-expand-icon {
+  display: none;
+}
+
 /* ── Chat View ── */
 
 .chat-view {

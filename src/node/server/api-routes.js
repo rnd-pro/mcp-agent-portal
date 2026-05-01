@@ -7,9 +7,15 @@
  * @module api-routes
  */
 import { readConfig, writeConfig, getAllProviderModels, setProviderModels } from '../config-store.js';
+import { getStateGraph } from '../state-graph.js';
 import { lintFile } from './lint-service.js';
 import { listAdapterTypes, discoverOpenCodeModels, getCLIModels } from '../adapters/index.js';
 import { REGISTRY, getRegistryByCategory, findInRegistry } from './marketplace-registry.js';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+let __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Parse JSON body from request.
@@ -140,7 +146,17 @@ export function createRoutes(ctx) {
     'POST /api/restart': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, message: 'Restarting...' }));
-      setTimeout(() => process.exit(2), 500);
+      setTimeout(async () => {
+        let { removePortFile } = await import('./backend-lifecycle.js');
+        let backendScript = path.join(__dirname, 'backend.js');
+        removePortFile(projectRoot);
+        spawn(process.execPath, [backendScript, path.resolve(projectRoot)], {
+          detached: true,
+          stdio: 'ignore',
+          env: { ...process.env, PORTAL_BACKEND: '1' },
+        }).unref();
+        setTimeout(() => process.exit(0), 300);
+      }, 200);
     },
 
     'POST /api/mcp-call': async (req, res) => {
@@ -242,6 +258,56 @@ export function createRoutes(ctx) {
         }
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
+    // ── State Graph ───────────────────────────────────────
+
+    'GET /api/state': (req, res) => {
+      let sg = getStateGraph();
+      let url = new URL(req.url, 'http://localhost');
+      let p = url.searchParams.get('path') || '';
+      let sinceParam = url.searchParams.get('since');
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+
+      // Delta sync via ?since=N
+      if (sinceParam) {
+        let sinceVersion = parseInt(sinceParam, 10);
+        let patches = sg.getPatches(sinceVersion);
+        if (patches) {
+          res.end(JSON.stringify({ ok: true, v: sg.version, patches }));
+        } else {
+          // Too old — send full snapshot
+          res.end(JSON.stringify({ ok: true, ...sg.getSnapshot() }));
+        }
+        return;
+      }
+
+      // Path query or full snapshot
+      if (p) {
+        res.end(JSON.stringify({ ok: true, v: sg.version, path: p, value: sg.get(p) }));
+      } else {
+        res.end(JSON.stringify({ ok: true, ...sg.getSnapshot() }));
+      }
+    },
+
+    'POST /api/state/commit': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let ops = body.ops;
+        if (!Array.isArray(ops) || ops.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing ops array' }));
+          return;
+        }
+        let sg = getStateGraph();
+        let v = sg.commit(ops, body.source || 'http');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, v }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     },

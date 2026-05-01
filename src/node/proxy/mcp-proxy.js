@@ -7,6 +7,7 @@ import os from 'node:os';
 import { AdapterPool } from '../adapters/pool.js';
 import { PluginLoader } from '../plugins/plugin-loader.js';
 import { updateChatTask, getChat, replaceChatMessages, updateChatSession } from '../config-store.js';
+import { getStateGraph } from '../state-graph.js';
 
 const CONFIG_PATH = path.join(os.homedir(), '.gemini', 'agent-portal.json');
 
@@ -28,6 +29,8 @@ export class MCPProxyManager {
     this.nextRequestId = 1;
     /** @type {Map<string, { resolve: Function, reject: Function }>} */
     this.pendingRequests = new Map();
+    /** @type {Set<import('ws').WebSocket>} state sync WS clients */
+    this._stateClients = new Set();
     this.adapterPool = new AdapterPool({});
     this.pluginLoader = new PluginLoader({}, { adapterPool: this.adapterPool, mcpProxy: this, broadcast: (msg) => this.broadcastMonitor(msg) });
     /** @type {Function|null} Called when servers are added/removed */
@@ -119,6 +122,7 @@ export class MCPProxyManager {
 
     let env = { ...process.env, ...settings.env };
     let child = spawn(settings.command, settings.args, {
+      cwd: settings.cwd || this.projectRoot,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -372,6 +376,100 @@ export class MCPProxyManager {
     }
   }
 
+  handleStateWs(req, socket, head) {
+    let wss = new WebSocketServer({ noServer: true });
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      this._stateClients.add(ws);
+      ws._pendingMessages = 0;
+
+      let sg = getStateGraph();
+      let url = new URL(req.url, 'http://localhost');
+      let sinceParam = url.searchParams.get('since');
+      let sinceVersion = sinceParam ? parseInt(sinceParam, 10) : 0;
+
+      // Delta sync: send only missed patches if possible
+      if (sinceVersion > 0) {
+        let patches = sg.getPatches(sinceVersion);
+        if (patches) {
+          // Delta sync — send individual patches
+          for (let p of patches) {
+            ws.send(JSON.stringify({
+              jsonrpc: '2.0', method: 'patch',
+              params: { v: p.v, ops: p.ops },
+            }));
+          }
+        } else {
+          // Too old — full snapshot
+          let snap = sg.getSnapshot();
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0', method: 'snapshot',
+            params: snap,
+          }));
+        }
+      } else {
+        // First connect — full snapshot
+        let snap = sg.getSnapshot();
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0', method: 'snapshot',
+          params: snap,
+        }));
+      }
+
+      ws.on('close', () => this._stateClients.delete(ws));
+      ws.on('error', () => this._stateClients.delete(ws));
+
+      // Handle incoming mutations from client
+      ws.on('message', (raw) => {
+        try {
+          let msg = JSON.parse(raw.toString());
+          if (msg.method === 'commit' && Array.isArray(msg.params?.ops)) {
+            sg.commit(msg.params.ops, msg.params?.source || 'browser');
+          }
+        } catch (err) {
+          console.error('[StateWS] message error:', err.message);
+        }
+      });
+    });
+  }
+
+  /**
+   * Initialize StateGraph commit listener for versioned WS broadcast.
+   * Call once after constructor.
+   */
+  initStateSync() {
+    let sg = getStateGraph();
+    const { MAX_WS_QUEUE } = /** @type {any} */ (
+      /** @type {typeof import('../state-graph.js')} */ ({MAX_WS_QUEUE: 500})
+    );
+
+    sg.on('commit', ({ v, ops, source }) => {
+      let msg = JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'patch',
+        params: { v, ops },
+      });
+      for (let client of this._stateClients) {
+        try {
+          if (client.readyState !== 1) {
+            this._stateClients.delete(client);
+            continue;
+          }
+          // Backpressure: disconnect slow clients
+          client._pendingMessages = (client._pendingMessages || 0) + 1;
+          if (client._pendingMessages > MAX_WS_QUEUE) {
+            console.warn('[StateWS] Backpressure: disconnecting slow client');
+            client.close(4001, 'Too slow');
+            this._stateClients.delete(client);
+            continue;
+          }
+          client.send(msg, () => { client._pendingMessages--; });
+        } catch {
+          this._stateClients.delete(client);
+        }
+      }
+    });
+  }
+
   handleUpgrade(req, socket, head) {
     let url = new URL(req.url, 'http://localhost');
     let parts = url.pathname.split('/').filter(Boolean);
@@ -388,6 +486,11 @@ export class MCPProxyManager {
 
     if (parts[0] === 'ws' && parts[1] === 'chat') {
       this.handleChatWs(req, socket, head);
+      return true;
+    }
+
+    if (parts[0] === 'ws' && parts[1] === 'state') {
+      this.handleStateWs(req, socket, head);
       return true;
     }
 
@@ -408,15 +511,7 @@ export class MCPProxyManager {
       const { MCPMultiplexer } = await import('./mcp-multiplexer.js');
       let multiplexer = new MCPMultiplexer(this, ws);
       multiplexer.listen();
-
-      // Automatically register project and notify UI
-      try {
-        let { addProject } = await import('../config-store.js');
-        let proj = addProject({ path: this.projectRoot });
-        this.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'projects.opened', value: proj.id } });
-      } catch (err) {
-        console.error('🔴 [mcp-proxy] Failed to auto-register project:', err);
-      }
+      // Project registration happens in multiplexer on initialize (from IDE roots)
     });
   }
 
@@ -618,6 +713,27 @@ export class MCPProxyManager {
     if (!taskId) return;
 
     console.log(`💬 [TaskNotify] taskId=${taskId} type=${type}`);
+
+    // Mirror task state into StateGraph for UI visibility + persistence
+    let sg = getStateGraph();
+    let meta = data?.meta;
+    if (meta && type !== 'event') {
+      let ops = [{ op: 'set', path: `tasks/${taskId}`, value: {
+        ...meta,
+        type, // last notification type
+        updatedAt: Date.now(),
+      }}];
+      // Remove completed tasks from graph after a delay (10 min TTL)
+      if (type === 'done' || type === 'error' || type === 'cancelled') {
+        // Schedule cleanup — keep in graph briefly for UI to display result
+        setTimeout(() => {
+          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch {}
+        }, 10 * 60 * 1000);
+      }
+      try { sg.commit(ops, `agent-pool:${type}`); } catch (err) {
+        console.error(`[TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
+      }
+    }
 
     let clients = this.chatSubscriptions.get(taskId);
     if (!clients || clients.size === 0) {

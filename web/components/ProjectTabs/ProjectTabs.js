@@ -1,29 +1,19 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
-import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
+import { navigate, getRoute, parseQuery } from 'symbiote-node';
 import css from './ProjectTabs.css.js';
 import tpl from './ProjectTabs.tpl.js';
 
 /**
  * ProjectTabs — browser-style tab bar for switching between project workspaces.
  *
- * Uses a SINGLE panel-layout instance. The layout tree root is always:
- *   split(horizontal, [workspace], [globalChat], ratio)
- *
- * The `second` child (marked global:true) stays constant across tab switches.
- * Only the `first` child (workspace) is swapped per project.
- * All layout features (resize, collapse, fullscreen) work naturally.
+ * Unified routing: tab clicks navigate via URL ?project= param.
+ * No multi-workspace DOM — a single sidebar + panel-layout is managed by app.js.
  */
 export class ProjectTabs extends Symbiote {
   init$ = {
     activeId: null,
   };
-
-  /** @type {Map<string|null, object>} projectId → saved workspace subtree */
-  _workspaceTrees = new Map();
-
-  /** @type {HTMLElement|null} */
-  _layout = null;
 
   renderCallback() {
     this._renderTabs();
@@ -31,15 +21,12 @@ export class ProjectTabs extends Symbiote {
     dashEvents.addEventListener('projects-history-updated', () => this._renderTabs());
     dashEvents.addEventListener('active-project-changed', (e) => {
       let newId = e.detail?.id || null;
-      let oldId = this.$.activeId;
-      if (newId === oldId) return;
-
-      this._switchProject(oldId, newId);
+      if (newId === this.$.activeId) return;
       this.$.activeId = newId;
       this._highlightActive();
     });
 
-    // Self-register with router: react to ?project= URL param changes
+    // Sync tab highlight from URL on hash change
     this.sub('ROUTER/query', () => {
       this._syncProjectFromRouter();
     });
@@ -50,9 +37,8 @@ export class ProjectTabs extends Symbiote {
     // Home tab click
     let homeTab = this.querySelector('.tab[active]');
     homeTab?.addEventListener('click', () => {
-      dashState.activeProjectId = null;
-      setGlobalParam('project', null);
-      dashEmit('active-project-changed', { id: null });
+      // Navigate to dashboard, clearing project param
+      navigate('dashboard', '', { project: null });
     });
 
     // Add button
@@ -64,49 +50,9 @@ export class ProjectTabs extends Symbiote {
     let globals = parseQuery(route.query || '');
     let projectId = globals.project || null;
 
-    if (projectId && projectId !== dashState.activeProjectId) {
-      dashState.activeProjectId = projectId;
-      dashEmit('active-project-changed', { id: projectId, fromRoute: true });
-    }
-  }
-
-  /** Get the main panel-layout element */
-  _getLayout() {
-    if (!this._layout) {
-      this._layout = document.querySelector('#main-layout');
-    }
-    return this._layout;
-  }
-
-  /**
-   * Switch workspace subtree when changing project tabs.
-   * Saves current workspace tree, restores target's tree.
-   * The global portion (chat) is never touched.
-   */
-  _switchProject(oldId, newId) {
-    let layout = this._getLayout();
-    if (!layout || !layout.$.layoutTree) return;
-
-    let tree = layout.$.layoutTree;
-
-    // Save current workspace subtree (tree.first) for old project
-    if (tree.type === 'split' && tree.first) {
-      this._workspaceTrees.set(oldId, JSON.parse(JSON.stringify(tree.first)));
-    }
-
-    // Restore workspace subtree for new project
-    let savedWorkspace = this._workspaceTrees.get(newId);
-
-    if (tree.type === 'split') {
-      if (savedWorkspace) {
-        tree.first = savedWorkspace;
-      }
-      // If no saved workspace for this project, keep current workspace
-      // (user can rearrange as needed)
-
-      // Trigger layout re-render
-      layout.$.layoutTree = { ...tree };
-      layout._saveLayout();
+    if (projectId !== this.$.activeId) {
+      this.$.activeId = projectId;
+      this._highlightActive();
     }
   }
 
@@ -125,7 +71,7 @@ export class ProjectTabs extends Symbiote {
       btn.className = 'tab';
       btn.dataset.id = id;
       if (proj.color) btn.style.setProperty('--tab-accent', proj.color);
-      if (id === dashState.activeProjectId) btn.setAttribute('active', '');
+      if (id === this.$.activeId) btn.setAttribute('active', '');
 
       btn.innerHTML = `
         <span class="tab-dot"></span>
@@ -135,9 +81,14 @@ export class ProjectTabs extends Symbiote {
 
       btn.addEventListener('click', (e) => {
         if (e.target.closest('.tab-close')) return;
-        dashState.activeProjectId = id;
-        setGlobalParam('project', id);
-        dashEmit('active-project-changed', { id, project: proj });
+        // Navigate to project default section via URL
+        let defaultSection = 'explorer';
+        // If already on this project, keep current section
+        let route = getRoute();
+        let currentGlobals = parseQuery(route.query || '');
+        if (currentGlobals.project === id) return;
+
+        navigate(defaultSection, '', { project: id });
       });
 
       btn.querySelector('.tab-close').addEventListener('click', async (e) => {
@@ -148,14 +99,11 @@ export class ProjectTabs extends Symbiote {
           body: JSON.stringify({ id }),
         });
 
-        // Clean up saved tree
-        this._workspaceTrees.delete(id);
         dashState.openProjectIds = dashState.openProjectIds.filter(i => i !== id);
 
-        if (dashState.activeProjectId === id) {
-          dashState.activeProjectId = null;
-          setGlobalParam('project', null);
-          dashEmit('active-project-changed', { id: null });
+        if (this.$.activeId === id) {
+          // Switch to Home
+          navigate('dashboard', '', { project: null });
         }
         this._renderTabs();
       });
@@ -169,8 +117,8 @@ export class ProjectTabs extends Symbiote {
     tabs.forEach(tab => {
       let isHome = !tab.dataset.id;
       let isActive = isHome
-        ? !dashState.activeProjectId
-        : tab.dataset.id === dashState.activeProjectId;
+        ? !this.$.activeId
+        : tab.dataset.id === this.$.activeId;
       if (isActive) tab.setAttribute('active', '');
       else tab.removeAttribute('active');
     });
@@ -209,9 +157,8 @@ export class ProjectTabs extends Symbiote {
       if (!dashState.openProjectIds.includes(id)) {
         dashState.openProjectIds.push(id);
       }
-      dashState.activeProjectId = id;
-      setGlobalParam('project', id);
-      dashEmit('active-project-changed', { id, project: proj });
+      // Navigate via URL
+      navigate('explorer', '', { project: id });
       this._renderTabs();
     }
   }
@@ -226,12 +173,11 @@ export class ProjectTabs extends Symbiote {
     let data = await res.json();
     if (data.ok) {
       await this._fetchHistory();
-      dashState.activeProjectId = data.id;
       if (!dashState.openProjectIds.includes(data.id)) {
         dashState.openProjectIds.push(data.id);
       }
-      dashEmit('active-project-changed', { id: data.id });
-      setGlobalParam('project', data.id);
+      // Navigate via URL
+      navigate('explorer', '', { project: data.id });
       this._renderTabs();
     }
   }

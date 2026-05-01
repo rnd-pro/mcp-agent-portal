@@ -30,14 +30,17 @@
 Agent Portal runs as a **detached singleton backend** to prevent resource exhaustion when opening multiple IDE windows.
 
 ```
-IDE Window 1 ──stdio──┐                 ┌───────────────────────┐
-IDE Window 2 ──stdio──┼───WebSocket────▶│ Singleton Backend     │
-IDE Window 3 ──stdio──┘                 │ (detached process)    │
-                                        └──┬────────┬───────────┘
-                                           │        │
-                                           ▼        ▼
-                                       project-   agent-
-                                       graph      pool
+IDE Window 1 (~/project-a) ──stdio──┐      ┌───────────────────────┐
+IDE Window 2 (~/project-b) ──stdio──┼─WS──▶│ Singleton Backend     │
+IDE Window 3 (~/project-c) ──stdio──┘      │ (detached process)    │
+                                            │                       │
+                                            │ Dashboard Tabs:       │
+                                            │  [project-a] [b] [c]  │
+                                            └──┬────────┬───────────┘
+                                               │        │
+                                               ▼        ▼
+                                           project-   agent-
+                                           graph      pool
 ```
 
 1. **First IDE window**: Spawns the detached backend process, then connects via WebSocket.
@@ -52,6 +55,7 @@ IDE Window 3 ──stdio──┘                 │ (detached process)    │
 - **Plugin System** — external integrations (Telegram, Slack, GitHub) with alert dispatch
 - **Distributed Mode** — master/client topology via WebSocket for multi-machine tool sharing
 - **Auto-Restart** — crashed child processes respawn with exponential backoff
+- **Workspace Auto-Discovery** — each IDE connection auto-registers its workspace as a project tab in the dashboard
 - **Local Gateway** — `portal.local` DNS-like service discovery for all projects
 
 ## Quick Start

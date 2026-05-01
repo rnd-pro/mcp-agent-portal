@@ -1,8 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { api } from '../../app.js';
+import { mcpCall } from '../../common/mcp-call.js';
 import template from './PeerReview.tpl.js';
 import css from '../../common/ui-shared.css.js';
-import { marked } from 'https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js';
 
 export class PeerReview extends Symbiote {
   init$ = {
@@ -14,9 +13,9 @@ export class PeerReview extends Symbiote {
     this.ref.refreshBtn.onclick = () => this.pollStatus();
     
     this.querySelector('#consult-btn').onclick = async () => {
-      const context = this.querySelector('#pr-context').value;
-      const proposal = this.querySelector('#pr-proposal').value;
-      const history = this.querySelector('#pr-history').value;
+      let context = this.querySelector('#pr-context').value;
+      let proposal = this.querySelector('#pr-proposal').value;
+      let history = this.querySelector('#pr-history').value;
       
       if (!proposal) return alert('Proposal is required');
       
@@ -24,29 +23,14 @@ export class PeerReview extends Symbiote {
       this.querySelector('#consult-btn').innerHTML = '<span class="material-symbols-outlined" style="animation: spin 2s linear infinite;">sync</span> Initiating...';
       
       try {
-        const res = await fetch("/api/mcp-call", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            serverName: "agent-pool",
-            method: "tools/call",
-            params: {
-              name: 'consult_peer',
-              arguments: {
-                context,
-                proposal,
-                previous_rounds: history || undefined
-              }
-            }
-          })
+        let resultText = await mcpCall('agent-pool', 'consult_peer', {
+          context,
+          proposal,
+          previous_rounds: history || undefined,
         });
         
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
-        const data = await res.json();
-        if (data.isError) throw new Error(data.content?.[0]?.text || "Tool error");
-        
-        const resultText = data.content?.[0]?.text || '';
-        const match = resultText.match(/Task ID\*\*: \`([a-f0-9-]+)\`/);
+        if (typeof resultText === 'object') resultText = JSON.stringify(resultText);
+        let match = resultText.match(/Task ID\*\*: \`([a-f0-9-]+)\`/);
         if (match && match[1]) {
           this.$.taskId = match[1];
           this.startPolling();
@@ -80,21 +64,13 @@ export class PeerReview extends Symbiote {
     if (!this.$.taskId) return;
     
     try {
-      const res = await fetch("/api/mcp-call", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          serverName: "agent-pool",
-          method: "tools/call",
-          params: { name: 'list_tasks', arguments: { json: true } }
-        })
-      });
+      let tasks = await mcpCall('agent-pool', 'list_tasks', { json: true });
+      if (typeof tasks === 'string') {
+        try { tasks = JSON.parse(tasks); } catch { tasks = []; }
+      }
+      if (!Array.isArray(tasks)) tasks = [];
       
-      const data = await res.json();
-      const text = data.content?.[0]?.text;
-      const tasks = JSON.parse(text || '[]');
-      
-      const task = tasks.find(t => t.id === this.$.taskId);
+      let task = tasks.find(t => t.id === this.$.taskId);
       if (!task) {
         this.updateBanner('error', 'Task not found');
         return;
@@ -118,7 +94,7 @@ export class PeerReview extends Symbiote {
   }
   
   updateBanner(type, message) {
-    const banner = this.querySelector('#pr-status-banner');
+    let banner = this.querySelector('#pr-status-banner');
     banner.style.display = 'flex';
     banner.className = 'ui-banner ' + type;
     
@@ -133,19 +109,9 @@ export class PeerReview extends Symbiote {
   renderResult(task) {
     if (this._pollTimer) clearInterval(this._pollTimer);
     
-    // We need to fetch get_task_result to get the actual text output
-    fetch("/api/mcp-call", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        serverName: "agent-pool",
-        method: "tools/call",
-        params: { name: 'get_task_result', arguments: { task_id: this.$.taskId } }
-      })
-    })
-    .then(r => r.json())
-    .then(data => {
-      const text = data.content?.[0]?.text || '';
+    mcpCall('agent-pool', 'get_task_result', { task_id: this.$.taskId })
+    .then(resultText => {
+      let text = typeof resultText === 'string' ? resultText : JSON.stringify(resultText, null, 2);
       
       // Parse verdict
       let verdictClass = 'info';
@@ -153,25 +119,20 @@ export class PeerReview extends Symbiote {
       else if (text.includes('DISAGREE')) verdictClass = 'error';
       else if (text.includes('SUGGEST_CHANGES')) verdictClass = 'warning';
       
-      const verdictText = text.match(/Verdict:\s*([A-Z_]+)/i)?.[1] || 'UNKNOWN';
+      let verdictText = text.match(/Verdict:\s*([A-Z_]+)/i)?.[1] || 'UNKNOWN';
       
       this.querySelector('#pr-feedback').innerHTML = `
         <div style="margin-bottom:16px;"><span class="ui-badge ${verdictClass}" style="font-size:14px; padding:4px 12px;">Verdict: ${verdictText}</span></div>
-        <div class="sm-markdown-preview" style="background:transparent; border:none; padding:0;">${marked.parse(text)}</div>
+        <div class="sm-markdown-preview" style="background:transparent; border:none; padding:0;"><pre style="white-space:pre-wrap;font-size:13px;line-height:1.6;">${this._esc(text)}</pre></div>
       `;
     });
   }
-}
 
-// Add keyframes for spin
-const style = document.createElement('style');
-style.textContent = `
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  _esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
 }
-`;
-document.head.appendChild(style);
 
 PeerReview.template = template;
 PeerReview.rootStyles = css;

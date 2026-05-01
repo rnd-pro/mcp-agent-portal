@@ -134,6 +134,7 @@ function proxyToBackend(req, res, url, proxyManager) {
  */
 export function startWebServer(projectRoot) {
   let proxyManager = new MCPProxyManager(projectRoot);
+  proxyManager.initStateSync();
   let routes = createRoutes({ proxyManager, projectRoot });
   let projectRoutes = createProjectRoutes();
   let allRoutes = { ...routes, ...projectRoutes };

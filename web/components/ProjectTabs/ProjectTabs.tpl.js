@@ -4,7 +4,7 @@ export default /*html*/ `
     <span class="material-symbols-outlined">hub</span>
     <span>Home</span>
   </button>
-  <div ref="tabsContainer"></div>
+  <div ref="tabsContainer" style="display:flex; align-items:stretch;"></div>
   <button class="tab-add" ref="addBtn" title="Open project">
     <span class="material-symbols-outlined">add</span>
   </button>

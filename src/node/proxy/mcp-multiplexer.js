@@ -52,6 +52,7 @@ let META_TOOLS = [
       properties: {
         name: { type: 'string', description: 'Name or title for the new chat.' },
         adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "gemini"). Optional.' },
+        parentChatId: { type: 'string', description: 'Parent chat ID for delegation hierarchy. Set this when an orchestrator creates a sub-chat for a delegated task. Optional.' },
       },
       required: ['name'],
     },
@@ -177,6 +178,30 @@ export class MCPMultiplexer {
     });
 
     if (msg.method === 'initialize') {
+      // Register IDE workspaces as projects from MCP roots
+      let roots = msg.params?.roots || [];
+      if (roots.length > 0) {
+        import('../config-store.js').then(({ addProject, getActiveProjectIds, setActiveProjectIds }) => {
+          for (let root of roots) {
+            let rootPath = root.uri?.replace(/^file:\/\//, '') || root.uri;
+            if (!rootPath) continue;
+            let proj = addProject({ path: rootPath });
+            let active = getActiveProjectIds();
+            if (!active.includes(proj.id)) {
+              active.push(proj.id);
+              setActiveProjectIds(active);
+            }
+            this.proxyManager.broadcastMonitor({
+              jsonrpc: '2.0',
+              method: 'patch',
+              params: { path: 'projects.opened', value: proj.id },
+            });
+          }
+        }).catch(err => {
+          console.error('🔴 [multiplexer] Failed to register project from roots:', err.message);
+        });
+      }
+
       this.sendToIde({
         jsonrpc: '2.0',
         id: msg.id,
@@ -302,7 +327,11 @@ export class MCPMultiplexer {
 
       if (toolName === 'create_chat') {
         let { createChat } = await import('../config-store.js');
-        let chat = createChat({ name: args.name, adapter: args.adapter || 'pool' });
+        let chat = createChat({
+          name: args.name,
+          adapter: args.adapter || 'pool',
+          parentChatId: args.parentChatId || null,
+        });
         // Broadcast event so UI reactive tabs open automatically
         this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
         this.sendToIde({

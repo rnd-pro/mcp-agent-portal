@@ -166,7 +166,7 @@ html, body {
 }
 
 /* === Workspace: sidebar + content area === */
-.app-workspace {
+.app-workspace, .workspaces-container {
   flex: 1;
   overflow: hidden;
   position: relative;

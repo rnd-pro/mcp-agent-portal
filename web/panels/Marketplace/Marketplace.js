@@ -293,7 +293,7 @@ class Marketplace extends Symbiote {
 }
 
 Marketplace.template = template;
-Marketplace.shadowStyles = cssShared + cssLocal;
+Marketplace.rootStyles = cssShared + cssLocal;
 Marketplace.reg('pg-marketplace');
 
 export { Marketplace };

@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { api } from '../../app.js';
+import { mcpCall } from '../../common/mcp-call.js';
 import template from './SkillManager.tpl.js';
 import css from '../../common/ui-shared.css.js';
 
@@ -17,26 +17,8 @@ export class SkillManager extends Symbiote {
     this.loadSkills();
   }
 
-  async _mcpCall(toolName, args = {}) {
-    const res = await fetch("/api/mcp-call", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        serverName: "agent-pool",
-        method: "tools/call",
-        params: { name: toolName, arguments: args }
-      })
-    });
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
-    const data = await res.json();
-    if (data.isError) throw new Error(data.content?.[0]?.text || data.error || "Tool error");
-    
-    const resultText = data.content?.[0]?.text || data.text || data.response;
-    try {
-      return JSON.parse(resultText);
-    } catch {
-      return resultText;
-    }
+  _mcpCall(toolName, args = {}) {
+    return mcpCall('agent-pool', toolName, args);
   }
 
   async loadSkills() {
@@ -59,15 +41,15 @@ export class SkillManager extends Symbiote {
   }
 
   renderSidebar() {
-    const pList = this.ref.projectList;
-    const gList = this.ref.globalList;
-    const bList = this.ref.builtinList;
+    let pList = this.ref.projectList;
+    let gList = this.ref.globalList;
+    let bList = this.ref.builtinList;
     
     pList.innerHTML = '';
     gList.innerHTML = '';
     bList.innerHTML = '';
     
-    const skills = this.$.skills;
+    let skills = this.$.skills;
     if (!skills || skills.length === 0) {
       pList.innerHTML = '<div class="ui-empty-state">No skills found</div>';
       return;
@@ -76,7 +58,7 @@ export class SkillManager extends Symbiote {
     let pCount = 0, gCount = 0, bCount = 0;
     
     skills.forEach(s => {
-      const item = document.createElement('div');
+      let item = document.createElement('div');
       item.className = 'ui-item' + (this.$.selectedSkillName === s.name && this.$.selectedSkillTier === s.tier ? ' active' : '');
       item.innerHTML = `
         <div class="ui-item-title">${s.name}</div>
@@ -100,10 +82,10 @@ export class SkillManager extends Symbiote {
   }
 
   showSkillDetails(skill) {
-    const main = this.ref.mainContent;
+    let main = this.ref.mainContent;
     
-    const isBuiltin = skill.tier === 'built-in';
-    const isProject = skill.tier === 'project';
+    let isBuiltin = skill.tier === 'built-in';
+    let isProject = skill.tier === 'project';
     
     main.innerHTML = `
       <div class="ui-details">
@@ -126,7 +108,7 @@ export class SkillManager extends Symbiote {
       </div>
     `;
     
-    const installBtn = main.querySelector('#install-btn');
+    let installBtn = main.querySelector('#install-btn');
     if (installBtn) {
       installBtn.onclick = async () => {
         try {
@@ -139,7 +121,7 @@ export class SkillManager extends Symbiote {
       };
     }
     
-    const delBtn = main.querySelector('#del-btn');
+    let delBtn = main.querySelector('#del-btn');
     if (delBtn) {
       delBtn.onclick = async () => {
         if (!confirm(`Are you sure you want to delete ${skill.name} from the ${skill.tier} tier?`)) return;
@@ -190,10 +172,10 @@ export class SkillManager extends Symbiote {
     `;
     
     this.ref.mainContent.querySelector('#save-btn').onclick = async () => {
-      const name = this.ref.mainContent.querySelector('#s-name').value;
-      const desc = this.ref.mainContent.querySelector('#s-desc').value;
-      const scope = this.ref.mainContent.querySelector('#s-scope').value;
-      const inst = this.ref.mainContent.querySelector('#s-inst').value;
+      let name = this.ref.mainContent.querySelector('#s-name').value;
+      let desc = this.ref.mainContent.querySelector('#s-desc').value;
+      let scope = this.ref.mainContent.querySelector('#s-scope').value;
+      let inst = this.ref.mainContent.querySelector('#s-inst').value;
       
       if (!name || !desc || !inst) return alert('Name, description, and instructions are required');
       

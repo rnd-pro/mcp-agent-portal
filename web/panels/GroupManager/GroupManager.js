@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { api } from '../../app.js';
+import { mcpCall } from '../../common/mcp-call.js';
 import template from './GroupManager.tpl.js';
 import css from '../../common/ui-shared.css.js';
 
@@ -16,26 +16,8 @@ export class GroupManager extends Symbiote {
     this.loadGroups();
   }
 
-  async _mcpCall(toolName, args = {}) {
-    const res = await fetch("/api/mcp-call", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        serverName: "agent-pool",
-        method: "tools/call",
-        params: { name: toolName, arguments: args }
-      })
-    });
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
-    const data = await res.json();
-    if (data.isError) throw new Error(data.content?.[0]?.text || data.error || "Tool error");
-    
-    const resultText = data.content?.[0]?.text || data.text || data.response;
-    try {
-      return JSON.parse(resultText);
-    } catch {
-      return resultText;
-    }
+  _mcpCall(toolName, args = {}) {
+    return mcpCall('agent-pool', toolName, args);
   }
 
   async loadGroups() {
@@ -44,7 +26,7 @@ export class GroupManager extends Symbiote {
       
       let data = await this._mcpCall('list_groups', { json: true });
       if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch(e){ data = []; }
+        try { data = JSON.parse(data); } catch { data = []; }
       }
       
       this.$.groups = Array.isArray(data) ? data : [];
@@ -56,17 +38,17 @@ export class GroupManager extends Symbiote {
   }
 
   renderSidebar() {
-    const list = this.ref.groupList;
+    let list = this.ref.groupList;
     list.innerHTML = '';
     
-    const groups = this.$.groups;
+    let groups = this.$.groups;
     if (!groups || groups.length === 0) {
       list.innerHTML = '<div class="ui-empty-state">No groups found</div>';
       return;
     }
     
     groups.forEach(g => {
-      const item = document.createElement('div');
+      let item = document.createElement('div');
       item.className = 'ui-item' + (this.$.selectedGroupName === g.name ? ' active' : '');
       item.innerHTML = `<span class="ui-item-title">${g.name}</span> <span class="ui-item-desc">${g.max_agents ? g.max_agents + ' max' : ''}</span>`;
       item.onclick = () => {
@@ -79,7 +61,7 @@ export class GroupManager extends Symbiote {
   }
 
   showGroupDetails(group) {
-    const main = this.ref.mainContent;
+    let main = this.ref.mainContent;
     
     main.innerHTML = `
       <div class="ui-details">
@@ -123,8 +105,8 @@ export class GroupManager extends Symbiote {
     `;
     
     main.querySelector('#launch-btn').onclick = async () => {
-      const prompt = main.querySelector('#swarm-prompt').value;
-      const count = parseInt(main.querySelector('#swarm-count').value, 10);
+      let prompt = main.querySelector('#swarm-prompt').value;
+      let count = parseInt(main.querySelector('#swarm-count').value, 10);
       if (!prompt) return alert('Prompt is required');
       
       try {
@@ -171,10 +153,10 @@ export class GroupManager extends Symbiote {
     `;
     
     this.ref.mainContent.querySelector('#save-btn').onclick = async () => {
-      const name = this.ref.mainContent.querySelector('#g-name').value;
-      const runner = this.ref.mainContent.querySelector('#g-runner').value;
-      const skill = this.ref.mainContent.querySelector('#g-skill').value;
-      const maxAgents = this.ref.mainContent.querySelector('#g-max').value;
+      let name = this.ref.mainContent.querySelector('#g-name').value;
+      let runner = this.ref.mainContent.querySelector('#g-runner').value;
+      let skill = this.ref.mainContent.querySelector('#g-skill').value;
+      let maxAgents = this.ref.mainContent.querySelector('#g-max').value;
       
       if (!name) return alert('Name is required');
       

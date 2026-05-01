@@ -91,7 +91,7 @@ class ToolExplorer extends Symbiote {
 }
 
 ToolExplorer.template = template;
-ToolExplorer.shadowStyles = cssShared + cssLocal;
+ToolExplorer.rootStyles = cssShared + cssLocal;
 ToolExplorer.reg('pg-tool-explorer');
 
 export { ToolExplorer };

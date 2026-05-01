@@ -9,7 +9,7 @@ function renderMetric(label, value, extraClass = "") {
 
 function _fmtTime(s) {
   if (s <= 0) return "now";
-  const m = Math.floor(s / 60), sec = s % 60;
+  let m = Math.floor(s / 60), sec = s % 60;
   return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
 
@@ -41,13 +41,13 @@ export class SettingsPanel extends Symbiote {
 
   async _fetchStatus() {
     try {
-      const r = await fetch("/api/server-status").then((res) => res.json());
+      let r = await fetch("/api/server-status").then((res) => res.json());
       this.ref.uptimeVal.textContent = _fmtTime(r.uptime);
       if (r.shutdownAt !== null && r.shutdownAt > 0) {
         this.ref.shutdownTimer.textContent = _fmtTime(r.shutdownAt);
         this.ref.shutdownTimer.className = "pg-stg-val pg-stg-warn";
       } else {
-        const clients = r.agents + r.monitors;
+        let clients = r.agents + r.monitors;
         this.ref.shutdownTimer.textContent = `Active (${clients} client${clients !== 1 ? "s" : ""})`;
         this.ref.shutdownTimer.className = "pg-stg-val pg-stg-ok";
       }
@@ -69,14 +69,14 @@ export class SettingsPanel extends Symbiote {
   }
 
   async restartServer() {
-    const t = this.ref.restartStatus;
+    let t = this.ref.restartStatus;
     t.textContent = "⏳ Restarting server…";
     t.style.color = "var(--sn-warning-color, #ff9800)";
     try {
       await fetch("/api/restart", { method: "POST" });
       t.textContent = "Server stopped. Reconnecting…";
       let retries = 0;
-      const timer = setInterval(async () => {
+      let timer = setInterval(async () => {
         retries++;
         try {
           if ((await fetch("/api/project-info")).ok) {
@@ -103,7 +103,7 @@ export class SettingsPanel extends Symbiote {
   async fetchInfo() {
     this.ref.backendCard.innerHTML = '<div class="ui-empty-state pg-stg-pulse">Loading…</div>';
     try {
-      const [info, instances, modelsInfo] = await Promise.all([
+      let [info, instances, modelsInfo] = await Promise.all([
         fetch("/api/project-info").then((res) => res.json()),
         fetch("/api/instances").then((res) => res.json()),
         fetch("/api/settings/models").then((res) => res.json()).catch(() => ({ userModels: {}, cliModels: [] })),
@@ -121,12 +121,12 @@ export class SettingsPanel extends Symbiote {
         renderMetric("Connected Agents", info.agents ?? "—"),
       ].join("");
 
-      const n = this.ref.instanceList;
+      let n = this.ref.instanceList;
       n.innerHTML = "";
       if (Array.isArray(instances) && instances.length > 0) {
-        for (const inst of instances) {
-          const uptimeStr = inst.startedAt ? Math.round((Date.now() - inst.startedAt) / 60000) : "?";
-          const s = document.createElement("div");
+        for (let inst of instances) {
+          let uptimeStr = inst.startedAt ? Math.round((Date.now() - inst.startedAt) / 60000) : "?";
+          let s = document.createElement("div");
           s.className = "ui-card";
           s.innerHTML = [
             renderMetric("Name", inst.name || "unknown"),
@@ -163,7 +163,7 @@ export class SettingsPanel extends Symbiote {
   }
 
   _renderProviderTabs() {
-    const providers = ['opencode', 'gemini', 'claude'];
+    let providers = ['opencode', 'gemini', 'claude'];
     if (!providers.includes(this._activeProvider)) this._activeProvider = providers[0];
     
     this.ref.providerTabs.innerHTML = providers.map(p => 
@@ -190,7 +190,7 @@ export class SettingsPanel extends Symbiote {
   }
 
   _renderModelList() {
-    const models = this._userModels[this._activeProvider] || [];
+    let models = this._userModels[this._activeProvider] || [];
     if (models.length === 0) {
       this.ref.modelList.innerHTML = `<div class="ui-empty-state" style="padding:4px">No custom models. Showing defaults.</div>`;
     } else {
@@ -239,7 +239,7 @@ export class SettingsPanel extends Symbiote {
       };
     });
     
-    const favs = this._userModels['opencode'] || [];
+    let favs = this._userModels['opencode'] || [];
     let items = this._cliModels;
     
     if (this._filterQuery) {
@@ -294,7 +294,7 @@ export class SettingsPanel extends Symbiote {
       
       let dateStr = '—';
       if (m.created && m.created > 0) {
-        const d = new Date(m.created * 1000);
+        let d = new Date(m.created * 1000);
         dateStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       }
       
@@ -357,11 +357,11 @@ export class SettingsPanel extends Symbiote {
   }
 
   async _syncFromCli() {
-    const btn = this.ref.syncCliBtn;
+    let btn = this.ref.syncCliBtn;
     btn.innerHTML = `<span class="material-symbols-outlined" style="animation:spin 1s linear infinite;font-size:14px">sync</span> Discovering...`;
     btn.disabled = true;
     try {
-      const r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
+      let r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
       this._cliModels = r.models || [];
       this._renderDirectory();
       this._setStatus(`Discovered ${r.count} models`, "var(--sn-node-selected)");

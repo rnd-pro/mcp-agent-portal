@@ -425,7 +425,7 @@ export class AgentChat extends Symbiote {
   }
 
   _updateComposerFooter() {
-    let adapter = this.$.chatAdapter;
+    let adapter = this.$.chatAdapter || "pool";
     let meta = this.$.adapterMeta || {};
     let currentParams = this.$.chatParams || {};
     let paramsToMap = [];
@@ -662,48 +662,110 @@ export class AgentChat extends Symbiote {
 
     let projectId = dashState.activeProjectId;
     if (projectId) {
-      // Show project-bound chats first, then unbound (no projectId) chats
-      let projectChats = chats.filter(c => c.projectId === projectId);
-      let unboundChats = chats.filter(c => !c.projectId);
-      chats = [...projectChats, ...unboundChats];
+      // Project scope: show ONLY chats bound to this project
+      chats = chats.filter(c => c.projectId === projectId);
     }
+    // Home scope (no projectId): show ALL chats from all projects
+
+    // Build parent-child map
+    let childMap = new Map(); // parentId → [chat, ...]
+    let rootChats = [];
 
     for (let chat of chats) {
-      let div = document.createElement('div');
-      div.className = 'chat-item';
-      if (chat.id === dashState.activeChatId) div.setAttribute('active', '');
-
-      div.innerHTML = `
-        <span class="material-symbols-outlined">chat</span>
-        <span class="chat-item-label">${chat.name}</span>
-        <span class="chat-item-adapter">${chat.adapter}</span>
-        <button class="chat-item-delete" title="Delete">×</button>
-      `;
-
-      div.addEventListener('click', (e) => {
-        if (e.target.closest('.chat-item-delete')) return;
-        dashState.activeChatId = chat.id;
-        setGlobalParam('chat', chat.id);
-        dashEmit('active-chat-changed', { id: chat.id });
-      });
-
-      div.querySelector('.chat-item-delete').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch('/api/chats/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: chat.id }),
-        });
-        if (dashState.activeChatId === chat.id) {
-          dashState.activeChatId = null;
-          setGlobalParam('chat', null);
-          dashEmit('active-chat-changed', { id: null });
+      if (chat.parentChatId) {
+        if (!childMap.has(chat.parentChatId)) {
+          childMap.set(chat.parentChatId, []);
         }
-        this._fetchChats();
-      });
-
-      container.appendChild(div);
+        childMap.get(chat.parentChatId).push(chat);
+      } else {
+        rootChats.push(chat);
+      }
     }
+
+    for (let chat of rootChats) {
+      let children = childMap.get(chat.id) || [];
+      let hasChildren = children.length > 0;
+
+      this._renderChatItem(container, chat, hasChildren, false);
+
+      if (hasChildren) {
+        let subContainer = document.createElement('div');
+        subContainer.className = 'chat-sub-items';
+        subContainer.dataset.parent = chat.id;
+
+        for (let child of children) {
+          this._renderChatItem(subContainer, child, false, true);
+        }
+        container.appendChild(subContainer);
+      }
+    }
+
+    // Orphan children (parent deleted) — show as root
+    for (let [parentId, children] of childMap) {
+      if (rootChats.some(c => c.id === parentId)) continue;
+      for (let child of children) {
+        this._renderChatItem(container, child, false, false);
+      }
+    }
+  }
+
+  _renderChatItem(container, chat, hasChildren, isChild) {
+    let div = document.createElement('div');
+    div.className = 'chat-item';
+    if (isChild) div.classList.add('chat-item-child');
+    if (chat.id === dashState.activeChatId) div.setAttribute('active', '');
+
+    let expandHtml = '';
+    if (hasChildren) {
+      expandHtml = `<span class="material-symbols-outlined chat-expand-icon">chevron_right</span>`;
+    }
+
+    let icon = isChild ? 'subdirectory_arrow_right' : 'chat';
+
+    div.innerHTML = `
+      ${expandHtml}
+      <span class="material-symbols-outlined">${icon}</span>
+      <span class="chat-item-label">${chat.name}</span>
+      <span class="chat-item-adapter">${chat.adapter}</span>
+      <button class="chat-item-delete" title="Delete">×</button>
+    `;
+
+    // Expand/collapse children
+    if (hasChildren) {
+      div.querySelector('.chat-expand-icon').addEventListener('click', (e) => {
+        e.stopPropagation();
+        let subContainer = container.querySelector(`.chat-sub-items[data-parent="${chat.id}"]`);
+        if (!subContainer) return;
+        let isExpanded = subContainer.hasAttribute('expanded');
+        subContainer.toggleAttribute('expanded', !isExpanded);
+        div.classList.toggle('chat-item-expanded', !isExpanded);
+      });
+    }
+
+    div.addEventListener('click', (e) => {
+      if (e.target.closest('.chat-item-delete')) return;
+      if (e.target.closest('.chat-expand-icon')) return;
+      dashState.activeChatId = chat.id;
+      setGlobalParam('chat', chat.id);
+      dashEmit('active-chat-changed', { id: chat.id });
+    });
+
+    div.querySelector('.chat-item-delete').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await fetch('/api/chats/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: chat.id }),
+      });
+      if (dashState.activeChatId === chat.id) {
+        dashState.activeChatId = null;
+        setGlobalParam('chat', null);
+        dashEmit('active-chat-changed', { id: null });
+      }
+      this._fetchChats();
+    });
+
+    container.appendChild(div);
   }
 
   async _createChat() {
