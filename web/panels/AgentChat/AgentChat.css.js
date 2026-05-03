@@ -9,7 +9,7 @@ pg-agent-chat {
 .chat-shell {
   display: flex;
   height: 100%;
-  background: var(--sn-panel-bg, hsl(228, 14%, 18%));
+  background: var(--sn-bg, #1a1a1a);
   color: var(--sn-text, #e0e0e0);
   font-size: 13px;
 }
@@ -29,7 +29,7 @@ chat-sidebar {
   display: flex;
   flex-direction: column;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: var(--sn-bg, #1e1e1e);
+  background: var(--sn-node-bg, #222222);
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
   user-select: none;
@@ -46,7 +46,7 @@ chat-sidebar {
   gap: 2px;
   padding: 2px 4px;
   min-height: 28px;
-  background: var(--bg-header, var(--sn-bg, #1e1e1e));
+  background: var(--bg-header, var(--sn-node-bg, #222222));
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
 }

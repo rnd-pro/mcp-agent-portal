@@ -20,10 +20,10 @@ const RULE_S = [2, 3];
 const CELL_SIZE = 14;
 const STEP_MS = 75;
 const MIN_RADIUS = 2;
-const MAX_RADIUS = 4;
+const MAX_RADIUS = 5;
 const FADE_RATE = 0.04;
 const BG_COLOR = '#1a1a1a';
-const DOT_COLOR = [209, 209, 209];
+const DOT_COLOR = [80, 80, 80];
 const BASE_ALPHA = 0.06;
 
 const PALETTE_SIZE = 32;
@@ -36,7 +36,7 @@ export class CellBg extends Symbiote {
   initCallback() {
     this.canvas = this.ref.canvas;
     this.ctx = this.canvas.getContext('2d');
-    
+
     this._buildPalette();
 
     this.cols = 0;
@@ -44,14 +44,16 @@ export class CellBg extends Symbiote {
     this.grid = new Uint8Array(0);
     this.radii = new Float32Array(0);
     this.running = false;
-    this.stepTimer = null;
-    this.lastDrawTime = 0;
+    this.currentSpeed = 0;
+    this.accumulator = 0;
+    this.lastTime = performance.now();
+    this.isAnimating = false;
     this._stagnantCount = 0;
 
     // We only redraw on rAF if running, or if a single frame is needed after resize
     this.resize = this.resize.bind(this);
     this.renderLoop = this.renderLoop.bind(this);
-    
+
     // Use ResizeObserver to catch layout panel resizing (not just window resizes)
     // Debounce: resize canvas immediately (prevents flash), pulse only after settle
     this.ro = new ResizeObserver(() => {
@@ -63,7 +65,7 @@ export class CellBg extends Symbiote {
         this.pulse(10000);
       }, 300);
     });
-    
+
     // Defer observation to allow DOM to settle
     setTimeout(() => {
       this.ro.observe(this);
@@ -126,7 +128,7 @@ export class CellBg extends Symbiote {
       let r = Math.round(br * (1 - alpha) + DOT_COLOR[0] * alpha);
       let g = Math.round(bgG * (1 - alpha) + DOT_COLOR[1] * alpha);
       let b = Math.round(bb * (1 - alpha) + DOT_COLOR[2] * alpha);
-      this.palette.push(`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
+      this.palette.push(`#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`);
     }
   }
 
@@ -135,7 +137,7 @@ export class CellBg extends Symbiote {
     let dpr = window.devicePixelRatio || 1;
     let w = this.canvas.parentElement.clientWidth;
     let h = this.canvas.parentElement.clientHeight;
-    
+
     if (w === 0 || h === 0) return; // Hidden or not attached
 
     this.canvas.width = w * dpr;
@@ -172,7 +174,7 @@ export class CellBg extends Symbiote {
     } else {
       this._seedRandom();
     }
-    
+
     // Draw one frame if not running
     if (!this.running) {
       this._draw();
@@ -190,15 +192,17 @@ export class CellBg extends Symbiote {
   _start() {
     if (this.running) return;
     this.running = true;
-    this.stepTimer = setInterval(() => this._step(), STEP_MS);
-    requestAnimationFrame(this.renderLoop);
+    if (!this.isAnimating) {
+      this.lastTime = performance.now();
+      this.isAnimating = true;
+      requestAnimationFrame(this.renderLoop);
+    }
   }
 
   _stop() {
     if (!this.running) return;
     this.running = false;
-    if (this.stepTimer) clearInterval(this.stepTimer);
-    this.stepTimer = null;
+    // Loop will smoothly decelerate and stop in renderLoop
   }
 
   _step() {
@@ -266,16 +270,44 @@ export class CellBg extends Symbiote {
   }
 
   renderLoop(ts) {
-    if (!this.running) return;
+    if (!this.isAnimating) return;
+
+    let now = performance.now();
+    let dt = Math.min(now - this.lastTime, 100); // clamp dt to prevent huge jumps
+    this.lastTime = now;
+
+    // Smoothly accelerate/decelerate
+    let targetSpeed = this.running ? 1.0 : 0.0;
+    this.currentSpeed += (targetSpeed - this.currentSpeed) * 0.03; // Smooth transition factor
+
+    // If we're fully stopped and radii have faded (we just wait for speed to drop near 0)
+    if (!this.running && this.currentSpeed < 0.005) {
+      this.currentSpeed = 0;
+      this.isAnimating = false;
+    }
+
+    // Accumulate effective time for cellular automaton steps
+    this.accumulator += dt * this.currentSpeed;
+
+    let maxSteps = 5;
+    while (this.accumulator >= STEP_MS && maxSteps > 0) {
+      this._step();
+      this.accumulator -= STEP_MS;
+      maxSteps--;
+    }
+
     this._draw();
-    requestAnimationFrame(this.renderLoop);
+
+    if (this.isAnimating) {
+      requestAnimationFrame(this.renderLoop);
+    }
   }
 
   _draw() {
     if (!this.canvas._w) return;
     let w = this.canvas._w;
     let h = this.canvas._h;
-    
+
     this.ctx.clearRect(0, 0, w, h);
     this.ctx.fillStyle = BG_COLOR;
     this.ctx.fillRect(0, 0, w, h);
@@ -303,7 +335,7 @@ export class CellBg extends Symbiote {
         let t = (r - MIN_RADIUS) / (MAX_RADIUS - MIN_RADIUS);
         if (t < 0) t = 0;
         if (t > 1) t = 1;
-        
+
         let pi = (t * maxIdx + 0.5) | 0;
 
         this.ctx.beginPath();

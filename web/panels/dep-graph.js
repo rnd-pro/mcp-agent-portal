@@ -30,7 +30,7 @@ import {
 } from 'symbiote-node';
 import { api, state, events, emit } from '../app.js';
 
-import { buildGraphState } from "../services/skeleton-parser.js";
+import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 // ── Consumer-specific CSS (toolbar, stats, pin overlay) ──
 // Node styling, chip decorations, connection strokes, frame styling
@@ -236,17 +236,17 @@ export class DepGraph extends Symbiote {
    * @param {string} [sub] - optional subtitle
    */
   _setProgress(pct, phase, sub = '') {
-    this.ref.loader?.setProgress(pct, phase, sub);
+    this.querySelector('loading-overlay')?.setProgress(pct, phase, sub);
   }
 
   /** Hide the PCB preloader overlay */
   _hideLoader() {
-    this.ref.loader?.hide(() => this._replayPendingFollowFocus());
+    this.querySelector('loading-overlay')?.hide(() => this._replayPendingFollowFocus());
   }
 
   /** Show (or re-show) the PCB preloader overlay */
   _showLoader() {
-    this.ref.loader?.show();
+    this.querySelector('loading-overlay')?.show();
   }
 
   initCallback() {
