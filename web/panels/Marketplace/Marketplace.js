@@ -314,11 +314,13 @@ class Marketplace extends Symbiote {
       this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">Loading open memory...</div>';
       
       let data = await mcpCall('context-x', 'list_open_memory');
-      if (data && data.content && data.content[0]) {
-        let text = data.content[0].text;
-        // The text is typically: "Available context items in Open Memory:\nrules/rule1.md\n..."
+      let text = typeof data === 'string' ? data : (data && data.content ? data.content[0].text : '');
+      
+      if (text) {
         let lines = text.split('\n').filter(l => l && !l.startsWith('Available'));
         this._renderContextItems(lines);
+      } else if (Array.isArray(data)) {
+        this._renderContextItems(data);
       } else {
         throw new Error('Invalid response format');
       }
