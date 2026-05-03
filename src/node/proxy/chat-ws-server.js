@@ -204,3 +204,5 @@ export class ChatWsServer {
     }
   }
 }
+
+export default ChatWsServer;

@@ -234,3 +234,5 @@ export class TaskRouter {
     this.mcpProxy.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
   }
 }
+
+export default TaskRouter;
