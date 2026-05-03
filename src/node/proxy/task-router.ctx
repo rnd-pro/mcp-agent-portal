@@ -1,0 +1,14 @@
+--- task-router.js ---
+@sig c2a05f85
+@enrich: Replace each {DESCRIBE} below. Read task-router.js for context.
+  Rules: max 80ch, pipe|separated, abbrev (fn/ret/cfg/init/auth/db/msg).
+  Save this file after filling all markers. Remove @enrich lines when done.
+class TaskRouter|4m|{DESCRIBE}
+  .route()|{DESCRIBE}
+  .replayCachedNotifications()|{DESCRIBE}
+  ._findChatForTask()|{DESCRIBE}
+  ._persistFinalTaskResult()|{DESCRIBE}
+  CALLS→console.log,getStateGraph,Date.now,sg.del,console.warn,createWatchdog,sg.commit,console.error
+createWatchdog(onTimeout:() => void,inactivityMs:number=)→clearTimeout,setTimeout,watchdog.kick|{DESCRIBE}
+PATTERNS: {DESCRIBE}
+EDGE_CASES: {DESCRIBE}

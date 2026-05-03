@@ -1,0 +1,16 @@
+--- tool-index.js ---
+@sig 6914dc0c
+@enrich: Replace each {DESCRIBE} below. Read tool-index.js for context.
+  Rules: max 80ch, pipe|separated, abbrev (fn/ret/cfg/init/auth/db/msg).
+  Save this file after filling all markers. Remove @enrich lines when done.
+class ToolIndex|7m|{DESCRIBE}
+  .rebuild()|{DESCRIBE}
+  .setTags()|{DESCRIBE}
+  .search()|{DESCRIBE}
+  .get()|{DESCRIBE}
+  .getAvailableTags()|{DESCRIBE}
+  .getServers()|{DESCRIBE}
+  .isReady()|{DESCRIBE}
+  CALLS→tools.clear,servers.keys,proxyManager.requestFromChild,tools.set,console.error,tags.clear,Object.entries,tags.set
+PATTERNS: {DESCRIBE}
+EDGE_CASES: {DESCRIBE}

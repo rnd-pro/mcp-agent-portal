@@ -1,0 +1,16 @@
+--- chat-ws-server.js ---
+@sig 68171036
+@enrich: Replace each {DESCRIBE} below. Read chat-ws-server.js for context.
+  Rules: max 80ch, pipe|separated, abbrev (fn/ret/cfg/init/auth/db/msg).
+  Save this file after filling all markers. Remove @enrich lines when done.
+class ChatWsServer|7m|{DESCRIBE}
+  .handleUpgrade()|{DESCRIBE}
+  ._handleChatSend()|{DESCRIBE}
+  ._handleChatResume()|{DESCRIBE}
+  ._handleChatCancel()|{DESCRIBE}
+  .subscribe()|{DESCRIBE}
+  .unsubscribe()|{DESCRIBE}
+  .broadcastTaskEvent()|{DESCRIBE}
+  CALLS→data.toString,JSON.parse,_handleChatSend,_handleChatResume,_handleChatCancel,console.error,JSON.stringify,ws.send
+PATTERNS: {DESCRIBE}
+EDGE_CASES: {DESCRIBE}
