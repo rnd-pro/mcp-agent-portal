@@ -10,6 +10,8 @@ import { PluginLoader } from '../plugins/plugin-loader.js';
 import { getStateGraph } from '../state-graph.js';
 import { logTrajectory } from '../mlops/flywheel.js';
 import { findInRegistry } from '../server/marketplace-registry.js';
+import { ChatWsServer } from './chat-ws-server.js';
+import { TaskRouter } from './task-router.js';
 
 let pkgJson;
 try {
@@ -53,12 +55,6 @@ export class MCPProxyManager {
     this.servers = new Map();
     /** @type {Set<import('ws').WebSocket>} */
     this.monitors = new Set();
-    /** @type {Map<string, Set<import('ws').WebSocket>>} taskId → chat WS clients */
-    this.chatSubscriptions = new Map();
-    /** @type {Map<string, string>} taskId → chatId */
-    this.taskChatMap = new Map();
-    /** @type {Map<string, object[]>} taskId → cached notifications before subscription */
-    this.pendingNotifications = new Map();
     /** @type {Set<Function>} */
     this.multiplexerCallbacks = new Set();
     this.nextRequestId = 1;
@@ -70,6 +66,10 @@ export class MCPProxyManager {
     this.pluginLoader = new PluginLoader({}, { adapterPool: this.adapterPool, mcpProxy: this, broadcast: (msg) => this.broadcastMonitor(msg) });
     /** @type {Function|null} Called when servers are added/removed */
     this.onServerChange = null;
+    
+    this.chatWsServer = new ChatWsServer(this);
+    this.taskRouter = new TaskRouter(this);
+
     this.loadConfig();
   }
 
@@ -302,7 +302,7 @@ export class MCPProxyManager {
         if (line.startsWith('__TASK_NOTIFY__')) {
           try {
             let msg = JSON.parse(line.slice('__TASK_NOTIFY__'.length));
-            this.routeTaskNotification(msg);
+            if (this.taskRouter) this.taskRouter.route(msg);
           } catch (err) {
             console.error(`🔴 [${serverName}] Failed to parse __TASK_NOTIFY__:`, err.message);
           }
@@ -407,7 +407,7 @@ export class MCPProxyManager {
             // Route task notifications to chat WebSocket clients
             if (msg.method === 'notifications/task/event') {
               console.error(`📡 [ChatWS] Task notification: ${msg.params?.type} for ${msg.params?.taskId?.substring(0, 8)}`);
-              this.routeTaskNotification(msg);
+              if (this.taskRouter) this.taskRouter.route(msg);
             }
 
             for (let cb of this.multiplexerCallbacks) {
@@ -687,7 +687,7 @@ export class MCPProxyManager {
     }
 
     if (parts[0] === 'ws' && parts[1] === 'chat') {
-      this.handleChatWs(req, socket, head);
+      this.chatWsServer.handleUpgrade(req, socket, head);
       return true;
     }
 
@@ -791,387 +791,6 @@ export class MCPProxyManager {
     });
   }
 
-  /**
-   * WebSocket chat handler — clients send prompts, receive streaming task events.
-   * Replaces HTTP polling for AgentChat.
-   */
-  handleChatWs(req, socket, head) {
-    let wss = new WebSocketServer({ noServer: true });
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.on('message', async (data) => {
-        try {
-          let msg = JSON.parse(data.toString());
-          if (msg.method === 'chat.send') {
-            let { chatId, prompt, sessionId, timeout, model, provider } = msg.params || {};
-            console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, provider=${provider}, model=${model}`);
-            if (!prompt) return;
-
-            // If CLI sends a chat without a proper persisted chatId (or we want to ensure it exists in UI)
-            let sg = getStateGraph();
-            if (!chatId || !sg.getChat(chatId)) {
-              let cwd = msg.params.cwd || this.projectRoot;
-              let proj = sg.addProject({ path: cwd, name: path.basename(cwd) });
-
-              let chat = sg.createChat({ 
-                name: prompt.substring(0, 40) + (prompt.length > 40 ? '...' : ''),
-                projectId: proj.id
-              });
-              chatId = chat.id;
-              sg.appendChatMessage(chatId, { role: 'user', content: prompt });
-              console.log(`💬 [Chat] Created new chat ${chatId} for CLI request in project ${proj.id}`);
-            }
-
-            // Resolve CWD from project path (prefer explicit, then chat's project, then projectRoot)
-            let resolvedCwd = msg.params.cwd;
-            if (!resolvedCwd) {
-              let chat = sg.getChat(chatId);
-              if (chat?.projectId) {
-                let proj = sg.get(`projects/${chat.projectId}`);
-                if (proj?.path) resolvedCwd = proj.path;
-              }
-            }
-            if (!resolvedCwd) resolvedCwd = this.projectRoot !== '/' ? this.projectRoot : process.env.HOME;
-
-            // Delegate to agent-pool
-            if (!provider || !model || !sessionId) {
-              let chatData = sg.getChat(chatId);
-              if (chatData) {
-                if (!provider && chatData.provider) provider = chatData.provider;
-                if (!model && chatData.model) model = chatData.model;
-                if (!sessionId && chatData.sessionId) sessionId = chatData.sessionId;
-              }
-            }
-            
-            let delegateArgs = { prompt, timeout: timeout || 600, cwd: resolvedCwd };
-            if (sessionId) delegateArgs.session_id = sessionId;
-            if (model) delegateArgs.model = model;
-            if (provider) delegateArgs.provider = provider;
-
-            try {
-              console.log(`💬 [Chat] Calling delegate_task...`, delegateArgs);
-              let result = await this.requestFromChild('agent-pool', 'tools/call', {
-                name: 'delegate_task',
-                arguments: delegateArgs,
-              });
-              
-              console.log(`💬 [Chat] delegate_task returned`, result);
-
-              let delegateText = result.content?.[0]?.text || '';
-              
-              // Propagate errors from the adapter directly
-              if (result.isError) {
-                console.error(`❌ [Chat] delegate_task returned an error state:`, delegateText);
-                if (ws.readyState === 1) {
-                  ws.send(JSON.stringify({
-                    method: 'chat.error',
-                    params: { chatId, error: delegateText },
-                  }));
-                }
-                return;
-              }
-
-              let taskIdMatch = delegateText.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
-              let taskId = taskIdMatch?.[1];
-
-              // Subscribe this WS to task notifications
-              if (taskId) {
-                console.log(`💬 [Chat] Subscribing WS to taskId=${taskId}`);
-                if (!this.chatSubscriptions.has(taskId)) {
-                  this.chatSubscriptions.set(taskId, new Set());
-                }
-                this.chatSubscriptions.get(taskId).add(ws);
-                // Persist taskId → chatId mapping for recovery
-                this.taskChatMap.set(taskId, chatId);
-                getStateGraph().updateChatTask(chatId, taskId);
-
-                // Replay any notifications that arrived before we could subscribe
-                let cached = this.pendingNotifications?.get(taskId);
-                if (cached && cached.length > 0) {
-                  console.log(`💬 [Chat] Replaying ${cached.length} cached notification(s) for taskId=${taskId}`);
-                  for (let note of cached) {
-                    this.routeTaskNotification(note);
-                  }
-                  this.pendingNotifications.delete(taskId);
-                }
-              }
-              
-              ws.send(JSON.stringify({
-                method: 'chat.delegated',
-                params: { chatId, taskId, text: delegateText },
-              }));
-            } catch (err) {
-              console.error(`❌ [Chat] Error in delegate_task:`, err);
-              if (ws.readyState === 1) {
-                ws.send(JSON.stringify({
-                  method: 'chat.error',
-                  params: { chatId, error: err.message || 'Server error' },
-                }));
-              }
-            }
-          } else if (msg.method === 'chat.resume') {
-            // Re-subscribe to an in-flight task (after browser reload)
-            let { chatId, taskId } = msg.params || {};
-            if (taskId) {
-              console.log(`💬 [Chat] Resuming subscription for taskId=${taskId}, chatId=${chatId}`);
-              if (!this.chatSubscriptions.has(taskId)) {
-                this.chatSubscriptions.set(taskId, new Set());
-              }
-              this.chatSubscriptions.get(taskId).add(ws);
-              this.taskChatMap.set(taskId, chatId);
-
-              // Check if task already completed while we were away
-              this.requestFromChild('agent-pool', 'tools/call', {
-                name: 'get_task_result',
-                arguments: { task_id: taskId },
-              }).then(result => {
-                let text = result.content?.[0]?.text || '';
-                // If result contains actual content, the task is done
-                if (text && !text.includes('still running')) {
-                  if (text.includes('Task not found')) {
-                    ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Task was lost (e.g. server restart). Please try again.' } }));
-                  } else {
-                    ws.send(JSON.stringify({ method: 'chat.done', params: { taskId, text } }));
-                  }
-                  this.chatSubscriptions.delete(taskId);
-                  getStateGraph().updateChatTask(chatId, null);
-                } else {
-                  ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
-                }
-              }).catch(() => {
-                ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'unknown' } }));
-              });
-            }
-          } else if (msg.method === 'chat.cancel') {
-              let { chatId, taskId } = msg.params || {};
-              if (!taskId && chatId) {
-                let chat = getStateGraph().getChat(chatId);
-                taskId = chat?.pendingTaskId;
-              }
-              if (taskId) {
-                console.log(`💬 [Chat] Canceling task: ${taskId} for chat ${chatId}`);
-                try {
-                  await this.requestFromChild('agent-pool', 'tools/call', {
-                    name: 'cancel_task',
-                    arguments: { task_id: taskId }
-                  });
-                } catch (e) { console.error('Failed to cancel task:', e); }
-              }
-            }
-        } catch (e) {
-          console.error('❌ [ChatWS] Message handler error:', e);
-          if (ws.readyState === 1) {
-            ws.send(JSON.stringify({ method: 'chat.error', params: { error: e.message || 'Internal error' } }));
-          }
-        }
-      });
-
-      ws.on('close', () => {
-        // Cleanup subscriptions for this client
-        for (let [taskId, clients] of this.chatSubscriptions) {
-          clients.delete(ws);
-          if (clients.size === 0) this.chatSubscriptions.delete(taskId);
-        }
-      });
-    });
-  }
-
-  /**
-   * Route a task notification from agent-pool to subscribed chat WS clients.
-   * Called from the multiplexer when a 'notifications/task/event' message arrives.
-   * @param {object} notification
-   */
-  routeTaskNotification(notification) {
-    let { taskId, type, data } = notification.params || {};
-    if (!taskId) return;
-
-    console.log(`💬 [TaskNotify] taskId=${taskId} type=${type}`);
-
-    // Mirror task state into StateGraph for UI visibility + persistence
-    let sg = getStateGraph();
-    let meta = data?.meta;
-    if (meta && type !== 'event') {
-      let ops = [{ op: 'set', path: `tasks/${taskId}`, value: {
-        ...meta,
-        type, // last notification type
-        updatedAt: Date.now(),
-      }}];
-      // Remove completed tasks from graph after a delay (10 min TTL)
-      if (type === 'done' || type === 'error' || type === 'cancelled') {
-        // Schedule cleanup — keep in graph briefly for UI to display result
-        createWatchdog(() => {
-          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
-        }, 10 * 60 * 1000);
-      }
-      try { sg.commit(ops, `agent-pool:${type}`); } catch (err) {
-        console.error(`[TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
-      }
-    }
-
-    let clients = this.chatSubscriptions.get(taskId);
-    if (!clients || clients.size === 0) {
-      console.log(`💬 [TaskNotify] No subscribers for taskId=${taskId}, type=${type} — caching for 5s`);
-      
-      // Cache notification in case subscription is still resolving
-      if (!this.pendingNotifications.has(taskId)) {
-        this.pendingNotifications.set(taskId, []);
-        // Clean up after 5s to avoid memory leak if no client ever subscribes
-        setTimeout(() => this.pendingNotifications.delete(taskId), 5000);
-      }
-      this.pendingNotifications.get(taskId).push(notification);
-
-      // Even without subscribers, fetch and save final result to state-graph
-      if (type === 'done' || type === 'error') {
-        let chatId = this.taskChatMap.get(taskId) || this._findChatForTask(taskId);
-        if (chatId) {
-          this.taskChatMap.delete(taskId);
-          this.requestFromChild('agent-pool', 'tools/call', {
-            name: 'get_task_result',
-            arguments: { task_id: taskId },
-          }).then(result => {
-            let text = result.content?.[0]?.text || '';
-            this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
-            getStateGraph().updateChatTask(chatId, null);
-          }).catch(() => {
-            getStateGraph().updateChatTask(chatId, null);
-          });
-        }
-      }
-      return;
-    }
-
-    console.log(`💬 [TaskNotify] Routing to ${clients.size} client(s)`);
-
-    let method = type === 'done' ? 'chat.done'
-      : type === 'error' ? 'chat.error'
-      : 'chat.event';
-
-    // For 'done', fetch the full formatted result and persist it
-    let payload;
-    if (type === 'done' || type === 'error') {
-      let chatId = this.taskChatMap.get(taskId) || this._findChatForTask(taskId);
-      if (chatId) this.taskChatMap.delete(taskId);
-
-      this.requestFromChild('agent-pool', 'tools/call', {
-        name: 'get_task_result',
-        arguments: { task_id: taskId },
-      }).then(result => {
-        let text = result.content?.[0]?.text || '';
-        
-        // Persist result into chat to ensure headless integrity
-        if (chatId) {
-          this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
-          getStateGraph().updateChatTask(chatId, null);
-        }
-
-        // Notify clients to refresh
-        for (let client of clients) {
-          if (client.readyState === 1) {
-            client.send(JSON.stringify({ method, params: { taskId, text } }));
-          }
-        }
-        this.chatSubscriptions.delete(taskId);
-      }).catch(() => {
-        this.chatSubscriptions.delete(taskId);
-        if (chatId) getStateGraph().updateChatTask(chatId, null);
-      });
-    } else {
-      // Stream event
-      payload = JSON.stringify({ method, params: { taskId, event: data } });
-      for (let client of clients) {
-        if (client.readyState === 1) client.send(payload);
-      }
-    }
-  }
-
-  _findChatForTask(taskId) {
-    let sg = getStateGraph();
-    let state = sg.getState();
-    if (!state.chats) return null;
-    for (let chatId in state.chats) {
-      if (state.chats[chatId].pendingTaskId === taskId) {
-        return chatId;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Parse the final task result and persist it to StateGraph, ensuring headless integrity.
-   */
-  _persistFinalTaskResult(chatId, text, startedAt) {
-    let sg = getStateGraph();
-    let chat = sg.getChat(chatId);
-    if (!chat) return;
-
-    let msgs = [...(chat.messages || [])];
-    
-    // Filter out transient system thinking messages
-    msgs = msgs.filter(m => 
-      !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
-      && !(m.role === 'thinking' && !m.done)
-      && !(m.role === 'tool') // Streamed tool messages are transient
-    );
-
-    let meta = {};
-    if (text) {
-      let lastAgent = [...msgs].reverse().find(m => m.role === 'agent');
-      if (!lastAgent || !lastAgent.streaming) {
-        let body = text;
-        let startIdx = body.indexOf('## Agent Response');
-        if (startIdx >= 0) {
-          body = body.substring(startIdx + '## Agent Response'.length).trim();
-        }
-        let endIdx = body.search(/\n+(?:---|## Tools Used|## Errors|## Stats)/i);
-        if (endIdx > 0) {
-          body = body.substring(0, endIdx).trim();
-        }
-        msgs.push({ role: 'agent', text: body, streaming: false });
-      } else {
-        lastAgent.streaming = false;
-      }
-
-      let modeMatch = text.match(/- Mode:\s*(.+)/i);
-      if (modeMatch) meta.mode = modeMatch[1].trim();
-      let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
-      if (sidMatch) {
-        meta.sessionId = sidMatch[1];
-        sg.updateChatSession(chatId, meta.sessionId);
-      }
-      let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
-      if (exitMatch) meta.exitCode = parseInt(exitMatch[1], 10);
-      let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
-      if (toolsMatch) meta.tools = parseInt(toolsMatch[1], 10);
-      let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
-      if (tokensMatch) meta.tokens = parseInt(tokensMatch[1], 10);
-      let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
-      if (costMatch) meta.cost = parseFloat(costMatch[1]);
-      let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
-      if (errorsMatch) meta.errors = errorsMatch[1].trim();
-      let failMatch = text.match(/## \[ERR\] Agent Failed[\s\S]*?(?=\n+##|$)/i);
-      if (failMatch) meta.errors = failMatch[0].trim();
-    }
-
-    let elapsedSec = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
-    msgs.push({
-      role: 'thinking',
-      elapsed: elapsedSec,
-      done: true,
-      meta: Object.keys(meta).length > 0 ? meta : null
-    });
-
-    sg.replaceChatMessages(chatId, msgs);
-    sg.updateChatTask(chatId, null);
-    
-    // Set lastTaskStatus based on exitCode
-    let lastTaskStatus = 'done';
-    if (meta.exitCode !== undefined && meta.exitCode !== 0) {
-      lastTaskStatus = 'error';
-    }
-    sg.updateChat(chatId, { lastTaskStatus });
-
-    // Broadcast chat update to all UI clients
-    this.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
-  }
 
   /**
    * Intentionally stop a server (no respawn).
