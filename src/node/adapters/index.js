@@ -114,7 +114,7 @@ export function getCLIModels() {
  */
 function getEffectiveModels(provider) {
   let userModels = {};
-  try { userModels = getStateGraph().getAllProviderModels(); } catch (e) { /* StateGraph may not be initialized yet during module load */ }
+  try { userModels = getStateGraph().getAllProviderModels(); } catch (e) { console.debug('[adapters] StateGraph not initialized yet'); }
   let models = [];
   
   if (userModels[provider]?.length > 0) {

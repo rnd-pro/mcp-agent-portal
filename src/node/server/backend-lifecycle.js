@@ -69,8 +69,8 @@ export function listBackends() {
       try {
         process.kill(data.pid, 0);
         active.push(data);
-      } catch {
-        try { unlinkSync(join(LOCAL_GATEWAY_DIR, f)); } catch (e) { /* ignore cleanup error */ }
+      } catch (err) {
+        try { unlinkSync(join(LOCAL_GATEWAY_DIR, f)); } catch (e) { console.debug('[portal] Cleanup error:', e.message); }
       }
     } catch (e) { console.warn('[portal] Failed to read backend file:', f, e.message); }
   }

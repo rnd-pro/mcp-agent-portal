@@ -983,7 +983,7 @@ export class MCPProxyManager {
       // Remove completed tasks from graph after a delay (10 min TTL)
       if (type === 'done' || type === 'error' || type === 'cancelled') {
         // Schedule cleanup — keep in graph briefly for UI to display result
-        setTimeout(() => {
+        createWatchdog(() => {
           try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
@@ -1082,7 +1082,7 @@ export class MCPProxyManager {
     this._healthFailures = new Map();
     this._healthInterval = setInterval(() => this._runHealthCheck(), 30000);
     // First check after 10s (let servers initialize)
-    setTimeout(() => this._runHealthCheck(), 10000);
+    createWatchdog(() => this._runHealthCheck(), 10000);
     console.error('💓 [HealthCheck] Started (30s interval)');
   }
 
