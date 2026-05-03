@@ -8,8 +8,7 @@ import { uiPrompt } from '../../common/ui-dialogs.js';
 import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
 import { escapeHtml, formatElapsed, formatMarkdown } from '../../utils/markdown-formatter.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
-
-const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
+import { ChatSidebar } from '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
  * AgentChat — single layout panel with integrated chat-nav sidebar.
@@ -34,7 +33,6 @@ export class AgentChat extends Symbiote {
     composerFooterHtml: '',
     chatParams: {},
     attachedContext: [],
-    navCollapsed: false,
     isInputDisabled: true,
     inputPlaceholder: "Ask anything, @ to mention, / for workflows",
     sessionMetaHtml: '',
@@ -69,14 +67,6 @@ export class AgentChat extends Symbiote {
 
     onSend: () => {
       this._sendMessage();
-    },
-
-    onToggleNav: () => {
-      this.$.navCollapsed = !this.$.navCollapsed;
-    },
-
-    onNewChat: () => {
-      this._createChat();
     },
 
     onParamChangeDelegated: (e) => {
@@ -146,43 +136,42 @@ export class AgentChat extends Symbiote {
   };
 
   renderCallback() {
-    // Restore collapsed state from localStorage
-    if (typeof localStorage !== 'undefined') {
-      let stored = localStorage.getItem(STORAGE_KEY_CHAT_NAV);
-      if (stored === 'true') {
-        this.$.navCollapsed = true;
-      }
-    }
 
     // Initial empty state
     queueMicrotask(() => this._updateEmptyState());
 
-    // Reflect nav collapsed state and persist to localStorage
-    this.sub('navCollapsed', (val) => {
-      let nav = this.querySelector('.chat-nav');
-      if (nav) nav.toggleAttribute('collapsed', val);
-
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_CHAT_NAV, String(val));
-      }
-    });
-
     // Fetch adapter metadata
     this._fetchAdapterMeta();
 
-    // Fetch chats, then sync from URL — component is ready when fetch completes
-    this._fetchChats().then(() => {
-      console.log("[AgentChat] _fetchChats completed. Calling _syncChatFromRouter");
-      this._syncChatFromRouter();
-    });
+    this._syncChatFromRouter();
 
-    dashEvents.addEventListener('chats-updated', () => this._fetchChats());
+    this._wsClient = new ChatWsClient({
+      getMessages: () => this.$.messages,
+      setMessages: (msgs) => { this.$.messages = msgs; },
+      onSessionId: (id) => {
+        this._sessionId = id;
+        fetch("/api/chats/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId: dashState.activeChatId, sessionId: id }),
+        }).catch(() => {});
+      },
+      onBackgroundToggle: (isActive) => this.ref.cellBg?.toggle(isActive),
+      onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
+      onDone: () => {
+        this._setSending(false);
+        this._updateEmptyState();
+      },
+      onError: (errText) => {
+        this._setSending(false);
+        this._updateEmptyState();
+      },
+      buildSessionMetaHtml: (text) => this._buildSessionMetaHtml(text)
+    });
     dashEvents.addEventListener('active-chat-changed', (e) => {
       console.log("[AgentChat] active-chat-changed received:", e.detail);
       this._loadChat(e.detail?.id);
-      this._renderNavItems();
     });
-    dashEvents.addEventListener('active-project-changed', () => this._renderNavItems());
 
     // Self-register with router: react to ?chat= URL param changes
     this.sub('ROUTER/query', (query) => {
@@ -611,163 +600,6 @@ export class AgentChat extends Symbiote {
     });
   }
 
-  async _fetchChats() {
-    try {
-      let res = await fetch('/api/chats');
-      let data = await res.json();
-      dashState.chats = data.chats || [];
-      this._renderNavItems();
-    } catch (err) {
-      console.error('[AgentChat] fetch chats error:', err);
-    }
-  }
-
-  _renderNavItems() {
-    let container = this.querySelector('.chat-items');
-    if (!container) return;
-    container.innerHTML = '';
-
-    let chats = dashState.chats || [];
-
-    let projectId = dashState.activeProjectId;
-    if (projectId) {
-      // Project scope: show ONLY chats bound to this project
-      chats = chats.filter(c => c.projectId === projectId);
-    }
-    // Home scope (no projectId): show ALL chats from all projects
-
-    // Build parent-child map
-    let childMap = new Map(); // parentId → [chat, ...]
-    let rootChats = [];
-
-    for (let chat of chats) {
-      if (chat.parentChatId) {
-        if (!childMap.has(chat.parentChatId)) {
-          childMap.set(chat.parentChatId, []);
-        }
-        childMap.get(chat.parentChatId).push(chat);
-      } else {
-        rootChats.push(chat);
-      }
-    }
-
-    for (let chat of rootChats) {
-      let children = childMap.get(chat.id) || [];
-      let hasChildren = children.length > 0;
-
-      this._renderChatItem(container, chat, hasChildren, false);
-
-      if (hasChildren) {
-        let subContainer = document.createElement('div');
-        subContainer.className = 'chat-sub-items';
-        subContainer.dataset.parent = chat.id;
-
-        for (let child of children) {
-          this._renderChatItem(subContainer, child, false, true);
-        }
-        container.appendChild(subContainer);
-      }
-    }
-
-    // Orphan children (parent deleted) — show as root
-    for (let [parentId, children] of childMap) {
-      if (rootChats.some(c => c.id === parentId)) continue;
-      for (let child of children) {
-        this._renderChatItem(container, child, false, false);
-      }
-    }
-  }
-
-  _renderChatItem(container, chat, hasChildren, isChild) {
-    let div = document.createElement('div');
-    div.className = 'chat-item';
-    if (isChild) div.classList.add('chat-item-child');
-    if (chat.id === dashState.activeChatId) div.setAttribute('active', '');
-
-    let expandHtml = '';
-    if (hasChildren) {
-      expandHtml = `<span class="material-symbols-outlined chat-expand-icon">chevron_right</span>`;
-    }
-
-    let icon = isChild ? 'subdirectory_arrow_right' : 'chat';
-
-    div.innerHTML = `
-      ${expandHtml}
-      <span class="material-symbols-outlined">${icon}</span>
-      <span class="chat-item-label">${chat.name}</span>
-      <span class="chat-item-adapter">${chat.adapter}</span>
-      <button class="chat-item-delete" title="Delete">×</button>
-    `;
-
-    // Expand/collapse children
-    if (hasChildren) {
-      div.querySelector('.chat-expand-icon').addEventListener('click', (e) => {
-        e.stopPropagation();
-        let subContainer = container.querySelector(`.chat-sub-items[data-parent="${chat.id}"]`);
-        if (!subContainer) return;
-        let isExpanded = subContainer.hasAttribute('expanded');
-        subContainer.toggleAttribute('expanded', !isExpanded);
-        div.classList.toggle('chat-item-expanded', !isExpanded);
-      });
-    }
-
-    div.addEventListener('click', (e) => {
-      if (e.target.closest('.chat-item-delete')) return;
-      if (e.target.closest('.chat-expand-icon')) return;
-      dashState.activeChatId = chat.id;
-      setGlobalParam('chat', chat.id);
-      dashEmit('active-chat-changed', { id: chat.id });
-    });
-
-    div.querySelector('.chat-item-delete').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await fetch('/api/chats/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: chat.id }),
-      });
-      if (dashState.activeChatId === chat.id) {
-        dashState.activeChatId = null;
-        setGlobalParam('chat', null);
-        dashEmit('active-chat-changed', { id: null });
-      }
-      this._fetchChats();
-    });
-
-    container.appendChild(div);
-  }
-
-  async _createChat() {
-    console.log('[AgentChat] _createChat called!', new Error().stack);
-    let adapter = dashState.globalCli?.defaultAdapter || 'pool';
-    let projectId = dashState.activeProjectId || null;
-    let projectName = null;
-
-    if (projectId) {
-      let proj = (dashState.projectHistory || []).find(p => p.id === projectId);
-      projectName = proj?.name;
-    }
-
-    let name = projectName ? `${projectName} — Chat` : 'New Chat';
-
-    try {
-      let res = await fetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, name, adapter }),
-      });
-      let data = await res.json();
-      if (data.ok) {
-        dashState.activeChatId = data.id;
-        setGlobalParam('chat', data.id);
-        dashEmit('active-chat-changed', { id: data.id });
-        await this._fetchChats();
-      }
-    } catch (err) {
-      console.error('[AgentChat] create chat error:', err);
-    }
-  }
-
   async _sendMessage() {
     console.log('[AgentChat] _sendMessage called!', new Error().stack);
     let chatId = dashState.activeChatId;
@@ -789,34 +621,7 @@ export class AgentChat extends Symbiote {
           dashState.activeChatId = chatId;
           setGlobalParam('chat', chatId);
           dashEmit('active-chat-changed', { id: chatId });
-          this._toggleNav(true);
-    }
-
-    this._wsClient = new ChatWsClient({
-      getMessages: () => this.$.messages,
-      setMessages: (msgs) => { this.$.messages = msgs; },
-      onSessionId: (id) => {
-        this._sessionId = id;
-        fetch("/api/chats/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId: dashState.activeChatId, sessionId: id }),
-        }).catch(() => {});
-      },
-      onBackgroundToggle: (isActive) => this.ref.cellBg?.toggle(isActive),
-      onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
-      onDone: () => {
-        this._setSending(false);
-        this._updateEmptyState();
-      },
-      onError: (errText) => {
-        this._setSending(false);
-        this._updateEmptyState();
-      },
-      buildSessionMetaHtml: (text) => this._buildSessionMetaHtml(text)
-    });
-
-    this._fetchChats();
+          dashEmit('active-chat-changed', { id: chatId });
         } else {
           return;
         }

@@ -7,13 +7,13 @@ import os from 'node:os';
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-context-test-${Date.now()}`);
 
 describe('context.js', () => {
-  let trackFiles, untrackFiles, getActiveContext;
+  let trackFiles, untrackFiles, getTrackedFiles;
 
   before(async () => {
     const mod = await import('../../packages/context-x-mcp/src/file-tracker.js');
     trackFiles = mod.trackFiles;
     untrackFiles = mod.untrackFiles;
-    getActiveContext = mod.getActiveContext;
+    getTrackedFiles = mod.getTrackedFiles;
 
     if (!fs.existsSync(TEST_CWD)) {
       fs.mkdirSync(TEST_CWD, { recursive: true });
@@ -26,8 +26,8 @@ describe('context.js', () => {
     }
   });
 
-  it('getActiveContext on nonexistent context returns empty array', () => {
-    const ctx = getActiveContext(TEST_CWD);
+  it('getTrackedFiles on nonexistent context returns empty array', () => {
+    const ctx = getTrackedFiles(TEST_CWD);
     assert.deepStrictEqual(ctx, []);
   });
 
@@ -39,7 +39,7 @@ describe('context.js', () => {
     assert.deepStrictEqual(res2, ['src/index.js', 'src/utils.js']);
     
     // Check persistence
-    const loaded = getActiveContext(TEST_CWD);
+    const loaded = getTrackedFiles(TEST_CWD);
     assert.deepStrictEqual(loaded, ['src/index.js', 'src/utils.js']);
   });
 
@@ -52,7 +52,7 @@ describe('context.js', () => {
     const res = untrackFiles(TEST_CWD, []);
     assert.deepStrictEqual(res, []);
     
-    const loaded = getActiveContext(TEST_CWD);
+    const loaded = getTrackedFiles(TEST_CWD);
     assert.deepStrictEqual(loaded, []);
   });
 });
