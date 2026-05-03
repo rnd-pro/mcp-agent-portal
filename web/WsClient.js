@@ -61,7 +61,7 @@ export class WsClient {
         // Generic event
         this._eventCallbacks.forEach(cb => cb(msg));
       } catch (err) {
-        console.error('🔴 [WsClient] Failed to parse message:', err);
+        console.error('[WsClient] Failed to parse message:', err);
       }
     };
 

@@ -95,7 +95,7 @@ export class PeerReview extends Symbiote {
   
   updateBanner(type, message) {
     let banner = this.querySelector('#pr-status-banner');
-    banner.style.display = 'flex';
+    banner.hidden = false;
     banner.className = 'ui-banner ' + type;
     
     let icon = 'info';

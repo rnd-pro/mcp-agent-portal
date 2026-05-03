@@ -52,9 +52,16 @@ export function createGeminiAdapter(config = {}) {
     async run({ prompt, cwd, model, timeout }) {
       busy = true;
       try {
+        const { getGlobalTeamRules } = await import('../server/context-injector.js');
+        const rules = getGlobalTeamRules();
+        let finalPrompt = prompt;
+        if (rules) {
+          finalPrompt = `[GLOBAL TEAM CONTEXT AND RULES]\n${rules}\n[/GLOBAL TEAM CONTEXT AND RULES]\n\nTask:\n${prompt}`;
+        }
+
         return await new Promise((resolve) => {
           const args = [
-            '-p', prompt,
+            '-p', finalPrompt,
             '--output-format', 'stream-json',
             '--approval-mode', 'yolo'
           ];
@@ -67,7 +74,7 @@ export function createGeminiAdapter(config = {}) {
           const timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
 
           const spawnOpts = {
-            cwd: cwd ?? process.cwd(),
+            cwd: cwd || process.env.HOME,
             env: { ...process.env, TERM: 'dumb', CI: '1' },
             stdio: ['pipe', 'pipe', 'pipe'],
             detached: true,

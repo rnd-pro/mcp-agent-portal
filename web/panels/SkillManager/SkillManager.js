@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './SkillManager.tpl.js';
+import { uiConfirm } from '../../common/ui-dialogs.js';
 import css from '../../common/ui-shared.css.js';
 
 export class SkillManager extends Symbiote {
@@ -124,7 +125,7 @@ export class SkillManager extends Symbiote {
     let delBtn = main.querySelector('#del-btn');
     if (delBtn) {
       delBtn.onclick = async () => {
-        if (!confirm(`Are you sure you want to delete ${skill.name} from the ${skill.tier} tier?`)) return;
+        if (!(await uiConfirm(`Are you sure you want to delete ${skill.name} from the ${skill.tier} tier?`))) return;
         try {
           await this._mcpCall('delete_skill', { skill_name: skill.name, scope: skill.tier });
           this.$.selectedSkillName = null;

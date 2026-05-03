@@ -21,11 +21,12 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
 // ── Paths ────────────────────────────────────────────────
-const STATE_DIR = path.join(os.homedir(), '.gemini');
+const STATE_DIR = path.join(os.homedir(), '.agent-portal');
 const SNAPSHOT_PATH = path.join(STATE_DIR, 'agent-portal-state.json');
 const WAL_PATH = path.join(STATE_DIR, 'agent-portal.wal');
 const OLD_CONFIG_PATH = path.join(STATE_DIR, 'agent-portal.json');
 const CHATS_DIR = path.join(STATE_DIR, 'agent-portal-chats');
+
 
 // ── Tuning ───────────────────────────────────────────────
 const RING_BUFFER_SIZE = 2000;        // patches kept in memory for delta sync
@@ -326,6 +327,8 @@ export class StateGraph extends EventEmitter {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
     let snapshotLoaded = false;
+
+
 
     // 1. Try loading snapshot
     if (fs.existsSync(this._snapshotPath)) {
@@ -748,6 +751,63 @@ export class StateGraph extends EventEmitter {
     else delete chat.pendingTaskId;
     chat.updatedAt = Date.now();
     fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  }
+
+  // ── Project Mutation Helpers ───────────────────────────
+
+  /** Remove a project from the graph. */
+  removeProject(id, source = 'system') {
+    this.del(`projects/${id}`, source);
+  }
+
+  /** Update project fields (merge). */
+  updateProject(id, updates, source = 'system') {
+    if (Object.keys(updates).length === 0) return;
+    updates.updatedAt = Date.now();
+    this.merge(`projects/${id}`, updates, source);
+  }
+
+  /** Toggle project open/close tab. */
+  setProjectOpen(id, open, source = 'system') {
+    this.merge(`projects/${id}`, { open }, source);
+  }
+
+  // ── Settings Helpers ───────────────────────────────────
+
+  /** Read all settings. */
+  getSettings() {
+    return this._state.settings || {};
+  }
+
+  /** Merge settings (shallow). */
+  setSettings(updates, source = 'system') {
+    this.merge('settings', updates, source);
+  }
+
+  /** Get provider models for a specific provider. */
+  getProviderModels(provider) {
+    return this._state.settings?.providerModels?.[provider] || [];
+  }
+
+  /** Get all provider model configs. */
+  getAllProviderModels() {
+    return this._state.settings?.providerModels || {};
+  }
+
+  /** Set models for a provider. */
+  setProviderModels(provider, models, source = 'system') {
+    let pm = { ...(this._state.settings?.providerModels || {}), [provider]: models };
+    this.merge('settings', { providerModels: pm }, source);
+  }
+
+  /** Read global CLI config. */
+  getGlobalCli() {
+    return this._state.settings?.globalCli || {};
+  }
+
+  /** Set global CLI config. */
+  setGlobalCli(cli, source = 'system') {
+    this.merge('settings', { globalCli: cli }, source);
   }
 }
 

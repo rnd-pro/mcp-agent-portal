@@ -2,6 +2,7 @@ import { Symbiote } from "@symbiotejs/symbiote";
 import cssShared from "../../common/ui-shared.css.js";
 import cssLocal from "./SettingsPanel.css.js";
 import template from "./SettingsPanel.tpl.js";
+import { uiConfirm } from '../../common/ui-dialogs.js';
 
 function renderMetric(label, value, extraClass = "") {
   return `<div class="pg-stg-metric"><span>${label}</span><span class="pg-stg-val ${extraClass}">${value}</span></div>`;
@@ -22,8 +23,44 @@ export class SettingsPanel extends Symbiote {
     this.ref.refreshBtn.onclick = () => this.fetchInfo();
     this.ref.restartBtn.onclick = () => this.restartServer();
     this.ref.stopBtn.onclick = () => this.stopServer();
+    this.ref.saveSettingsBtn.onclick = () => this.saveSettings();
     this.fetchInfo();
+    this.fetchSettings();
     this._startStatusPolling();
+  }
+
+  async fetchSettings() {
+    try {
+      let r = await fetch("/api/settings").then(res => res.json());
+      if (r.telegramToken) {
+        this.ref.telegramTokenInput.value = r.telegramToken;
+      }
+      if (r.telegramChatId) {
+        this.ref.telegramChatIdInput.value = r.telegramChatId;
+      }
+    } catch (e) {
+      console.error('Failed to fetch settings:', e);
+    }
+  }
+
+  async saveSettings() {
+    try {
+      let telegramToken = this.ref.telegramTokenInput.value.trim();
+      let telegramChatId = this.ref.telegramChatIdInput.value.trim();
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telegramToken, telegramChatId })
+      });
+      let btn = this.ref.saveSettingsBtn;
+      btn.textContent = "Saved! Please click Restart.";
+      btn.className = "ui-btn primary";
+      setTimeout(() => {
+        btn.textContent = "Save";
+      }, 4000);
+    } catch (e) {
+      console.error('Failed to save settings:', e);
+    }
   }
 
   disconnectedCallback() {
@@ -58,7 +95,7 @@ export class SettingsPanel extends Symbiote {
   }
 
   async stopServer() {
-    if (!confirm("Stop the server? It will not restart automatically.")) return;
+    if (!(await uiConfirm("Stop the server? It will not restart automatically."))) return;
     try {
       await fetch("/api/stop", { method: "POST" });
       this.ref.restartStatus.textContent = "⏹ Server stopped.";
@@ -70,7 +107,7 @@ export class SettingsPanel extends Symbiote {
 
   async restartServer() {
     let t = this.ref.restartStatus;
-    t.textContent = "⏳ Restarting server…";
+    t.textContent = "Restarting server…";
     t.style.color = "var(--sn-warning-color, #ff9800)";
     try {
       await fetch("/api/restart", { method: "POST" });
@@ -81,7 +118,7 @@ export class SettingsPanel extends Symbiote {
         try {
           if ((await fetch("/api/project-info")).ok) {
             clearInterval(timer);
-            t.textContent = "✅ Server restarted successfully";
+            t.textContent = "Server restarted successfully";
             t.style.color = "var(--sn-success-color, #4caf50)";
             this.fetchInfo();
             setTimeout(() => { t.textContent = ""; }, 3000);
@@ -90,7 +127,7 @@ export class SettingsPanel extends Symbiote {
         } catch {}
         if (retries > 15) {
           clearInterval(timer);
-          t.textContent = "⚠ Server did not come back. Refresh the page manually.";
+          t.textContent = "Server did not come back. Refresh the page manually.";
           t.style.color = "var(--sn-danger-color, #f44336)";
         }
       }, 1000);
@@ -180,9 +217,9 @@ export class SettingsPanel extends Symbiote {
     });
     
     if (this._activeProvider !== 'opencode') {
-      this.ref.directoryEl.style.display = 'none';
+      this.ref.directoryEl.hidden = true;
     } else {
-      this.ref.directoryEl.style.display = 'flex';
+      this.ref.directoryEl.hidden = false;
       this._renderDirectory();
     }
     
@@ -304,9 +341,9 @@ export class SettingsPanel extends Symbiote {
       }
       
       let tags = [];
-      if (m.isVision) tags.push('<span class="pm-tag">👁️ Vision</span>');
-      if (m.isTools) tags.push('<span class="pm-tag">🛠️ Tools</span>');
-      if (m.maxOutput) tags.push(`<span class="pm-tag">⏱️ ${Math.round(m.maxOutput / 1000)}k Out</span>`);
+      if (m.isVision) tags.push('<span class="pm-tag"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">visibility</span> Vision</span>');
+      if (m.isTools) tags.push('<span class="pm-tag"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">build</span> Tools</span>');
+      if (m.maxOutput) tags.push(`<span class="pm-tag"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">timer</span> ${Math.round(m.maxOutput / 1000)}k Out</span>`);
       
       return `
         <div class="pm-grid-row">

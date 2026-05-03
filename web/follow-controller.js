@@ -240,21 +240,24 @@ class FollowController {
         if (args.action === 'expand') return `🔍 Expanding ${args.symbol}`;
         if (args.action === 'deps') return `🔗 Tracing deps of ${args.symbol}`;
         if (args.action === 'usages') return `📡 Finding usages of ${args.symbol}`;
-        if (args.action === 'call_chain') return `⛓ Tracing ${args.from} → ${args.to}`;
-        if (args.action === 'sub_projects') return `📦 Scanning sub-projects`;
-        return `🧭 Navigating graph`;
+        if (args.action === 'expand') return `Expanding ${args.symbol}`;
+        if (args.action === 'deps') return `Tracing deps of ${args.symbol}`;
+        if (args.action === 'usages') return `Finding usages of ${args.symbol}`;
+        if (args.action === 'call_chain') return `Tracing ${args.from} → ${args.to}`;
+        if (args.action === 'sub_projects') return `Scanning sub-projects`;
+        return `Navigating graph`;
       }
-      case 'get_skeleton': return `🗺️ Scanning project structure`;
-      case 'get_ai_context': return `🧠 Loading AI context`;
-      case 'get_focus_zone': return `🎯 Analyzing recent changes`;
-      case 'compact': return `📄 Reading ${short}`;
-      case 'analyze': return `📊 Analyzing: ${args.action || ''}`;
-      case 'docs': return `📝 Documentation: ${args.action || ''}`;
-      case 'jsdoc': return `📋 JSDoc: ${args.action || ''}`;
-      case 'db': return `🗄️ Database: ${args.action || ''}`;
-      case 'testing': return `🧪 Tests: ${args.action || ''}`;
-      case 'filters': return `⚙️ Filters: ${args.action || ''}`;
-      default: return tool ? `⚡ ${tool}` : '';
+      case 'get_skeleton': return `Scanning project structure`;
+      case 'get_ai_context': return `Loading AI context`;
+      case 'get_focus_zone': return `Analyzing recent changes`;
+      case 'compact': return `Reading ${short}`;
+      case 'analyze': return `Analyzing: ${args.action || ''}`;
+      case 'docs': return `Documentation: ${args.action || ''}`;
+      case 'jsdoc': return `JSDoc: ${args.action || ''}`;
+      case 'db': return `Database: ${args.action || ''}`;
+      case 'testing': return `Tests: ${args.action || ''}`;
+      case 'filters': return `Filters: ${args.action || ''}`;
+      default: return tool ? `${tool}` : '';
     }
   }
 

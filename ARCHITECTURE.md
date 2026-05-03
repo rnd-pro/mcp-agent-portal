@@ -17,76 +17,127 @@
 └──┬────────┬────────┬────────────┘
    │        │        │
    ▼        ▼        ▼
- project  agent    browser        ← Child MCP servers
+ project  agent    context        ← Child MCP servers
  -graph   -pool    -x-mcp           (stdio, auto-spawned)
 ```
 
 > [!TIP]
 > Add one entry to your MCP config and get access to every tool from every child server — no per-server configuration in the IDE.
 
-### Singleton Architecture
+## Singleton Architecture
 
-Agent Portal runs as a **detached singleton backend** to prevent resource exhaustion when opening multiple IDE windows.
+Agent Portal runs as a **detached singleton backend** shared by all IDE instances. This is the fundamental design principle — one backend, many thin proxies.
 
 ```
-IDE Window 1 ──stdio──┐                 ┌───────────────────────┐
-IDE Window 2 ──stdio──┼───WebSocket────▶│ Singleton Backend     │
-IDE Window 3 ──stdio──┘                 │ (detached process)    │
-                                        └──┬────────┬───────────┘
-                                           │        │
-                                           ▼        ▼
-                                       project-   agent-
-                                       graph      pool
+IDE Window 1 ──stdio→ index.js ──WebSocket──┐
+IDE Window 2 ──stdio→ index.js ──WebSocket──┼──→ Singleton Backend (detached)
+IDE Window 3 ──stdio→ index.js ──WebSocket──┘    port: random, pid in port file
+                                                  │
+           Web Dashboard ◀──HTTP/WS──────────────┘
+             http://portal.local/                  │
+                                              ┌────┴─────┐
+                                              ▼          ▼
+                                          project-    agent-
+                                          graph       pool
 ```
 
-1. **First IDE window**: Spawns the detached backend process, then connects via WebSocket.
-2. **Subsequent IDE windows**: Detect the backend via `~/.local-gateway/backends/` port files and connect via WebSocket.
-3. **Zero-Zombie**: The backend outlives the IDE windows and manages all child processes in detached process groups. On shutdown, it cleans up all children automatically.
+### Lifecycle
+
+1. **First IDE window**: `index.js` runs `ensureBackend()` → no port file found → spawns detached `backend.js` → waits for port file → connects thin stdio↔WS proxy.
+2. **Subsequent IDE windows**: `ensureBackend()` finds port file in `~/.local-gateway/backends/` → validates PID is alive AND port accepts TCP → connects proxy.
+3. **Backend restart**: Only triggered by explicit `--force` flag or npm version mismatch. **Source file changes never trigger restart** — this is critical for multi-instance stability.
+4. **Zero-Zombie**: The backend outlives IDE windows. On SIGTERM/SIGINT, it removes its port file and stops all child processes.
+
+### Restart Safety Rules
+
+> [!IMPORTANT]
+> The `ensureBackend()` function follows strict safety rules to prevent cascade failures:
+> - **Never kills a running backend due to source file changes** — other IDE instances depend on it.
+> - **TCP health check** before returning a port — prevents connecting to a dead/initializing backend.
+> - **PID liveness check** via `process.kill(pid, 0)` — cleans up stale port files from crashed backends.
+> - Version `0.0.0` (dev mode) is never treated as a mismatch — prevents restart loops during development.
+
+### Port File Protocol
+
+Each backend writes a JSON port file to `~/.local-gateway/backends/portal-<hash>.json`:
+
+```json
+{
+  "port": 63288,
+  "pid": 87544,
+  "project": "/path/to/workspace",
+  "name": "mcp-agent-portal",
+  "version": "1.0.0",
+  "startedAt": 1777723454556
+}
+```
+
+The hash is derived from `md5(absoluteProjectPath).slice(0, 8)`. Multiple workspaces can have independent backends.
 
 ### Workspace Registration
 
 When an IDE connects, the MCP `initialize` message carries `params.roots` — the workspace directories the IDE has open. The portal extracts these roots and automatically:
 
-1. Creates a project entry in `~/.gemini/agent-portal.json` (deduplication by path)
+1. Creates a project entry in `~/.agent-portal/agent-portal.json` (deduplication by path)
 2. Adds it to the active project tabs
 3. Broadcasts `projects.opened` to the web UI for real-time tab creation
 
-This means each IDE window registers its **own workspace**, not the portal's install directory. Multiple IDE windows editing different projects all appear as separate tabs in the dashboard.
+This means each IDE window registers its **own workspace**, not the portal's install directory.
 
-### Dual Mode
+## Dual Mode
 
 Agent Portal provides two interfaces to the same singleton backend:
 
 | Mode | Transport | What you see |
 |------|-----------|-------------|
-| **IDE** | stdio (JSON-RPC) | Unified `tools/list`, `resources/list`, `prompts/list` from all children |
-| **Web** | HTTP + WebSocket | Dashboard, Marketplace, AI Chat, Graph, live monitoring |
+| **IDE** | stdio (JSON-RPC over stdin/stdout) | Unified `tools/list`, `resources/list` from all children |
+| **Web** | HTTP + WebSocket | Dashboard, Marketplace, AI Chat, live monitoring |
 
-The IDE connects to the portal's `/mcp-ws` endpoint. The web UI runs on a random port, accessible via `http://portal.local` (local gateway).
+### IDE Mode (stdin/stdout)
 
-### MCP Aggregation
+When `process.stdin.isTTY === false` (launched by IDE):
 
-When your IDE sends `initialize { params: { roots: [...] } }`:
+1. `console.log` is redirected to `stderr` (stdout is reserved for JSON-RPC)
+2. `ensureBackend()` finds or spawns the singleton backend
+3. `startStdioProxy(port)` creates a raw TCP→WebSocket bridge to `/mcp-ws`
+4. IDE JSON-RPC flows: `stdin → maskAndFrame → WS → backend → WS frame → stdout`
 
-1. Portal extracts workspace roots and registers them as dashboard project tabs
-2. Portal responds with its capabilities (`tools`, `resources`)
-3. Portal broadcasts `initialize` to all child MCP servers
+### Terminal Mode (attached)
 
-When your IDE sends `tools/call { name: "get_skeleton" }`:
+When `process.stdin.isTTY === true` (run from terminal):
 
-1. Portal looks up `get_skeleton` in its `toolsMap` → `project-graph`
-2. Rewrites the request ID and forwards it to the child's stdin
-3. Child processes the call, responds on stdout
-4. Portal rewrites the ID back and sends the response to the IDE over WebSocket
+- Backend runs directly (attached, not detached)
+- Supports `--master` and `--connect` flags for distributed mode
+- Web UI starts on the same process
 
-The browser uses the same mechanism via `POST /api/mcp-call`.
+## MCP Smart Gateway
 
-### Heterogeneous Agent Pool
+The portal does **not** expose all child tools directly. Instead, it presents a **Smart Gateway** with meta-tools:
 
-> [!NOTE]
-> The adapter pool infrastructure (`src/node/adapters/`) is fully implemented with `BaseAdapter`, `AdapterPool` (acquire/release), and three functional adapters: `gemini`, `claude`, and `opencode`. All three use stream-json parsing with timeout and process group management.
+| Meta-Tool | Description |
+|-----------|-------------|
+| `discover_tools` | Search child tools by keyword, tag, or server name |
+| `call_tool` | Proxy a call to any child tool by name (transparent routing) |
+| `get_portal_status` | Health, server list, tool counts, available tags |
+| `create_chat` | Create an Agent Chat session in the web UI |
+| `send_chat_message` | Send a message to an existing chat session |
+| `remember` | Save key-value pair to persistent memory |
+| `recall` | Query persistent memory by key substring |
 
-Multiple CLI agents will run **in parallel** — not just one at a time. The pool is heterogeneous: different providers handle different tasks simultaneously.
+When an IDE sends `tools/list`, it receives these 7 meta-tools with dynamic hints about available child tools. The `call_tool` meta-tool transparently routes to the correct child server using a `ToolIndex`.
+
+### MCP Aggregation Flow
+
+```
+IDE → tools/call { name: "call_tool", arguments: { name: "get_skeleton", arguments: {...} } }
+  → MCPMultiplexer → ToolIndex.get("get_skeleton") → "project-graph"
+  → proxyManager.sendToChild("project-graph", { method: "tools/call", params: { name: "get_skeleton", ... } })
+  → child stdout → handleChildMessage → rewrite ID → sendToIde → stdout → IDE
+```
+
+## Heterogeneous Agent Pool
+
+Multiple CLI agents run **in parallel** via the `agent-pool-mcp` package. The pool is heterogeneous: different providers handle different tasks simultaneously.
 
 ```
 ┌───────────────────────────────────────────────────────┐
@@ -105,29 +156,26 @@ Multiple CLI agents will run **in parallel** — not just one at a time. The poo
 └───────────────────────────────────────────────────────┘
 ```
 
-Each adapter type will have configurable capacity limits. The orchestrator can auto-select the best provider for a task:
-
-- **Code generation** → Gemini (fast, good with code)
-- **Architecture review** → Claude (deep reasoning)
-- **Sensitive data** → OpenCode (local, no cloud)
-- **Bulk analysis** → OpenRouter/Qwen (cheap, parallel)
-
-### Three Operating Modes
+### Dual Execution Architecture
 
 > [!NOTE]
-> **Standalone** and **Client** modes are fully implemented. **Master** mode accepts remote client connections via WebSocket (`/ws/client`) and aggregates their tools.
+> The portal features two execution paths for CLI agents:
+> 1. **Direct Adapters (`src/node/adapters/`)**: Native adapters for Gemini and Claude that run directly within the portal process. Fallback execution path.
+> 2. **Pool Orchestrator (`agent-pool-mcp`)**: Primary execution path. All providers (Gemini, Claude, OpenCode, OpenRouter) are natively implemented inside the `agent-pool-mcp` server. The `AgentChat` UI delegates via `adapter: "pool"`.
+
+## Three Operating Modes
 
 ```
-node index.js                  # standalone (default, implemented)
-node index.js --connect wss:// # client — joins a master node (planned)
-node index.js --master         # master — orchestrates client nodes (planned)
+node index.js                  # standalone (default)
+node index.js --connect wss:// # client — joins a master node
+node index.js --master         # master — orchestrates client nodes
 ```
 
 | Mode | What it does | Status |
 |------|-------------|--------|
-| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE | ✅ Implemented |
-| **Client** | Connects to a master via WebSocket, registers its local tools, executes delegated tasks | ✅ Implemented |
-| **Master** | Aggregates tools from local children AND remote client nodes. IDE sees everything. | ✅ Implemented |
+| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE | ✅ Production |
+| **Client** | Connects to a master via WebSocket, registers its local tools | ✅ Implemented |
+| **Master** | Aggregates tools from local children AND remote client nodes | ✅ Implemented |
 
 ```
 IDE ──stdio──→ Portal (master)
@@ -136,93 +184,49 @@ IDE ──stdio──→ Portal (master)
                 └──WSS──→ Client B (cloud-vm): terminal-x, context-x
 ```
 
-> [!IMPORTANT]
-> In master mode, `tools/list` will include tools from all connected clients. Routing is transparent — the IDE won't know which machine handles the call.
+## Web Dashboard
 
-### Web Dashboard
+Built-in SPA with extensible section registry (`RouterRegistry` + `LayoutTree` from `symbiote-node`):
 
-Built-in web UI with extensible section registry:
+| Section | Hash | Panel Components |
+|---------|------|-----------------|
+| Dashboard | `#dashboard` | project-list, action-board, agent-chat, monitor |
+| Agent Chat | `#agent-chat` | Full-screen agent chat with adapter/model selection |
+| Marketplace | `#marketplace` | MCP server management — install, remove, status |
+| Explorer | `#explorer` | file-tree, code-viewer, ctx-panel, dep-graph |
+| Analysis | `#analysis` | health-panel (code quality dashboard) |
+| Topology | `#topology` | Network visualization of connected nodes |
+| Settings | `#settings` | Portal configuration, Telegram token, model management |
 
-| Section | Hash | Icon | Description |
-|---------|------|------|-------------|
-| Dashboard | `#dashboard` | `dashboard` | Server list, action board, agent chat |
-| AI Chat | `#chat` | `smart_toy` | Full-screen agent chat with adapter selection |
-| Marketplace | `#marketplace` | `storefront` | MCP server management — status, start/stop, tool explorer |
-| Topology | `#topology` | `hub` | Network visualization of connected nodes (local + remote) |
-| Tool Explorer | `#tool-explorer` | `build` | Browse `tools/list` per server with input schema viewer |
-| Explorer | `#explorer` | `folder_open` | File browser with code viewer and docs |
-| Graph | `#graph` | `developer_board` | Force-directed dependency graph (canvas) |
-| Follow | `#follow` | `smart_toy` | Combined graph + code + monitor view for live agent tracking |
-| Analysis | `#analysis` | `analytics` | Code quality health dashboard |
-| Monitor | `#monitor` | `monitor_heart` | Live event stream from all MCP servers |
-| Settings | `#settings` | `settings` | Portal configuration |
+Additional panels registered but composed within sections:
+- `ToolExplorer` — browse `tools/list` per server with input schema viewer
+- `ActiveContext` — live context tracking data
+- `ActiveTasks` — running agent tasks monitor
+- `PipelineManager` — multi-step pipeline orchestration
+- `GroupManager` — agent group management
+- `SkillManager` — workflow/skill discovery and management
+- `PeerReview` — agent peer review interface
+- `WorkflowExplorer` — workflow discovery and execution
+- `ChatList` — chat session management
 
-New sections are registered via `RouterRegistry` — MCP servers can inject their own UI panels at runtime.
+New sections are registered via `registerSection()`. MCP servers can inject their own UI panels at runtime via `registerPanelType()`.
 
-### Marketplace
-
-Discover and manage MCP servers. The Marketplace panel shows all configured servers with live status, PID, and tool count. Planned features:
-
-- Add/remove servers via UI (edits `mcp-agent-portal.json`)
-- Tool explorer — browse `tools/list` per server
-- Start/stop/restart individual servers
-- Public registry (ClawHub-inspired)
-
-### CLI Adapters
+## Plugin Architecture
 
 > [!NOTE]
-> **Dual Execution Architecture:** The portal features two ways to execute CLI agents:
-> 1. **Direct Adapters (`src/node/adapters/`)**: Native adapters for Gemini and Claude that run directly within the portal process. These act as direct execution fallbacks.
-> 2. **Pool Orchestrator (`agent-pool-mcp`)**: The primary and recommended execution path. All providers (Gemini, Claude, OpenCode, OpenRouter) are natively implemented inside the `agent-pool-mcp` server. The `AgentChat` UI delegates tasks to the pool by default (via `adapter: "pool"` and `provider: "..."`), allowing the pool to manage parallel streams, detached process groups, and task scheduling.
+> Plugin architecture is implemented: `PluginLoader` scans and initializes plugins, supports `{ init, destroy, onAlert }` interface. Telegram bot plugin is functional.
 
-Abstract interface for any direct CLI agent runtime (in `src/node/adapters/`):
+### Implemented Plugins
 
-```javascript
-class BaseAdapter {
-  async start() {}
-  async chat(prompt) {}
-  async *stream(prompt) {}
-  async stop() {}
-  getBuiltinTools() { return []; }
-  getStatus() { return { id, type, status }; }
-}
-```
+| Plugin | Path | Description |
+|--------|------|-------------|
+| **Telegram** | `src/node/plugins/telegram/` | Chat bot + alert notifications |
+| Slack | `src/node/plugins/slack/` | Block Kit webhook alerts |
+| GitHub | `src/node/plugins/github/` | Crash → GitHub Issue |
 
-Concrete direct adapters in portal (fallbacks):
+### Gateway Layer
 
-| Adapter | CLI | Status |
-|---------|-----|--------|
-| `gemini-adapter` | `gemini -p "prompt" --output-format stream-json` | ✅ Functional |
-| `claude-adapter` | `claude -p "prompt" --output-format stream-json` | ✅ Functional |
-
-The `AdapterPool` will manage direct adapter instances — `acquire(type)` gets an idle adapter or spawns a new one, `release()` returns it to the pool.
-
-## Plugin Architecture (External Integrations)
-
-> [!NOTE]
-> Plugin architecture is implemented: `PluginLoader` scans and initializes plugins, supports `{ init, destroy, onAlert }` interface. Telegram bot plugin is functional. Error alerting (crash → plugin dispatch) is wired.
-
-The Agent Portal will support a modular **Plugin System** designed to bridge the portal's unified agent pool and MCP tools to external platforms (e.g., Telegram, Slack, GitHub). 
-
-Based on our reference implementations (like the local `telegram-llm-bot`), a plugin is an autonomous integration module that connects external channels to the portal's reasoning engine.
-
-### Core Responsibilities of a Plugin
-
-1. **Channel Transport**: Manages the connection to the external service (e.g., Telegraf for Telegram bots, Webhooks for Slack).
-2. **Context Synchronization**: Maintains conversation state. While standalone bots might use local XML/JSON files for context windows, Portal plugins can leverage the centralized context management to store and retrieve multi-day conversation histories.
-3. **Agent Delegation**: Instead of calling LLM APIs directly, plugins route user messages through the Portal's `AdapterPool`. The plugin asks the portal to execute a task, and the portal routes it to the appropriate CLI adapter (Gemini, Claude, or OpenCode).
-4. **Action Interception (Inline Tools)**: Plugins can parse special output directives from the agents. For legacy agents or environments where strict JSON-RPC MCP isn't available, the agent can output text-based markers (e.g., `||readFile||/path/to/file||` or `||sendMessage||...`). The plugin intercepts these markers, executes the corresponding local action (like reading a file uploaded to the chat), and injects the result back into the agent's context without exposing the raw markup to the end user.
-
-### Example: Telegram Bot Plugin
-
-A Telegram plugin running within the portal operates as follows:
-- **Input**: Listens for `@bot_name` mentions, direct messages, or document uploads.
-- **Context**: Formats the recent chat history into the agent's context prompt.
-- **Execution**: Sends the prompt to the Portal Orchestrator (e.g., targeting the `opencode-adapter` for secure local execution).
-- **Tooling**: If a user uploads a document, the plugin saves it locally. If the agent needs to read it, it outputs `||readFile||/path/to/doc.txt||`. The plugin reads the file, appends its content to the context, and re-prompts the agent seamlessly.
-- **Output**: Formats the final text (handling Markdown code blocks properly for Telegram's specific syntax) and sends it back to the chat.
-
-By keeping plugins loosely coupled, the Agent Portal acts as the central brain, while plugins serve as the sensory inputs and outputs across different communication platforms.
+The Telegram integration also has a dedicated **Gateway** (`src/node/gateways/telegram.js`) that provides deeper integration than the plugin — it routes messages through the portal's adapter pool and manages conversation state.
 
 ## Quick Start
 
@@ -249,25 +253,31 @@ Add to your IDE's MCP configuration:
 
 ### Configuration
 
-Create `~/.gemini/mcp-agent-portal.json`:
+Portal configuration is stored at `~/.agent-portal/agent-portal.json`:
 
 ```json
 {
-  "mode": "standalone",
   "mcpServers": {
     "project-graph": {
-      "command": "npx",
-      "args": ["-y", "project-graph-mcp"]
+      "command": "node",
+      "args": ["/path/to/project-graph-mcp/src/network/server.js"]
     },
     "agent-pool": {
-      "command": "npx",
-      "args": ["-y", "agent-pool-mcp"]
+      "command": "node",
+      "args": ["packages/agent-pool-mcp/index.js"]
+    },
+    "context-x": {
+      "command": "node",
+      "args": ["packages/context-x-mcp/src/mcp-server.js"]
     }
   },
-  "adapters": {
-    "gemini": { "type": "gemini", "enabled": true, "maxInstances": 5 },
-    "claude": { "type": "claude-code", "enabled": false, "maxInstances": 2 }
-  }
+  "projects": [],
+  "activeProjectIds": [],
+  "settings": {
+    "telegramToken": "",
+    "telegramChatId": ""
+  },
+  "providerModels": {}
 }
 ```
 
@@ -279,217 +289,203 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |
+| context-x-mcp | Context enrichment, workflow discovery, script management | 🟡 Beta |
 | browser-x-mcp | Browser automation, form testing | 🟡 Beta |
 | terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
-| context-x-mcp | Context enrichment with auto-topic detection | 🔴 Alpha |
 | crypto-mcp | Crypto market analysis, trend lines, auto-trading | 🟡 Beta |
 
 > [!IMPORTANT]
-> Each child server runs as an independent process. The singleton backend manages their lifecycle — auto-start on boot, log anomalies on crash, graceful shutdown on exit. Auto-restart on crash is supported.
+> Each child server runs as an independent process. The singleton backend manages their lifecycle — auto-start on boot, auto-restart on crash (exponential backoff: 1s → 2s → 4s → ... → 30s max), graceful shutdown on exit.
 
 ## HTTP API
 
+### Core
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/mcp-call` | POST | Proxy an MCP call to a child server |
-| `/api/instances` | GET | List all registered MCP servers with status |
-| `/api/project-info` | GET | Portal metadata |
+| `/api/instances` | GET | List all registered MCP servers with status, PID, tool count |
+| `/api/project-info` | GET | Portal metadata (name, path, version) |
 | `/api/server-status` | GET | Uptime, server count, monitor count |
+| `/api/health` | GET | Health check for all child servers |
+| `/api/mcp-call` | POST | Proxy an MCP call to a child server `{ serverName, method, params }` |
 | `/api/stop` | POST | Graceful shutdown |
 | `/api/restart` | POST | Restart portal (spawn-before-exit) |
-| `/api/*` | * | Fallback HTTP proxy to local-gateway backends |
+
+### Marketplace
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/marketplace` | GET | List available MCP servers from registry |
+| `/api/marketplace/install` | POST | Install a server from registry |
+| `/api/marketplace/install-custom` | POST | Install a custom MCP server |
+| `/api/marketplace/remove` | POST | Remove an installed server |
+
+### Settings & Models
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/settings` | GET | Read portal settings |
+| `/api/settings` | POST | Update portal settings |
+| `/api/settings/models` | GET | Get configured provider models |
+| `/api/settings/models` | POST | Save provider model configuration |
+| `/api/settings/models/refresh` | POST | Re-discover models from providers |
+| `/api/adapter/status` | GET | Adapter pool status |
+| `/api/adapter/types` | GET | Available adapter types |
+| `/api/adapter/run` | POST | Run a prompt through an adapter |
+
+### Projects & Chats
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects/history` | GET | List all known projects |
+| `/api/projects/open` | POST | Open/activate a project |
+| `/api/projects/close` | POST | Close/deactivate a project |
+| `/api/projects/remove` | POST | Remove a project from history |
+| `/api/projects/update` | POST | Update project metadata |
+| `/api/chats` | GET | List all chat sessions |
+| `/api/chats` | POST | Create a new chat session |
+| `/api/chats/get` | POST | Get a specific chat with messages |
+| `/api/chats/message` | POST | Append a message to a chat |
+| `/api/chats/update` | POST | Update chat metadata |
+| `/api/chats/delete` | POST | Delete a chat session |
+| `/api/chats/session` | POST | Manage chat adapter sessions |
+
+### State & Observability
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/state` | GET | Read from StateGraph `?path=projects.list` |
+| `/api/state/commit` | POST | Write to StateGraph |
+| `/api/lint-file` | POST | Server-side ESLint for a file |
+| `/api/flywheel/stats` | GET | MLOps flywheel statistics |
+| `/api/cli/config` | GET/POST | CLI adapter configuration |
+
+## WebSocket Channels
+
+| Path | Protocol | Description |
+|------|----------|-------------|
+| `/mcp-ws` | MCP JSON-RPC | IDE stdio proxy endpoint. MCPMultiplexer handles `initialize`, `tools/list`, `tools/call` |
+| `/ws/client` | Custom JSON | Remote client registration (master/client mode) |
+| `/ws/chat` | Custom JSON | Real-time chat streaming for AgentChat UI |
+| `/ws/state` | Custom JSON | StateGraph live sync for reactive UI |
+| `/<server>/ws/monitor` | Custom JSON | Per-server live event stream (JSON-RPC broadcasts) |
 
 ## Project Structure
 
 ```
 mcp-agent-portal/
-├── bin/mcp-agent-portal.js           # CLI entry point + exit(2) respawn fallback
-├── index.js                     # Entry point: web server + stdio MCP
+├── bin/mcp-agent-portal.js           # CLI entry point + exit(2) respawn
+├── index.js                          # Entry: IDE mode (proxy) or terminal mode (attached)
 ├── package.json
-├── eslint.config.js             # Flat ESLint config for IDE highlighting
-├── packages/                    # Git submodules
-│   ├── symbiote-node/           # UI framework (layout, canvas, themes)
-│   ├── project-graph-mcp/       # Codebase analysis MCP
-│   └── agent-pool-mcp/          # Agent orchestration MCP
+├── eslint.config.js
+├── packages/                         # Git submodules
+│   ├── symbiote-node/                # UI framework (layout, canvas, themes)
+│   ├── project-graph-mcp/            # Codebase analysis MCP server
+│   ├── agent-pool-mcp/               # Agent orchestration MCP server
+│   └── context-x-mcp/               # Context enrichment MCP server
 ├── src/node/
-│   ├── config-store.js          # Config read/write utility (DRY)
+│   ├── config-store.js               # Config read/write (projects, chats, settings)
+│   ├── state-graph.js                # Reactive state graph with version tracking
+│   ├── memory-store.js               # Persistent key-value memory for agents
 │   ├── server/
-│   │   ├── web-server.js        # HTTP server + route dispatch + static files
-│   │   ├── api-routes.js        # Declarative API route map (CIT pattern)
-│   │   ├── lint-service.js      # ESLint integration for server-side linting
-│   │   ├── local-gateway.js     # DNS-like service discovery
-│   │   └── web-server.ctx       # ← colocated documentation
+│   │   ├── backend.js                # Backend entry point (spawned detached)
+│   │   ├── backend-lifecycle.js      # ensureBackend, startStdioProxy, port file mgmt
+│   │   ├── web-server.js             # HTTP server + upgrade dispatch + static files
+│   │   ├── api-routes.js             # Declarative API route map (core)
+│   │   ├── api-routes-projects.js    # Project & chat API routes
+│   │   ├── context-injector.js       # Workspace rules sync (.cursorrules, etc.)
+│   │   ├── lint-service.js           # ESLint integration
+│   │   ├── local-gateway.js          # DNS-like service discovery (portal.local)
+│   │   ├── marketplace-registry.js   # MCP server registry for marketplace
+│   │   └── mdns.js                   # Bonjour/Avahi/mDNS announcements
 │   ├── proxy/
-│   │   ├── mcp-proxy.js         # MCPProxyManager (child lifecycle + auto-restart)
-│   │   ├── mcp-multiplexer.js   # MCPMultiplexer (stdio ↔ children)
-│   │   ├── mcp-proxy.ctx
-│   │   └── mcp-multiplexer.ctx
+│   │   ├── mcp-proxy.js              # MCPProxyManager (child lifecycle + WS channels)
+│   │   ├── mcp-multiplexer.js        # Smart Gateway (meta-tools + tool routing)
+│   │   └── tool-index.js             # ToolIndex (search, tags, server mapping)
 │   ├── adapters/
-│   │   ├── index.js             # resolveAdapter() registry
-│   │   ├── base.js              # BaseAdapter interface
-│   │   ├── gemini.js            # Gemini CLI adapter
-│   │   ├── claude.js            # Claude Code CLI adapter
-│   │   ├── opencode.js          # OpenCode/Crush adapter
-│   │   └── pool.js              # AdapterPool (acquire/release)
+│   │   ├── index.js                  # resolveAdapter() registry
+│   │   ├── base.js                   # BaseAdapter interface
+│   │   ├── gemini.js                 # Gemini CLI adapter (stream-json)
+│   │   ├── claude.js                 # Claude Code CLI adapter (stream-json)
+│   │   ├── opencode.js               # OpenCode/Crush adapter
+│   │   └── pool.js                   # AdapterPool (acquire/release)
+│   ├── gateways/
+│   │   └── telegram.js               # Telegram bot gateway (deep integration)
 │   ├── plugins/
-│   │   ├── plugin-loader.js     # Plugin discovery + lifecycle + alert dispatch
-│   │   ├── telegram/index.js    # Telegram bot plugin (chat + alerts)
-│   │   ├── slack/index.js       # Slack webhook plugin (Block Kit alerts)
-│   │   └── github/index.js      # GitHub Issues plugin (crash → issue)
+│   │   ├── plugin-loader.js          # Plugin discovery + lifecycle + alert dispatch
+│   │   ├── telegram/index.js         # Telegram plugin (alerts)
+│   │   ├── slack/index.js            # Slack webhook plugin
+│   │   └── github/index.js           # GitHub Issues plugin
+│   ├── mlops/
+│   │   ├── flywheel.js               # Agent performance tracking
+│   │   └── trajectory-compressor.js  # Token trajectory compression
 │   └── discovery/
-│       └── ws-client.js         # WebSocket client for --connect mode
-├── web/                         # Frontend SPA
-│   ├── app.js                   # Main app (RouterRegistry)
-│   ├── router-registry.js       # Extensible section/panel registry
-│   ├── state.js                 # Reactive state store + WS connection
-│   ├── WsClient.js              # Static WS singleton (CIT pattern)
-│   ├── components/              # code-block (with lint overlay), canvas-graph
-│   └── panels/                  # 9 panel dirs + 6 standalone panels
+│       └── ws-client.js              # WebSocket client for --connect mode
+├── web/                              # Frontend SPA
+│   ├── app.js                        # Main app (routing, project switching)
+│   ├── router-registry.js            # Extensible section/panel registry
+│   ├── state-sync.js                 # Reactive state sync via WS
+│   ├── common/
+│   │   └── mcp-call.js               # Shared MCP call helper
+│   ├── components/
+│   │   ├── ProjectTabs/              # Multi-project tab bar
+│   │   └── ...                       # code-block, canvas-graph, etc.
+│   └── panels/                       # 17 panel directories + 6 standalone
+│       ├── ActionBoard/              # Dashboard action cards
+│       ├── ActiveContext/            # Live context tracking
+│       ├── ActiveTasks/              # Running agent tasks
+│       ├── AgentChat/                # AI chat with adapter selection
+│       ├── ChatList/                 # Chat session list
+│       ├── GroupManager/             # Agent group management
+│       ├── Marketplace/              # MCP server marketplace
+│       ├── PeerReview/               # Agent peer review
+│       ├── PipelineManager/          # Multi-step pipelines
+│       ├── ProjectItem/              # Single project card
+│       ├── ProjectList/              # Project list view
+│       ├── SettingsPanel/            # Configuration UI
+│       ├── SkillManager/             # Skill/workflow manager
+│       ├── ToolExplorer/             # Tool schema browser
+│       ├── Topology/                 # Network topology viz
+│       └── WorkflowExplorer/         # Workflow discovery
 ├── test/
-│   ├── unit/                    # node --test unit tests
-│   └── integration/             # node --test API tests
-└── tmp/                         # Drafts (gitignored)
+│   ├── unit/                         # node --test unit tests
+│   └── integration/                  # node --test API tests
+└── tmp/                              # Drafts (gitignored)
 ```
 
 > [!TIP]
-> **Colocated `.ctx`** — documentation files live next to their source (`parser.ctx` beside `parser.js`), not in a separate `.context/` tree. This ensures agents see the `file ↔ docs` pairing immediately when listing a directory, without needing to know about a separate documentation tree.
+> **Colocated `.ctx`** — documentation files live next to their source (`parser.ctx` beside `parser.js`), not in a separate tree. This ensures agents see the `file ↔ docs` pairing immediately.
 
 ## Observability & Monitoring
-
-Since Agent Portal acts as an aggregation hub for multiple child processes and parallel agents, observability is a core concern:
 
 ### Implemented
 
 1. **Process Lifecycle Tracking**: 
-   The `MCPProxyManager` spawns child servers and tracks their PID and process state.
+   `MCPProxyManager` spawns child servers and tracks PID, process state, crash count.
 
 2. **Log Multiplexing & Live Telemetry**: 
-   Standard error (stderr) streams from all child servers are logged to the portal's console. JSON-RPC messages from children are broadcast to connected WebSocket clients via `broadcastMonitor()`. The Web Dashboard's **Monitor** panel subscribes to this feed, providing a real-time event stream.
+   Stderr from all children is logged to portal console. JSON-RPC messages are broadcast to WebSocket monitors via `broadcastMonitor()`. The **Monitor** panel subscribes to this feed.
 
 3. **Auto-Restart on Crash**: 
-   Crashed child processes are automatically respawned with exponential backoff (1s → 2s → 4s → ... → 30s max). Crash counter resets after 10s of stable uptime. Crash events are broadcast to WebSocket monitors and dispatched to plugins.
+   Crashed children are respawned with exponential backoff (1s → 30s max). Crash counter resets after 10s of stable uptime.
 
 4. **Error Notifications & Alerting**:
-   Crash events trigger `pluginLoader.dispatchAlert()`, which forwards alerts to all plugins implementing `onAlert()`. The Telegram plugin sends alerts to a configured `alertChatId`.
+   Crash events trigger `pluginLoader.dispatchAlert()` → Telegram/Slack/GitHub.
 
-## UI Error Highlighting (Server-Side Linting)
+5. **MLOps Flywheel**:
+   `src/node/mlops/flywheel.js` tracks agent performance metrics. `trajectory-compressor.js` handles token trajectory compression for cost analysis.
 
-Server-side linting is fully implemented:
+6. **StateGraph**:
+   `src/node/state-graph.js` provides a versioned, reactive state store with persistence. The web UI subscribes via `/ws/state` for live updates.
 
-1. **Backend Integration**: The `/api/lint-file` endpoint runs Node.js-based ESLint (`lint-service.js`) against the local file system using the project's `eslint.config.js`.
-2. **UI Component (`code-block.js`)**: The `code-viewer.js` panel calls `_lintCurrentFile()` on every file load, passing results to `code-block.setDiagnostics()`. The `_renderSquiggles()` method renders absolutely positioned wavy underlines (red for errors, yellow for warnings) with hover tooltips showing rule IDs and messages.
+## Configuration Paths
 
-## Roadmap
-
-Implementation phases in strict execution order. Each phase depends on the previous one being complete.
-
-### Phase 0 — Cross-Project Best Practices Refactoring ✅ (this repo)
-
-> [!IMPORTANT]
-> This phase is **prerequisite** for all feature work. Without it, new code will inherit inconsistent patterns from upstream projects.
-
-Align **all related repositories** to the unified coding standard defined in [BEST-PRACTICES.md](./BEST-PRACTICES.md):
-
-| # | Project | Key Refactoring | Priority |
-|---|---------|-----------------|----------|
-| 0.1 | **mcp-agent-portal** (this repo) | `iso/node/ui/` source layout; `let`-first; single quotes; JSDoc `@type` on all exports | 🔴 Critical |
-| 0.2 | **project-graph-mcp** | Code style audit (let/const, arrow conventions); generate `.ctx` docs for every `src/` file | 🔴 Critical |
-| 0.3 | **agent-pool-mcp** | Same code style audit; `.ctx` docs generation; verify plain-object patterns (no unnecessary classes) | 🔴 Critical |
-| 0.4 | **symbiote-node** | Verify Triple-File Partitioning; audit token-based theming; ensure `iso/node/ui/` boundary compliance | 🟡 High |
-| 0.5 | **browser-x-mcp** | Code style pass; add `.ctx` docs | 🟢 Normal |
-| 0.6 | **terminal-x-mcp** | Code style pass; add `.ctx` docs | 🟢 Normal |
-
-**Per-project checklist** (from BEST-PRACTICES §10):
-- [ ] `let` over `const` (const only for true constants: `CONFIG_FILE`, `REQUIRED_FIELDS`)
-- [ ] Single quotes + semicolons + 2-space indent
-- [ ] Arrow functions for callbacks; `function` only for named exports and hoisted helpers
-- [ ] Max 30 lines per utility file; split if larger
-- [ ] Plain objects for adapters/connectors — no class hierarchies
-- [ ] `resolveX()` registry pattern with error messages listing valid options
-- [ ] JSDoc `@type` inline casts; full `@param`/`@returns` blocks on public exports only
-- [ ] Emoji log prefixes (✅🟡🔴🔄)
-- [ ] Dual exports (named + default) on every module
-- [ ] **Colocated `.ctx`** — documentation generated next to source files (`src/proxy/mcp-proxy.ctx`), not in `.context/`
-- [ ] `node --test` — no test framework dependency (no Jest/Mocha/Vitest)
-- [ ] `eslint.config.js` matching conventional style for IDE highlighting only
-
-**Deliverable**: All repos pass a unified style audit. `.ctx` docs generated. Ready for feature work.
-
----
-
-### Phase 1 — Portal Core Stabilization ✅
-
-Harden the implemented MCP aggregator core:
-
-| # | Task | Scope |
-|---|------|-------|
-| 1.1 | **Auto-restart on crash** | `mcp-proxy.js`: add respawn logic with exponential backoff in `child.on('exit')` |
-| 1.2 | **Exit code 2 = restart** | `index.js`: wrap in bin entry point that restarts on code 2 (config change via UI) |
-| 1.3 | **Config validation** | `mcp-proxy.js`: fail-fast with clear messages on missing `command`/`args` fields |
-| 1.4 | **`/api/lint-file` endpoint** | `web-server.js`: integrate ESLint for server-side linting |
-| 1.5 | **Code viewer error overlay** | `code-block.js`: squiggles/tooltips from lint results |
-| 1.6 | **`.ctx` docs panel** | Verify `ctx-panel.js` works with generated `.ctx` files from Phase 0 |
-
-**Deliverable**: Rock-solid single-node portal with auto-healing, config validation, and error visualization.
-
----
-
-### Phase 2 — CLI Adapter Pool ✅ (core)
-
-Implement the heterogeneous agent pool:
-
-| # | Task | Scope |
-|---|------|-------|
-| 2.1 | **`src/adapters/` directory** | Create with `index.js` registry (plain-object `resolveAdapter()` pattern) |
-| 2.2 | **gemini-adapter** | Port from `agent-pool-mcp` — `gemini` CLI wrapper |
-| 2.3 | **claude-adapter** | Port from `agent2agent` — `claude-code` CLI wrapper |
-| 2.4 | **opencode-adapter migration** | Migrate OpenCode integration exclusively into `agent-pool-mcp` orchestrator |
-| 2.5 | **AdapterPool** | `acquire(type)` / `release()` lifecycle, capacity limits from config |
-| 2.6 | **AgentChat integration** | Wire `AgentChat` panel to use `AdapterPool` instead of direct API calls |
-
-**Deliverable**: Agent chat works with multiple LLM backends. Config `adapters` section is functional.
-
----
-
-### Phase 3 — Plugin System ✅
-
-External integrations via loosely coupled plugins:
-
-| # | Task | Scope |
-|---|------|-------|
-| 3.1 | **Plugin loader** | Scan `plugins/` directory, load and register plugins at startup |
-| 3.2 | **Plugin interface** | `{ name, init(portal), destroy() }` — portal injects API surface |
-| 3.3 | **Telegram plugin** | Port and adapt `telegram-llm-bot` as first reference plugin |
-| 3.4 | **Error alerting via plugins** | Connect Observability alerts → plugin dispatch (Telegram, Slack) |
-
-**Deliverable**: Working Telegram bot that routes messages through Portal's adapter pool. Error alerts in Telegram.
-
----
-
-### Phase 4 — Distributed Mode ✅ (core)
-
-Multi-node topology (client/master):
-
-| # | Task | Scope |
-|---|------|-------|
-| 4.1 | **CLI argument parsing** | `--connect`, `--master` flags in `index.js` |
-| 4.2 | **`src/discovery/`** | WebSocket client for connecting to master node |
-| 4.3 | **Master aggregation** | Extend `MCPMultiplexer` to accept remote tool registrations |
-| 4.4 | **Topology panel** | New `#topology` section — network visualization of connected nodes |
-
-**Deliverable**: IDE on machine A uses tools from machine B transparently.
-
----
-
-### Phase 5 — Marketplace & Public Registry ✅ (local)
-
-| # | Task | Scope |
-|---|------|-------|
-| 5.1 | **Add/remove servers via UI** | Marketplace edits `mcp-agent-portal.json` + triggers exit(2) restart |
-| 5.2 | **Tool explorer** | Browse `tools/list` per server with input playground |
-| 5.3 | **Public registry API** | ClawHub-inspired server discovery and one-click install |
-
-**Deliverable**: Fully self-service MCP server management.
+| Path | Purpose |
+|------|---------|
+| `~/.agent-portal/agent-portal.json` | Main config: servers, projects, settings |
+| `~/.local-gateway/backends/portal-<hash>.json` | Backend port file (singleton discovery) |
+| `~/.local-gateway/gateway.json` | Local gateway routing table |
+| `~/.agent-portal/memory.json` | Persistent agent memory (remember/recall) |
 
 ## Related Projects
 

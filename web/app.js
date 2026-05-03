@@ -12,6 +12,7 @@ import "./panels/health-panel.js";
 import "./panels/live-monitor.js";
 import "./components/quick-open.js";
 import "./components/canvas-graph.js";
+import "./panels/ActiveContext/ActiveContext.js";
 
 // Dashboard panels
 import "./panels/ProjectList/ProjectList.js";
@@ -23,6 +24,7 @@ import "./panels/Topology/TopologyPanel.js";
 import "./panels/ToolExplorer/ToolExplorer.js";
 import "./panels/ActiveTasks/ActiveTasks.js";
 import "./panels/PipelineManager/PipelineManager.js";
+import "./panels/WorkflowExplorer/WorkflowExplorer.js";
 import "./panels/GroupManager/GroupManager.js";
 import "./panels/SkillManager/SkillManager.js";
 import "./panels/PeerReview/PeerReview.js";
@@ -34,40 +36,36 @@ export const state = { skeleton: null, activeFile: null, ws: null, monitorEvents
 export { formatStats } from "./stats-format.js";
 export const baseUrl = new URL(".", import.meta.url).href; const l = baseUrl;
 
-export async function api(endpoint, params = {}) {
-  const urlParams = new URLSearchParams(window.location.search);
-  const serverName = urlParams.get('server') || "project-graph";
-
-  // Resolve project root path from active project
+export function resolveProjectPath(p) {
   let projectRoot = null;
   if (dashState.activeProjectId) {
     let proj = (dashState.projectHistory || []).find(p => p.id === dashState.activeProjectId);
     if (proj) projectRoot = proj.path;
   }
+  if (!p || p === '.') return projectRoot || '.';
+  if (p.startsWith('/')) return p;
+  if (projectRoot) return projectRoot + '/' + p;
+  return p;
+}
 
-  // Helper: resolve path relative to project root
-  const resolvePath = (p) => {
-    if (!p || p === '.') return projectRoot || '.';
-    // Already absolute path — use as-is
-    if (p.startsWith('/')) return p;
-    // Relative path + project root — combine
-    if (projectRoot) return projectRoot + '/' + p;
-    return p;
-  };
+export async function api(endpoint, params = {}) {
+  const urlParams = new URLSearchParams(window.location.search);
+  const serverName = urlParams.get('server') || "project-graph";
+  let projectRoot = resolveProjectPath('.');
 
   const map = {
-    "/api/skeleton": { name: "get_skeleton", args: p => ({ path: resolvePath(p.path) }) },
-    "/api/file": { name: "compact", args: p => ({ action: "compact_file", path: p.path, beautify: true }) },
-    "/api/compact-file": { name: "compact", args: p => ({ action: "compact_file", path: p.path, beautify: true }) },
-    "/api/expand-file": { name: "compact", args: p => ({ action: "expand_file", path: p.path, beautify: true }) },
-    "/api/raw-file": { name: "compact", args: p => ({ action: "compact_file", path: p.path, beautify: false }) },
-    "/api/analysis": { name: "analyze", args: p => ({ action: "full_analysis", path: resolvePath(p.path) }) },
-    "/api/analysis-summary": { name: "analyze", args: p => ({ action: "analysis_summary", path: resolvePath(p.path) }) },
-    "/api/deps": { name: "navigate", args: p => ({ action: "deps", symbol: p.symbol }) },
-    "/api/usages": { name: "navigate", args: p => ({ action: "usages", symbol: p.symbol }) },
-    "/api/expand": { name: "navigate", args: p => ({ action: "expand", symbol: p.symbol }) },
-    "/api/chain": { name: "navigate", args: p => ({ action: "call_chain", from: p.from, to: p.to }) },
-    "/api/docs": { name: "docs", args: p => ({ action: "get", path: resolvePath(p.path) }) }
+    "/api/skeleton": { name: "get_skeleton", args: p => ({ path: resolveProjectPath(p.path) }) },
+    "/api/file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), beautify: true }) },
+    "/api/compact-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), beautify: false }) },
+    "/api/expand-file": { name: "compact", args: p => ({ action: "expand_file", path: resolveProjectPath(p.path), beautify: true }) },
+    "/api/raw-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), beautify: false }) },
+    "/api/analysis": { name: "analyze", args: p => ({ action: "full_analysis", path: resolveProjectPath(p.path) }) },
+    "/api/analysis-summary": { name: "analyze", args: p => ({ action: "analysis_summary", path: resolveProjectPath(p.path) }) },
+    "/api/deps": { name: "navigate", args: p => ({ action: "deps", symbol: p.symbol, path: projectRoot }) },
+    "/api/usages": { name: "navigate", args: p => ({ action: "usages", symbol: p.symbol, path: projectRoot }) },
+    "/api/expand": { name: "navigate", args: p => ({ action: "expand", symbol: p.symbol, path: projectRoot }) },
+    "/api/chain": { name: "navigate", args: p => ({ action: "call_chain", from: p.from, to: p.to, path: projectRoot }) },
+    "/api/docs": { name: "docs", args: p => ({ action: "get", path: projectRoot || '.', file: p.file || p.path }) }
   };
 
   const tool = map[endpoint];
@@ -86,8 +84,22 @@ export async function api(endpoint, params = {}) {
     });
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     const data = await res.json();
-    if (data.isError) throw new Error(data.content?.[0]?.text || data.error || "Tool error");
-    const resultText = data.content?.[0]?.text || data.text || data.response || JSON.stringify(data);
+    
+    // Handle JSON-RPC standard error
+    if (data.error) {
+      throw new Error(data.error.message || "Tool error");
+    }
+    // Handle our custom error flag if present
+    if (data.isError) {
+      let errText = "Tool error";
+      if (data.result?.content?.[0]?.text) errText = data.result.content[0].text;
+      else if (data.content?.[0]?.text) errText = data.content[0].text;
+      else errText = data.error || "Tool error";
+      throw new Error(errText);
+    }
+    
+    // Extract text from standard MCP result.content or fallbacks
+    let resultText = data.result?.content?.[0]?.text || data.content?.[0]?.text || data.text || data.response || JSON.stringify(data.result || data);
     try {
       return JSON.parse(resultText);
     } catch {
@@ -178,7 +190,7 @@ let _currentProjectId = undefined;
  * even before the user navigates to them.
  */
 function getSubPanelsForSection(sectionId, projectId) {
-  let storageKey = `pg-layout-${projectId || 'global'}-${sectionId}`;
+  let storageKey = `pg-layout-v2-${projectId || 'global'}-${sectionId}`;
   let saved = localStorage.getItem(storageKey);
   let tree;
   if (saved) {
@@ -256,6 +268,22 @@ function handleProjectSwitch(projectId) {
   }).catch(err => {
     console.warn('[app] skeleton fetch for project switch:', err);
   });
+  
+  updateTopbarPath();
+}
+
+function updateTopbarPath() {
+  let pathEl = document.getElementById('active-project-path');
+  if (!pathEl) return;
+  
+  let proj = (dashState.projectHistory || []).find(p => p.id === dashState.activeProjectId);
+  if (proj && proj.path) {
+    pathEl.textContent = proj.path;
+    pathEl.title = proj.path;
+  } else {
+    pathEl.textContent = 'Workspace not selected';
+    pathEl.title = '';
+  }
 }
 
 /**
@@ -278,7 +306,7 @@ function handleRoute() {
     let layout = document.getElementById('app-layout');
     if (!layout) return;
 
-    let storageKey = `pg-layout-${projectId || 'global'}-${section}`;
+    let storageKey = `pg-layout-v2-${projectId || 'global'}-${section}`;
     layout.$['@storage-key'] = storageKey;
 
     let saved = localStorage.getItem(storageKey);
@@ -303,7 +331,7 @@ function handleRoute() {
   // Explorer file routing
   if (section === 'explorer' && subPath) {
     requestAnimationFrame(() => {
-      dashEmit('file-selected', { path: subPath, fromRoute: true });
+      emit('file-selected', { path: subPath, fromRoute: true });
     });
   }
 }
@@ -367,6 +395,32 @@ async function u() {
       }
     });
 
+    // Initialize Dashboard data
+    const list = await fetchProjects();
+    dashState.projects = list.map(t => ({ prefix: t.prefix, ...t, connected: false, agents: 0 }));
+    dashEmit("projects-updated", dashState.projects);
+    initDashboardWS(dashState.projects);
+
+    // Connect StateGraph sync for reactive task/chat/settings updates
+    stateSync.connect();
+
+    try {
+      const [histRes, cliRes, chatRes] = await Promise.all([
+        fetch('/api/projects/history').then(r => r.json()),
+        fetch('/api/cli/config').then(r => r.json()),
+        fetch('/api/chats').then(r => r.json()),
+      ]);
+      dashState.projectHistory = histRes.projects || [];
+      dashState.openProjectIds = histRes.activeIds || [];
+      dashState.globalCli = cliRes.global || {};
+      dashState.chats = chatRes.chats || [];
+      dashEmit('projects-history-updated', dashState.projectHistory);
+      dashEmit('chats-updated');
+      updateTopbarPath();
+    } catch (err) {
+      console.warn('[app] project/chat init error:', err);
+    }
+
     localStorage.removeItem("pg-explorer-layout");
     localStorage.removeItem("pg-layout-v2");
 
@@ -390,31 +444,6 @@ async function u() {
 
     // Initial route — this also calls handleProjectSwitch() to populate sidebar
     handleRoute();
-
-    // Initialize Dashboard data
-    const list = await fetchProjects();
-    dashState.projects = list.map(t => ({ prefix: t.prefix, ...t, connected: false, agents: 0 }));
-    dashEmit("projects-updated", dashState.projects);
-    initDashboardWS(dashState.projects);
-
-    // Connect StateGraph sync for reactive task/chat/settings updates
-    stateSync.connect();
-
-    try {
-      const [histRes, cliRes, chatRes] = await Promise.all([
-        fetch('/api/projects/history').then(r => r.json()),
-        fetch('/api/cli/config').then(r => r.json()),
-        fetch('/api/chats').then(r => r.json()),
-      ]);
-      dashState.projectHistory = histRes.projects || [];
-      dashState.openProjectIds = histRes.activeIds || [];
-      dashState.globalCli = cliRes.global || {};
-      dashState.chats = chatRes.chats || [];
-      dashEmit('projects-history-updated', dashState.projectHistory);
-      dashEmit('chats-updated');
-    } catch (err) {
-      console.warn('[app] project/chat init error:', err);
-    }
   });
 
   // Also keep original Explorer websocket events alive conceptually
@@ -433,7 +462,7 @@ async function u() {
   // c();
 }
 
-function g(e) { let t = document.getElementById("agent-badge"); if (!t) { const e = document.querySelector(".app-topbar"); if (!e) return; t = document.createElement("span"), t.id = "agent-badge", t.className = "agent-badge", e.appendChild(t) } t.textContent = e > 0 ? `● ${e} agent${1 !== e ? "s" : ""}` : "", t.style.display = e > 0 ? "" : "none" }
+function g(e) { let t = document.getElementById("agent-badge"); if (!t) { const e = document.querySelector(".app-topbar"); if (!e) return; t = document.createElement("span"), t.id = "agent-badge", t.className = "agent-badge", e.appendChild(t) } t.textContent = e > 0 ? `● ${e} agent${1 !== e ? "s" : ""}` : "", t.hidden = !(e > 0) }
 function f() { document.querySelector("pg-quick-open") || document.body.appendChild(document.createElement("pg-quick-open")) }
 function h() { const btn = document.getElementById("follow-btn"); if (!btn) return; let active = false; btn.addEventListener("click", () => { active = !active; if (active) { btn.setAttribute("data-active", ""); btn.classList.add("active"); followController.enable(); location.hash = "follow" } else { btn.removeAttribute("data-active"); btn.classList.remove("active"); const prev = followController.getPreviousHash(); followController.disable(); if (prev && prev !== "#follow") location.hash = prev.replace(/^#/, "") } events.dispatchEvent(new CustomEvent("follow-mode-changed", { detail: { enabled: active } })) }); events.addEventListener("follow-state-changed", e => { const en = e.detail?.enabled; if (en && !active) { active = true; btn.setAttribute("data-active", ""); btn.classList.add("active") } else if (!en && active) { active = false; btn.removeAttribute("data-active"); btn.classList.remove("active") } }); window.addEventListener("hashchange", () => { const sec = (location.hash.replace("#", "").split("?")[0].split("/")[0]) || "explorer"; if (sec === "follow" && !active) { active = true; btn.setAttribute("data-active", ""); btn.classList.add("active"); followController.enable() } else if (sec !== "follow" && active) { active = false; btn.removeAttribute("data-active"); btn.classList.remove("active"); followController.disable() } }) }
 function _initRibbon() { if (!document.querySelector("follow-ribbon")) document.body.appendChild(document.createElement("follow-ribbon")) }

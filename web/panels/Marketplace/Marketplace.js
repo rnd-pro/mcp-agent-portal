@@ -1,5 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
+import { mcpCall } from '../../common/mcp-call.js';
 import template from './Marketplace.tpl.js';
+import { uiConfirm } from '../../common/ui-dialogs.js';
 import cssLocal from './Marketplace.css.js';
 import cssShared from '../../common/ui-shared.css.js';
 
@@ -12,18 +14,19 @@ import cssShared from '../../common/ui-shared.css.js';
  */
 
 let CATEGORY_META = {
-  'rnd-pro':   { label: 'RND-PRO',   icon: '🔬', gradient: 'linear-gradient(135deg, #a78bfa, #7c3aed)' },
-  'official':  { label: 'Official',   icon: '✅', gradient: 'linear-gradient(135deg, #4a9eff, #2563eb)' },
-  'google':    { label: 'Google',     icon: '🔍', gradient: 'linear-gradient(135deg, #34d399, #059669)' },
-  'community': { label: 'Community',  icon: '🌐', gradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
+  'rnd-pro':   { label: 'RND-PRO',   icon: 'science', gradient: 'linear-gradient(135deg, #a78bfa, #7c3aed)' },
+  'google':    { label: 'Google',     icon: 'search', gradient: 'linear-gradient(135deg, #34d399, #059669)' },
+  'official':  { label: 'Official',   icon: 'check_circle', gradient: 'linear-gradient(135deg, #4a9eff, #2563eb)' },
+  '3rd-party': { label: '3rd Party',  icon: 'extension', gradient: 'linear-gradient(135deg, #a855f7, #7e22ce)' },
+  'community': { label: 'Community',  icon: 'public', gradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
 };
 
 let ICON_MAP = {
-  'project-graph': '📊', 'agent-pool': '🤖', 'filesystem': '📁',
-  'github': '🐙', 'slack': '💬', 'postgres': '🐘', 'sqlite': '💾',
-  'memory': '🧠', 'puppeteer': '🎭', 'brave-search': '🔍', 'fetch': '🌐',
-  'sequential-thinking': '🧩', 'google-maps': '🗺️', 'gdrive': '📂',
-  'docker': '🐳', 'git': '📝', 'sentry': '🐛', 'linear': '📋',
+  'project-graph': 'bar_chart', 'agent-pool': 'smart_toy', 'filesystem': 'folder',
+  'github': 'code', 'slack': 'chat', 'postgres': 'database', 'sqlite': 'dataset',
+  'memory': 'memory', 'puppeteer': 'smart_display', 'brave-search': 'search', 'fetch': 'public',
+  'sequential-thinking': 'account_tree', 'google-maps': 'map', 'gdrive': 'folder_open',
+  'docker': 'directions_boat', 'git': 'edit', 'sentry': 'bug_report', 'linear': 'assignment',
 };
 
 class Marketplace extends Symbiote {
@@ -33,10 +36,26 @@ class Marketplace extends Symbiote {
   };
 
   initCallback() {
+    this._setupModeToggle();
     this._setupTabs();
     this._setupSearch();
     this._setupCustomForm();
     this.loadServers();
+    this.loadOpenMemory();
+  }
+
+  _setupModeToggle() {
+    let btns = this.ref.modeToggle.querySelectorAll('button');
+    for (let btn of btns) {
+      btn.onclick = () => {
+        for (let b of btns) b.classList.remove('active');
+        btn.classList.add('active');
+        
+        let mode = btn.dataset.mode;
+        this.ref.serversSection.hidden = mode !== 'servers';
+        this.ref.contextSection.hidden = mode !== 'context';
+      };
+    }
   }
 
   _setupTabs() {
@@ -84,13 +103,13 @@ class Marketplace extends Symbiote {
       this._renderInstalled(installedArray);
       this._renderCatalog();
     } catch (err) {
-      console.error('🔴 [marketplace] Failed to load:', err);
+      console.error('[ERROR] [marketplace] Failed to load:', err);
       this.ref.installedGrid.innerHTML = `<div class="ui-empty-state">Failed to load MCP servers</div>`;
     }
   }
 
   _createCard(key, server, actionHtml) {
-    let icon = ICON_MAP[key] || '⚡';
+    let icon = ICON_MAP[key] || 'bolt';
     let desc = server.description || `${server.command} ${(server.args || []).join(' ')}`;
     let gradient = CATEGORY_META[server.category]?.gradient || 'linear-gradient(135deg, #6b7280, #4b5563)';
 
@@ -98,7 +117,7 @@ class Marketplace extends Symbiote {
     card.className = 'ui-card';
     card.innerHTML = `
       <div class="mp-card-header">
-        <div class="mp-card-icon" style="background:${gradient}">${icon}</div>
+        <div class="mp-card-icon" style="background:${gradient}"><span class="material-symbols-outlined">${icon}</span></div>
         <div>
           <div class="ui-card-title" style="margin-bottom:0">${key}</div>
           ${server.source ? `<div class="mp-card-source">${new URL(server.source).hostname}</div>` : ''}
@@ -148,13 +167,13 @@ class Marketplace extends Symbiote {
       let available = servers.filter(s => !this._installedNames.has(s.name));
       if (!available.length) continue;
 
-      let meta = CATEGORY_META[catKey] || { label: catKey, icon: '📦' };
+      let meta = CATEGORY_META[catKey] || { label: catKey, icon: 'inventory_2' };
 
       let section = document.createElement('div');
       section.className = 'mp-category';
       section.innerHTML = `
         <div class="mp-category-header">
-          <span class="mp-category-label">${meta.icon} ${meta.label}</span>
+           <span class="mp-category-label"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">${meta.icon}</span>${meta.label}</span>
           <span class="mp-category-badge mp-badge-${catKey}">${available.length}</span>
         </div>
       `;
@@ -206,7 +225,7 @@ class Marketplace extends Symbiote {
   }
 
   async _removeServer(name, card) {
-    if (!confirm(`Remove "${name}"? The server will be stopped immediately.`)) return;
+    if (!(await uiConfirm(`Remove "${name}"? The server will be stopped immediately.`))) return;
     let btn = card.querySelector('.mp-card-toggle');
     btn.disabled = true;
     btn.textContent = 'Removing...';
@@ -287,6 +306,110 @@ class Marketplace extends Symbiote {
       status.className = 'mp-form-status error';
       status.textContent = err.message;
     } finally {
+      btn.disabled = false;
+    }
+  }
+  async loadOpenMemory() {
+    try {
+      this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">Loading open memory...</div>';
+      
+      let data = await mcpCall('context-x', 'list_open_memory');
+      if (data && data.content && data.content[0]) {
+        let text = data.content[0].text;
+        // The text is typically: "Available context items in Open Memory:\nrules/rule1.md\n..."
+        let lines = text.split('\n').filter(l => l && !l.startsWith('Available'));
+        this._renderContextItems(lines);
+      } else {
+        throw new Error('Invalid response format');
+      }
+    } catch (err) {
+      console.error('[ERROR] [marketplace] Failed to load open memory:', err);
+      this.ref.contextGrid.innerHTML = `<div class="ui-empty-state" style="color:#f87171">Failed to load open memory: ${err.message}. Make sure context-x-mcp is installed and running.</div>`;
+    }
+  }
+
+  _renderContextItems(paths) {
+    this.ref.contextGrid.innerHTML = '';
+    
+    if (!paths || paths.length === 0) {
+      this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">No context items found in open memory</div>';
+      return;
+    }
+
+    for (let p of paths) {
+      // e.g. "rules/core-workflow.md"
+      let parts = p.split('/');
+      let category = parts.length > 1 ? parts[0] : 'general';
+      let filename = parts.pop();
+      let icon = category === 'rules' ? 'description' : category === 'workflows' ? 'sync' : category === 'templates' ? 'insert_drive_file' : 'lightbulb';
+      
+      let card = document.createElement('div');
+      card.className = 'ui-card';
+      card.innerHTML = `
+        <div class="mp-card-header">
+          <div class="mp-card-title">
+            <span class="mp-card-icon" style="width:auto;height:auto;"><span class="material-symbols-outlined" style="font-size:16px">${icon}</span></span>
+            <span style="word-break:break-all">${filename}</span>
+          </div>
+          <span class="ui-badge info">${category}</span>
+        </div>
+        <div class="mp-card-desc" style="font-family:monospace; font-size:11px; margin-bottom:12px;">${p}</div>
+        <div class="mp-card-actions" style="display:flex; gap:8px;">
+          <button class="ui-btn" style="flex:1" data-path="${p}" data-dest="project">
+            <span class="material-symbols-outlined" style="font-size:16px;">download</span> Project
+          </button>
+          <button class="ui-btn primary" style="flex:1" data-path="${p}" data-dest="team">
+            <span class="material-symbols-outlined" style="font-size:16px;">group</span> Team
+          </button>
+        </div>
+        <div class="mp-form-status" style="margin-top:8px; font-size:11px;"></div>
+      `;
+      
+      let btns = card.querySelectorAll('button');
+      let statusDiv = card.querySelector('.mp-form-status');
+      
+      for (let btn of btns) {
+        btn.onclick = () => this._installContextItem(btn.dataset.path, btn.dataset.dest, btn, statusDiv);
+      }
+      
+      this.ref.contextGrid.appendChild(card);
+    }
+  }
+
+  async _installContextItem(itemPath, destination, btn, statusDiv) {
+    let originalHtml = btn.innerHTML;
+    btn.innerHTML = `<span class="mp-spinner"></span>`;
+    btn.disabled = true;
+    statusDiv.textContent = '';
+    statusDiv.style.color = 'inherit';
+    
+    try {
+      // If destination is project, we need the active project's path.
+      // The Agent Portal has global selectedProject. Wait, we can fetch it via API or just send empty and let backend fail if missing.
+      // Let's get the active project from the URL or state.
+      let activeProject = document.querySelector('agent-portal-app').$.activeProject;
+      let projectPath = activeProject ? activeProject.path : '';
+      
+      if (destination === 'project' && !projectPath) {
+        throw new Error('No active project selected to install into.');
+      }
+      
+      let res = await mcpCall('context-x', 'install_memory_item', { itemPath, destination, projectPath });
+      
+      if (res.isError) {
+        throw new Error(res.content[0].text);
+      }
+      
+      statusDiv.innerHTML = 'Installed <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle">check_circle</span>';
+      statusDiv.style.color = '#10b981';
+      setTimeout(() => { statusDiv.textContent = ''; }, 3000);
+      
+    } catch (err) {
+      console.error(err);
+      statusDiv.textContent = `Error: ${err.message}`;
+      statusDiv.style.color = '#ef4444';
+    } finally {
+      btn.innerHTML = originalHtml;
       btn.disabled = false;
     }
   }

@@ -22,11 +22,13 @@ export const panelTypes = {
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
   'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
   'tool-explorer':{ title: 'Tool Explorer', icon: 'build',         component: 'pg-tool-explorer' },
+  'active-context':{title: 'Active Context',icon: 'data_object',   component: 'pg-active-context' },
   'active-tasks': { title: 'Active Tasks',  icon: 'memory',        component: 'pg-active-tasks' },
   'pipeline-mgr': { title: 'Pipelines',     icon: 'schema',        component: 'pg-pipeline-mgr' },
   'group-mgr':    { title: 'Group Manager', icon: 'groups',        component: 'pg-group-manager' },
   'skill-mgr':    { title: 'Skills Manager',icon: 'school',        component: 'pg-skill-manager' },
   'peer-review':  { title: 'Peer Review',   icon: 'forum',         component: 'pg-peer-review' },
+  'workflow-exp': { title: 'Workflows',     icon: 'account_tree',  component: 'pg-workflow-explorer' },
 };
 
 /**
@@ -128,7 +130,10 @@ registerSection('orchestration', {
       LayoutTree.createPanel('active-tasks'),
       LayoutTree.createPanel('group-mgr'), 0.5
     ),
-    LayoutTree.createPanel('pipeline-mgr'), 0.4
+    LayoutTree.createSplit('vertical',
+      LayoutTree.createPanel('workflow-exp'),
+      LayoutTree.createPanel('pipeline-mgr'), 0.5
+    ), 0.4
   )
 });
 
@@ -143,7 +148,10 @@ registerSection('skills', {
 registerSection('explorer', {
   icon: 'folder_open', label: 'Explorer', order: 30, scope: 'project',
   layout: () => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('file-tree'),
+    LayoutTree.createSplit('vertical',
+      LayoutTree.createPanel('file-tree'),
+      LayoutTree.createPanel('active-context'), 0.7
+    ),
     LayoutTree.createSplit('horizontal',
       LayoutTree.createPanel('code-viewer'),
       LayoutTree.createPanel('ctx-panel'), 0.65

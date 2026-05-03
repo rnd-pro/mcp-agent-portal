@@ -4,6 +4,8 @@ import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
 import template from './AgentChat.tpl.js';
 import css from "./AgentChat.css.js";
 import '../../common/CellBg/CellBg.js';
+import { uiPrompt } from '../../common/ui-dialogs.js';
+import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
 
 const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
 
@@ -104,8 +106,8 @@ export class AgentChat extends Symbiote {
       }
     },
 
-    onAttachClick: () => {
-      let path = prompt("Enter file or folder path to attach:");
+    onAttachClick: async () => {
+      let path = await uiPrompt("Enter file or folder path to attach:");
       if (path && path.trim()) {
         this.$.attachedContext = [...this.$.attachedContext, { path: path.trim() }];
       }
@@ -457,6 +459,11 @@ export class AgentChat extends Symbiote {
           if (!paramValue && p.options.length > 0 && p.id !== 'model') {
             let firstOpt = p.options[0];
             paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
+            // Persist visual default back to chatParams so it's included in send
+            if (paramValue) {
+              currentParams[p.id] = paramValue;
+              this.$.chatParams = { ...currentParams };
+            }
           }
           
           let optionsHtml = '';
@@ -522,6 +529,9 @@ export class AgentChat extends Symbiote {
     html = html.replace(/<pre class="markdown-pre"><code>([\s\S]*?)<\/code><\/pre>/g, (match, p1) => {
       return `<pre class="markdown-pre"><code>${p1.split('<br>').join('\n')}</code></pre>`;
     });
+
+    // Icons
+    html = replaceIconsWithHtml(html);
 
     return html;
   }
@@ -590,7 +600,8 @@ export class AgentChat extends Symbiote {
         if (msg.done) {
           summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;color:hsl(140,40%,50%)">check_circle</span>${label} ${timeStr}`;
         } else {
-          summary.innerHTML = `<span class="material-symbols-outlined spin-icon" style="font-size:16px">pending</span>${label} ${timeStr}`;
+          let statusHtml = msg.status ? `<span class="thinking-status">${this._escapeHtml(msg.status)}</span>` : '';
+          summary.innerHTML = `<span class="material-symbols-outlined spin-icon" style="font-size:16px">pending</span>${label} ${timeStr}${statusHtml}`;
         }
         details.appendChild(summary);
 
@@ -769,6 +780,7 @@ export class AgentChat extends Symbiote {
   }
 
   async _createChat() {
+    console.log('[AgentChat] _createChat called!', new Error().stack);
     let adapter = dashState.globalCli?.defaultAdapter || 'pool';
     let projectId = dashState.activeProjectId || null;
     let projectName = null;
@@ -799,16 +811,19 @@ export class AgentChat extends Symbiote {
   }
 
   async _sendMessage() {
+    console.log('[AgentChat] _sendMessage called!', new Error().stack);
     let chatId = dashState.activeChatId;
 
     // Auto-create chat on first message (quick-start flow)
     if (!chatId) {
       try {
         let adapter = this.$.chatAdapter || 'pool';
+        // Include current chatParams (provider, model, etc.) in the new chat
+        let createPayload = { adapter, ...this.$.chatParams };
         let res = await fetch('/api/chats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ adapter }),
+          body: JSON.stringify(createPayload),
         });
         let data = await res.json();
         if (data.ok) {
@@ -988,6 +1003,7 @@ export class AgentChat extends Symbiote {
       let send = () => {
         let params = { chatId, prompt, timeout: 600, ...this.$.chatParams };
         if (this._sessionId) params.sessionId = this._sessionId;
+        console.log('[AgentChat] WS send params:', JSON.stringify(params));
         ws.send(JSON.stringify({ method: 'chat.send', params }));
       };
 
@@ -1001,7 +1017,7 @@ export class AgentChat extends Symbiote {
         
         // Remove streaming flags
         this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
-        resolve('⏳ Process crashed or connection closed unexpectedly.');
+        resolve(`${ICONS.WAIT} Process crashed or connection closed unexpectedly.`);
       };
       ws.addEventListener('close', onClose);
 
@@ -1019,11 +1035,13 @@ export class AgentChat extends Symbiote {
               
               // Live streaming logic
               if (ev.type === 'message' && ev.role === 'system') {
+                // Merge status into the thinking block instead of separate messages
                 let msgs = [...this.$.messages];
-                let lastMsg = msgs[msgs.length - 1];
-                if (lastMsg && lastMsg.role === 'system' && lastMsg.text.startsWith('⏳')) {
-                  lastMsg.text = ev.content || '';
+                let thinkingIdx = msgs.findIndex(m => m.role === 'thinking' && !m.done);
+                if (thinkingIdx >= 0) {
+                  msgs[thinkingIdx].status = ev.content || '';
                 } else {
+                  // Fallback: no thinking block yet, add as system message
                   msgs.push({ role: 'system', text: ev.content || '' });
                 }
                 this.$.messages = msgs;
@@ -1082,20 +1100,20 @@ export class AgentChat extends Symbiote {
                 }).catch(() => {});
               }
 
-              // Remove system status messages (⏳, ✅) and the thinking block
-              let cleaned = this.$.messages.filter(m => 
-                !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
+              // Remove system status messages and the thinking block
+              this.$.messages = this.$.messages.filter(m => 
+                !(m.role === 'system' && (m.text.startsWith(ICONS.WAIT) || m.text.startsWith(ICONS.OK)))
                 && !(m.role === 'thinking' && !m.done)
               );
 
               // Parse metadata from the formatted result.
               let meta = {};
               if (text) {
-                let lastAgent = [...cleaned].reverse().find(m => m.role === 'agent');
+                let lastAgent = [...this.$.messages].reverse().find(m => m.role === 'agent');
                 if (!lastAgent) {
                   let bodyMatch = text.match(/## Agent Response\n+([\s\S]*?)(?=\n+(?:---|## Tools Used|## Errors|## Stats)|$)/i);
                   let body = bodyMatch ? bodyMatch[1].trim() : text;
-                  cleaned.push({ role: 'agent', text: body });
+                  this.$.messages.push({ role: 'agent', text: body });
                 }
 
                 let modeMatch = text.match(/- Mode:\s*(.+)/i);
@@ -1108,7 +1126,7 @@ export class AgentChat extends Symbiote {
                 if (toolsMatch) meta.tools = parseInt(toolsMatch[1]);
                 let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
                 if (errorsMatch) meta.errors = errorsMatch[1].trim();
-                let failMatch = text.match(/## ⚠️ Agent Failed[\s\S]*?(?=\n+##|$)/i);
+                let failMatch = text.match(/## \[ERR\] Agent Failed[\s\S]*?(?=\n+##|$)/i);
                 if (failMatch) meta.errors = failMatch[0].trim();
 
                 // Update header meta
@@ -1117,14 +1135,13 @@ export class AgentChat extends Symbiote {
 
               // Insert "Worked for Xm" summary block
               let elapsedSec = Math.round((Date.now() - startTime) / 1000);
-              cleaned.push({
+              this.$.messages.push({
                 role: 'thinking',
                 elapsed: elapsedSec,
                 done: true,
                 meta: Object.keys(meta).length > 0 ? meta : null
               });
 
-              this.$.messages = cleaned;
               if (this.ref.cellBg) this.ref.cellBg.toggle(false);
 
               // Persist final state
@@ -1242,7 +1259,7 @@ export class AgentChat extends Symbiote {
       let msgs = (chat.messages || []).filter(m => {
         if (m.role !== 'system') return true;
         let t = m.text || '';
-        return !t.startsWith('⏳') && !t.startsWith('✅') && !t.startsWith('⚠️') && t !== 'Processing...';
+        return !t.startsWith(ICONS.WAIT) && !t.startsWith(ICONS.OK) && !t.startsWith(ICONS.WARN) && t !== 'Processing...';
       });
       this.$.messages = msgs;
       this._sessionId = chat.sessionId || null;
@@ -1278,7 +1295,7 @@ export class AgentChat extends Symbiote {
    */
   _resumeTask(chatId, taskId) {
     // Show status
-    this.$.messages = [...this.$.messages, { role: 'system', text: '⏳ Reconnecting to running task...' }];
+    this.$.messages = [...this.$.messages, { role: 'system', text: `${ICONS.WAIT} Reconnecting to running task...` }];
     if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
     let ws = this._ensureChatWs();
@@ -1300,10 +1317,11 @@ export class AgentChat extends Symbiote {
           case 'chat.resumed': {
             let msgs = [...this.$.messages];
             let last = msgs[msgs.length - 1];
-            if (last && last.role === 'system' && last.text.startsWith('⏳ Reconnecting')) {
-              last.text = msg.params?.status === 'running'
-                ? '✅ Reconnected — task still running...'
-                : '⏳ Task status unknown, waiting...';
+            let isRunning = msg.params?.status === 'running';
+            if (last && last.role === 'system' && last.text.startsWith(`${ICONS.WAIT} Reconnecting`)) {
+              last.text = isRunning 
+                ? `${ICONS.OK} Reconnected — task still running...`
+                : `${ICONS.WAIT} Task status unknown, waiting...`;
             }
             this.$.messages = msgs;
             break;
@@ -1365,7 +1383,7 @@ export class AgentChat extends Symbiote {
             }
 
             // Remove system status messages, add final reply
-            let cleaned = this.$.messages.filter(m => !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅'))));
+            let cleaned = this.$.messages.filter(m => !(m.role === 'system' && (m.text.startsWith(ICONS.WAIT) || m.text.startsWith(ICONS.OK))));
             if (text) cleaned.push({ role: 'agent', text });
             this.$.messages = cleaned;
 
@@ -1389,7 +1407,7 @@ export class AgentChat extends Symbiote {
             
             // If it's a "lost task" error, just show a temporary system message
             if (errText.includes('lost')) {
-              this.$.messages = [...this.$.messages, { role: 'system', text: `⚠️ ${errText}` }];
+              this.$.messages = [...this.$.messages, { role: 'system', text: `${ICONS.WARN} ${errText}` }];
               // Clear pending task ID from backend
               fetch("/api/chats/messages", {
                 method: "PUT",

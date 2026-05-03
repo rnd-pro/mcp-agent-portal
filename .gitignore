@@ -7,3 +7,6 @@ tmp/
 .agents/
 *.log
 logs.txt
+output.txt
+error.txt
+patch.js

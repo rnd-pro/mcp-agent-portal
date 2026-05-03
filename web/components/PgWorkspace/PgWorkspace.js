@@ -31,7 +31,7 @@ export class PgWorkspace extends Symbiote {
     this._projectId = this.getAttribute('project-id') || 'global';
 
     // Initial CSS
-    this.style.display = 'none';
+    this.hidden = true;
     this.style.width = '100%';
     this.style.height = '100%';
 
@@ -45,7 +45,7 @@ export class PgWorkspace extends Symbiote {
 
     // Active state handler — core freeze/unfreeze logic
     this.sub('active', (val) => {
-      this.style.display = val ? 'flex' : 'none';
+      this.hidden = !val;
       if (!val) {
         // Only save hash if workspace was previously active (not initial sub fire)
         if (this._wasActive && typeof location !== 'undefined') {

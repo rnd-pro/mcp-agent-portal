@@ -1,7 +1,7 @@
 // @ctx backend-lifecycle.ctx
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, basename, dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { createConnection } from 'node:net';
@@ -77,47 +77,51 @@ export function listBackends() {
   return active;
 }
 
-function _srcChanged(startedAt) {
-  try {
-    const dir = join(__dirname, '..'); // point to src/
-    function check(d) {
-      const files = readdirSync(d, { withFileTypes: true });
-      for (const f of files) {
-        const p = join(d, f.name);
-        if (f.isDirectory()) {
-          if (check(p)) return true;
-        } else if (f.isFile() && f.name.endsWith('.js')) {
-          if (statSync(p).mtimeMs > startedAt) return true;
-        }
-      }
-      return false;
-    }
-    return check(dir);
-  } catch {
-    return false;
-  }
-}
+
+
+import { syncWorkspaceRules } from './context-injector.js';
 
 export async function ensureBackend(rootPath, { force } = {}) {
   const absPath = resolve(rootPath);
+  
+  // Synchronize team rules to the workspace before starting backend
+  syncWorkspaceRules(absPath);
+  
   const existing = readPortFile(absPath);
   
   if (existing) {
     const currentVersion = _getVersion();
-    const needRestart = force || (existing.version && existing.version !== currentVersion) || _srcChanged(existing.startedAt);
+    // ONLY restart on explicit force or real version mismatch (npm update).
+    // NEVER restart on source changes — this is a shared singleton backend
+    // serving multiple IDE instances. Killing it disconnects ALL of them.
+    // Use `npx agent-portal --restart` for manual restarts after code changes.
+    const needRestart = force || (existing.version && existing.version !== currentVersion && currentVersion !== '0.0.0');
     
     if (needRestart) {
-      if (existing.version !== currentVersion) {
-        console.error(`[portal] Version mismatch: running ${existing.version}, installed ${currentVersion}`);
-      } else if (_srcChanged(existing.startedAt)) {
-        console.error('[portal] Source files changed, restarting...');
-      }
-      console.error('[portal] Restarting backend...');
+      console.error(`[portal] Version mismatch: running ${existing.version}, installed ${currentVersion}. Restarting...`);
       try { process.kill(existing.pid, 'SIGTERM'); } catch {}
       try { unlinkSync(getPortFilePath(absPath)); } catch {}
-      await new Promise(r => setTimeout(r, 500));
+      // Wait for old process to actually die (up to 3s)
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 200));
+        try { process.kill(existing.pid, 0); } catch { break; } // process is gone
+      }
     } else {
-      return existing.port;
+      // Verify the existing backend is actually accepting connections
+      const alive = await new Promise(resolve => {
+        const sock = createConnection({ host: '127.0.0.1', port: existing.port }, () => {
+          sock.destroy();
+          resolve(true);
+        });
+        sock.on('error', () => resolve(false));
+        sock.setTimeout(1000, () => { sock.destroy(); resolve(false); });
+      });
+      if (alive) return existing.port;
+      // Port file exists but backend isn't accepting connections — clean up and respawn
+      console.error(`[portal] Backend PID ${existing.pid} alive but port ${existing.port} not responding, respawning...`);
+      try { process.kill(existing.pid, 'SIGTERM'); } catch {}
+      try { unlinkSync(getPortFilePath(absPath)); } catch {}
+      await new Promise(r => setTimeout(r, 1000));
     }
   }
 
@@ -135,7 +139,18 @@ export async function ensureBackend(rootPath, { force } = {}) {
     await new Promise(r => setTimeout(r, 200));
     if (existsSync(portFile)) {
       const b = readPortFile(absPath);
-      if (b) return b.port;
+      if (b) {
+        // Verify the port is actually accepting TCP connections
+        const alive = await new Promise(resolve => {
+          const sock = createConnection({ host: '127.0.0.1', port: b.port }, () => {
+            sock.destroy();
+            resolve(true);
+          });
+          sock.on('error', () => resolve(false));
+          sock.setTimeout(500, () => { sock.destroy(); resolve(false); });
+        });
+        if (alive) return b.port;
+      }
     }
   }
   

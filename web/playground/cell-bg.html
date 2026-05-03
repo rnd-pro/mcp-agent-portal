@@ -210,7 +210,7 @@
   <div class="chat-overlay">
     <h3>Agent Chat (overlay preview)</h3>
     <div class="msg user">Refactor the authentication module to use JWT tokens</div>
-    <div class="msg agent thinking">⏳ Thinking...</div>
+    <div class="msg agent thinking">Thinking...</div>
   </div>
 </div>
 
@@ -556,7 +556,7 @@ function copyConfig() {
   
   navigator.clipboard.writeText(JSON.stringify(config, null, 2)).then(() => {
     let btn = document.getElementById('btn-copy');
-    btn.textContent = '✅ Copied!';
+    btn.textContent = 'Copied!';
     setTimeout(() => { btn.textContent = '📋 Copy Config'; }, 2000);
   });
 }

@@ -6,8 +6,9 @@
  *
  * @module api-routes
  */
-import { readConfig, writeConfig, getAllProviderModels, setProviderModels } from '../config-store.js';
+import { readConfig } from '../config-store.js';
 import { getStateGraph } from '../state-graph.js';
+import { getFlywheelStats } from '../mlops/flywheel.js';
 import { lintFile } from './lint-service.js';
 import { listAdapterTypes, discoverOpenCodeModels, getCLIModels } from '../adapters/index.js';
 import { REGISTRY, getRegistryByCategory, findInRegistry } from './marketplace-registry.js';
@@ -97,13 +98,38 @@ export function createRoutes(ctx) {
       res.end(JSON.stringify(proxyManager.adapterPool?.getStatus() || { adapters: {} }));
     },
 
+    'GET /api/flywheel/stats': (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getFlywheelStats()));
+    },
+
+    'GET /api/settings': (req, res) => {
+      let sg = getStateGraph();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(sg.getSettings()));
+    },
+
+    'POST /api/settings': async (req, res) => {
+      try {
+        let settings = await parseBody(req);
+        let sg = getStateGraph();
+        sg.setSettings(settings, 'http');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
     'GET /api/adapter/types': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(listAdapterTypes()));
     },
 
     'GET /api/settings/models': (req, res) => {
-      let userModels = getAllProviderModels();
+      let sg = getStateGraph();
+      let userModels = sg.getAllProviderModels();
       let cliModels = getCLIModels();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ userModels, cliModels }));
@@ -117,7 +143,8 @@ export function createRoutes(ctx) {
           res.end(JSON.stringify({ error: 'Missing provider or models array' }));
           return;
         }
-        setProviderModels(provider, models);
+        let sg = getStateGraph();
+        sg.setProviderModels(provider, models, 'http');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {

@@ -3,6 +3,7 @@ import { state as dashState, events as dashEvents, emit as dashEmit } from '../.
 import { navigate, getRoute, parseQuery } from 'symbiote-node';
 import css from './ProjectTabs.css.js';
 import tpl from './ProjectTabs.tpl.js';
+import { uiPrompt } from '../../common/ui-dialogs.js';
 
 /**
  * ProjectTabs — browser-style tab bar for switching between project workspaces.
@@ -35,7 +36,7 @@ export class ProjectTabs extends Symbiote {
     this._syncProjectFromRouter();
 
     // Home tab click
-    let homeTab = this.querySelector('.tab[active]');
+    let homeTab = this.querySelector('.tab:not([data-id])') || this.querySelector('.tab');
     homeTab?.addEventListener('click', () => {
       // Navigate to dashboard, clearing project param
       navigate('dashboard', '', { project: null });
@@ -131,7 +132,7 @@ export class ProjectTabs extends Symbiote {
 
     if (available.length > 0) {
       let names = available.map((p, i) => `${i + 1}. ${p.name} (${p.path})`).join('\n');
-      let choice = prompt(`Open project:\n${names}\n\nOr enter a new path:`);
+      let choice = await uiPrompt(`Open project:\n${names}\n\nOr enter a new path:`);
       if (!choice) return;
 
       let idx = parseInt(choice, 10) - 1;
@@ -141,7 +142,7 @@ export class ProjectTabs extends Symbiote {
         await this._openNewProject(choice.trim());
       }
     } else {
-      let pathStr = prompt('Enter project path:');
+      let pathStr = await uiPrompt('Enter project path:');
       if (pathStr) await this._openNewProject(pathStr.trim());
     }
   }

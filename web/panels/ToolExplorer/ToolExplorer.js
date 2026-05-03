@@ -39,7 +39,7 @@ class ToolExplorer extends Symbiote {
         this.ref.serverList.appendChild(el);
       }
     } catch (err) {
-      console.error('🔴 [tool-explorer] Failed to load servers:', err);
+      console.error('[ERROR] [tool-explorer] Failed to load servers:', err);
     }
   }
 

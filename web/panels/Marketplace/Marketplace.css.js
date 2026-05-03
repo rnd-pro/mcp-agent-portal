@@ -146,6 +146,12 @@ export default `
   justify-content: center;
   font-size: 18px;
   flex-shrink: 0;
+  color: #fff;
+}
+
+.mp-card-icon .material-symbols-outlined {
+  font-size: 20px;
+  color: #fff;
 }
 
 .mp-card-source {

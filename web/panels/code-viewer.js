@@ -1,5 +1,5 @@
 // @ctx .context/web/panels/code-viewer.ctx
-import e from"@symbiotejs/symbiote";import{api as n,events as t,state as o,formatStats}from"../app.js";import"../components/code-block.js";
+import e from"@symbiotejs/symbiote";import{api as n,events as t,state as o,formatStats,resolveProjectPath}from"../app.js";import"../components/code-block.js";
 
 const _extLang={'.md':'md','.markdown':'md','.sql':'sql','.json':'json','.css':'css','.html':'html','.htm':'html','.xml':'xml','.yaml':'yaml','.yml':'yaml','.toml':'toml','.sh':'sh','.bash':'bash','.env':'env','.ini':'ini','.conf':'conf','.cfg':'cfg','.txt':'plain','.csv':'csv','.gitignore':'plain','.dockerignore':'plain','.editorconfig':'plain','.png':'image','.jpg':'image','.jpeg':'image','.gif':'image','.svg':'image','.webp':'image','.bmp':'image','.ico':'image','.pdf':'binary','.zip':'binary','.tar':'binary','.gz':'binary','.woff':'binary','.woff2':'binary','.ttf':'binary','.eot':'binary','.mp3':'binary','.mp4':'binary','.wav':'binary','.avi':'binary','.mov':'binary'};
 function _getLang(path){if(!path)return'js';const i=path.lastIndexOf('.');if(i<0){const base=path.split('/').pop()||'';if(['Dockerfile','Makefile','Procfile','LICENSE','README','CHANGELOG'].some(n=>base.startsWith(n)))return'plain';return'plain'}return _extLang[path.substring(i).toLowerCase()]||'js'}
@@ -103,7 +103,7 @@ if(lang==='binary'){
   return;
 }
 try{const[t,_raw]=await Promise.all([n("/api/file",{path:e}),n("/api/raw-file",{path:e}).catch(()=>null)]);const o="string"==typeof t.code?t.code:"string"==typeof t.compressed?t.compressed:t.content||JSON.stringify(t,null,2);
-let s=_raw?.content||o;
+let s=t.raw||_raw?.content||o;
 // Detect mode: if .ctx documentation exists (ctxTok > 0), source is compact → EXPAND available
 // If no .ctx, source is readable → COMPACT available
 const hasCtx=!!(t.ctxTok&&t.ctxTok>0);
@@ -129,7 +129,7 @@ if(lang==='md'){
   i&&(i.$.code=s);
 }
 this.$.hasFile=!0;this._lintCurrentFile()}catch(e){const n=this._getCodeBlock();n&&(n.$.lang='plain',n.$.code=`// Error: ${e.message}`),this.$.showToggle=!1,this.$.hasFile=!0}}
-async _lintCurrentFile(){if(!this._currentPath)return;const lang=_getLang(this._currentPath);if(lang!=='js'&&lang!=='mjs')return;const cb=this._getCodeBlock();if(!cb||!cb.setDiagnostics)return;try{const r=await fetch('/api/lint-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filePath:this._currentPath})});const d=await r.json();if(Array.isArray(d)&&d[0]&&d[0].messages&&d[0].messages.length>0){cb.setDiagnostics(d[0].messages)}else{cb.clearDiagnostics()}}catch{cb.clearDiagnostics()}}}
+async _lintCurrentFile(){if(!this._currentPath)return;const lang=_getLang(this._currentPath);if(lang!=='js'&&lang!=='mjs')return;const cb=this._getCodeBlock();if(!cb||!cb.setDiagnostics)return;try{const r=await fetch('/api/lint-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filePath:resolveProjectPath(this._currentPath)})});const d=await r.json();if(Array.isArray(d)&&d[0]&&d[0].messages&&d[0].messages.length>0){cb.setDiagnostics(d[0].messages)}else{cb.clearDiagnostics()}}catch{cb.clearDiagnostics()}}}
 
 CodeViewer.template=`
   <div class="pg-code-header">

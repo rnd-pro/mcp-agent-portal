@@ -4,12 +4,24 @@ import { WebSocketServer } from 'ws';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { AdapterPool } from '../adapters/pool.js';
 import { PluginLoader } from '../plugins/plugin-loader.js';
-import { updateChatTask, getChat, replaceChatMessages, updateChatSession } from '../config-store.js';
 import { getStateGraph } from '../state-graph.js';
+import { logTrajectory } from '../mlops/flywheel.js';
+import { findInRegistry } from '../server/marketplace-registry.js';
 
-const CONFIG_PATH = path.join(os.homedir(), '.gemini', 'agent-portal.json');
+let pkgJson;
+try {
+  let pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../package.json');
+  pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+} catch (e) {
+  console.error("Failed to load package.json for version:", e);
+  pkgJson = { version: 'unknown' };
+}
+const SERVER_VERSION = `${pkgJson.version}+${Date.now()}`;
+
+const CONFIG_PATH = path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
 
 const MAX_CRASHES = 10;
 
@@ -24,6 +36,8 @@ export class MCPProxyManager {
     this.chatSubscriptions = new Map();
     /** @type {Map<string, string>} taskId → chatId */
     this.taskChatMap = new Map();
+    /** @type {Map<string, object[]>} taskId → cached notifications before subscription */
+    this.pendingNotifications = new Map();
     /** @type {Set<Function>} */
     this.multiplexerCallbacks = new Set();
     this.nextRequestId = 1;
@@ -81,6 +95,33 @@ export class MCPProxyManager {
         settings.args = [];
       }
     }
+
+    // Auto-install core servers if missing
+    const CORE_SERVERS = ['project-graph', 'agent-pool', 'context-x'];
+    let configUpdated = false;
+    for (let coreName of CORE_SERVERS) {
+      if (!this.servers.has(coreName)) {
+        let def = findInRegistry(coreName);
+        if (def) {
+          this.servers.set(coreName, {
+            command: def.command,
+            args: def.args,
+            color: `hsl(${Math.floor(Math.random() * 360)}, 65%, 55%)`,
+            agents: 0,
+            pid: null,
+            process: null,
+            crashes: 0,
+            respawnTimer: null,
+          });
+          configUpdated = true;
+          console.error(`🟢 [Auto-Install] Added core server: ${coreName}`);
+        }
+      }
+    }
+    
+    if (configUpdated) {
+      this._persistConfig();
+    }
   }
 
   /**
@@ -107,6 +148,95 @@ export class MCPProxyManager {
     }
     this.pluginLoader.initAll().catch(err => console.error('🔴 [MCPProxy] Plugin init error:', err));
     this.startHealthCheck();
+
+    // Set up persistent roots/list handler for all child servers
+    this._installRootsHandler();
+
+    // Track which servers have been initialized
+    this._initializedServers = new Set();
+  }
+
+  /**
+   * Send initialize with roots from StateGraph to child server(s).
+   * This is only needed in web-only mode where no IDE sends initialize.
+   * @param {string} [serverName] - If provided, initialize only this server. Otherwise all.
+   */
+  _sendSyntheticInitialize(serverName) {
+    let sg = getStateGraph();
+    let projects = sg.getProjectHistory();
+    let validProjects = projects.filter(p => p.path && p.path !== '/' && p.name);
+    let roots;
+    
+    if (validProjects.length === 0) {
+      // Fallback: use the portal's own project root
+      roots = [{ uri: `file://${this.projectRoot}`, name: 'portal' }];
+    } else {
+      // First project becomes workspace root (project-graph uses first root as boundary).
+      // All valid project paths are listed so roots/list responses are complete.
+      roots = validProjects.map(p => ({ uri: `file://${p.path}`, name: p.prefix || p.path.split('/').pop() }));
+    }
+
+    let initMsg = {
+      jsonrpc: '2.0',
+      id: this.nextRequestId++,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: { roots: { listChanged: true } },
+        clientInfo: { name: 'mcp-agent-portal', version: '2.0.0' },
+        roots,
+      },
+    };
+
+    let initId = initMsg.id;
+    let targetServers = serverName ? [serverName] : [...this.servers.keys()];
+
+    for (let sName of targetServers) {
+      let s = this.servers.get(sName);
+      if (s && s.process) {
+        // Register a pending request so the initialize response doesn't error
+        this.pendingRequests.set(`${sName}:${initId}`, {
+          resolve: () => {
+            // After initialize response, send initialized notification
+            this.sendToChild(sName, {
+              jsonrpc: '2.0',
+              method: 'notifications/initialized',
+            });
+            console.error(`🟢 [${sName}] Synthetic initialize completed`);
+          },
+          reject: () => {},
+        });
+        this.sendToChild(sName, initMsg);
+
+        // Set up timeout to clean up pending request
+        setTimeout(() => {
+          this.pendingRequests.delete(`${sName}:${initId}`);
+        }, 5000);
+      }
+    }
+  }
+
+  /**
+   * Install a persistent handler that responds to roots/list requests from child servers.
+   * This is kept alive for the lifetime of the proxy (not just init).
+   */
+  _installRootsHandler() {
+    let rootsHandler = (sName, msg) => {
+      if (msg.method === 'roots/list' && msg.id !== undefined) {
+        let sg = getStateGraph();
+        let projects = sg.getProjectHistory();
+        let validProjects = projects.filter(p => p.path && p.path !== '/' && p.name);
+        let roots = validProjects.length > 0
+          ? validProjects.map(p => ({ uri: `file://${p.path}`, name: p.prefix || p.path.split('/').pop() }))
+          : [{ uri: `file://${this.projectRoot}`, name: 'portal' }];
+        this.sendToChild(sName, {
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: { roots },
+        });
+      }
+    };
+    this.multiplexerCallbacks.add(rootsHandler);
   }
 
   spawnServer(serverName) {
@@ -129,6 +259,14 @@ export class MCPProxyManager {
     settings.process = child;
     settings.pid = child.pid;
 
+    // Send synthetic initialize shortly after spawning
+    setTimeout(() => {
+      if (!this._initializedServers?.has(serverName)) {
+        this._initializedServers?.add(serverName);
+        this._sendSyntheticInitialize(serverName);
+      }
+    }, 500);
+
     child.stderr.on('data', (data) => {
       let text = data.toString();
       // Parse task notifications from stderr side-channel
@@ -137,7 +275,9 @@ export class MCPProxyManager {
           try {
             let msg = JSON.parse(line.slice('__TASK_NOTIFY__'.length));
             this.routeTaskNotification(msg);
-          } catch {}
+          } catch (err) {
+            console.error(`🔴 [${serverName}] Failed to parse __TASK_NOTIFY__:`, err.message);
+          }
           continue;
         }
         if (line.trim()) {
@@ -211,6 +351,7 @@ export class MCPProxyManager {
     let outBuffer = '';
     child.stdout.on('data', (data) => {
       outBuffer += data.toString();
+
       let nlIndex;
       while ((nlIndex = outBuffer.indexOf('\n')) !== -1) {
         let line = outBuffer.slice(0, nlIndex);
@@ -236,7 +377,9 @@ export class MCPProxyManager {
             for (let cb of this.multiplexerCallbacks) {
               cb(serverName, msg);
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error(`🔴 [${serverName}] Failed to broadcast event:`, e.message);
+          }
         }
       }
     });
@@ -263,7 +406,17 @@ export class MCPProxyManager {
         return reject(new Error('Server not running'));
       }
       let id = this.nextRequestId++;
-      this.pendingRequests.set(`${serverName}:${id}`, { resolve, reject });
+      let startTime = Date.now();
+      
+      this.pendingRequests.set(`${serverName}:${id}`, { 
+        resolve: (result) => {
+          if (method === 'tools/call') {
+            logTrajectory(serverName, method, params, result, Date.now() - startTime);
+          }
+          resolve(result);
+        }, 
+        reject 
+      });
 
       this.sendToChild(serverName, {
         jsonrpc: '2.0',
@@ -333,14 +486,24 @@ export class MCPProxyManager {
    * @param {string} name
    */
   removeServer(name) {
-    if (!this.servers.has(name)) {
-      throw new Error(`Server "${name}" not found`);
+    if (this.servers.has(name)) {
+      let s = this.servers.get(name);
+      if (s.process) {
+        try { process.kill(s.process.pid, 'SIGTERM'); } catch (e) {}
+      }
+      this.servers.delete(name);
+      this._persistConfig();
+      if (this.onServerChange) this.onServerChange('remove', name);
+      this.broadcastMonitor({ jsonrpc: '2.0', method: 'event', params: { type: 'config_update', tool: name } });
     }
-    this.stopServer(name);
-    this.servers.delete(name);
-    this._persistConfig();
-    if (this.onServerChange) this.onServerChange('remove', name);
-    console.error(`🗑️ [Marketplace] Removed "${name}"`);
+  }
+
+  addMultiplexerCallback(cb) {
+    this.multiplexerCallbacks.add(cb);
+  }
+
+  removeMultiplexerCallback(cb) {
+    this.multiplexerCallbacks.delete(cb);
   }
 
   /** Persist current server list to config file. */
@@ -395,12 +558,13 @@ export class MCPProxyManager {
           for (let p of patches) {
             ws.send(JSON.stringify({
               jsonrpc: '2.0', method: 'patch',
-              params: { v: p.v, ops: p.ops },
+              params: { v: p.v, ops: p.ops, serverVersion: SERVER_VERSION },
             }));
           }
         } else {
           // Too old — full snapshot
           let snap = sg.getSnapshot();
+          snap.serverVersion = SERVER_VERSION;
           ws.send(JSON.stringify({
             jsonrpc: '2.0', method: 'snapshot',
             params: snap,
@@ -409,6 +573,7 @@ export class MCPProxyManager {
       } else {
         // First connect — full snapshot
         let snap = sg.getSnapshot();
+        snap.serverVersion = SERVER_VERSION;
         ws.send(JSON.stringify({
           jsonrpc: '2.0', method: 'snapshot',
           params: snap,
@@ -442,11 +607,11 @@ export class MCPProxyManager {
       /** @type {typeof import('../state-graph.js')} */ ({MAX_WS_QUEUE: 500})
     );
 
-    sg.on('commit', ({ v, ops, source }) => {
+    sg.on('commit', ({ v, ops }) => {
       let msg = JSON.stringify({
         jsonrpc: '2.0',
         method: 'patch',
-        params: { v, ops },
+        params: { v, ops, serverVersion: SERVER_VERSION },
       });
       for (let client of this._stateClients) {
         try {
@@ -577,7 +742,9 @@ export class MCPProxyManager {
           for (let cb of this.multiplexerCallbacks) {
             cb(remoteId, msg);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error(`🔴 [${serverName}] Multiplexer callback error:`, e.message);
+        }
       });
 
       ws.on('close', () => {
@@ -602,8 +769,43 @@ export class MCPProxyManager {
             console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, provider=${provider}, model=${model}`);
             if (!prompt) return;
 
+            // If CLI sends a chat without a proper persisted chatId (or we want to ensure it exists in UI)
+            let sg = getStateGraph();
+            if (!chatId || !sg.getChat(chatId)) {
+              let cwd = msg.params.cwd || this.projectRoot;
+              let proj = sg.addProject({ path: cwd, name: path.basename(cwd) });
+
+              let chat = sg.createChat({ 
+                name: prompt.substring(0, 40) + (prompt.length > 40 ? '...' : ''),
+                projectId: proj.id
+              });
+              chatId = chat.id;
+              sg.appendChatMessage(chatId, { role: 'user', content: prompt });
+              console.log(`💬 [Chat] Created new chat ${chatId} for CLI request in project ${proj.id}`);
+            }
+
+            // Resolve CWD from project path (prefer explicit, then chat's project, then projectRoot)
+            let resolvedCwd = msg.params.cwd;
+            if (!resolvedCwd) {
+              let chat = sg.getChat(chatId);
+              if (chat?.projectId) {
+                let proj = sg.get(`projects/${chat.projectId}`);
+                if (proj?.path) resolvedCwd = proj.path;
+              }
+            }
+            if (!resolvedCwd) resolvedCwd = this.projectRoot !== '/' ? this.projectRoot : process.env.HOME;
+
             // Delegate to agent-pool
-            let delegateArgs = { prompt, timeout: timeout || 600 };
+            // Fallback: if client didn't send provider/model, use values from persisted chat
+            if (!provider || !model) {
+              let chatData = sg.getChat(chatId);
+              if (chatData) {
+                if (!provider && chatData.provider) provider = chatData.provider;
+                if (!model && chatData.model) model = chatData.model;
+              }
+            }
+            
+            let delegateArgs = { prompt, timeout: timeout || 600, cwd: resolvedCwd };
             if (sessionId) delegateArgs.session_id = sessionId;
             if (model) delegateArgs.model = model;
             if (provider) delegateArgs.provider = provider;
@@ -618,6 +820,19 @@ export class MCPProxyManager {
               console.log(`💬 [Chat] delegate_task returned`, result);
 
               let delegateText = result.content?.[0]?.text || '';
+              
+              // Propagate errors from the adapter directly
+              if (result.isError) {
+                console.error(`❌ [Chat] delegate_task returned an error state:`, delegateText);
+                if (ws.readyState === 1) {
+                  ws.send(JSON.stringify({
+                    method: 'chat.error',
+                    params: { chatId, error: delegateText },
+                  }));
+                }
+                return;
+              }
+
               let taskIdMatch = delegateText.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
               let taskId = taskIdMatch?.[1];
 
@@ -630,7 +845,7 @@ export class MCPProxyManager {
                 this.chatSubscriptions.get(taskId).add(ws);
                 // Persist taskId → chatId mapping for recovery
                 this.taskChatMap.set(taskId, chatId);
-                updateChatTask(chatId, taskId);
+                getStateGraph().updateChatTask(chatId, taskId);
 
                 // Replay any notifications that arrived before we could subscribe
                 let cached = this.pendingNotifications?.get(taskId);
@@ -681,7 +896,7 @@ export class MCPProxyManager {
                     ws.send(JSON.stringify({ method: 'chat.done', params: { taskId, text } }));
                   }
                   this.chatSubscriptions.delete(taskId);
-                  updateChatTask(chatId, null);
+                  getStateGraph().updateChatTask(chatId, null);
                 } else {
                   ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
                 }
@@ -690,7 +905,12 @@ export class MCPProxyManager {
               });
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error('❌ [ChatWS] Message handler error:', e);
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ method: 'chat.error', params: { error: e.message || 'Internal error' } }));
+          }
+        }
       });
 
       ws.on('close', () => {
@@ -740,7 +960,6 @@ export class MCPProxyManager {
       console.log(`💬 [TaskNotify] No subscribers for taskId=${taskId}, type=${type} — caching for 5s`);
       
       // Cache notification in case subscription is still resolving
-      if (!this.pendingNotifications) this.pendingNotifications = new Map();
       if (!this.pendingNotifications.has(taskId)) {
         this.pendingNotifications.set(taskId, []);
         // Clean up after 5s to avoid memory leak if no client ever subscribes
@@ -753,7 +972,7 @@ export class MCPProxyManager {
         let chatId = this.taskChatMap.get(taskId);
         if (chatId) {
           this.taskChatMap.delete(taskId);
-          updateChatTask(chatId, null);
+          getStateGraph().updateChatTask(chatId, null);
         }
       }
       return;
@@ -784,14 +1003,14 @@ export class MCPProxyManager {
         let chatId = this.taskChatMap.get(taskId);
         if (chatId) {
           this.taskChatMap.delete(taskId);
-          updateChatTask(chatId, null);
+          getStateGraph().updateChatTask(chatId, null);
         }
       }).catch(() => {
         this.chatSubscriptions.delete(taskId);
         let chatId = this.taskChatMap.get(taskId);
         if (chatId) {
           this.taskChatMap.delete(taskId);
-          updateChatTask(chatId, null);
+          getStateGraph().updateChatTask(chatId, null);
         }
       });
     } else {

@@ -19,6 +19,19 @@ export default`
   <div class="pg-stg-metric"><span>Uptime</span><span class="pg-stg-val" ref="uptimeVal">—</span></div>
 </div>
 
+<div class="ui-card-title">Integrations</div>
+<div class="ui-card" ref="integrationsCard" style="display:flex; flex-direction:column; gap:8px;">
+  <div class="pg-stg-metric">
+    <span style="min-width: 150px;">Telegram Token</span>
+    <input type="password" ref="telegramTokenInput" placeholder="123456:ABC-DEF..." style="flex:1; padding:4px 8px; border:1px solid var(--sn-border); border-radius:4px; background:var(--sn-bg-level-1); color:var(--sn-text-main);">
+  </div>
+  <div class="pg-stg-metric">
+    <span style="min-width: 150px;">Authorized Chat ID</span>
+    <input type="text" ref="telegramChatIdInput" placeholder="-100123456789" style="flex:1; padding:4px 8px; border:1px solid var(--sn-border); border-radius:4px; background:var(--sn-bg-level-1); color:var(--sn-text-main);">
+    <button class="ui-btn primary" ref="saveSettingsBtn" style="margin-left: 8px; align-self: flex-start;">Save</button>
+  </div>
+</div>
+
 <div class="ui-card-title">Provider Models</div>
 <div class="ui-card" ref="modelsCard">
   <div class="pm-provider-tabs" ref="providerTabs"></div>

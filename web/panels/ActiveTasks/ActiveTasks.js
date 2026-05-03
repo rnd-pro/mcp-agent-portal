@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { stateSync } from '../../state-sync.js';
 import template from './ActiveTasks.tpl.js';
+import { uiConfirm } from '../../common/ui-dialogs.js';
 import css from '../../common/ui-shared.css.js';
 
 export class ActiveTasks extends Symbiote {
@@ -72,7 +73,7 @@ export class ActiveTasks extends Symbiote {
   }
 
   async cancelTask(taskId) {
-    if (!confirm(`Cancel task ${taskId.substring(0, 8)}?`)) return;
+    if (!(await uiConfirm(`Cancel task ${taskId.substring(0, 8)}?`))) return;
     try {
       await fetch('/api/mcp-call', {
         method: 'POST',
@@ -131,8 +132,8 @@ export class ActiveTasks extends Symbiote {
         <div>
           <div style="margin-bottom:12px; line-height:1.4;" title="${(task.prompt || '').replace(/"/g, '&quot;')}">${promptText}</div>
           <div style="display:flex; gap:16px; font-size:12px; color:#9ca3af;">
-            <span>⏱️ ${timeStr}</span>
-            ${task.pid ? `<span>⚙️ PID: ${task.pid}</span>` : ''}
+            <span><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">timer</span> ${timeStr}</span>
+            ${task.pid ? `<span><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">settings</span> PID: ${task.pid}</span>` : ''}
             ${task.eventCount ? `<span>📊 ${task.eventCount} events</span>` : ''}
           </div>
         </div>

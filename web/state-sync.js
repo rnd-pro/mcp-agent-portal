@@ -22,6 +22,32 @@ let _state = {};
 /** @type {Map<string, Set<Function>>} */
 const _listeners = new Map();
 
+let _initialServerVersion = null;
+
+/** Check if backend version changed since page load. */
+function _checkVersion(serverVersion) {
+  if (!serverVersion) return;
+  if (!_initialServerVersion) {
+    _initialServerVersion = serverVersion;
+  } else if (_initialServerVersion !== serverVersion) {
+    console.warn(`[stateSync] Server version changed from ${_initialServerVersion} to ${serverVersion}. Reload required.`);
+    let banner = document.getElementById('version-warning-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'version-warning-banner';
+      let displayVersion = serverVersion.split('+')[0];
+      banner.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;margin-right:4px">warning</span> Agent Portal was updated (v${displayVersion}). Please <a href="#" onclick="location.reload()" style="color: white; text-decoration: underline;">refresh the page</a>.`;
+      Object.assign(banner.style, {
+        position: 'fixed', top: '0', left: '0', width: '100%', background: 'rgba(220, 38, 38, 0.95)', color: '#fff',
+        textAlign: 'center', padding: '8px', zIndex: '999999', fontWeight: 'bold', cursor: 'pointer',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+      });
+      banner.onclick = () => location.reload();
+      document.body.prepend(banner);
+    }
+  }
+}
+
 /**
  * Subscribe to changes on a specific path prefix.
  * Callback fires with the value at that path.
@@ -149,6 +175,7 @@ function connect() {
   _ws.onmessage = ({ data }) => {
     try {
       let msg = JSON.parse(data);
+      if (msg.params?.serverVersion) _checkVersion(msg.params.serverVersion);
       if (msg.method === 'snapshot') _applySnapshot(msg.params);
       else if (msg.method === 'patch') _applyPatch(msg.params);
     } catch (e) {

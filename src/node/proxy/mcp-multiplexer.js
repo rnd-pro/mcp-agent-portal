@@ -70,6 +70,29 @@ let META_TOOLS = [
       required: ['chatId', 'text'],
     },
   },
+  {
+    name: 'remember',
+    description: 'Save a key-value pair in the global persistent memory. Use this to remember user preferences, environment specifics, or cross-workflow insights.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Unique identifier for the memory.' },
+        value: { type: 'string', description: 'The value or context to remember. Can be a complex stringified JSON object.' },
+      },
+      required: ['key', 'value'],
+    },
+  },
+  {
+    name: 'recall',
+    description: 'Recall values from the global persistent memory by a query string. Returns all memories where the key contains the query.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Substring to search for in memory keys.' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 export class MCPMultiplexer {
@@ -139,12 +162,15 @@ export class MCPMultiplexer {
     await this.toolIndex.rebuild(this.proxyManager);
     // Load tags from config if available
     try {
-      let { readConfig } = await import('../config-store.js');
-      let config = readConfig();
-      if (config.toolTags) {
-        this.toolIndex.setTags(config.toolTags);
+      let { getStateGraph } = await import('../state-graph.js');
+      let sg = getStateGraph();
+      let toolTags = sg.get('settings/toolTags');
+      if (toolTags) {
+        this.toolIndex.setTags(toolTags);
       }
-    } catch {}
+    } catch (err) {
+      console.error('🟡 [multiplexer] Failed to load tool tags:', err.message);
+    }
   }
 
   sendToIde(msg) {
@@ -181,16 +207,13 @@ export class MCPMultiplexer {
       // Register IDE workspaces as projects from MCP roots
       let roots = msg.params?.roots || [];
       if (roots.length > 0) {
-        import('../config-store.js').then(({ addProject, getActiveProjectIds, setActiveProjectIds }) => {
+        import('../state-graph.js').then(({ getStateGraph }) => {
+          let sg = getStateGraph();
           for (let root of roots) {
             let rootPath = root.uri?.replace(/^file:\/\//, '') || root.uri;
             if (!rootPath) continue;
-            let proj = addProject({ path: rootPath });
-            let active = getActiveProjectIds();
-            if (!active.includes(proj.id)) {
-              active.push(proj.id);
-              setActiveProjectIds(active);
-            }
+            let proj = sg.addProject({ path: rootPath }, 'ide');
+            sg.setProjectOpen(proj.id, true, 'ide');
             this.proxyManager.broadcastMonitor({
               jsonrpc: '2.0',
               method: 'patch',
@@ -282,7 +305,9 @@ export class MCPMultiplexer {
       META_TOOLS[1],
       META_TOOLS[2],
       META_TOOLS[3],
-      META_TOOLS[4]
+      META_TOOLS[4],
+      META_TOOLS[5],
+      META_TOOLS[6]
     ];
   }
 
@@ -326,12 +351,13 @@ export class MCPMultiplexer {
       }
 
       if (toolName === 'create_chat') {
-        let { createChat } = await import('../config-store.js');
-        let chat = createChat({
+        let { getStateGraph } = await import('../state-graph.js');
+        let sg = getStateGraph();
+        let chat = sg.createChat({
           name: args.name,
           adapter: args.adapter || 'pool',
           parentChatId: args.parentChatId || null,
-        });
+        }, 'mcp');
         // Broadcast event so UI reactive tabs open automatically
         this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
         this.sendToIde({
@@ -343,8 +369,9 @@ export class MCPMultiplexer {
       }
 
       if (toolName === 'send_chat_message') {
-        let { appendChatMessage } = await import('../config-store.js');
-        appendChatMessage(args.chatId, {
+        let { getStateGraph } = await import('../state-graph.js');
+        let sg = getStateGraph();
+        sg.appendChatMessage(args.chatId, {
           role: args.role || 'agent',
           text: args.text
         });
@@ -354,6 +381,28 @@ export class MCPMultiplexer {
           jsonrpc: '2.0',
           id: msg.id,
           result: { content: [{ type: 'text', text: 'Message sent successfully.' }] }
+        });
+        return;
+      }
+
+      if (toolName === 'remember') {
+        let { remember } = await import('../memory-store.js');
+        let res = remember(args.key, args.value);
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: { content: [{ type: 'text', text: res }] }
+        });
+        return;
+      }
+
+      if (toolName === 'recall') {
+        let { recall } = await import('../memory-store.js');
+        let res = recall(args.query);
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] }
         });
         return;
       }

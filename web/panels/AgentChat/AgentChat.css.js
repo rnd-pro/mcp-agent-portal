@@ -806,4 +806,13 @@ pg-agent-chat {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.thinking-status {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #666;
+  font-style: italic;
+}
 `;

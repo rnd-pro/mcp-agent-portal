@@ -4,6 +4,7 @@ import { setGlobalParam } from 'symbiote-node';
 import cssLocal from './ChatList.css.js';
 import cssShared from '../../common/ui-shared.css.js';
 import tpl from './ChatList.tpl.js';
+import { uiConfirm } from '../../common/ui-dialogs.js';
 
 export class ChatList extends Symbiote {
   init$ = {
@@ -147,7 +148,7 @@ export class ChatList extends Symbiote {
 
       div.querySelector('.chat-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm(`Delete "${chat.name}"?`)) return;
+        if (!(await uiConfirm(`Delete "${chat.name}"?`))) return;
         await fetch('/api/chats/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -18,6 +18,13 @@ process.on('SIGTERM', () => { cleanup(); process.exit(); });
 const { server, proxyManager } = startWebServer(projectRoot);
 proxyManager.startAllServers();
 
+// Start Telegram Gateway (will naturally skip if no token)
+import('../gateways/telegram.js').then(m => {
+  m.startTelegramGateway(proxyManager);
+}).catch(err => {
+  console.error('[portal] Failed to load Telegram gateway:', err.message);
+});
+
 // Wait for port to be assigned, then write port file
 const checkInterval = setInterval(() => {
   const addr = server.address();

@@ -1,6 +1,6 @@
 import { createGeminiAdapter } from './gemini.js';
 import { createClaudeAdapter } from './claude.js';
-import { getAllProviderModels } from '../config-store.js';
+import { getStateGraph } from '../state-graph.js';
 import { execFile } from 'node:child_process';
 
 let ADAPTERS = {
@@ -24,7 +24,7 @@ export function resolveAdapter(type) {
 
 /** Default (fallback) models per provider — used only if no CLI / user config */
 const DEFAULT_MODELS = {
-  gemini: ['default', 'gemini-3.1-pro', 'gemini-3.1-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  gemini: ['default', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
   claude: ['default', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
   opencode: ['default'],
 };
@@ -112,7 +112,8 @@ export function getCLIModels() {
  * @returns {string[]}
  */
 function getEffectiveModels(provider) {
-  let userModels = getAllProviderModels();
+  let userModels = {};
+  try { userModels = getStateGraph().getAllProviderModels(); } catch {}
   let models = [];
   
   if (userModels[provider]?.length > 0) {

@@ -16,8 +16,8 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
-let CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.gemini', 'agent-portal.json');
-let CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(os.homedir(), '.gemini', 'agent-portal-chats');
+let CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
+let CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(os.homedir(), '.agent-portal', 'agent-portal-chats');
 
 /** @returns {object} */
 export function readConfig() {
@@ -96,6 +96,19 @@ export function updateProject(id, updates) {
   let proj = (config.projects || []).find(p => p.id === id);
   if (!proj) return;
   Object.assign(proj, updates);
+  writeConfig(config);
+}
+
+// ── Global Settings ─────────────────────────────────────
+
+export function getGlobalSettings() {
+  let config = readConfig();
+  return config.settings || {};
+}
+
+export function setGlobalSettings(settings) {
+  let config = readConfig();
+  config.settings = { ...(config.settings || {}), ...settings };
   writeConfig(config);
 }
 

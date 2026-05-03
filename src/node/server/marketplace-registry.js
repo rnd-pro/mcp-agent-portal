@@ -25,6 +25,14 @@ export let REGISTRY = [
     category: 'rnd-pro',
     source: 'https://github.com/nicholasgriffintn/agent-pool-mcp',
   },
+  {
+    name: 'context-x',
+    description: 'Global Memory and Team Context synchronization via Git',
+    command: 'node',
+    args: ['packages/context-x-mcp/src/mcp-server.js'],
+    category: 'rnd-pro',
+    source: 'local',
+  },
 
   // ── Official (modelcontextprotocol) ────────────────────
   {

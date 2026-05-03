@@ -1,23 +1,26 @@
 /**
  * API routes for project history, chat management, and CLI configuration.
+ * All data operations go through StateGraph (single source of truth).
  * @module api-routes-projects
  */
-import {
-  getProjectHistory, addProject, removeProject, updateProject,
-  getActiveProjectIds, setActiveProjectIds,
-  getGlobalCli, setGlobalCli,
-  listChats, getChat, createChat, appendChatMessage, replaceChatMessages, deleteChat, updateChat, updateChatSession,
-} from '../config-store.js';
+import { getStateGraph } from '../state-graph.js';
 
 /**
  * Parse JSON body from request.
  * @param {import('node:http').IncomingMessage} req
+ * @param {number} [maxBytes]
  * @returns {Promise<any>}
  */
-function parseBody(req) {
+function parseBody(req, maxBytes = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', c => { body += c.toString(); });
+    req.on('data', c => {
+      body += c.toString();
+      if (body.length > maxBytes) {
+        req.destroy(new Error('Payload Too Large'));
+        reject(new Error('Payload Too Large'));
+      }
+    });
     req.on('end', () => {
       try { resolve(JSON.parse(body)); }
       catch (err) { reject(err); }
@@ -39,9 +42,10 @@ export function createProjectRoutes() {
   return {
     // ── Project History ───────────────────────────────────
     'GET /api/projects/history': (req, res) => {
+      let sg = getStateGraph();
       json(res, {
-        projects: getProjectHistory(),
-        activeIds: getActiveProjectIds(),
+        projects: sg.getProjectHistory(),
+        activeIds: sg.getActiveProjectIds(),
       });
     },
 
@@ -49,14 +53,11 @@ export function createProjectRoutes() {
       try {
         let { name, path, color, cli } = await parseBody(req);
         if (!path) return json(res, { error: 'Missing path' }, 400);
-        let result = addProject({ name, path, color, cli });
+        let sg = getStateGraph();
+        let result = sg.addProject({ name, path, color, cli }, 'http');
 
-        // Also add to active tabs
-        let active = getActiveProjectIds();
-        if (!active.includes(result.id)) {
-          active.push(result.id);
-          setActiveProjectIds(active);
-        }
+        // Also mark as open tab
+        sg.setProjectOpen(result.id, true, 'http');
         json(res, { ok: true, id: result.id });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -67,8 +68,8 @@ export function createProjectRoutes() {
       try {
         let { id } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        let active = getActiveProjectIds().filter(i => i !== id);
-        setActiveProjectIds(active);
+        let sg = getStateGraph();
+        sg.setProjectOpen(id, false, 'http');
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -79,7 +80,8 @@ export function createProjectRoutes() {
       try {
         let { id } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        removeProject(id);
+        let sg = getStateGraph();
+        sg.removeProject(id, 'http');
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -90,7 +92,8 @@ export function createProjectRoutes() {
       try {
         let { id, ...updates } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        updateProject(id, updates);
+        let sg = getStateGraph();
+        sg.updateProject(id, updates, 'http');
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -99,13 +102,14 @@ export function createProjectRoutes() {
 
     // ── CLI Config ────────────────────────────────────────
     'GET /api/cli/config': (req, res) => {
-      let projects = getProjectHistory();
+      let sg = getStateGraph();
+      let projects = sg.getProjectHistory();
       let projectCli = {};
       for (let p of projects) {
         if (p.cli) projectCli[p.id] = p.cli;
       }
       json(res, {
-        global: getGlobalCli(),
+        global: sg.getGlobalCli(),
         projects: projectCli,
       });
     },
@@ -113,8 +117,9 @@ export function createProjectRoutes() {
     'POST /api/cli/config': async (req, res) => {
       try {
         let { global: globalCli, projectId, cli } = await parseBody(req);
-        if (globalCli) setGlobalCli(globalCli);
-        if (projectId && cli) updateProject(projectId, { cli });
+        let sg = getStateGraph();
+        if (globalCli) sg.setGlobalCli(globalCli, 'http');
+        if (projectId && cli) sg.updateProject(projectId, { cli }, 'http');
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -123,13 +128,16 @@ export function createProjectRoutes() {
 
     // ── Chats ─────────────────────────────────────────────
     'GET /api/chats': (req, res) => {
-      json(res, { chats: listChats() });
+      let sg = getStateGraph();
+      json(res, { chats: sg.listChats() });
     },
 
     'POST /api/chats': async (req, res) => {
       try {
+        console.log('[API] POST /api/chats called!', req.headers['referer'] || req.url);
         let opts = await parseBody(req);
-        let result = createChat(opts);
+        let sg = getStateGraph();
+        let result = sg.createChat(opts, 'http');
         json(res, { ok: true, id: result.id });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -139,7 +147,8 @@ export function createProjectRoutes() {
     'POST /api/chats/get': async (req, res) => {
       try {
         let { id } = await parseBody(req);
-        let chat = getChat(id);
+        let sg = getStateGraph();
+        let chat = sg.getChat(id);
         if (!chat) return json(res, { error: 'Chat not found' }, 404);
         json(res, chat);
       } catch (err) {
@@ -151,7 +160,8 @@ export function createProjectRoutes() {
       try {
         let { chatId, role, text } = await parseBody(req);
         if (!chatId || !role || !text) return json(res, { error: 'Missing chatId, role, or text' }, 400);
-        appendChatMessage(chatId, { role, text });
+        let sg = getStateGraph();
+        sg.appendChatMessage(chatId, { role, text });
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -168,7 +178,8 @@ export function createProjectRoutes() {
           let t = m.text || '';
           return !t.startsWith('⏳') && !t.startsWith('✅') && !t.startsWith('⚠️') && t !== 'Processing...';
         });
-        replaceChatMessages(chatId, cleaned);
+        let sg = getStateGraph();
+        sg.replaceChatMessages(chatId, cleaned);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -179,7 +190,8 @@ export function createProjectRoutes() {
       try {
         let { id, ...updates } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        updateChat(id, updates);
+        let sg = getStateGraph();
+        sg.updateChat(id, updates, 'http');
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -190,7 +202,8 @@ export function createProjectRoutes() {
       try {
         let { id } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        deleteChat(id);
+        let sg = getStateGraph();
+        sg.deleteChat(id, 'http');
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -201,7 +214,8 @@ export function createProjectRoutes() {
       try {
         let { chatId, sessionId } = await parseBody(req);
         if (!chatId || !sessionId) return json(res, { error: 'Missing chatId or sessionId' }, 400);
-        updateChatSession(chatId, sessionId);
+        let sg = getStateGraph();
+        sg.updateChatSession(chatId, sessionId);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);

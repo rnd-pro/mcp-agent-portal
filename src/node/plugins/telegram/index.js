@@ -88,7 +88,9 @@ export async function destroy() {
 export function onAlert(alert) {
   if (!bot || !alertChatId) return;
   let text = `⚠️ *Portal Alert*\n\`${alert.type}\`: ${alert.message}`;
-  bot.telegram.sendMessage(alertChatId, text, { parse_mode: 'Markdown' }).catch(() => {});
+  bot.telegram.sendMessage(alertChatId, text, { parse_mode: 'Markdown' }).catch((err) => {
+    console.error('[telegram] Failed to send alert:', err.message);
+  });
 }
 
 export default { init, destroy, onAlert };

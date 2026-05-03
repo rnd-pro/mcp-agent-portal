@@ -17,6 +17,14 @@ let connectUrl = connectArgIndex > -1 ? process.argv[connectArgIndex + 1] : null
 
 async function main() {
   let projectRoot = process.cwd();
+  // Guard: never use '/' as project root — filesystem is read-only on macOS
+  // and child processes (agent-pool) will fail writing temp files there.
+  if (projectRoot === '/') {
+    const { fileURLToPath } = await import('node:url');
+    const { dirname } = await import('node:path');
+    projectRoot = dirname(fileURLToPath(import.meta.url));
+    console.error(`[portal] CWD is /, using package dir: ${projectRoot}`);
+  }
 
   if (isIDEMode) {
     try {
