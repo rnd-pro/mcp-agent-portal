@@ -1,5 +1,5 @@
 import { ICONS } from '../../common/icons.js';
-import { dashEmit } from '../../app.js';
+import { emit as dashEmit } from '../../dashboard-state.js';
 
 export class ChatWsClient {
   constructor(opts) {
