@@ -471,8 +471,8 @@ export class AgentChat extends Symbiote {
           }
           if (msg.meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtml(msg.meta.sessionId)}">${escapeHtml(msg.meta.sessionId.substring(0, 16))}\u2026</span>`);
           if (msg.meta.tools) items.push(`<span class="meta-chip">${msg.meta.tools} tool call${msg.meta.tools > 1 ? 's' : ''}</span>`);
-          if (msg.meta.tokens) items.push(`<span class="meta-chip meta-info">${msg.meta.tokens} tks</span>`);
-          if (msg.meta.cost) items.push(`<span class="meta-chip meta-info">$${msg.meta.cost.toFixed(4)}</span>`);
+          if (msg.meta.tokens != null) items.push(`<span class="meta-chip meta-info">${msg.meta.tokens} tks</span>`);
+          if (msg.meta.cost != null) items.push(`<span class="meta-chip meta-info">$${msg.meta.cost.toFixed(4)}</span>`);
           if (msg.meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtml(msg.meta.errors)}</span>`);
           body.innerHTML = items.join('');
           details.appendChild(body);
