@@ -64,7 +64,7 @@ export class ActiveTasks extends Symbiote {
           this.$.tasks = merged;
           this.renderGrid();
         }
-      } catch {}
+      } catch (e) { console.warn('[ActiveTasks] Failed to parse task list:', e.message); }
     } catch (err) {
       console.error('[ActiveTasks] refresh error:', err);
     } finally {

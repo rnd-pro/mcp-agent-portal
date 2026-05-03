@@ -165,16 +165,6 @@ function buildFileGraph(skeleton) {
 
   // TODO Phase 2: Create directory hub nodes when LOD zoom expansion is ready
   // Hub nodes without connections create disconnected groups — skip for now
-  // for (const [dir, dirFileList] of dirFiles) {
-  //   if (dirFileList.length < 2) continue;
-  //   const dirLabel = dir.replace(/\/$/, '').split('/').pop() || 'root';
-  //   const hubNode = new Node(dirLabel, { type: 'directory', category: 'server', shape: 'hexagon' });
-  //   hubNode.params = { path: dir, dir, isHub: true };
-  //   hubNode.addOutput('out', new Output(S_EXPORT, ''));
-  //   hubNode.addInput('in', new Input(S_IMPORT, ''));
-  //   editor.addNode(hubNode);
-  //   dirMap.set(dir, hubNode.id);
-  // }
 
   // Create file nodes (standard HTML nodes with icons)
   for (const file of files) {
@@ -2385,7 +2375,6 @@ export class DepGraph extends Symbiote {
     }
     // Phase 3: Directory frames (flat mode only)
     // DISABLED: Zone group frames temporarily turned off
-    // if (!isStructured) this._addDirectoryFrames(editor, fileMap, dirFiles, positions);
 
     // Store skeleton for Phase 2 pin resolution (flat mode only)
     this._skeleton = skeleton;

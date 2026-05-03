@@ -61,7 +61,7 @@ function on(key, cb) {
   _listeners.get(key).add(cb);
   // Deliver current value immediately if available
   if (_state[key] !== undefined) {
-    try { cb(_state[key], key); } catch {}
+    try { cb(_state[key], key); } catch (e) { console.error('[stateSync] initial delivery error:', e); }
   }
   return () => _listeners.get(key)?.delete(cb);
 }
@@ -111,7 +111,7 @@ function _notify(affectedPaths) {
   // Always notify '*' wildcard
   if (_listeners.has('*')) {
     for (let cb of _listeners.get('*')) {
-      try { cb(_state, '*'); } catch {}
+      try { cb(_state, '*'); } catch (e) { console.error('[stateSync] wildcard listener error:', e); }
     }
   }
 }

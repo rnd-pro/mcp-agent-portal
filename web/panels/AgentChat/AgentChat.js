@@ -317,7 +317,7 @@ export class AgentChat extends Symbiote {
             label: f.path || f, hint: f.type || 'file', icon: f.type === 'directory' ? 'folder' : 'description'
           }));
         }
-      } catch {}
+      } catch (e) { console.warn('[AgentChat] file list fetch failed:', e.message); }
       // Fallback: allow typing arbitrary paths
       if (items.length === 0) {
         items = [{ label: query || 'path/to/file', hint: 'type a path', icon: 'description' }];
@@ -967,7 +967,7 @@ export class AgentChat extends Symbiote {
   _ensureChatWs() {
     if (this._chatWs && this._chatWs.readyState === WebSocket.OPEN) return this._chatWs;
     if (this._chatWs) {
-      try { this._chatWs.close(); } catch {}
+      try { this._chatWs.close(); } catch (e) { /* already closed */ }
     }
 
     let base = new URL('.', location.href).href.replace(/^http/, 'ws');
@@ -1202,7 +1202,7 @@ export class AgentChat extends Symbiote {
               break;
             }
           }
-        } catch {}
+        } catch (e) { console.error('[AgentChat] WS message parse error:', e); }
       };
 
       ws.addEventListener('message', onMessage);
@@ -1431,7 +1431,7 @@ export class AgentChat extends Symbiote {
             break;
           }
         }
-      } catch {}
+      } catch (e) { console.error('[AgentChat] WS message parse error:', e); }
     };
     ws.addEventListener('message', onMessage);
   }

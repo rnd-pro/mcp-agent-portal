@@ -23,7 +23,7 @@ let CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(os.homedir(), '.agent-
 export function readConfig() {
   if (!fs.existsSync(CONFIG_PATH)) return { mcpServers: {}, projects: [], globalCli: {}, activeProjectIds: [] };
   try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); }
-  catch { return { mcpServers: {}, projects: [], globalCli: {}, activeProjectIds: [] }; }
+  catch (e) { throw new Error(`[config-store] Failed to parse config at ${CONFIG_PATH}: ${e.message}`); }
 }
 
 /** @param {object} config */

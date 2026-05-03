@@ -96,11 +96,11 @@ function proxyToBackend(req, res, url, proxyManager) {
         for (let f of files) {
           let b = JSON.parse(fs.readFileSync(path.join(bgDir, f), 'utf8'));
           if (b.name === 'project-graph-mcp' || b.project.includes('project-graph')) {
-            try { process.kill(b.pid, 0); backendPort = b.port; break; } catch {}
+            try { process.kill(b.pid, 0); backendPort = b.port; break; } catch (e) { /* process dead */ }
           }
         }
       }
-    } catch {}
+    } catch (e) { /* backend discovery failed — will return 404 */ }
   }
 
   if (backendPort) {

@@ -25,6 +25,27 @@ const CONFIG_PATH = path.join(os.homedir(), '.agent-portal', 'agent-portal.json'
 
 const MAX_CRASHES = 10;
 
+/**
+ * Inactivity Watchdog
+ * @param {() => void} onTimeout 
+ * @param {number} inactivityMs 
+ */
+function createWatchdog(onTimeout, inactivityMs = 30000) {
+  let timer = null;
+  let watchdog = {
+    kick() {
+      clearTimeout(timer);
+      timer = setTimeout(onTimeout, inactivityMs);
+    },
+    stop() {
+      clearTimeout(timer);
+      timer = null;
+    },
+  };
+  watchdog.kick();
+  return watchdog;
+}
+
 export class MCPProxyManager {
   constructor(projectRoot = process.cwd()) {
     this.projectRoot = projectRoot;
@@ -41,7 +62,7 @@ export class MCPProxyManager {
     /** @type {Set<Function>} */
     this.multiplexerCallbacks = new Set();
     this.nextRequestId = 1;
-    /** @type {Map<string, { resolve: Function, reject: Function }>} */
+    /** @type {Map<string, { resolve: Function, reject: Function, watchdog?: object }>} */
     this.pendingRequests = new Map();
     /** @type {Set<import('ws').WebSocket>} state sync WS clients */
     this._stateClients = new Set();
@@ -268,6 +289,13 @@ export class MCPProxyManager {
     }, 500);
 
     child.stderr.on('data', (data) => {
+      // Kick all watchdogs for this server
+      for (let [key, req] of this.pendingRequests) {
+        if (key.startsWith(`${serverName}:`) && req.watchdog) {
+          req.watchdog.kick();
+        }
+      }
+
       let text = data.toString();
       // Parse task notifications from stderr side-channel
       for (let line of text.split('\n')) {
@@ -350,6 +378,13 @@ export class MCPProxyManager {
 
     let outBuffer = '';
     child.stdout.on('data', (data) => {
+      // Kick all watchdogs for this server
+      for (let [key, req] of this.pendingRequests) {
+        if (key.startsWith(`${serverName}:`) && req.watchdog) {
+          req.watchdog.kick();
+        }
+      }
+
       outBuffer += data.toString();
 
       let nlIndex;
@@ -363,6 +398,7 @@ export class MCPProxyManager {
             // Intercept internal requests
             if (msg.id && this.pendingRequests.has(`${serverName}:${msg.id}`)) {
               let req = this.pendingRequests.get(`${serverName}:${msg.id}`);
+              if (req.watchdog) req.watchdog.stop();
               this.pendingRequests.delete(`${serverName}:${msg.id}`);
               req.resolve(msg.result || msg);
               continue;
@@ -408,6 +444,13 @@ export class MCPProxyManager {
       let id = this.nextRequestId++;
       let startTime = Date.now();
       
+      let wd = createWatchdog(() => {
+        if (this.pendingRequests.has(`${serverName}:${id}`)) {
+          this.pendingRequests.delete(`${serverName}:${id}`);
+          reject(new Error('Timeout'));
+        }
+      }, timeout);
+
       this.pendingRequests.set(`${serverName}:${id}`, { 
         resolve: (result) => {
           if (method === 'tools/call') {
@@ -415,7 +458,8 @@ export class MCPProxyManager {
           }
           resolve(result);
         }, 
-        reject 
+        reject,
+        watchdog: wd
       });
 
       this.sendToChild(serverName, {
@@ -424,13 +468,6 @@ export class MCPProxyManager {
         method,
         params,
       });
-
-      setTimeout(() => {
-        if (this.pendingRequests.has(`${serverName}:${id}`)) {
-          this.pendingRequests.delete(`${serverName}:${id}`);
-          reject(new Error('Timeout'));
-        }
-      }, timeout);
     });
   }
 
@@ -947,7 +984,7 @@ export class MCPProxyManager {
       if (type === 'done' || type === 'error' || type === 'cancelled') {
         // Schedule cleanup — keep in graph briefly for UI to display result
         setTimeout(() => {
-          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch {}
+          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
       try { sg.commit(ops, `agent-pool:${type}`); } catch (err) {

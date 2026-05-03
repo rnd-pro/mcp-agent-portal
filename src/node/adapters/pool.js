@@ -39,7 +39,7 @@ export class AdapterPool {
     for (let i = list.length - 1; i >= 0; i--) {
       let a = list[i];
       if (a.busy && a.busySince > 0 && now - a.busySince > MAX_BUSY_MS) {
-        try { a.destroy(); } catch {}
+        try { a.destroy(); } catch (e) { console.warn('[pool] Evict destroy failed:', e.message); }
         list.splice(i, 1);
       }
     }
@@ -57,7 +57,8 @@ export class AdapterPool {
     let factory;
     try {
       factory = resolveAdapter(type);
-    } catch {
+    } catch (e) {
+      console.warn(`[pool] Unknown adapter type "${type}":`, e.message);
       return null;
     }
 
@@ -111,7 +112,7 @@ export class AdapterPool {
   destroy() {
     for (const list of this.instances.values()) {
       for (const adapter of list) {
-        try { adapter.destroy(); } catch {}
+        try { adapter.destroy(); } catch (e) { console.warn('[pool] Destroy failed:', e.message); }
       }
     }
     this.instances.clear();

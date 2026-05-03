@@ -32,7 +32,7 @@ function readPortFile(rootPath) {
     try {
       process.kill(data.pid, 0);
     } catch {
-      try { unlinkSync(file); } catch {}
+      try { unlinkSync(file); } catch (e) { /* ignore cleanup error */ }
       return null;
     }
     return data;
@@ -56,7 +56,7 @@ export function writePortFile(rootPath, port) {
 }
 
 export function removePortFile(rootPath) {
-  try { unlinkSync(getPortFilePath(rootPath)); } catch {}
+  try { unlinkSync(getPortFilePath(rootPath)); } catch (e) { /* ignore cleanup error */ }
 }
 
 export function listBackends() {
@@ -70,9 +70,9 @@ export function listBackends() {
         process.kill(data.pid, 0);
         active.push(data);
       } catch {
-        try { unlinkSync(join(LOCAL_GATEWAY_DIR, f)); } catch {}
+        try { unlinkSync(join(LOCAL_GATEWAY_DIR, f)); } catch (e) { /* ignore cleanup error */ }
       }
-    } catch {}
+    } catch (e) { console.warn('[portal] Failed to read backend file:', f, e.message); }
   }
   return active;
 }
@@ -99,8 +99,8 @@ export async function ensureBackend(rootPath, { force } = {}) {
     
     if (needRestart) {
       console.error(`[portal] Version mismatch: running ${existing.version}, installed ${currentVersion}. Restarting...`);
-      try { process.kill(existing.pid, 'SIGTERM'); } catch {}
-      try { unlinkSync(getPortFilePath(absPath)); } catch {}
+      try { process.kill(existing.pid, 'SIGTERM'); } catch (e) { console.warn('[portal] Failed to kill old backend:', e.message); }
+      try { unlinkSync(getPortFilePath(absPath)); } catch (e) { /* ignore cleanup error */ }
       // Wait for old process to actually die (up to 3s)
       for (let i = 0; i < 15; i++) {
         await new Promise(r => setTimeout(r, 200));
@@ -119,8 +119,8 @@ export async function ensureBackend(rootPath, { force } = {}) {
       if (alive) return existing.port;
       // Port file exists but backend isn't accepting connections — clean up and respawn
       console.error(`[portal] Backend PID ${existing.pid} alive but port ${existing.port} not responding, respawning...`);
-      try { process.kill(existing.pid, 'SIGTERM'); } catch {}
-      try { unlinkSync(getPortFilePath(absPath)); } catch {}
+      try { process.kill(existing.pid, 'SIGTERM'); } catch (e) { console.warn('[portal] Failed to kill unresponsive backend:', e.message); }
+      try { unlinkSync(getPortFilePath(absPath)); } catch (e) { /* ignore cleanup error */ }
       await new Promise(r => setTimeout(r, 1000));
     }
   }
@@ -218,7 +218,7 @@ export function startStdioProxy(port, buffered = []) {
 
   rl.on('line', line => {
     if (connected) {
-      try { ws.write(maskAndFrame(line)); } catch {}
+      try { ws.write(maskAndFrame(line)); } catch (e) { console.warn('[portal] Proxy write failed:', e.message); }
     } else {
       queue.push(line);
     }
@@ -244,7 +244,7 @@ export function startStdioProxy(port, buffered = []) {
       connected = true;
       buffer = combined.slice(idx + 4);
       for (const line of queue) {
-        try { ws.write(maskAndFrame(line)); } catch {}
+        try { ws.write(maskAndFrame(line)); } catch (e) { console.warn('[portal] Proxy queued write failed:', e.message); }
       }
       queue = [];
     } else {

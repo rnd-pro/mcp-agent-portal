@@ -109,7 +109,7 @@ export function createGeminiAdapter(config = {}) {
               });
               
               if (childProc && childProc.pid) {
-                try { process.kill(-childProc.pid, 'SIGTERM'); } catch {}
+                try { process.kill(-childProc.pid, 'SIGTERM'); } catch (e) { console.warn('[gemini] kill failed:', e.message); }
               }
             }, timeoutMs);
           }
@@ -141,7 +141,7 @@ export function createGeminiAdapter(config = {}) {
             childProc = null;
 
             if (buffer.trim()) {
-              try { events.push(JSON.parse(buffer.trim())); } catch {}
+              try { events.push(JSON.parse(buffer.trim())); } catch (e) { console.warn('[gemini] final parse error:', e.message); }
             }
 
             const messages = events.filter((e) => e.type === 'message');
@@ -185,7 +185,7 @@ export function createGeminiAdapter(config = {}) {
 
     destroy() {
       if (childProc && childProc.pid) {
-        try { process.kill(-childProc.pid, 'SIGTERM'); } catch {}
+        try { process.kill(-childProc.pid, 'SIGTERM'); } catch (e) { console.warn('[gemini] destroy kill failed:', e.message); }
         childProc = null;
       }
       busy = false;

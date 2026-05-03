@@ -22,14 +22,15 @@ export function resolveAdapter(type) {
   return factory;
 }
 
-/** Default (fallback) models per provider — used only if no CLI / user config */
+// Default (fallback) models per provider — used only if no CLI / user config
 const DEFAULT_MODELS = {
   gemini: ['default', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
   claude: ['default', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
   opencode: ['default'],
 };
 
-/** Cached CLI-discovered models (populated by discoverOpenCodeModels) */
+// Cached CLI-discovered models (populated by discoverOpenCodeModels)
+/** @type {any[]} */
 let _cliModels = [];
 let _openRouterMetadata = new Map();
 let _lastMetadataFetch = 0;
@@ -62,9 +63,9 @@ async function fetchOpenRouterMetadata() {
   }
 }
 
+// Discover models from OpenCode CLI (`opencode models`) and enrich with OpenRouter pricing.
+// Caches result.
 /**
- * Discover models from OpenCode CLI (`opencode models`) and enrich with OpenRouter pricing.
- * Caches result.
  * @returns {Promise<Array<{id: string, name: string, context?: number, pricePrompt?: string, priceCompletion?: string, isFree?: boolean}>>}
  */
 export async function discoverOpenCodeModels() {
@@ -97,23 +98,23 @@ export async function discoverOpenCodeModels() {
   });
 }
 
+// Get the cached CLI models (from last discovery).
 /**
- * Get the cached CLI models (from last discovery).
- * @returns {string[]}
+ * @returns {any[]}
  */
 export function getCLIModels() {
   return _cliModels;
 }
 
+// Build the effective model list for a provider.
+// Priority: user-configured → CLI-discovered → defaults.
 /**
- * Build the effective model list for a provider.
- * Priority: user-configured → CLI-discovered → defaults.
  * @param {string} provider
- * @returns {string[]}
+ * @returns {Array<{val: string, text: string}>}
  */
 function getEffectiveModels(provider) {
   let userModels = {};
-  try { userModels = getStateGraph().getAllProviderModels(); } catch {}
+  try { userModels = getStateGraph().getAllProviderModels(); } catch (e) { /* StateGraph may not be initialized yet during module load */ }
   let models = [];
   
   if (userModels[provider]?.length > 0) {
@@ -134,12 +135,10 @@ function getEffectiveModels(provider) {
   });
 }
 
-/**
- * Adapter metadata — describes providers and their parameters.
- * Pool-specific params (chatType) are separate from provider params (model).
- * The UI uses this to build dynamic cascading selects:
- *   pool → Provider (from keys of providers) → Model (from selected provider) → ChatType
- */
+// Adapter metadata — describes providers and their parameters.
+// Pool-specific params (chatType) are separate from provider params (model).
+// The UI uses this to build dynamic cascading selects:
+//   pool → Provider (from keys of providers) → Model (from selected provider) → ChatType
 function buildAdapterMetadata() {
   return {
     pool: {

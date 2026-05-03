@@ -124,7 +124,7 @@ export class SettingsPanel extends Symbiote {
             setTimeout(() => { t.textContent = ""; }, 3000);
             return;
           }
-        } catch {}
+        } catch (e) { /* expected — server is restarting */ }
         if (retries > 15) {
           clearInterval(timer);
           t.textContent = "Server did not come back. Refresh the page manually.";

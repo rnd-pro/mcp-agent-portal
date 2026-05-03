@@ -105,7 +105,7 @@ export function createClaudeAdapter(config = {}) {
               });
 
               if (childProc && childProc.pid) {
-                try { process.kill(-childProc.pid, 'SIGTERM'); } catch {}
+                try { process.kill(-childProc.pid, 'SIGTERM'); } catch (e) { console.warn('[claude] kill failed:', e.message); }
               }
             }, timeoutMs);
           }
@@ -119,7 +119,9 @@ export function createClaudeAdapter(config = {}) {
               if (!trimmed) continue;
               try {
                 events.push(JSON.parse(trimmed));
-              } catch {}
+              } catch (e) {
+                // Ignore partial JSON chunks during stream
+              }
             }
           });
 
@@ -134,7 +136,7 @@ export function createClaudeAdapter(config = {}) {
             childProc = null;
 
             if (buffer.trim()) {
-              try { events.push(JSON.parse(buffer.trim())); } catch {}
+              try { events.push(JSON.parse(buffer.trim())); } catch (e) { console.warn('[claude] final parse error:', e.message); }
             }
 
             // Claude stream-json: result event has the final response
@@ -176,7 +178,7 @@ export function createClaudeAdapter(config = {}) {
 
     destroy() {
       if (childProc && childProc.pid) {
-        try { process.kill(-childProc.pid, 'SIGTERM'); } catch {}
+        try { process.kill(-childProc.pid, 'SIGTERM'); } catch (e) { console.warn('[claude] destroy kill failed:', e.message); }
         childProc = null;
       }
       busy = false;

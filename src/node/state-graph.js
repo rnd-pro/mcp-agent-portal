@@ -162,7 +162,8 @@ export class StateGraph extends EventEmitter {
     this._ringStart = 0; // oldest version in ring
 
     // ── Async WAL Group Commit ──
-    /** @type {Array<string>} lines pending disk write */
+    // lines pending disk write
+    /** @type {Array<string>} */
     this._walQueue = [];
     this._walTimer = null;
     this._walFlushing = false;
@@ -174,7 +175,7 @@ export class StateGraph extends EventEmitter {
 
   // ── Public Read API ────────────────────────────────────
 
-  /** Current monotonic version. */
+  // Current monotonic version.
   get version() { return this._version; }
 
   /**
@@ -318,10 +319,8 @@ export class StateGraph extends EventEmitter {
 
   // ── Persistence: Load ──────────────────────────────────
 
-  /**
-   * Load state from snapshot + replay WAL.
-   * Call once on startup.
-   */
+   // Load state from snapshot + replay WAL.
+   // Call once on startup.
   load() {
     let dir = path.dirname(this._snapshotPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -402,14 +401,14 @@ export class StateGraph extends EventEmitter {
 
   // ── Persistence: WAL (Async Group Commit) ──────────────
 
-  /** Schedule async WAL flush (group commit). */
+  // Schedule async WAL flush (group commit).
   _scheduleWalFlush() {
     if (this._walTimer || this._walFlushing) return;
     this._walTimer = setTimeout(() => this._flushWal(), GROUP_COMMIT_MS);
     this._walTimer.unref(); // Don't keep process alive for WAL flush
   }
 
-  /** Flush pending WAL entries to disk (async). */
+  // Flush pending WAL entries to disk (async).
   async _flushWal() {
     this._walTimer = null;
     if (this._walQueue.length === 0 || this._walFlushing) return;
@@ -434,7 +433,7 @@ export class StateGraph extends EventEmitter {
 
   // ── Persistence: Snapshot Compaction ────────────────────
 
-  /** Async snapshot write + WAL truncation. */
+  // Async snapshot write + WAL truncation.
   async _writeSnapshot() {
     this._commitsSinceSnapshot = 0;
     let snap = JSON.stringify(this._state, null, 2);
@@ -462,7 +461,7 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-  /** Synchronous snapshot write (for process exit). */
+  // Synchronous snapshot write (for process exit).
   _writeSnapshotSync() {
     try {
       // Flush pending WAL synchronously
@@ -482,9 +481,7 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-  /**
-   * Flush all pending writes and snapshot. Call on process exit.
-   */
+   // Flush all pending writes and snapshot. Call on process exit.
   flush() {
     if (this._walTimer) {
       clearTimeout(this._walTimer);
@@ -495,7 +492,7 @@ export class StateGraph extends EventEmitter {
 
   // ── Migration ──────────────────────────────────────────
 
-  /** Migrate from old config-store format. */
+  // Migrate from old config-store format.
   _migrateFromOldConfig() {
     try {
       let old = JSON.parse(fs.readFileSync(OLD_CONFIG_PATH, 'utf8'));
@@ -557,7 +554,7 @@ export class StateGraph extends EventEmitter {
 
   // ── Helpers ────────────────────────────────────────────
 
-  /** Deep merge (target shape preserved, source values applied). */
+  // Deep merge (target shape preserved, source values applied).
   _deepMerge(target, source) {
     let result = { ...target };
     for (let [key, val] of Object.entries(source)) {
@@ -606,13 +603,13 @@ export class StateGraph extends EventEmitter {
     return { id };
   }
 
-  /** Get sorted project history list. */
+  // Get sorted project history list.
   getProjectHistory() {
     return Object.entries(this._state.projects || {}).map(([id, p]) => ({ id, ...p }))
       .sort((a, b) => (b.lastOpened || 0) - (a.lastOpened || 0));
   }
 
-  /** Get IDs of open project tabs. */
+  // Get IDs of open project tabs.
   getActiveProjectIds() {
     return Object.entries(this._state.projects || {})
       .filter(([, p]) => p.open)
@@ -623,7 +620,7 @@ export class StateGraph extends EventEmitter {
   // Chat messages stay in individual files (can be large).
   // Graph stores metadata only.
 
-  /** List chat metadata (sorted by updatedAt). */
+  // List chat metadata (sorted by updatedAt).
   listChats() {
     return Object.entries(this._state.chats || {}).map(([id, c]) => ({ id, ...c }))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -668,7 +665,7 @@ export class StateGraph extends EventEmitter {
     return { id };
   }
 
-  /** Get full chat data (with messages) from file. */
+  // Get full chat data (with messages) from file.
   getChat(chatId) {
     let file = path.join(CHATS_DIR, `${chatId}.json`);
     if (!fs.existsSync(file)) return null;
@@ -676,7 +673,7 @@ export class StateGraph extends EventEmitter {
     catch { return null; }
   }
 
-  /** Append message + update metadata. */
+  // Append message + update metadata.
   appendChatMessage(chatId, msg) {
     let chat = this.getChat(chatId);
     if (!chat) return;
@@ -691,7 +688,7 @@ export class StateGraph extends EventEmitter {
     }}], 'chat');
   }
 
-  /** Replace all messages in a chat. */
+  // Replace all messages in a chat.
   replaceChatMessages(chatId, messages) {
     let chat = this.getChat(chatId);
     if (!chat) return;
@@ -706,14 +703,14 @@ export class StateGraph extends EventEmitter {
     }}], 'chat');
   }
 
-  /** Delete a chat (graph + file). */
+  // Delete a chat (graph + file).
   deleteChat(chatId, source = 'system') {
     this.commit([{ op: 'delete', path: `chats/${chatId}` }], source);
     let file = path.join(CHATS_DIR, `${chatId}.json`);
     if (fs.existsSync(file)) fs.unlinkSync(file);
   }
 
-  /** Update chat metadata fields. */
+  // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
     let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId']);
     let filtered = {};
@@ -734,7 +731,7 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-  /** Update session ID for a chat. */
+  // Update session ID for a chat.
   updateChatSession(chatId, sessionId) {
     let chat = this.getChat(chatId);
     if (!chat) return;
@@ -743,7 +740,7 @@ export class StateGraph extends EventEmitter {
     fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
   }
 
-  /** Set or clear pending task ID. */
+  // Set or clear pending task ID.
   updateChatTask(chatId, taskId) {
     let chat = this.getChat(chatId);
     if (!chat) return;
@@ -755,57 +752,57 @@ export class StateGraph extends EventEmitter {
 
   // ── Project Mutation Helpers ───────────────────────────
 
-  /** Remove a project from the graph. */
+  // Remove a project from the graph.
   removeProject(id, source = 'system') {
     this.del(`projects/${id}`, source);
   }
 
-  /** Update project fields (merge). */
+  // Update project fields (merge).
   updateProject(id, updates, source = 'system') {
     if (Object.keys(updates).length === 0) return;
     updates.updatedAt = Date.now();
     this.merge(`projects/${id}`, updates, source);
   }
 
-  /** Toggle project open/close tab. */
+  // Toggle project open/close tab.
   setProjectOpen(id, open, source = 'system') {
     this.merge(`projects/${id}`, { open }, source);
   }
 
   // ── Settings Helpers ───────────────────────────────────
 
-  /** Read all settings. */
+  // Read all settings.
   getSettings() {
     return this._state.settings || {};
   }
 
-  /** Merge settings (shallow). */
+  // Merge settings (shallow).
   setSettings(updates, source = 'system') {
     this.merge('settings', updates, source);
   }
 
-  /** Get provider models for a specific provider. */
+  // Get provider models for a specific provider.
   getProviderModels(provider) {
     return this._state.settings?.providerModels?.[provider] || [];
   }
 
-  /** Get all provider model configs. */
+  // Get all provider model configs.
   getAllProviderModels() {
     return this._state.settings?.providerModels || {};
   }
 
-  /** Set models for a provider. */
+  // Set models for a provider.
   setProviderModels(provider, models, source = 'system') {
     let pm = { ...(this._state.settings?.providerModels || {}), [provider]: models };
     this.merge('settings', { providerModels: pm }, source);
   }
 
-  /** Read global CLI config. */
+  // Read global CLI config.
   getGlobalCli() {
     return this._state.settings?.globalCli || {};
   }
 
-  /** Set global CLI config. */
+  // Set global CLI config.
   setGlobalCli(cli, source = 'system') {
     this.merge('settings', { globalCli: cli }, source);
   }
@@ -835,5 +832,5 @@ export function getStateGraph() {
   return _instance;
 }
 
-/** Max WS queue size before disconnecting slow client. */
+// Max WS queue size before disconnecting slow client.
 export { MAX_WS_QUEUE };
