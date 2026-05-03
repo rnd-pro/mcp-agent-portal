@@ -1015,9 +1015,17 @@ export class AgentChat extends Symbiote {
         clearInterval(timerInterval);
         ws.removeEventListener('message', onMessage);
         
-        // Remove streaming flags
-        this.$.messages = this.$.messages.map(m => ({ ...m, streaming: false }));
-        resolve(`${ICONS.WAIT} Process crashed or connection closed unexpectedly.`);
+        let crashMsg = `${ICONS.WAIT} Process crashed or connection closed unexpectedly.`;
+        
+        // Remove thinking block and streaming flags
+        this.$.messages = this.$.messages
+          .filter(m => !(m.role === 'thinking' && !m.done))
+          .map(m => ({ ...m, streaming: false }));
+          
+        this.$.messages = [...this.$.messages, { role: 'system', text: crashMsg }];
+        if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+        
+        resolve(crashMsg);
       };
       ws.addEventListener('close', onClose);
 
