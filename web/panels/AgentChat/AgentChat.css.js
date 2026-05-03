@@ -16,7 +16,13 @@ pg-agent-chat {
 
 /* ── Chat Nav (unchanged) ── */
 
+chat-sidebar {
+  display: flex;
+  height: 100%;
+}
+
 .chat-nav {
+  height: 100%;
   width: 200px;
   min-width: 200px;
   flex-shrink: 0;
