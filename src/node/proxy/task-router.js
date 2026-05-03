@@ -12,8 +12,6 @@ export class TaskRouter {
   }
 
   /**
-   * Route a task notification from agent-pool to subscribed chat WS clients.
-   * Called from the multiplexer when a 'notifications/task/event' message arrives.
    * @param {object} notification
    */
   route(notification) {
@@ -22,16 +20,16 @@ export class TaskRouter {
 
     console.log(`💬 [TaskNotify] taskId=${taskId} type=${type}`);
 
-    // Mirror task state into StateGraph for UI visibility + persistence
+
     let sg = getStateGraph();
     let meta = data?.meta;
     if (meta && type !== 'event') {
       let ops = [{ op: 'set', path: `tasks/${taskId}`, value: {
         ...meta,
-        type, // last notification type
+        type,
         updatedAt: Date.now(),
       }}];
-      // Remove completed tasks from graph after a delay (10 min TTL)
+
       if (type === 'done' || type === 'error' || type === 'cancelled') {
         setTimeout(() => {
           try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
@@ -54,7 +52,7 @@ export class TaskRouter {
       }
       this.pendingNotifications.get(taskId).push(notification);
 
-      // Even without subscribers, fetch and save final result to state-graph
+
       if (type === 'done' || type === 'error') {
         let chatId = (chatWsServer ? chatWsServer.taskChatMap.get(taskId) : null) || this._findChatForTask(taskId);
         if (chatId) {
@@ -84,13 +82,13 @@ export class TaskRouter {
       fetchTaskResult(this.mcpProxy, taskId).then(result => {
         let text = result.content?.[0]?.text || '';
         
-        // Persist result into chat to ensure headless integrity
+
         if (chatId) {
           this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
           getStateGraph().updateChatTask(chatId, null);
         }
 
-        // Notify clients to refresh
+
         if (chatWsServer) {
           chatWsServer.broadcastTaskEvent(taskId, method, { taskId, text });
           chatWsServer.unsubscribe(taskId);
@@ -100,7 +98,7 @@ export class TaskRouter {
         if (chatId) getStateGraph().updateChatTask(chatId, null);
       });
     } else {
-      // Stream event
+
       if (chatWsServer) {
         chatWsServer.broadcastTaskEvent(taskId, method, { taskId, event: data });
       }
@@ -131,7 +129,9 @@ export class TaskRouter {
   }
 
   /**
-   * Parse the final task result and persist it to StateGraph, ensuring headless integrity.
+   * @param {string} chatId 
+   * @param {string} text 
+   * @param {number} startedAt 
    */
   _persistFinalTaskResult(chatId, text, startedAt) {
     let sg = getStateGraph();
@@ -140,11 +140,11 @@ export class TaskRouter {
 
     let msgs = [...(chat.messages || [])];
     
-    // Filter out transient system thinking messages
+
     msgs = msgs.filter(m => 
       !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
       && !(m.role === 'thinking' && !m.done)
-      && !(m.role === 'tool') // Streamed tool messages are transient
+      && !(m.role === 'tool')
     );
 
     let meta = {};
@@ -197,14 +197,14 @@ export class TaskRouter {
     sg.replaceChatMessages(chatId, msgs);
     sg.updateChatTask(chatId, null);
     
-    // Set lastTaskStatus based on exitCode
+
     let lastTaskStatus = 'done';
     if (meta.exitCode !== undefined && meta.exitCode !== 0) {
       lastTaskStatus = 'error';
     }
     sg.updateChat(chatId, { lastTaskStatus });
 
-    // Broadcast chat update to all UI clients
+
     this.mcpProxy.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
   }
 }

@@ -3,7 +3,6 @@
  */
 
 /**
- * Fetch the final task result from the agent-pool.
  * @param {object} mcpProxy
  * @param {string} taskId
  * @returns {Promise<any>}

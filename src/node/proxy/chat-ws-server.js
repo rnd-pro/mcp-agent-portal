@@ -114,8 +114,7 @@ export class ChatWsServer {
         this.subscribe(taskId, ws, chatId);
         getStateGraph().updateChatTask(chatId, taskId);
 
-        // Replay any notifications that arrived before we could subscribe
-        if (this.mcpProxy.taskRouter) {
+                if (this.mcpProxy.taskRouter) {
           this.mcpProxy.taskRouter.replayCachedNotifications(taskId);
         }
       }
