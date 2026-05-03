@@ -8,6 +8,7 @@ import { uiPrompt } from '../../common/ui-dialogs.js';
 import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
 import { escapeHtml, formatElapsed, formatMarkdown } from '../../utils/markdown-formatter.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
+import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import { ChatSidebar } from '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
@@ -42,16 +43,16 @@ export class AgentChat extends Symbiote {
         e.preventDefault();
         this._sendMessage();
       }
-      if (e.key === 'Escape') this._hideAutocomplete();
+      if (e.key === 'Escape') this._ac?.hide();
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (this._acVisible) {
+        if (this._ac?.isVisible) {
           e.preventDefault();
-          this._navigateAutocomplete(e.key === 'ArrowDown' ? 1 : -1);
+          this._ac?.navigate(e.key === "ArrowDown" ? 1 : -1);
         }
       }
-      if (e.key === 'Tab' && this._acVisible) {
+      if (e.key === 'Tab' && this._ac?.isVisible) {
         e.preventDefault();
-        this._selectAutocomplete();
+        this._ac?.select();
       }
     },
 
@@ -62,7 +63,7 @@ export class AgentChat extends Symbiote {
       ta.style.height = 'auto';
       ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
       // Autocomplete trigger
-      this._checkAutocomplete(ta.value, ta.selectionStart);
+      this._ac?.check(ta.value, ta.selectionStart);
     },
 
     onSend: () => {
@@ -144,6 +145,24 @@ export class AgentChat extends Symbiote {
     this._fetchAdapterMeta();
 
     this._syncChatFromRouter();
+
+    
+    this._ac = new ChatAutocomplete({
+      popupEl: this.ref.autocompletePopup,
+      textareaEl: this.ref.chatInput,
+      onAttachFile: (newVal, path) => {
+        this.$.inputVal = newVal;
+        this.ref.chatInput.value = newVal;
+        let ctx = this.$.attachedContext || [];
+        if (!ctx.find(c => c.path === path)) {
+          this.$.attachedContext = [...ctx, { path }];
+        }
+      },
+      onInsertWorkflow: (newVal) => {
+        this.$.inputVal = newVal;
+        this.ref.chatInput.value = newVal;
+      }
+    });
 
     this._wsClient = new ChatWsClient({
       getMessages: () => this.$.messages,
@@ -262,138 +281,6 @@ export class AgentChat extends Symbiote {
       }
     }
   }
-
-  /* ── Autocomplete (@, /) ── */
-
-  _acVisible = false;
-  _acItems = [];
-  _acIndex = -1;
-  _acTrigger = null; // '@' or '/'
-  _acStartPos = 0;
-
-  _checkAutocomplete(value, cursorPos) {
-    // Find trigger character before cursor
-    let before = value.substring(0, cursorPos);
-    let atMatch = before.match(/@([\w./\-]*)$/);
-    let slashMatch = before.match(/^\/([\w]*)$/);
-
-    if (atMatch) {
-      this._acTrigger = '@';
-      this._acStartPos = cursorPos - atMatch[0].length;
-      this._showAutocomplete(atMatch[1]);
-    } else if (slashMatch) {
-      this._acTrigger = '/';
-      this._acStartPos = 0;
-      this._showAutocomplete(slashMatch[1]);
-    } else {
-      this._hideAutocomplete();
-    }
-  }
-
-  async _showAutocomplete(query) {
-    let items = [];
-    if (this._acTrigger === '/') {
-      // Workflows
-      items = [
-        { label: 'publish', hint: 'Cross-project publication', icon: 'rocket_launch' },
-      ];
-      if (query) items = items.filter(i => i.label.startsWith(query));
-    } else if (this._acTrigger === '@') {
-      // Files from project
-      try {
-        let res = await fetch('/api/files/list');
-        if (res.ok) {
-          let data = await res.json();
-          items = (data.files || []).map(f => ({
-            label: f.path || f, hint: f.type || 'file', icon: f.type === 'directory' ? 'folder' : 'description'
-          }));
-        }
-      } catch (e) { console.warn('[AgentChat] file list fetch failed:', e.message); }
-      // Fallback: allow typing arbitrary paths
-      if (items.length === 0) {
-        items = [{ label: query || 'path/to/file', hint: 'type a path', icon: 'description' }];
-      }
-      if (query) items = items.filter(i => i.label.toLowerCase().includes(query.toLowerCase()));
-      items = items.slice(0, 12);
-    }
-
-    this._acItems = items;
-    this._acIndex = items.length > 0 ? 0 : -1;
-    this._renderAutocomplete();
-  }
-
-  _hideAutocomplete() {
-    this._acVisible = false;
-    this._acItems = [];
-    this._acIndex = -1;
-    let popup = this.ref.autocompletePopup;
-    if (popup) popup.classList.remove('visible');
-  }
-
-  _renderAutocomplete() {
-    let popup = this.ref.autocompletePopup;
-    if (!popup) return;
-    if (this._acItems.length === 0) {
-      this._hideAutocomplete();
-      return;
-    }
-    this._acVisible = true;
-    let header = this._acTrigger === '@' ? 'Files' : 'Workflows';
-    popup.innerHTML = `<div class="autocomplete-header">${header}</div>` +
-      this._acItems.map((item, i) => `
-        <div class="autocomplete-item${i === this._acIndex ? ' active' : ''}" data-index="${i}">
-          <span class="material-symbols-outlined">${item.icon}</span>
-          <span class="autocomplete-item-label">${escapeHtml(item.label)}</span>
-          <span class="autocomplete-item-hint">${escapeHtml(item.hint)}</span>
-        </div>
-      `).join('');
-    popup.classList.add('visible');
-
-    // Click handler
-    popup.onclick = (e) => {
-      let el = e.target.closest('.autocomplete-item');
-      if (el) {
-        this._acIndex = parseInt(el.dataset.index);
-        this._selectAutocomplete();
-      }
-    };
-  }
-
-  _navigateAutocomplete(dir) {
-    if (this._acItems.length === 0) return;
-    this._acIndex = (this._acIndex + dir + this._acItems.length) % this._acItems.length;
-    this._renderAutocomplete();
-  }
-
-  _selectAutocomplete() {
-    let item = this._acItems[this._acIndex];
-    if (!item) return;
-
-    let ta = this.ref.chatInput;
-    let value = ta.value;
-
-    if (this._acTrigger === '@') {
-      // Insert file as context attachment
-      let before = value.substring(0, this._acStartPos);
-      let after = value.substring(ta.selectionStart);
-      ta.value = before + after;
-      this.$.inputVal = ta.value;
-      // Add to attachedContext
-      let ctx = this.$.attachedContext || [];
-      if (!ctx.find(c => c.path === item.label)) {
-        this.$.attachedContext = [...ctx, { path: item.label }];
-      }
-    } else if (this._acTrigger === '/') {
-      // Insert workflow command
-      ta.value = '/' + item.label + ' ';
-      this.$.inputVal = ta.value;
-    }
-
-    this._hideAutocomplete();
-    this._hideAutocomplete();
-    ta.focus();
-  }
-
   async _fetchAdapterMeta() {
     try {
       let res = await fetch('/api/adapter/types');
