@@ -1,6 +1,7 @@
 import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import { getStateGraph } from '../state-graph.js';
+import { fetchTaskResult } from './mcp-helpers.js';
 
 export class ChatWsServer {
   /**
@@ -139,10 +140,7 @@ export class ChatWsServer {
     this.subscribe(taskId, ws, chatId);
 
     try {
-      let result = await this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
-        name: 'get_task_result',
-        arguments: { task_id: taskId },
-      });
+      let result = await fetchTaskResult(this.mcpProxy, taskId);
       
       let text = result.content?.[0]?.text || '';
       if (text && !text.includes('still running')) {

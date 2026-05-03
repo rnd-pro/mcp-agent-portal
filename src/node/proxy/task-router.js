@@ -1,25 +1,5 @@
 import { getStateGraph } from '../state-graph.js';
-
-/**
- * Inactivity Watchdog
- * @param {() => void} onTimeout 
- * @param {number} inactivityMs 
- */
-function createWatchdog(onTimeout, inactivityMs = 30000) {
-  let timer = null;
-  let watchdog = {
-    kick() {
-      clearTimeout(timer);
-      timer = setTimeout(onTimeout, inactivityMs);
-    },
-    stop() {
-      clearTimeout(timer);
-      timer = null;
-    },
-  };
-  watchdog.kick();
-  return watchdog;
-}
+import { fetchTaskResult } from './mcp-helpers.js';
 
 export class TaskRouter {
   /**
@@ -53,7 +33,7 @@ export class TaskRouter {
       }}];
       // Remove completed tasks from graph after a delay (10 min TTL)
       if (type === 'done' || type === 'error' || type === 'cancelled') {
-        createWatchdog(() => {
+        setTimeout(() => {
           try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
@@ -79,10 +59,7 @@ export class TaskRouter {
         let chatId = (chatWsServer ? chatWsServer.taskChatMap.get(taskId) : null) || this._findChatForTask(taskId);
         if (chatId) {
           if (chatWsServer) chatWsServer.taskChatMap.delete(taskId);
-          this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
-            name: 'get_task_result',
-            arguments: { task_id: taskId },
-          }).then(result => {
+          fetchTaskResult(this.mcpProxy, taskId).then(result => {
             let text = result.content?.[0]?.text || '';
             this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
             getStateGraph().updateChatTask(chatId, null);
@@ -104,10 +81,7 @@ export class TaskRouter {
       let chatId = chatWsServer.taskChatMap.get(taskId) || this._findChatForTask(taskId);
       if (chatId) chatWsServer.taskChatMap.delete(taskId);
 
-      this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
-        name: 'get_task_result',
-        arguments: { task_id: taskId },
-      }).then(result => {
+      fetchTaskResult(this.mcpProxy, taskId).then(result => {
         let text = result.content?.[0]?.text || '';
         
         // Persist result into chat to ensure headless integrity
