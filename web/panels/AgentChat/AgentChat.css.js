@@ -23,7 +23,7 @@ pg-agent-chat {
   display: flex;
   flex-direction: column;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: var(--sn-bg, #1e1e1e);
+  background: transparent;
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
   user-select: none;
@@ -40,7 +40,7 @@ pg-agent-chat {
   gap: 2px;
   padding: 2px 4px;
   min-height: 28px;
-  background: var(--bg-header, var(--sn-bg, #1e1e1e));
+  background: transparent;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
 }
