@@ -67,6 +67,12 @@ export class AgentChat extends Symbiote {
     },
 
     onSend: () => {
+      if (this._isSending && dashState.activeChatId) {
+        let chat = dashState.chats?.find(c => c.id === dashState.activeChatId);
+        let taskId = chat?.pendingTaskId || this.$.chatParams?.pendingTaskId;
+        this._wsClient?.stop(dashState.activeChatId, taskId);
+        return;
+      }
       this._sendMessage();
     },
 

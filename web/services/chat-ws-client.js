@@ -78,8 +78,14 @@ export class ChatWsClient {
           let msg = JSON.parse(e.data);
           
           switch (msg.method) {
-            case 'chat.delegated':
+            case 'chat.delegated': {
+              // Orchestrator delegated sub-tasks — inject inline board
+              let taskIds = msg.params?.taskIds || [];
+              let msgs = [...this.opts.getMessages()];
+              msgs.push({ role: 'board', taskIds, streaming: true });
+              this.opts.setMessages(msgs);
               break;
+            }
 
             case 'chat.event': {
               let ev = msg.params?.event;
@@ -133,67 +139,21 @@ export class ChatWsClient {
               ws.removeEventListener('message', onMessage);
               ws.removeEventListener('close', onClose);
               
-              let msgs = this.opts.getMessages().map(m => ({ ...m, streaming: false }));
-              this.opts.setMessages(msgs);
-              
-              let text = msg.params?.text || '';
-
-              let sessionMatch = text.match(/Session ID:\s*`([a-f0-9-]+)`/);
-              if (sessionMatch) {
-                this.opts.onSessionId(sessionMatch[1]);
-              }
-
-              msgs = this.opts.getMessages().filter(m => 
-                !(m.role === 'system' && (m.text.startsWith(ICONS.WAIT) || m.text.startsWith(ICONS.OK)))
-                && !(m.role === 'thinking' && !m.done)
-              );
-
-              let meta = {};
-              if (text) {
-                let lastAgent = [...msgs].reverse().find(m => m.role === 'agent');
-                if (!lastAgent) {
-                  let bodyMatch = text.match(/## Agent Response\n+([\s\S]*?)(?=\n+(?:---|## Tools Used|## Errors|## Stats)|$)/i);
-                  let body = bodyMatch ? bodyMatch[1].trim() : text;
-                  msgs.push({ role: 'agent', text: body });
-                }
-
-                let modeMatch = text.match(/- Mode:\s*(.+)/i);
-                if (modeMatch) meta.mode = modeMatch[1].trim();
-                let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
-                if (sidMatch) meta.sessionId = sidMatch[1];
-                let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
-                if (exitMatch) meta.exitCode = parseInt(exitMatch[1], 10);
-                let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
-                if (toolsMatch) meta.tools = parseInt(toolsMatch[1], 10);
-                let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
-                if (tokensMatch) meta.tokens = parseInt(tokensMatch[1], 10);
-                let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
-                if (costMatch) meta.cost = parseFloat(costMatch[1]);
-                let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
-                if (errorsMatch) meta.errors = errorsMatch[1].trim();
-                let failMatch = text.match(/## \[ERR\] Agent Failed[\s\S]*?(?=\n+##|$)/i);
-                if (failMatch) meta.errors = failMatch[0].trim();
-
-                this.opts.onMetaHtml(this.opts.buildSessionMetaHtml(text));
-              }
-
-              let elapsedSec = Math.round((Date.now() - startTime) / 1000);
-              msgs.push({
-                role: 'thinking',
-                elapsed: elapsedSec,
-                done: true,
-                meta: Object.keys(meta).length > 0 ? meta : null
-              });
-
-              this.opts.setMessages(msgs);
               this.opts.onBackgroundToggle(false);
-
-              fetch("/api/chats/messages", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chatId, messages: this.opts.getMessages() }),
+              
+              // Backend persists final state and emits chats.updated to trigger UI refresh
+              // We fetch the updated messages from the server to ensure we show the final parsed result
+              fetch(`/api/chats?id=${chatId}`).then(r => r.json()).then(d => {
+                if (d.chat && d.chat.messages) {
+                  this.opts.setMessages(d.chat.messages);
+                  if (d.chat.sessionMetaHtml && this.opts.onMetaHtml) {
+                    this.opts.onMetaHtml(d.chat.sessionMetaHtml);
+                  }
+                  if (d.chat.sessionId && this.opts.onSessionId) {
+                    this.opts.onSessionId(d.chat.sessionId);
+                  }
+                }
               }).catch(() => {});
-              dashEmit("chats-updated");
 
               resolve('');
               break;
@@ -205,25 +165,8 @@ export class ChatWsClient {
               ws.removeEventListener('message', onMessage);
               ws.removeEventListener('close', onClose);
               
-              let msgs = this.opts.getMessages().map(m => ({ ...m, streaming: false }));
-              
+              this.opts.onBackgroundToggle(false);
               let errText = msg.params?.text || msg.params?.error || 'Unknown error';
-
-              let errSessionMatch = errText.match(/Session ID:\s*`([a-f0-9-]+)`/);
-              if (errSessionMatch) {
-                this.opts.onSessionId(errSessionMatch[1]);
-              }
-
-              let finalMessages = [];
-              for (let m of msgs) {
-                if (m.role === 'tool') {
-                  finalMessages.push({ ...m, streaming: false });
-                } else if (!m.streaming) {
-                  finalMessages.push(m);
-                }
-              }
-              this.opts.setMessages(finalMessages);
-
               resolve(errText);
               break;
             }
@@ -337,13 +280,19 @@ export class ChatWsClient {
             }
 
             let cleaned = msgs.filter(m => !(m.role === 'system' && (m.text.startsWith(ICONS.WAIT) || m.text.startsWith(ICONS.OK))));
-            if (text) cleaned.push({ role: 'agent', text });
             this.opts.setMessages(cleaned);
 
-            fetch("/api/chats/messages", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ chatId, messages: this.opts.getMessages() }),
+            // Fetch the updated messages from the server since the backend persisted the final result
+            fetch(`/api/chats?id=${chatId}`).then(r => r.json()).then(d => {
+              if (d.chat && d.chat.messages) {
+                this.opts.setMessages(d.chat.messages);
+                if (d.chat.sessionMetaHtml && this.opts.onMetaHtml) {
+                  this.opts.onMetaHtml(d.chat.sessionMetaHtml);
+                }
+                if (d.chat.sessionId && this.opts.onSessionId) {
+                  this.opts.onSessionId(d.chat.sessionId);
+                }
+              }
             }).catch(() => {});
 
             dashEmit("chats-updated");

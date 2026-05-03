@@ -388,6 +388,17 @@ export class StateGraph extends EventEmitter {
       if (task && task.status === 'running') {
         tasks[id] = { ...task, status: 'lost', error: 'Server restarted', completedAt: Date.now() };
         cleaned++;
+
+        // Clear the pending task from its chat
+        let chats = this._state.chats || {};
+        for (let [chatId, chat] of Object.entries(chats)) {
+          if (chat.pendingTaskId === id) {
+            chat.pendingTaskId = null;
+            chat.lastTaskStatus = 'error';
+            // Also write to file so it's persisted
+            fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+          }
+        }
       }
     }
     if (cleaned > 0) {
@@ -538,6 +549,7 @@ export class StateGraph extends EventEmitter {
               lastMessage: data.messages?.length ? (data.messages[data.messages.length - 1].text || '').slice(0, 80) : '',
               updatedAt: data.updatedAt || 0,
               createdAt: data.createdAt || 0,
+              pendingTaskId: data.pendingTaskId || null,
             }});
           } catch { /* skip */ }
         }
@@ -640,21 +652,28 @@ export class StateGraph extends EventEmitter {
     this.commit([{ op: 'set', path: `chats/${id}`, value: {
       name: opts.name || 'New Chat',
       projectId: opts.projectId || null,
+      parentChatId: opts.parentChatId || null,
       adapter: opts.adapter || 'pool',
       model: opts.model || null,
+      agentIcon: opts.agentIcon || null,
+      agentColor: opts.agentColor || null,
       messageCount: 0,
       lastMessage: '',
       updatedAt: now,
       createdAt: now,
+      pendingTaskId: null,
     }}], source);
 
     // Full chat data in file
     let chatData = {
       id,
       projectId: opts.projectId || null,
+      parentChatId: opts.parentChatId || null,
       name: opts.name || 'New Chat',
       adapter: opts.adapter || 'pool',
       model: opts.model || null,
+      agentIcon: opts.agentIcon || null,
+      agentColor: opts.agentColor || null,
       messages: [],
       createdAt: now,
       updatedAt: now,
@@ -712,7 +731,7 @@ export class StateGraph extends EventEmitter {
 
   // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
-    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId']);
+    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId', 'parentChatId', 'lastTaskStatus']);
     let filtered = {};
     for (let [k, v] of Object.entries(updates)) {
       if (!allowed.has(k)) continue;
@@ -748,6 +767,11 @@ export class StateGraph extends EventEmitter {
     else delete chat.pendingTaskId;
     chat.updatedAt = Date.now();
     fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+
+    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
+      pendingTaskId: taskId || null,
+      updatedAt: chat.updatedAt,
+    }}], 'chat');
   }
 
   // ── Project Mutation Helpers ───────────────────────────

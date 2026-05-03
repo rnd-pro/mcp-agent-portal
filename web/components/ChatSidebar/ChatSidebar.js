@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
 import { setGlobalParam } from 'symbiote-node';
 import template from './ChatSidebar.tpl.js';
+import { stateSync } from '../../state-sync.js';
 
 const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
 
@@ -110,6 +111,19 @@ export class ChatSidebar extends Symbiote {
       let nav = this.querySelector('.chat-nav');
       if (nav) nav.toggleAttribute('collapsed', val);
     });
+
+    this._unsubChats = stateSync.on('chats', (chatsObj) => {
+      if (!chatsObj) return;
+      dashState.chats = Object.entries(chatsObj)
+        .map(([id, c]) => ({ id, ...c }))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      this._renderNavItems();
+    });
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._unsubChats) this._unsubChats();
   }
 
   async _fetchChats() {
@@ -190,12 +204,26 @@ export class ChatSidebar extends Symbiote {
       expandHtml = `<span class="material-symbols-outlined chat-expand-icon">chevron_right</span>`;
     }
 
-    let icon = isChild ? 'subdirectory_arrow_right' : 'chat';
+    // Agent-specific icon from metadata, fallback to generic
+    let icon = chat.agentIcon || (isChild ? 'subdirectory_arrow_right' : 'chat');
+    let iconStyle = chat.agentColor ? ` style="color:${chat.agentColor}"` : '';
+
+    // Richer status indicator
+    let statusIcon = '';
+    if (chat.pendingTaskId) {
+      statusIcon = `<span class="material-symbols-outlined spin-icon" style="font-size:12px;color:var(--accent-color);margin-left:4px;" title="Running task...">hourglass_empty</span>`;
+    } else if (chat.lastTaskStatus === 'done') {
+      statusIcon = `<span class="material-symbols-outlined" style="font-size:12px;color:hsl(140,50%,45%);margin-left:4px;" title="Completed">check_circle</span>`;
+    } else if (chat.lastTaskStatus === 'error') {
+      statusIcon = `<span class="material-symbols-outlined" style="font-size:12px;color:hsl(0,60%,50%);margin-left:4px;" title="Error">error</span>`;
+    }
+
+    let cleanName = (chat.name || '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '').trim();
 
     div.innerHTML = `
       ${expandHtml}
-      <span class="material-symbols-outlined">${icon}</span>
-      <span class="chat-item-label">${chat.name}</span>
+      <span class="material-symbols-outlined"${iconStyle}>${icon}</span>
+      <span class="chat-item-label">${cleanName}${statusIcon}</span>
       <span class="chat-item-adapter">${chat.adapter}</span>
       <button class="chat-item-delete" title="Delete">×</button>
     `;

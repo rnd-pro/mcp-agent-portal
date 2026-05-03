@@ -833,12 +833,12 @@ export class MCPProxyManager {
             if (!resolvedCwd) resolvedCwd = this.projectRoot !== '/' ? this.projectRoot : process.env.HOME;
 
             // Delegate to agent-pool
-            // Fallback: if client didn't send provider/model, use values from persisted chat
-            if (!provider || !model) {
+            if (!provider || !model || !sessionId) {
               let chatData = sg.getChat(chatId);
               if (chatData) {
                 if (!provider && chatData.provider) provider = chatData.provider;
                 if (!model && chatData.model) model = chatData.model;
+                if (!sessionId && chatData.sessionId) sessionId = chatData.sessionId;
               }
             }
             
@@ -941,7 +941,22 @@ export class MCPProxyManager {
                 ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'unknown' } }));
               });
             }
-          }
+          } else if (msg.method === 'chat.cancel') {
+              let { chatId, taskId } = msg.params || {};
+              if (!taskId && chatId) {
+                let chat = getStateGraph().getChat(chatId);
+                taskId = chat?.pendingTaskId;
+              }
+              if (taskId) {
+                console.log(`💬 [Chat] Canceling task: ${taskId} for chat ${chatId}`);
+                try {
+                  await this.requestFromChild('agent-pool', 'tools/call', {
+                    name: 'cancel_task',
+                    arguments: { task_id: taskId }
+                  });
+                } catch (e) { console.error('Failed to cancel task:', e); }
+              }
+            }
         } catch (e) {
           console.error('❌ [ChatWS] Message handler error:', e);
           if (ws.readyState === 1) {
@@ -1004,12 +1019,21 @@ export class MCPProxyManager {
       }
       this.pendingNotifications.get(taskId).push(notification);
 
-      // Even without subscribers, clear pending task on done/error
+      // Even without subscribers, fetch and save final result to state-graph
       if (type === 'done' || type === 'error') {
-        let chatId = this.taskChatMap.get(taskId);
+        let chatId = this.taskChatMap.get(taskId) || this._findChatForTask(taskId);
         if (chatId) {
           this.taskChatMap.delete(taskId);
-          getStateGraph().updateChatTask(chatId, null);
+          this.requestFromChild('agent-pool', 'tools/call', {
+            name: 'get_task_result',
+            arguments: { task_id: taskId },
+          }).then(result => {
+            let text = result.content?.[0]?.text || '';
+            this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
+            getStateGraph().updateChatTask(chatId, null);
+          }).catch(() => {
+            getStateGraph().updateChatTask(chatId, null);
+          });
         }
       }
       return;
@@ -1021,34 +1045,34 @@ export class MCPProxyManager {
       : type === 'error' ? 'chat.error'
       : 'chat.event';
 
-    // For 'done', fetch the full formatted result
+    // For 'done', fetch the full formatted result and persist it
     let payload;
     if (type === 'done' || type === 'error') {
-      // Get the formatted result via get_task_result
+      let chatId = this.taskChatMap.get(taskId) || this._findChatForTask(taskId);
+      if (chatId) this.taskChatMap.delete(taskId);
+
       this.requestFromChild('agent-pool', 'tools/call', {
         name: 'get_task_result',
         arguments: { task_id: taskId },
       }).then(result => {
         let text = result.content?.[0]?.text || '';
+        
+        // Persist result into chat to ensure headless integrity
+        if (chatId) {
+          this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
+          getStateGraph().updateChatTask(chatId, null);
+        }
+
+        // Notify clients to refresh
         for (let client of clients) {
           if (client.readyState === 1) {
             client.send(JSON.stringify({ method, params: { taskId, text } }));
           }
         }
         this.chatSubscriptions.delete(taskId);
-        // Persist result into chat and clear pending task
-        let chatId = this.taskChatMap.get(taskId);
-        if (chatId) {
-          this.taskChatMap.delete(taskId);
-          getStateGraph().updateChatTask(chatId, null);
-        }
       }).catch(() => {
         this.chatSubscriptions.delete(taskId);
-        let chatId = this.taskChatMap.get(taskId);
-        if (chatId) {
-          this.taskChatMap.delete(taskId);
-          getStateGraph().updateChatTask(chatId, null);
-        }
+        if (chatId) getStateGraph().updateChatTask(chatId, null);
       });
     } else {
       // Stream event
@@ -1058,6 +1082,97 @@ export class MCPProxyManager {
       }
     }
   }
+
+  _findChatForTask(taskId) {
+    let sg = getStateGraph();
+    let state = sg.getState();
+    if (!state.chats) return null;
+    for (let chatId in state.chats) {
+      if (state.chats[chatId].pendingTaskId === taskId) {
+        return chatId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Parse the final task result and persist it to StateGraph, ensuring headless integrity.
+   */
+  _persistFinalTaskResult(chatId, text, startedAt) {
+    let sg = getStateGraph();
+    let chat = sg.getChat(chatId);
+    if (!chat) return;
+
+    let msgs = [...(chat.messages || [])];
+    
+    // Filter out transient system thinking messages
+    msgs = msgs.filter(m => 
+      !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
+      && !(m.role === 'thinking' && !m.done)
+      && !(m.role === 'tool') // Streamed tool messages are transient
+    );
+
+    let meta = {};
+    if (text) {
+      let lastAgent = [...msgs].reverse().find(m => m.role === 'agent');
+      if (!lastAgent || !lastAgent.streaming) {
+        let body = text;
+        let startIdx = body.indexOf('## Agent Response');
+        if (startIdx >= 0) {
+          body = body.substring(startIdx + '## Agent Response'.length).trim();
+        }
+        let endIdx = body.search(/\n+(?:---|## Tools Used|## Errors|## Stats)/i);
+        if (endIdx > 0) {
+          body = body.substring(0, endIdx).trim();
+        }
+        msgs.push({ role: 'agent', text: body, streaming: false });
+      } else {
+        lastAgent.streaming = false;
+      }
+
+      let modeMatch = text.match(/- Mode:\s*(.+)/i);
+      if (modeMatch) meta.mode = modeMatch[1].trim();
+      let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
+      if (sidMatch) {
+        meta.sessionId = sidMatch[1];
+        sg.updateChatSession(chatId, meta.sessionId);
+      }
+      let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
+      if (exitMatch) meta.exitCode = parseInt(exitMatch[1], 10);
+      let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
+      if (toolsMatch) meta.tools = parseInt(toolsMatch[1], 10);
+      let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
+      if (tokensMatch) meta.tokens = parseInt(tokensMatch[1], 10);
+      let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
+      if (costMatch) meta.cost = parseFloat(costMatch[1]);
+      let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
+      if (errorsMatch) meta.errors = errorsMatch[1].trim();
+      let failMatch = text.match(/## \[ERR\] Agent Failed[\s\S]*?(?=\n+##|$)/i);
+      if (failMatch) meta.errors = failMatch[0].trim();
+    }
+
+    let elapsedSec = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
+    msgs.push({
+      role: 'thinking',
+      elapsed: elapsedSec,
+      done: true,
+      meta: Object.keys(meta).length > 0 ? meta : null
+    });
+
+    sg.replaceChatMessages(chatId, msgs);
+    sg.updateChatTask(chatId, null);
+    
+    // Set lastTaskStatus based on exitCode
+    let lastTaskStatus = 'done';
+    if (meta.exitCode !== undefined && meta.exitCode !== 0) {
+      lastTaskStatus = 'error';
+    }
+    sg.updateChat(chatId, { lastTaskStatus });
+
+    // Broadcast chat update to all UI clients
+    this.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
+  }
+
   /**
    * Intentionally stop a server (no respawn).
    * @param {string} serverName

@@ -53,6 +53,9 @@ let META_TOOLS = [
         name: { type: 'string', description: 'Name or title for the new chat.' },
         adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "gemini"). Optional.' },
         parentChatId: { type: 'string', description: 'Parent chat ID for delegation hierarchy. Set this when an orchestrator creates a sub-chat for a delegated task. Optional.' },
+        projectId: { type: 'string', description: 'Project ID to scope this chat to. Optional — inherits from parent chat if not specified.' },
+        agentIcon: { type: 'string', description: 'Material Symbols icon name for the agent. Optional.' },
+        agentColor: { type: 'string', description: 'CSS color for the agent badge. Optional.' },
       },
       required: ['name'],
     },
@@ -353,10 +356,21 @@ export class MCPMultiplexer {
       if (toolName === 'create_chat') {
         let { getStateGraph } = await import('../state-graph.js');
         let sg = getStateGraph();
+        
+        // Auto-inherit projectId from parent chat
+        let projectId = args.projectId || null;
+        if (!projectId && args.parentChatId) {
+          let parentMeta = sg.get(`chats/${args.parentChatId}`);
+          if (parentMeta) projectId = parentMeta.projectId || null;
+        }
+        
         let chat = sg.createChat({
           name: args.name,
           adapter: args.adapter || 'pool',
           parentChatId: args.parentChatId || null,
+          projectId,
+          agentIcon: args.agentIcon || null,
+          agentColor: args.agentColor || null,
         }, 'mcp');
         // Broadcast event so UI reactive tabs open automatically
         this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
