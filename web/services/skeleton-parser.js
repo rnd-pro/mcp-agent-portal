@@ -6,6 +6,7 @@ import {
   Socket,
   Input,
   Output,
+  computeAutoLayout,
 } from 'symbiote-node';
 
 // ── Socket types (for wire coloring) ──
@@ -563,3 +564,4 @@ function buildStructuredGraph(skeleton) {
 
   return { editor, fileMap, dirFiles, dirNodeMap, idToPath, symbolMap };
 }
+export { buildFileGraph, buildStructuredGraph };
