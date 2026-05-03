@@ -61,7 +61,8 @@ export class TaskRouter {
             let text = result.content?.[0]?.text || '';
             this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
             getStateGraph().updateChatTask(chatId, null);
-          }).catch(() => {
+          }).catch(err => {
+            console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
             getStateGraph().updateChatTask(chatId, null);
           });
         }
@@ -93,7 +94,8 @@ export class TaskRouter {
           chatWsServer.broadcastTaskEvent(taskId, method, { taskId, text });
           chatWsServer.unsubscribe(taskId);
         }
-      }).catch(() => {
+      }).catch(err => {
+        console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
         if (chatWsServer) chatWsServer.unsubscribe(taskId);
         if (chatId) getStateGraph().updateChatTask(chatId, null);
       });

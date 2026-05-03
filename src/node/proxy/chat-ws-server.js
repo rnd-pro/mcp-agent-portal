@@ -154,7 +154,8 @@ export class ChatWsServer {
         ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
       }
     } catch (err) {
-      ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'unknown' } }));
+      console.error(`❌ [Chat] Failed to fetch task result for resume:`, err.message);
+      ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Failed to load task state: ' + err.message } }));
     }
   }
 
