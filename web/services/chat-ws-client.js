@@ -165,6 +165,10 @@ export class ChatWsClient {
                 if (exitMatch) meta.exitCode = parseInt(exitMatch[1], 10);
                 let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
                 if (toolsMatch) meta.tools = parseInt(toolsMatch[1], 10);
+                let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
+                if (tokensMatch) meta.tokens = parseInt(tokensMatch[1], 10);
+                let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
+                if (costMatch) meta.cost = parseFloat(costMatch[1]);
                 let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
                 if (errorsMatch) meta.errors = errorsMatch[1].trim();
                 let failMatch = text.match(/## \[ERR\] Agent Failed[\s\S]*?(?=\n+##|$)/i);

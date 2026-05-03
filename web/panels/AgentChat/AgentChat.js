@@ -256,6 +256,14 @@ export class AgentChat extends Symbiote {
     if (sidMatch) {
       chips.push(`<span class="meta-chip meta-sid" title="${escapeHtml(sidMatch[1])}">${escapeHtml(sidMatch[1].substring(0, 12))}…</span>`);
     }
+    let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
+    if (tokensMatch) {
+      chips.push(`<span class="meta-chip meta-info" title="Tokens">${tokensMatch[1]} tks</span>`);
+    }
+    let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
+    if (costMatch) {
+      chips.push(`<span class="meta-chip meta-info" title="Cost">$${costMatch[1]}</span>`);
+    }
     return chips.join('');
   }
 
@@ -463,6 +471,8 @@ export class AgentChat extends Symbiote {
           }
           if (msg.meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtml(msg.meta.sessionId)}">${escapeHtml(msg.meta.sessionId.substring(0, 16))}\u2026</span>`);
           if (msg.meta.tools) items.push(`<span class="meta-chip">${msg.meta.tools} tool call${msg.meta.tools > 1 ? 's' : ''}</span>`);
+          if (msg.meta.tokens) items.push(`<span class="meta-chip meta-info">${msg.meta.tokens} tks</span>`);
+          if (msg.meta.cost) items.push(`<span class="meta-chip meta-info">$${msg.meta.cost.toFixed(4)}</span>`);
           if (msg.meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtml(msg.meta.errors)}</span>`);
           body.innerHTML = items.join('');
           details.appendChild(body);
