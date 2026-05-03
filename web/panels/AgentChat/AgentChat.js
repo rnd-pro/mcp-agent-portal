@@ -401,13 +401,13 @@ export class AgentChat extends Symbiote {
         
         let icon = msg.streaming ? 'build_circle' : 'build';
         let spinClass = msg.streaming ? 'spin-icon' : '';
-        summary.innerHTML = `<span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> ${escapeHtmlapeHtml(msg.name || 'tool')}`;
+        summary.innerHTML = `<span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> ${escapeHtml(msg.name || 'tool')}`;
         details.appendChild(summary);
 
         if (msg.input) {
           let inputBlock = document.createElement('div');
           inputBlock.className = 'tool-section';
-          inputBlock.innerHTML = `<div class="tool-label">Input</div><pre class="tool-code">${escapeHtmlapeHtml(typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input, null, 2))}</pre>`;
+          inputBlock.innerHTML = `<div class="tool-label">Input</div><pre class="tool-code">${escapeHtml(typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input, null, 2))}</pre>`;
           details.appendChild(inputBlock);
         }
 
@@ -417,7 +417,7 @@ export class AgentChat extends Symbiote {
           let resultText = typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result, null, 2);
           // Truncate long results
           let truncated = resultText.length > 500 ? resultText.slice(0, 500) + '\n...' : resultText;
-          resultBlock.innerHTML = `<div class="tool-label">Result</div><pre class="tool-code">${escapeHtmlapeHtml(truncated)}</pre>`;
+          resultBlock.innerHTML = `<div class="tool-label">Result</div><pre class="tool-code">${escapeHtml(truncated)}</pre>`;
           details.appendChild(resultBlock);
         } else if (msg.streaming) {
           let waitBlock = document.createElement('div');
@@ -439,7 +439,7 @@ export class AgentChat extends Symbiote {
         if (msg.done) {
           summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;color:hsl(140,40%,50%)">check_circle</span>${label} ${timeStr}`;
         } else {
-          let statusHtml = msg.status ? `<span class="thinking-status">${escapeHtmlapeHtml(msg.status)}</span>` : '';
+          let statusHtml = msg.status ? `<span class="thinking-status">${escapeHtml(msg.status)}</span>` : '';
           summary.innerHTML = `<span class="material-symbols-outlined spin-icon" style="font-size:16px">pending</span>${label} ${timeStr}${statusHtml}`;
         }
         details.appendChild(summary);
@@ -450,15 +450,15 @@ export class AgentChat extends Symbiote {
           let items = [];
           if (msg.meta.mode) {
             let iconName = msg.meta.mode === 'yolo' ? 'bolt' : 'settings';
-            items.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${escapeHtmlapeHtml(msg.meta.mode)}</span>`);
+            items.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${escapeHtml(msg.meta.mode)}</span>`);
           }
           if (msg.meta.exitCode != null) {
             let cls = msg.meta.exitCode === 0 ? 'meta-ok' : 'meta-err';
             items.push(`<span class="meta-chip ${cls}">exit ${msg.meta.exitCode}</span>`);
           }
-          if (msg.meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtmlapeHtml(msg.meta.sessionId)}">${escapeHtmlapeHtml(msg.meta.sessionId.substring(0, 16))}\u2026</span>`);
+          if (msg.meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtml(msg.meta.sessionId)}">${escapeHtml(msg.meta.sessionId.substring(0, 16))}\u2026</span>`);
           if (msg.meta.tools) items.push(`<span class="meta-chip">${msg.meta.tools} tool call${msg.meta.tools > 1 ? 's' : ''}</span>`);
-          if (msg.meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtmlapeHtml(msg.meta.errors)}</span>`);
+          if (msg.meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtml(msg.meta.errors)}</span>`);
           body.innerHTML = items.join('');
           details.appendChild(body);
         }
