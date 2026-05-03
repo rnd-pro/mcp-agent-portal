@@ -187,12 +187,40 @@ html, body {
 
 
 /* === Scrollbar — carbon grey === */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Layout panels: hide scrollbars by default, show on hover */
+layout-node[node-type="panel"] ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+layout-node[node-type="panel"]:hover ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+/* Split resizer: invisible by default, visible on hover */
+layout-node .split-resizer {
+  background: transparent !important;
+}
+layout-node .split-resizer:hover,
+layout-node[resizing] .split-resizer {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Action zones (split corners): match scrollbar color */
+action-zone .zone-icon {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+action-zone:hover .zone-icon {
+  color: rgba(255, 255, 255, 0.8) !important;
 }

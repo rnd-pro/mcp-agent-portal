@@ -144,7 +144,6 @@ export class AgentChat extends Symbiote {
     // Fetch adapter metadata
     this._fetchAdapterMeta();
 
-    this._syncChatFromRouter();
 
     
     this._ac = new ChatAutocomplete({
@@ -216,6 +215,9 @@ export class AgentChat extends Symbiote {
       if (!this._updatingOptions) this._updateComposerFooter();
       this._updateInputState();
     });
+
+    // Sync state from router after all listeners are attached (fixes cold load bug)
+    this._syncChatFromRouter();
   }
 
   _updateInputState() {
@@ -371,6 +373,9 @@ export class AgentChat extends Symbiote {
       console.log("[AgentChat] Emitting active-chat-changed for", chatId);
       dashState.activeChatId = chatId;
       dashEmit('active-chat-changed', { id: chatId, fromRoute: true });
+    } else if (chatId !== this._loadedChatId) {
+      console.log("[AgentChat] dashState already matches but not loaded locally. Loading", chatId);
+      this._loadChat(chatId);
     }
   }
 
@@ -639,6 +644,7 @@ export class AgentChat extends Symbiote {
 
   async _loadChat(chatId) {
     console.log("[AgentChat] _loadChat called with", chatId);
+    this._loadedChatId = chatId;
     if (!chatId) {
       this.$.messages = [];
       this.$.chatName = "New Chat";
