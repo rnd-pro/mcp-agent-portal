@@ -77,11 +77,11 @@ export class AgentChat extends Symbiote {
     },
 
     onParamChangeDelegated: (e) => {
-      let select = e.target;
-      if (!select || !select.classList.contains('composer-footer-select')) return;
+      let el = e.target;
+      if (!el || (!el.classList.contains('composer-footer-select') && !el.classList.contains('composer-footer-checkbox'))) return;
       
-      let id = select.dataset.param;
-      let val = select.value;
+      let id = el.dataset.param;
+      let val = el.type === 'checkbox' ? el.checked : el.value;
 
       let currentParams = this.$.chatParams || {};
       let updatedParams = { ...currentParams, [id]: val };
@@ -367,6 +367,22 @@ export class AgentChat extends Symbiote {
           let iconName = p.id === 'provider' ? 'dns' : p.id === 'model' ? 'smart_toy' : 'tune';
           
           return `<span class="composer-footer-btn"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" ${disabledAttr}>${optionsHtml}</select></span>`;
+        } else if (p.type === 'boolean') {
+          let paramValue = currentParams[p.id];
+          if (paramValue === undefined) {
+            paramValue = true; // Default to true as requested
+            currentParams[p.id] = paramValue;
+            this.$.chatParams = { ...currentParams };
+          }
+          let checked = paramValue ? 'checked' : '';
+          let iconColor = paramValue ? '#aaa' : '#555';
+          let textColor = paramValue ? '#aaa' : '#666';
+          
+          return `<label class="composer-footer-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:8px; opacity:0.9;">
+            <input type="checkbox" class="composer-footer-checkbox" data-param="${escapeHtml(p.id)}" ${checked} style="display:none;">
+            <span class="material-symbols-outlined" style="font-size:20px; color:${iconColor};">${paramValue ? 'toggle_on' : 'toggle_off'}</span>
+            <span style="color:${textColor}; font-weight:500;">${escapeHtml(p.label)}</span>
+          </label>`;
         }
         return '';
       }).join('');

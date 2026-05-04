@@ -74,6 +74,7 @@ export class ChatWsServer {
     }
     if (!resolvedCwd) resolvedCwd = this.mcpProxy.projectRoot !== '/' ? this.mcpProxy.projectRoot : process.env.HOME;
 
+    let multiAgent = true; // default
     if (!provider || !model || !sessionId) {
       let chatData = sg.getChat(chatId);
       if (chatData) {
@@ -83,10 +84,22 @@ export class ChatWsServer {
       }
     }
     
+    // params.adapterConfig comes from UI chatParams
+    if (params.adapterConfig && params.adapterConfig.multiAgent !== undefined) {
+      multiAgent = params.adapterConfig.multiAgent;
+    }
+    
     let delegateArgs = { prompt, timeout: timeout || 600, cwd: resolvedCwd };
     if (sessionId) delegateArgs.session_id = sessionId;
     if (model) delegateArgs.model = model;
     if (provider) delegateArgs.provider = provider;
+    
+    // Apply Orchestration limits
+    if (multiAgent) {
+      delegateArgs.skill = 'orchestrator';
+    } else {
+      delegateArgs.policy = 'single-agent';
+    }
 
     try {
       console.log(`💬 [Chat] Calling delegate_task...`, delegateArgs);

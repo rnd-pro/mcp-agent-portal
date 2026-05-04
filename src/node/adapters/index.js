@@ -144,7 +144,8 @@ function buildAdapterMetadata() {
     pool: {
       name: 'Agent Pool',
       parameters: [
-        { id: 'chatType', label: 'Chat Type', type: 'select', options: ['standard', 'planning', 'review'] }
+        { id: 'chatType', label: 'Chat Type', type: 'select', options: ['standard', 'planning', 'review'] },
+        { id: 'multiAgent', label: 'Multi-Agent', type: 'boolean' }
       ]
     },
     gemini: {
