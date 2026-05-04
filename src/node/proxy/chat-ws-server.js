@@ -154,7 +154,10 @@ export class ChatWsServer {
     try {
       let result = await fetchTaskResult(this.mcpProxy, taskId);
       
-      let text = result.content?.[0]?.text || '';
+      let eventsStr = result.content?.find(c => c.text && c.text.startsWith('__EVENTS__:'))?.text;
+      let liveEvents = eventsStr ? JSON.parse(eventsStr.substring(11)) : null;
+      let text = result.content?.find(c => c.text && !c.text.startsWith('__EVENTS__:'))?.text || '';
+      
       if (text && !text.includes('still running')) {
         if (text.includes('Task not found')) {
           ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Task was lost (e.g. server restart). Please try again.' } }));
@@ -165,6 +168,11 @@ export class ChatWsServer {
         getStateGraph().updateChatTask(chatId, null);
       } else {
         ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
+        if (liveEvents && Array.isArray(liveEvents)) {
+          for (let ev of liveEvents) {
+            ws.send(JSON.stringify({ method: 'chat.event', params: { taskId, event: ev } }));
+          }
+        }
       }
     } catch (err) {
       console.error(`❌ [Chat] Failed to fetch task result for resume:`, err.message);

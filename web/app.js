@@ -34,6 +34,8 @@ import { stateSync } from "./state-sync.js";
 
 export const state = { skeleton: null, activeFile: null, ws: null, monitorEvents: [] };
 export { formatStats } from "./stats-format.js";
+import { uiAlert } from "./common/ui-dialogs.js";
+window.alert = (msg) => uiAlert(msg);
 export const baseUrl = new URL(".", import.meta.url).href; const l = baseUrl;
 
 export function resolveProjectPath(p) {

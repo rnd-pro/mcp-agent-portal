@@ -146,7 +146,6 @@ export class TaskRouter {
     msgs = msgs.filter(m => 
       !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
       && !(m.role === 'thinking' && !m.done)
-      && !(m.role === 'tool')
     );
 
     let meta = {};

@@ -32,7 +32,7 @@ class ToolExplorer extends Symbiote {
         el.className = 'ui-item';
         el.innerHTML = `<div class="ui-item-title" style="display:flex;align-items:center;gap:6px"><span class="material-symbols-outlined" style="font-size:16px">api</span> ${server.name}</div>`;
         el.onclick = () => {
-          this.shadowRoot.querySelectorAll('.ui-item').forEach(e => e.classList.remove('active'));
+          this.ref.serverList.querySelectorAll('.ui-item').forEach(e => e.classList.remove('active'));
           el.classList.add('active');
           this.selectServer(server.name);
         };

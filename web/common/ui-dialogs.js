@@ -43,3 +43,22 @@ export function uiPrompt(message, defaultValue = '') {
     d.querySelector('#dlg-yes').onclick = () => close(input.value);
   });
 }
+
+export function uiAlert(message) {
+  return new Promise(resolve => {
+    let d = document.createElement('dialog');
+    d.innerHTML = `
+      <div style="padding:20px; font-family:var(--sn-font, sans-serif); font-size:14px; min-width:250px;">
+        <p style="margin:0 0 20px 0; white-space:pre-wrap;">${message}</p>
+        <div style="display:flex; justify-content:flex-end;">
+          <button id="dlg-ok" class="ui-btn primary">OK</button>
+        </div>
+      </div>
+    `;
+    d.style.cssText = "border:1px solid var(--sn-node-border); border-radius:6px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.3); background:var(--sn-panel-bg); color:var(--sn-text);";
+    document.body.appendChild(d);
+    d.showModal();
+    const close = () => { d.close(); d.remove(); resolve(); };
+    d.querySelector('#dlg-ok').onclick = close;
+  });
+}
