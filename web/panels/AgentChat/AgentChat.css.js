@@ -52,8 +52,10 @@ chat-sidebar {
 }
 
 .chat-nav[collapsed] .chat-nav-header {
-  justify-content: center;
-  padding: 2px 0;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 4px 0;
+  gap: 8px;
 }
 
 .chat-nav-header .nav-spacer { flex: 1; }
@@ -81,8 +83,7 @@ chat-sidebar {
 
 .chat-nav[collapsed] .chat-item-label,
 .chat-nav[collapsed] .chat-item-adapter,
-.chat-nav[collapsed] .chat-item-delete,
-.chat-nav[collapsed] .nav-btn-add {
+.chat-nav[collapsed] .chat-item-delete {
   display: none;
 }
 
