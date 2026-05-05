@@ -4,19 +4,14 @@ import { setGlobalParam } from 'symbiote-node';
 import template from './ChatSidebar.tpl.js';
 import { stateSync } from '../../state-sync.js';
 
-const STORAGE_KEY_CHAT_NAV = 'sn-chat-nav-collapsed';
-
 export class ChatSidebar extends Symbiote {
   static isoMode = true;
 
   init$ = {
-    navCollapsed: false,
+    navCollapsed: true,
     
     onToggleNav: () => {
       this.$.navCollapsed = !this.$.navCollapsed;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_CHAT_NAV, this.$.navCollapsed ? 'true' : 'false');
-      }
     },
     
     onNewChat: async () => {
@@ -89,18 +84,12 @@ export class ChatSidebar extends Symbiote {
         setGlobalParam('chat', chatId);
         dashEmit('active-chat-changed', { id: chatId });
         this._fetchChats(); // Update active class
-        if (this.$.navCollapsed) this.$.onToggleNav();
       }
     }
   }
 
   initCallback() {
-    if (typeof localStorage !== 'undefined') {
-      let stored = localStorage.getItem(STORAGE_KEY_CHAT_NAV);
-      if (stored === 'true') {
-        this.$.navCollapsed = true;
-      }
-    }
+    this.$.navCollapsed = true;
 
     this._fetchChats();
     dashEvents.addEventListener('chats-updated', () => this._fetchChats());
