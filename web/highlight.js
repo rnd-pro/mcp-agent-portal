@@ -2,7 +2,7 @@
 const t=new Set(["async","await","break","case","catch","class","const","continue","debugger","default","delete","do","else","export","extends","finally","for","from","function","if","import","in","instanceof","let","new","of","return","super","switch","this","throw","try","typeof","var","void","while","with","yield","static","get","set"]),n=new Set(["true","false","null","undefined","NaN","Infinity"]),s=new Set(["console","document","window","global","process","module","require","Promise","Array","Object","String","Number","Boolean","Map","Set","WeakMap","WeakSet","Symbol","RegExp","Error","JSON","Math","Date","parseInt","parseFloat","setTimeout","setInterval","clearTimeout","clearInterval","fetch","URL","Buffer","EventTarget","CustomEvent","HTMLElement","requestAnimationFrame","queueMicrotask"]);function e(t){return"&"===t?"&amp;":"<"===t?"&lt;":">"===t?"&gt;":t}
 export function highlight(i){const l=[],f=i.length;
 let h=0;for(;h<f;){const g=i[h];if("/"===g&&"/"===i[h+1]){const t=h;for(;h<f&&"\n"!==i[h];)h++;l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("/"===g&&"*"===i[h+1]){const t=h;for(h+=2;h<f&&("*"!==i[h]||"/"!==i[h+1]);)h++;h+=2;
-const n=i.substring(t,h);n.startsWith("/**")?l.push(u(n)):l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("'"===g||'"'===g){const t=h;for(h++;h<f&&i[h]!==g;)"\\"===i[h]&&h++,h++;h++,l.push(`<span class="t-str">${a(i,t,h)}</span>`);continue}if("`"===g){const t=h;for(h++;h<f&&"`"!==i[h];)"\\"===i[h]&&h++,h++;h++,l.push(`<span class="t-str">${a(i,t,h)}</span>`);continue}if(r(g)||"."===g&&h+1<f&&r(i[h+1])){const t=h;if("0"!==g||"x"!==i[h+1]&&"X"!==i[h+1])for(;h<f&&(r(i[h])||"."===i[h]||"e"===i[h]||"E"===i[h]||"_"===i[h]);)h++;else for(h+=2;h<f&&o(i[h]);)h++;h<f&&"n"===i[h]&&h++,l.push(`<span class="t-num">${a(i,t,h)}</span>`);continue}if(c(g)){const g=h;for(;h<f&&p(i[h]);)h++;
+const n=i.substring(t,h);n.startsWith("/**")?l.push(u(n)):l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("'"===g||'"'===g){const t=h;for(h++;h<f&&i[h]!==g;)"\\"===i[h]&&h++,h++;h++,l.push(`<span class="t-str">${a(i,t,h)}</span>`);continue}if("`"===g){const t=h;for(h++;h<f&&"`"!==i[h];)"\\"===i[h]&&h++,h++;h++,l.push(highlightTemplateLiteral(i.substring(t,h)));continue}if(r(g)||"."===g&&h+1<f&&r(i[h+1])){const t=h;if("0"!==g||"x"!==i[h+1]&&"X"!==i[h+1])for(;h<f&&(r(i[h])||"."===i[h]||"e"===i[h]||"E"===i[h]||"_"===i[h]);)h++;else for(h+=2;h<f&&o(i[h]);)h++;h<f&&"n"===i[h]&&h++,l.push(`<span class="t-num">${a(i,t,h)}</span>`);continue}if(c(g)){const g=h;for(;h<f&&p(i[h]);)h++;
 const m=i.substring(g,h);
 let d=h;for(;d<f&&" "===i[d];)d++;t.has(m)?l.push(`<span class="t-kw">${m}</span>`):n.has(m)?l.push(`<span class="t-lit">${m}</span>`):s.has(m)?l.push(`<span class="t-bi">${m}</span>`):"("===i[d]?l.push(`<span class="t-fn">${m}</span>`):g>0&&"."===i[g-1]?l.push(`<span class="t-prop">${m}</span>`):l.push(m);continue}l.push(e(g)),h++}return l.join("")}
 function a(t,n,s){let i="";for(let l=n;l<s;l++)i+=e(t[l]);return i}
@@ -11,6 +11,69 @@ function o(t){return r(t)||t>="a"&&t<="f"||t>="A"&&t<="F"}
 function c(t){return t>="a"&&t<="z"||t>="A"&&t<="Z"||"_"===t||"$"===t}
 function p(t){return c(t)||r(t)}
 function u(t){return'<span class="t-jd">'+t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/(@\w+)/g,'<span class="t-jd-tag">$1</span>').replace(/\{([^}]+)\}/g,'<span class="t-jd-type">{$1}</span>')+"</span>"}
+
+/**
+ * Highlight template literal content with inner HTML/CSS syntax.
+ * Detects whether the content is HTML-like or CSS-like and applies
+ * appropriate token coloring for tags, attributes, properties, values, etc.
+ * Falls back to plain string coloring if content is neither.
+ */
+function highlightTemplateLiteral(raw) {
+  const inner = raw.slice(1, -1); // strip backticks
+  const escaped = inner.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const hasHtmlTags = /<[a-zA-Z]/.test(inner);
+  const hasCssProps = /[{;]\s*[\w-]+\s*:/.test(inner) || /^\s*[\w.#&:\[\]>~+*-]+\s*\{/m.test(inner);
+
+  let highlighted;
+  if (hasHtmlTags) {
+    highlighted = highlightTemplateHtml(escaped);
+  } else if (hasCssProps) {
+    highlighted = highlightTemplateCss(escaped);
+  } else {
+    // Fallback: plain string with ${} interpolation highlighting
+    highlighted = escaped.replace(/\$\{([^}]*)\}/g, '<span class="t-tl-interp">${$1}</span>');
+  }
+
+  return '<span class="t-tl">`' + highlighted + '`</span>';
+}
+
+/** Highlight HTML content inside a template literal */
+function highlightTemplateHtml(html) {
+  return html
+    // ${...} interpolations
+    .replace(/\$\{([^}]*)\}/g, '<span class="t-tl-interp">${$1}</span>')
+    // HTML tags with attributes
+    .replace(/(&lt;\/?)([\w-]+)((?:\s+[^&]*?)?)(\/?\s*&gt;)/g, (_, open, tag, attrs, close) => {
+      let attrHtml = attrs;
+      if (attrs) {
+        // Highlight attribute names and values
+        attrHtml = attrs
+          .replace(/([\w-]+)(=)(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;|"[^"]*"|'[^']*')/g,
+            '<span class="t-tl-attr">$1</span>$2<span class="t-str">$3</span>')
+          .replace(/\s([\w-]+)(?=[\s\/&]|$)/g, ' <span class="t-tl-attr">$1</span>');
+      }
+      return `<span class="t-tl-bracket">${open}</span><span class="t-tl-tag">${tag}</span>${attrHtml}<span class="t-tl-bracket">${close}</span>`;
+    })
+    // HTML comments
+    .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="t-cm">$1</span>');
+}
+
+/** Highlight CSS content inside a template literal */
+function highlightTemplateCss(css) {
+  return css
+    // ${...} interpolations
+    .replace(/\$\{([^}]*)\}/g, '<span class="t-tl-interp">${$1}</span>')
+    // CSS comments
+    .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="t-cm">$1</span>')
+    // CSS selectors (lines ending with {)
+    .replace(/^(\s*)([\w.#&:\[\]>~+*\s,-]+?)(\s*\{)/gm, '$1<span class="t-tl-sel">$2</span>$3')
+    // CSS property: value pairs
+    .replace(/([\w-]+)(\s*:\s*)([^;{}]+)(;)/g,
+      '<span class="t-tl-prop">$1</span>$2<span class="t-tl-val">$3</span>$4')
+    // CSS @-rules
+    .replace(/@([\w-]+)/g, '<span class="t-kw">@$1</span>');
+}
 
 /** Markdown → HTML renderer */
 export function renderMarkdown(src, basePath) {
