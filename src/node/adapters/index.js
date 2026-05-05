@@ -162,9 +162,12 @@ export function getAgentList() {
 // The UI uses this to build dynamic cascading selects:
 //   pool → Agent (from .agents/agents/) → Provider → Model → ChatType
 function buildAdapterMetadata() {
-  let agentOptions = getAgentList().map(a => ({
-    val: a.slug, text: `${a.description || a.slug}`
-  }));
+  let agentOptions = getAgentList().map(a => {
+    // Humanize slug: backend-engineer → Backend Engineer, qa-engineer → QA Engineer
+    let acronyms = new Set(['qa', 'ui', 'api', 'db', 'ci', 'cd', 'ml', 'ai', 'devops', 'sre']);
+    let name = a.slug.split('-').map(w => acronyms.has(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).join(' ');
+    return { val: a.slug, text: name };
+  });
   // Ensure 'none' is always first — direct mode, no agent persona
   agentOptions.unshift({ val: 'none', text: 'Direct (no agent)' });
 

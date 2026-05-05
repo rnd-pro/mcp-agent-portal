@@ -322,6 +322,11 @@ export class AgentChat extends Symbiote {
     let paramsToMap = [];
 
     if (adapter === 'pool') {
+      // Pool params first (agent, chatType)
+      if (meta.pool?.parameters) {
+        paramsToMap.push(...meta.pool.parameters);
+      }
+
       let providers = Object.keys(meta).filter(k => k !== 'pool');
       let currentProvider = currentParams.provider ?? providers[0];
 
@@ -331,10 +336,6 @@ export class AgentChat extends Symbiote {
 
       if (currentProvider && meta[currentProvider]?.parameters) {
         paramsToMap.push(...meta[currentProvider].parameters);
-      }
-
-      if (meta.pool?.parameters) {
-        paramsToMap.push(...meta.pool.parameters);
       }
     } else if (adapter && meta[adapter]?.parameters) {
       paramsToMap = [...meta[adapter].parameters];
