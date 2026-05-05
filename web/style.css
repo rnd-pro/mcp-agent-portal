@@ -20,6 +20,8 @@ html, body {
   font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
+  --sn-node-border: transparent;
+  --layout-border: transparent;
 }
 
 /* === App shell — full viewport flex column === */
@@ -222,8 +224,8 @@ layout-node[resizing] .split-resizer {
 
 /* Action zones (split corners): match scrollbar color */
 action-zone .zone-icon {
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: #4e4e4e !important;
 }
 action-zone:hover .zone-icon {
-  color: rgba(255, 255, 255, 0.8) !important;
+  color: #6e6e6e !important;
 }

@@ -19,6 +19,8 @@ pg-agent-chat {
 chat-sidebar {
   display: flex;
   height: 100%;
+  position: relative;
+  z-index: 10;
 }
 
 .chat-nav {
@@ -28,7 +30,7 @@ chat-sidebar {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: none;
   background: var(--sn-node-bg, #222222);
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
@@ -38,6 +40,7 @@ chat-sidebar {
 .chat-nav[collapsed] {
   width: 48px;
   min-width: 48px;
+  overflow: visible;
 }
 
 .chat-nav-header {
@@ -47,7 +50,7 @@ chat-sidebar {
   padding: 2px 4px;
   min-height: 28px;
   background: var(--bg-header, var(--sn-node-bg, #222222));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: none;
   flex-shrink: 0;
 }
 
@@ -115,6 +118,10 @@ chat-sidebar {
   padding: 4px 0;
 }
 
+.chat-nav[collapsed] .chat-items {
+  overflow: visible;
+}
+
 .chat-item {
   display: flex;
   align-items: center;
@@ -177,6 +184,27 @@ chat-sidebar {
 
 .chat-item:hover .chat-item-delete { display: flex; }
 .chat-item-delete:hover { color: #ef5350; }
+
+.chat-nav[collapsed] .chat-item {
+  position: relative;
+  justify-content: center;
+  padding: 0;
+  overflow: visible;
+}
+
+.chat-nav[collapsed] .chat-item:hover .chat-item-delete {
+  display: flex;
+  position: absolute;
+  /* Shift it outside by exactly its own width to make it a large square */
+  right: -48px;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  height: 100%;
+  background: var(--sn-node-bg, #222222);
+  border-radius: 0 4px 4px 0;
+  box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+}
 
 /* ── Chat Hierarchy (delegation tree) ── */
 
@@ -628,7 +656,7 @@ chat-sidebar {
 }
 
 .tool-card[open] .tool-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: none;
   color: #ccc;
 }
 
