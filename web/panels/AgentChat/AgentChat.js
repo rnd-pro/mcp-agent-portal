@@ -109,7 +109,8 @@ export class AgentChat extends Symbiote {
       let path = await uiPrompt("Enter file or folder path to attach:");
       if (path && path.trim()) {
         let pathStr = path.trim();
-        let name = pathStr.split('/').pop() || pathStr;
+        let cleanPath = pathStr.endsWith('/') ? pathStr.slice(0, -1) : pathStr;
+        let name = (cleanPath.split('/').pop() || pathStr) + (pathStr.endsWith('/') ? '/' : '');
         this.$.attachedContext = [...this.$.attachedContext, { path: pathStr, name }];
       }
     },
@@ -139,7 +140,8 @@ export class AgentChat extends Symbiote {
         let pathStr = path.trim();
         let ctx = this.$.attachedContext || [];
         if (!ctx.find(c => c.path === pathStr)) {
-          let name = pathStr.split('/').pop() || pathStr;
+          let cleanPath = pathStr.endsWith('/') ? pathStr.slice(0, -1) : pathStr;
+          let name = (cleanPath.split('/').pop() || pathStr) + (pathStr.endsWith('/') ? '/' : '');
           this.$.attachedContext = [...ctx, { path: pathStr, name }];
         }
       }
@@ -164,7 +166,8 @@ export class AgentChat extends Symbiote {
         this.ref.chatInput.value = newVal;
         let ctx = this.$.attachedContext || [];
         if (!ctx.find(c => c.path === path)) {
-          let name = path.split('/').pop() || path;
+          let cleanPath = path.endsWith('/') ? path.slice(0, -1) : path;
+          let name = (cleanPath.split('/').pop() || path) + (path.endsWith('/') ? '/' : '');
           this.$.attachedContext = [...ctx, { path, name }];
         }
       },
