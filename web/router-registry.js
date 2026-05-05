@@ -202,3 +202,10 @@ registerSection('settings', {
   layout: withChat(() => LayoutTree.createPanel('settings'), false)
 });
 
+registerSection('agent-chat', {
+  icon: 'smart_toy', label: 'Agent Chat', order: 20, scope: 'project',
+  // Do not wrap the standalone chat in withChat, as it IS the chat.
+  layout: () => LayoutTree.createPanel('agent-chat')
+});
+
+

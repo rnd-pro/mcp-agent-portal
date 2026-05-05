@@ -124,7 +124,7 @@ export class PgWorkspace extends Symbiote {
 
     if (hasSection(section) && section !== this.lastSection) {
       this.lastSection = section;
-      let storageKey = `pg-layout-v2-${this._projectId}-${section}`;
+      let storageKey = `pg-layout-v3-${this._projectId}-${section}`;
       this.ref.layout.$['@storage-key'] = storageKey;
 
       let saved = localStorage.getItem(storageKey);
