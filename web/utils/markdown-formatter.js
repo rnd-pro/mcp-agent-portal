@@ -40,6 +40,9 @@ export function formatMarkdown(text) {
     return `<pre class="markdown-pre"><code>${p1.split('<br>').join('\n')}</code></pre>`;
   });
 
+  // File mentions @[filepath], optionally unwrapping them from quotes or inline code tags
+  html = html.replace(/(?:<code class="markdown-code">|<\/code>|&quot;|'|&#39;)*@\[([^\]]+)\](?:<code class="markdown-code">|<\/code>|&quot;|'|&#39;)*/g, '<span class="markdown-mention">@[$1]</span>');
+
   // Icons
   html = replaceIconsWithHtml(html);
 

@@ -739,6 +739,15 @@ chat-sidebar {
   color: #ccc;
 }
 
+.markdown-mention {
+  color: #64b5f6;
+  background: rgba(100, 181, 246, 0.1);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
 .markdown-link {
   color: #aaa;
   text-decoration: underline;
