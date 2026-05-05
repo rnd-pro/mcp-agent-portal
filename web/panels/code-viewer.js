@@ -167,11 +167,11 @@ _buildDirInfo(path) {
   const sk = o.skeleton;
   const norm = path.replace(/\/$/, '');
   const lines = [];
-  lines.push(`// 📁 Directory: ${norm || '.'}`);
-  lines.push(`// ${'─'.repeat(60)}`);
+  lines.push(`📁 Directory: ${norm || '.'}`);
+  lines.push('─'.repeat(60));
   lines.push('');
   if (!sk) {
-    lines.push('// Skeleton not loaded — unable to display directory metadata.');
+    lines.push('Skeleton not loaded — unable to display directory metadata.');
     return lines.join('\n');
   }
   // Collect all files under this directory
@@ -222,40 +222,40 @@ _buildDirInfo(path) {
   }
   // Subdirectories
   if (subdirs.size > 0) {
-    lines.push(`// 📂 Subdirectories (${subdirs.size}):`);
+    lines.push(`📂 Subdirectories (${subdirs.size}):`);
     for (const d of [...subdirs].sort()) {
-      lines.push(`//   └─ ${d}/`);
+      lines.push(`   └─ ${d}/`);
     }
     lines.push('');
   }
   // Direct files
   if (directFiles.length > 0) {
-    lines.push(`// 📄 Files (${directFiles.length}):`);
+    lines.push(`📄 Files (${directFiles.length}):`);
     for (const f of directFiles.sort()) {
-      lines.push(`//   ├─ ${f}`);
+      lines.push(`   ├─ ${f}`);
     }
     lines.push('');
   }
   // Extension breakdown
   const sorted = Object.entries(extCounts).sort((a, b) => b[1] - a[1]);
   if (sorted.length > 0) {
-    lines.push('// 📊 File types:');
+    lines.push('📊 File types:');
     for (const [ext, count] of sorted) {
       const bar = '█'.repeat(Math.min(count, 30));
-      lines.push(`//   ${ext.padEnd(12)} ${String(count).padStart(4)}  ${bar}`);
+      lines.push(`   ${ext.padEnd(12)} ${String(count).padStart(4)}  ${bar}`);
     }
     lines.push('');
   }
   // Summary
-  lines.push(`// ${'─'.repeat(60)}`);
-  lines.push(`// Total: ${files.length} files across ${subdirs.size} subdirectories`);
+  lines.push('─'.repeat(60));
+  lines.push(`Total: ${files.length} files across ${subdirs.size} subdirectories`);
   // Skeleton node info
   if (sk.n) {
     let nodeCount = 0;
     for (const [, node] of Object.entries(sk.n)) {
       if (node.f && node.f.startsWith(prefix)) nodeCount++;
     }
-    if (nodeCount > 0) lines.push(`// Symbols: ${nodeCount} exported nodes in this directory`);
+    if (nodeCount > 0) lines.push(`Symbols: ${nodeCount} exported nodes in this directory`);
   }
   return lines.join('\n');
 }
