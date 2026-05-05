@@ -292,7 +292,6 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 | context-x-mcp | Context enrichment, workflow discovery, script management | 🟡 Beta |
 | browser-x-mcp | Browser automation, form testing | 🟡 Beta |
 | terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
-| crypto-mcp | Crypto market analysis, trend lines, auto-trading | 🟡 Beta |
 
 > [!IMPORTANT]
 > Each child server runs as an independent process. The singleton backend manages their lifecycle — auto-start on boot, auto-restart on crash (exponential backoff: 1s → 2s → 4s → ... → 30s max), graceful shutdown on exit.
@@ -382,7 +381,9 @@ mcp-agent-portal/
 │   ├── symbiote-node/                # UI framework (layout, canvas, themes)
 │   ├── project-graph-mcp/            # Codebase analysis MCP server
 │   ├── agent-pool-mcp/               # Agent orchestration MCP server
-│   └── context-x-mcp/               # Context enrichment MCP server
+│   ├── context-x-mcp/                # Context enrichment MCP server
+│   ├── browser-x-mcp/                # Browser automation MCP server
+│   └── terminal-x-mcp/               # Terminal sessions MCP server
 ├── src/node/
 │   ├── config-store.js               # Config read/write (projects, chats, settings)
 │   ├── state-graph.js                # Reactive state graph with version tracking
@@ -430,7 +431,7 @@ mcp-agent-portal/
 │   ├── components/
 │   │   ├── ProjectTabs/              # Multi-project tab bar
 │   │   └── ...                       # code-block, canvas-graph, etc.
-│   └── panels/                       # 17 panel directories + 6 standalone
+│   └── panels/                       # 21 panel directories + 6 standalone
 │       ├── ActionBoard/              # Dashboard action cards
 │       ├── ActiveContext/            # Live context tracking
 │       ├── ActiveTasks/              # Running agent tasks
@@ -491,6 +492,9 @@ mcp-agent-portal/
 
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
 - [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration via Gemini CLI
+- [context-x-mcp](https://github.com/rnd-pro/context-x-mcp) — Context enrichment and team memory
+- [browser-x-mcp](https://github.com/nicholasgriffintn/browser-x-mcp) — Browser automation MCP server
+- [terminal-x-mcp](https://github.com/nicholasgriffintn/terminal-x-mcp) — Terminal sessions MCP server
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
 - [symbiote-node](https://github.com/RND-PRO/symbiote-node) — Studio UX framework with node graph editor
 
