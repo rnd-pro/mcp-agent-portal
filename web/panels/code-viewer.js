@@ -84,6 +84,17 @@ this.$.statsText=this._baseStatsText;
 e.$.code=this._fileData.raw;
 }async _loadFile(e){this.$.filename=e,this.$.hasFile=!1,this._fileData=null,this.$.statsText="",this._baseStatsText="",this._transformStatsText="",this._transformCache=null,this._currentPath=e;
 const lang=_getLang(e);
+// Directory detection: no extension or ends with /
+const isDir = e.endsWith('/') || (!e.includes('.') && !['Dockerfile','Makefile','Procfile','LICENSE','README','CHANGELOG','Gemfile','Rakefile','Vagrantfile'].some(n => e.split('/').pop()?.startsWith(n))) || this._isDirInSkeleton(e);
+if(isDir){
+  const i=this._getCodeBlock();
+  if(i){i.$.lang='plain';i.$.code=this._buildDirInfo(e)}
+  this.$.viewMode="source";
+  this.$.modeLabel="directory";
+  this.$.showToggle=!1;
+  this.$.hasFile=!0;
+  return;
+}
 if(lang==='image'){
   const i=this._getCodeBlock();
   if(i){i.$.lang='image';i.setBasePath(e);i.$.code=e}
@@ -129,6 +140,125 @@ if(lang==='md'){
   i&&(i.$.code=s);
 }
 this.$.hasFile=!0;this._lintCurrentFile()}catch(e){const n=this._getCodeBlock();n&&(n.$.lang='plain',n.$.code=`// Error: ${e.message}`),this.$.showToggle=!1,this.$.hasFile=!0}}
+_isDirInSkeleton(path) {
+  const sk = o.skeleton;
+  if (!sk) return false;
+  const norm = path.replace(/\/$/, '');
+  // Check if path is a directory key in skeleton.f (files by dir)
+  if (sk.f) {
+    for (const dir of Object.keys(sk.f)) {
+      const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
+      if (d === norm) return true;
+      // Also check if any file starts with this dir
+      if (d.startsWith(norm + '/')) return true;
+    }
+  }
+  // Check skeleton.a (asset dirs)
+  if (sk.a) {
+    for (const dir of Object.keys(sk.a)) {
+      const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
+      if (d === norm) return true;
+      if (d.startsWith(norm + '/')) return true;
+    }
+  }
+  return false;
+}
+_buildDirInfo(path) {
+  const sk = o.skeleton;
+  const norm = path.replace(/\/$/, '');
+  const lines = [];
+  lines.push(`// 📁 Directory: ${norm || '.'}`);
+  lines.push(`// ${'─'.repeat(60)}`);
+  lines.push('');
+  if (!sk) {
+    lines.push('// Skeleton not loaded — unable to display directory metadata.');
+    return lines.join('\n');
+  }
+  // Collect all files under this directory
+  const files = [];
+  const subdirs = new Set();
+  const prefix = norm ? norm + '/' : '';
+  if (sk.f) {
+    for (const [dir, items] of Object.entries(sk.f)) {
+      const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
+      const fullDir = d ? d + '/' : '';
+      if (!fullDir.startsWith(prefix) && d !== norm) continue;
+      for (const item of items) {
+        const fullPath = fullDir + item;
+        if (fullPath.startsWith(prefix)) {
+          files.push(fullPath.slice(prefix.length));
+          // Track immediate subdirectories
+          const rel = fullPath.slice(prefix.length);
+          const slashIdx = rel.indexOf('/');
+          if (slashIdx > 0) subdirs.add(rel.slice(0, slashIdx));
+        }
+      }
+    }
+  }
+  if (sk.a) {
+    for (const [dir, items] of Object.entries(sk.a)) {
+      const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
+      const fullDir = d ? d + '/' : '';
+      if (!fullDir.startsWith(prefix) && d !== norm) continue;
+      for (const item of items) {
+        const fullPath = fullDir + item;
+        if (fullPath.startsWith(prefix)) {
+          files.push(fullPath.slice(prefix.length));
+          const rel = fullPath.slice(prefix.length);
+          const slashIdx = rel.indexOf('/');
+          if (slashIdx > 0) subdirs.add(rel.slice(0, slashIdx));
+        }
+      }
+    }
+  }
+  // Stats by extension
+  const extCounts = {};
+  const directFiles = [];
+  for (const f of files) {
+    if (!f.includes('/')) directFiles.push(f);
+    const dot = f.lastIndexOf('.');
+    const ext = dot >= 0 ? f.slice(dot) : '(no ext)';
+    extCounts[ext] = (extCounts[ext] || 0) + 1;
+  }
+  // Subdirectories
+  if (subdirs.size > 0) {
+    lines.push(`// 📂 Subdirectories (${subdirs.size}):`);
+    for (const d of [...subdirs].sort()) {
+      lines.push(`//   └─ ${d}/`);
+    }
+    lines.push('');
+  }
+  // Direct files
+  if (directFiles.length > 0) {
+    lines.push(`// 📄 Files (${directFiles.length}):`);
+    for (const f of directFiles.sort()) {
+      lines.push(`//   ├─ ${f}`);
+    }
+    lines.push('');
+  }
+  // Extension breakdown
+  const sorted = Object.entries(extCounts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length > 0) {
+    lines.push('// 📊 File types:');
+    for (const [ext, count] of sorted) {
+      const bar = '█'.repeat(Math.min(count, 30));
+      lines.push(`//   ${ext.padEnd(12)} ${String(count).padStart(4)}  ${bar}`);
+    }
+    lines.push('');
+  }
+  // Summary
+  lines.push(`// ${'─'.repeat(60)}`);
+  lines.push(`// Total: ${files.length} files across ${subdirs.size} subdirectories`);
+  // Skeleton node info
+  if (sk.n) {
+    let nodeCount = 0;
+    for (const [, node] of Object.entries(sk.n)) {
+      if (node.f && node.f.startsWith(prefix)) nodeCount++;
+    }
+    if (nodeCount > 0) lines.push(`// Symbols: ${nodeCount} exported nodes in this directory`);
+  }
+  return lines.join('\n');
+}
 async _lintCurrentFile(){if(!this._currentPath)return;const lang=_getLang(this._currentPath);if(lang!=='js'&&lang!=='mjs')return;const cb=this._getCodeBlock();if(!cb||!cb.setDiagnostics)return;try{const r=await fetch('/api/lint-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filePath:resolveProjectPath(this._currentPath)})});const d=await r.json();if(Array.isArray(d)&&d[0]&&d[0].messages&&d[0].messages.length>0){cb.setDiagnostics(d[0].messages)}else{cb.clearDiagnostics()}}catch{cb.clearDiagnostics()}}}
 
 CodeViewer.template=`
