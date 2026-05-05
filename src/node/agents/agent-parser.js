@@ -75,6 +75,39 @@ function parseFrontmatter(raw) {
   return { meta, body };
 }
 
+import { statSync } from 'fs';
+
+let _skillCache = null;
+let _skillCacheTime = 0;
+
+function getSkillMap(skillsDir) {
+  const now = Date.now();
+  if (_skillCache && (now - _skillCacheTime < 2000)) return _skillCache;
+
+  let map = new Map();
+  if (!existsSync(skillsDir)) return map;
+
+  function scan(dir) {
+    for (const f of readdirSync(dir)) {
+      if (f.startsWith('.')) continue;
+      const fullPath = join(dir, f);
+      if (statSync(fullPath).isDirectory()) {
+        scan(fullPath);
+      } else if (f.endsWith('.md')) {
+        const raw = readFileSync(fullPath, 'utf8');
+        const { meta } = parseFrontmatter(raw);
+        const name = meta.name || basename(f, '.md');
+        map.set(name, raw.trim());
+      }
+    }
+  }
+  
+  scan(skillsDir);
+  _skillCache = map;
+  _skillCacheTime = now;
+  return map;
+}
+
 /**
  * Load a single skill file by name.
  * @param {string} skillsDir - path to `.agents/skills/`
@@ -82,9 +115,8 @@ function parseFrontmatter(raw) {
  * @returns {string|null}
  */
 function loadSkill(skillsDir, skillName) {
-  let filePath = join(skillsDir, `${skillName}.md`);
-  if (!existsSync(filePath)) return null;
-  return readFileSync(filePath, 'utf8').trim();
+  const map = getSkillMap(skillsDir);
+  return map.get(skillName) || null;
 }
 
 /**
