@@ -1,5 +1,5 @@
 // @ctx .context/web/components/code-block.ctx
-import o from"@symbiotejs/symbiote";import{highlight as n,renderMarkdown,highlightSQL,highlightPlain}from"../highlight.js";import{baseUrl}from"../app.js";
+import o from"@symbiotejs/symbiote";import{highlight as n,renderMarkdown,highlightSQL,highlightJSON,highlightCSS,highlightHTML,highlightYAML,highlightShell,highlightINI,highlightPlain}from"../highlight.js";import{baseUrl}from"../app.js";
 
 export class CodeBlock extends o{init$={code:"",lang:"js",highlighted:"",lineNums:"",isMarkdown:false,isImage:false,imageSrc:""};renderCallback(){
 this.sub("code",o=>{
@@ -22,8 +22,13 @@ this.$.lineNums="";
 this.$.isMarkdown=false;
 let hl;
 if(lang==="sql")hl=highlightSQL(o);
-else if(lang==="json"){try{hl=highlightPlain(JSON.stringify(JSON.parse(o),null,2))}catch{hl=highlightPlain(o)}}
-else if(lang==="plain"||lang==="txt"||lang==="css"||lang==="html"||lang==="yaml"||lang==="yml"||lang==="toml"||lang==="sh"||lang==="bash"||lang==="env"||lang==="ini"||lang==="conf"||lang==="cfg"||lang==="xml"||lang==="csv")hl=highlightPlain(o);
+else if(lang==="json"){try{hl=highlightJSON(JSON.stringify(JSON.parse(o),null,2))}catch{hl=highlightJSON(o)}}
+else if(lang==="css")hl=highlightCSS(o);
+else if(lang==="html"||lang==="htm"||lang==="xml")hl=highlightHTML(o);
+else if(lang==="yaml"||lang==="yml")hl=highlightYAML(o);
+else if(lang==="sh"||lang==="bash")hl=highlightShell(o);
+else if(lang==="env"||lang==="ini"||lang==="conf"||lang==="cfg"||lang==="toml")hl=highlightINI(o);
+else if(lang==="plain"||lang==="txt"||lang==="csv")hl=highlightPlain(o);
 else hl=n(o);
 this.$.highlighted=hl;
 const e=o.split("\n").length,t=[];for(let o=1;o<=e;o++)t.push(o);this.$.lineNums=t.join("\n");

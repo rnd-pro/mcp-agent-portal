@@ -44,7 +44,7 @@ function highlightTemplateHtml(html) {
     // ${...} interpolations
     .replace(/\$\{([^}]*)\}/g, '<span class="t-tl-interp">${$1}</span>')
     // HTML tags with attributes
-    .replace(/(&lt;\/?)([\w-]+)((?:\s+[^&]*?)?)(\/?\s*&gt;)/g, (_, open, tag, attrs, close) => {
+    .replace(/(&lt;\/?)([\w-]*)((?:\s+[^&]*?)?)(\/?\s*&gt;)/g, (_, open, tag, attrs, close) => {
       let attrHtml = attrs;
       if (attrs) {
         // Highlight attribute names and values
@@ -217,6 +217,134 @@ export function highlightSQL(src) {
     .replace(/'[^']*'/g, m => `<span class="t-str">${m}</span>`)
     .replace(/\b\d+\b/g, m => `<span class="t-num">${m}</span>`)
     .replace(/\b[A-Z_]{2,}\b/g, m => kw.has(m) ? `<span class="t-kw">${m}</span>` : m);
+}
+
+/** JSON highlighter */
+export function highlightJSON(src) {
+  return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    // Strings (keys and values)
+    .replace(/("(?:[^"\\]|\\.)*")\s*:/g, '<span class="t-tl-prop">$1</span>:')
+    .replace(/:(\s*)("(?:[^"\\]|\\.)*")/g, ':$1<span class="t-str">$2</span>')
+    // Remaining standalone strings (in arrays etc.)
+    .replace(/(?<=[\[,\s])("(?:[^"\\]|\\.)*")(?=[\],\s])/g, '<span class="t-str">$1</span>')
+    // Numbers
+    .replace(/:\s*(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/g, (m, n) => m.replace(n, `<span class="t-num">${n}</span>`))
+    // Booleans and null
+    .replace(/\b(true|false|null)\b/g, '<span class="t-lit">$1</span>');
+}
+
+/** CSS highlighter */
+export function highlightCSS(src) {
+  let html = src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Extract comments and strings as placeholders to avoid regex conflicts
+  const placeholders = [];
+  const ph = (s) => { placeholders.push(s); return `\x00PH${placeholders.length - 1}\x00`; };
+  html = html.replace(/(\/\*[\s\S]*?\*\/)/g, (m) => ph(`<span class="t-cm">${m}</span>`));
+  html = html.replace(/(["'])(?:(?!\1).)*?\1/g, (m) => ph(`<span class="t-str">${m}</span>`));
+  // @-rules
+  html = html.replace(/@([\w-]+)/g, '<span class="t-kw">@$1</span>');
+  // Selectors (lines ending with {)
+  html = html.replace(/^(\s*)([\w.#&:\[\]>~+*\s,-]+?)(\s*\{)/gm, '$1<span class="t-tl-sel">$2</span>$3');
+  // Property: value pairs
+  html = html.replace(/([\w-]+)(\s*:\s*)([^;{}]+)(;)/g,
+    '<span class="t-tl-prop">$1</span>$2<span class="t-tl-val">$3</span>$4');
+  // Restore placeholders
+  html = html.replace(/\x00PH(\d+)\x00/g, (_, i) => placeholders[i]);
+  return html;
+}
+
+/** HTML/XML highlighter */
+export function highlightHTML(src) {
+  return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    // Comments
+    .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="t-cm">$1</span>')
+    // DOCTYPE / processing instructions
+    .replace(/(&lt;![A-Z]+[^&]*?&gt;)/g, '<span class="t-cm">$1</span>')
+    // Tags with attributes
+    .replace(/(&lt;\/?)(\w[\w-]*)((?:\s+[^&]*?)?)(\/?\s*&gt;)/g, (_, open, tag, attrs, close) => {
+      let attrHtml = attrs;
+      if (attrs) {
+        attrHtml = attrs
+          .replace(/([\w-]+)(=)(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;|"[^"]*"|'[^']*')/g,
+            '<span class="t-tl-attr">$1</span>$2<span class="t-str">$3</span>')
+          .replace(/\s([\w-]+)(?=[\s\/&]|$)/g, ' <span class="t-tl-attr">$1</span>');
+      }
+      return `<span class="t-tl-bracket">${open}</span><span class="t-tl-tag">${tag}</span>${attrHtml}<span class="t-tl-bracket">${close}</span>`;
+    })
+    // Entities
+    .replace(/(&amp;\w+;)/g, '<span class="t-num">$1</span>');
+}
+
+/** YAML highlighter */
+export function highlightYAML(src) {
+  let html = src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const placeholders = [];
+  const ph = (s) => { placeholders.push(s); return `\x00PH${placeholders.length - 1}\x00`; };
+  // Comments
+  html = html.replace(/(#.*)/g, (m) => ph(`<span class="t-cm">${m}</span>`));
+  // Quoted strings
+  html = html.replace(/(["'])(?:(?!\1).)*?\1/g, (m) => ph(`<span class="t-str">${m}</span>`));
+  // Keys (word: )
+  html = html.replace(/^(\s*)([\w][\w.-]*)(\s*:)/gm, '$1<span class="t-tl-prop">$2</span>$3');
+  // Booleans and null
+  html = html.replace(/:\s*(true|false|null|yes|no|on|off)\b/gi, (m, v) => m.replace(v, `<span class="t-lit">${v}</span>`));
+  // Numbers
+  html = html.replace(/:\s*(-?\d+\.?\d*)\b/g, (m, n) => m.replace(n, `<span class="t-num">${n}</span>`));
+  // Anchors and aliases
+  html = html.replace(/([&*]\w+)/g, '<span class="t-fn">$1</span>');
+  // Document markers
+  html = html.replace(/^(---|\.\.\.)\s*$/gm, '<span class="t-kw">$1</span>');
+  // Restore placeholders
+  html = html.replace(/\x00PH(\d+)\x00/g, (_, i) => placeholders[i]);
+  return html;
+}
+
+/** Shell/Bash highlighter */
+export function highlightShell(src) {
+  const kw = new Set(['if','then','else','elif','fi','for','while','do','done','case','esac','in','function','return','exit','export','local','readonly','declare','source','alias','unalias','set','unset','shift','trap','eval','exec','test']);
+  let html = src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const placeholders = [];
+  const ph = (s) => { placeholders.push(s); return `\x00PH${placeholders.length - 1}\x00`; };
+  // Comments
+  html = html.replace(/(#.*)/g, (m) => ph(`<span class="t-cm">${m}</span>`));
+  // Double-quoted strings
+  html = html.replace(/"(?:[^"\\]|\\.)*"/g, (m) => ph(`<span class="t-str">${m}</span>`));
+  // Single-quoted strings
+  html = html.replace(/'[^']*'/g, (m) => ph(`<span class="t-str">${m}</span>`));
+  // Variables
+  html = html.replace(/(\$\{?\w+\}?)/g, '<span class="t-fn">$1</span>');
+  // Numbers
+  html = html.replace(/\b(\d+)\b/g, '<span class="t-num">$1</span>');
+  // Keywords
+  html = html.replace(/\b(\w+)\b/g, (m, w) => kw.has(w) ? `<span class="t-kw">${w}</span>` : m);
+  // Restore placeholders
+  html = html.replace(/\x00PH(\d+)\x00/g, (_, i) => placeholders[i]);
+  return html;
+}
+
+/** INI/ENV/CONF/TOML highlighter */
+export function highlightINI(src) {
+  let html = src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const placeholders = [];
+  const ph = (s) => { placeholders.push(s); return `\x00PH${placeholders.length - 1}\x00`; };
+  // Comments
+  html = html.replace(/(#.*|;.*)/g, (m) => ph(`<span class="t-cm">${m}</span>`));
+  // Quoted values
+  html = html.replace(/(["'])(?:(?!\1).)*?\1/g, (m) => ph(`<span class="t-str">${m}</span>`));
+  // Section headers [section]
+  html = html.replace(/^(\s*\[[\w. -]+\]\s*)$/gm, '<span class="t-kw">$1</span>');
+  // Key=value
+  html = html.replace(/^(\s*)([\w][\w.-]*)(\s*=\s*)(.*)/gm, (_, indent, key, eq, val) => {
+    let vHtml = val;
+    if (/^\x00PH/.test(val)) vHtml = val; // already a placeholder
+    else if (/^(true|false|yes|no|on|off)$/i.test(val)) vHtml = `<span class="t-lit">${val}</span>`;
+    else if (/^-?\d+\.?\d*$/.test(val)) vHtml = `<span class="t-num">${val}</span>`;
+    else vHtml = `<span class="t-tl-val">${val}</span>`;
+    return `${indent}<span class="t-tl-prop">${key}</span>${eq}${vHtml}`;
+  });
+  // Restore placeholders
+  html = html.replace(/\x00PH(\d+)\x00/g, (_, i) => placeholders[i]);
+  return html;
 }
 
 /** Generic plain-text highlighter (no colors, just escape) */
