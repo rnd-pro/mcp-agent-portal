@@ -1,19 +1,34 @@
 export default /*css*/ `
 :host {
   display: block;
-  height: 30px;
-  background: var(--sn-bg, #1a1a1a);
-  border-bottom: 1px solid var(--sn-node-border, rgba(255,255,255,0.08));
+  height: 38px;
+  background: transparent;
   flex-shrink: 0;
   user-select: none;
+  position: relative;
+}
+
+/* The continuous horizontal bottom line */
+:host::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--sn-node-border, rgba(255,255,255,0.08));
+  z-index: 1;
 }
 
 .tab-bar {
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   height: 100%;
+  padding: 0 12px;
   overflow-x: auto;
   scrollbar-width: none;
+  position: relative;
+  z-index: 2;
 }
 
 .tab-bar::-webkit-scrollbar {
@@ -21,21 +36,25 @@ export default /*css*/ `
 }
 
 .tab {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 14px;
-  height: 30px;
+  padding: 0 10px 0 12px;
+  height: 32px;
   border: none;
   background: transparent;
-  color: var(--sn-text-dim, #666);
+  color: var(--sn-text-dim, #888);
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s;
-  border-right: 1px solid var(--sn-node-border, rgba(255,255,255,0.06));
   position: relative;
+  border-radius: 8px 8px 0 0;
+  margin: 0 2px;
+  border: 1px solid transparent;
+  border-bottom: none;
 }
 
 .tab .material-symbols-outlined {
@@ -43,14 +62,68 @@ export default /*css*/ `
 }
 
 .tab:hover {
-  background: var(--sn-node-bg, #2a2a2a);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--sn-text, #e0e0e0);
 }
 
 .tab[active] {
   background: var(--sn-node-bg, #2a2a2a);
   color: var(--sn-text, #e0e0e0);
-  border-bottom: 2px solid var(--tab-accent, var(--sn-node-selected, #4c8bf5));
+  border-color: transparent;
+  border-bottom: none;
+}
+
+/* Left flare */
+.tab[active]::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -12px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 0 0,
+    transparent 11.5px,
+    var(--sn-node-bg, #2a2a2a) 12px
+  );
+}
+
+/* Right flare */
+.tab[active]::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: -12px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 100% 0,
+    transparent 11.5px,
+    var(--sn-node-bg, #2a2a2a) 12px
+  );
+}
+
+/* Separator line between inactive tabs */
+.tab:not([active]):not(:hover)::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: 25%;
+  height: 50%;
+  width: 1px;
+  background: var(--sn-node-border, rgba(255,255,255,0.1));
+}
+
+/* Hide separator if the next tab (or first dynamic tab) is active/hovered, or if it's the last tab */
+.tab:not([active]):not(:hover):has(+ .tab[active])::after,
+.tab:not([active]):not(:hover):has(+ .tab:hover)::after,
+.tab:not([active]):not(:hover):has(+ div > .tab:first-child[active])::after,
+.tab:not([active]):not(:hover):has(+ div > .tab:first-child:hover)::after,
+.tab:not([active]):not(:hover):last-child::after,
+.tab:not([active]):not(:hover):has(+ div:empty)::after {
+  content: none;
 }
 
 .tab-dot {
@@ -62,28 +135,30 @@ export default /*css*/ `
 }
 
 .tab-close {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: 50%;
   background: transparent;
   border: none;
-  color: var(--sn-text-dim, #666);
+  color: var(--sn-text-dim, #888);
   cursor: pointer;
   font-size: 14px;
   padding: 0;
   line-height: 1;
-  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 
-.tab:hover .tab-close {
-  display: flex;
+.tab:hover .tab-close,
+.tab[active] .tab-close {
+  opacity: 1;
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.2);
   color: var(--sn-text, #e0e0e0);
 }
 
@@ -91,18 +166,21 @@ export default /*css*/ `
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
   border: none;
   background: transparent;
-  color: var(--sn-text-dim, #555);
+  color: var(--sn-text-dim, #888);
   cursor: pointer;
   font-size: 18px;
-  transition: color 0.15s, background 0.15s;
+  transition: background 0.15s, color 0.15s;
+  margin-left: 4px;
+  margin-bottom: 2px;
 }
 
 .tab-add:hover {
-  background: var(--sn-node-bg, #2a2a2a);
+  background: rgba(255, 255, 255, 0.1);
   color: var(--sn-text, #e0e0e0);
 }
 

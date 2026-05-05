@@ -1,7 +1,7 @@
 export default /*html*/ `
 <div class="tab-bar">
   <button class="tab" active>
-    <span class="material-symbols-outlined">hub</span>
+    <span class="material-symbols-outlined">home</span>
     <span>Home</span>
   </button>
   <div ref="tabsContainer" style="display:flex; align-items:stretch;"></div>

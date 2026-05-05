@@ -75,7 +75,7 @@ export class ProjectTabs extends Symbiote {
       if (id === this.$.activeId) btn.setAttribute('active', '');
 
       btn.innerHTML = `
-        <span class="tab-dot"></span>
+        <span class="material-symbols-outlined" style="color: var(--tab-accent, var(--sn-node-selected, #4c8bf5));">folder</span>
         <span>${proj.name}</span>
         <button class="tab-close" title="Close">×</button>
       `;
