@@ -11,9 +11,9 @@ export default html`
 
     <div class="chat-composer" ref="composer" ${{ ondragover: 'onDragOver', ondragleave: 'onDragLeave', ondrop: 'onDrop' }}>
       <div class="chat-context-bar" itemize="attachedContext">
-        <div class="context-chip">
+        <div class="context-chip" title="{{path}}">
           <span class="material-symbols-outlined" style="font-size:14px">description</span>
-          <span class="context-path">{{path}}</span>
+          <span class="context-path">{{name}}</span>
           <button class="context-remove" ${{ '@data-path': 'path', onclick: '^onRemoveContext' }}>×</button>
         </div>
       </div>

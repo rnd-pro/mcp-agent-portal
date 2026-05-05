@@ -108,7 +108,9 @@ export class AgentChat extends Symbiote {
     onAttachClick: async () => {
       let path = await uiPrompt("Enter file or folder path to attach:");
       if (path && path.trim()) {
-        this.$.attachedContext = [...this.$.attachedContext, { path: path.trim() }];
+        let pathStr = path.trim();
+        let name = pathStr.split('/').pop() || pathStr;
+        this.$.attachedContext = [...this.$.attachedContext, { path: pathStr, name }];
       }
     },
 
@@ -134,9 +136,11 @@ export class AgentChat extends Symbiote {
       let path = e.dataTransfer.getData('text/plain');
       if (path && path.trim()) {
         // Prevent duplicates
+        let pathStr = path.trim();
         let ctx = this.$.attachedContext || [];
-        if (!ctx.find(c => c.path === path.trim())) {
-          this.$.attachedContext = [...ctx, { path: path.trim() }];
+        if (!ctx.find(c => c.path === pathStr)) {
+          let name = pathStr.split('/').pop() || pathStr;
+          this.$.attachedContext = [...ctx, { path: pathStr, name }];
         }
       }
     },
@@ -160,7 +164,8 @@ export class AgentChat extends Symbiote {
         this.ref.chatInput.value = newVal;
         let ctx = this.$.attachedContext || [];
         if (!ctx.find(c => c.path === path)) {
-          this.$.attachedContext = [...ctx, { path }];
+          let name = path.split('/').pop() || path;
+          this.$.attachedContext = [...ctx, { path, name }];
         }
       },
       onInsertWorkflow: (newVal) => {
