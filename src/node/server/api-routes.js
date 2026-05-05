@@ -10,7 +10,7 @@ import { readConfig } from '../config-store.js';
 import { getStateGraph } from '../state-graph.js';
 import { getFlywheelStats } from '../mlops/flywheel.js';
 import { lintFile } from './lint-service.js';
-import { listAdapterTypes, discoverOpenCodeModels, getCLIModels } from '../adapters/index.js';
+import { listAdapterTypes, discoverOpenCodeModels, getCLIModels, getAgentList, setPortalRoot } from '../adapters/index.js';
 import { REGISTRY, getRegistryByCategory, findInRegistry } from './marketplace-registry.js';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -50,6 +50,7 @@ function parseBody(req, maxBytes = 1024 * 1024) {
  */
 export function createRoutes(ctx) {
   let { proxyManager, projectRoot } = ctx;
+  setPortalRoot(projectRoot);
 
   /** @type {Record<string, (req: any, res: any) => void | Promise<void>>} */
   let routes = {
@@ -125,6 +126,11 @@ export function createRoutes(ctx) {
     'GET /api/adapter/types': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(listAdapterTypes()));
+    },
+
+    'GET /api/agents': (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ agents: getAgentList() }));
     },
 
     'GET /api/settings/models': (req, res) => {

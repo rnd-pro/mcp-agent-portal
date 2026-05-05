@@ -2,6 +2,8 @@ import { createGeminiAdapter } from './gemini.js';
 import { createClaudeAdapter } from './claude.js';
 import { getStateGraph } from '../state-graph.js';
 import { execFile } from 'node:child_process';
+import { join } from 'node:path';
+import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
 
 let ADAPTERS = {
   gemini: createGeminiAdapter,
@@ -135,17 +137,43 @@ function getEffectiveModels(provider) {
   });
 }
 
+// ── Agent catalog ─────────────────────────────────────────
+// Cached agent list from .agents/agents/*.md (refreshes every 5s).
+let _agentCache = null;
+let _agentCacheTime = 0;
+let _portalRoot = null;
+
+/** Set the portal root so agent-parser can find .agents/ */
+export function setPortalRoot(root) { _portalRoot = root; }
+
+/** Get agent catalog (slug, icon, color, description, role). Cached 5s. */
+export function getAgentList() {
+  if (_agentCache && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
+  if (!_portalRoot) return [];
+  let agentsDir = join(_portalRoot, '.agents', 'agents');
+  let skillsDir = join(_portalRoot, '.agents', 'skills');
+  let agents = loadAgents(agentsDir, skillsDir);
+  _agentCache = getAgentCatalog(agents);
+  _agentCacheTime = Date.now();
+  return _agentCache;
+}
+
 // Adapter metadata — describes providers and their parameters.
-// Pool-specific params (chatType) are separate from provider params (model).
 // The UI uses this to build dynamic cascading selects:
-//   pool → Provider (from keys of providers) → Model (from selected provider) → ChatType
+//   pool → Agent (from .agents/agents/) → Provider → Model → ChatType
 function buildAdapterMetadata() {
+  let agentOptions = getAgentList().map(a => ({
+    val: a.slug, text: `${a.description || a.slug}`
+  }));
+  // Ensure 'none' is always first — direct mode, no agent persona
+  agentOptions.unshift({ val: 'none', text: 'Direct (no agent)' });
+
   return {
     pool: {
       name: 'Agent Pool',
       parameters: [
+        { id: 'agent', label: 'Agent', type: 'select', options: agentOptions },
         { id: 'chatType', label: 'Chat Type', type: 'select', options: ['standard', 'planning', 'review'] },
-        { id: 'multiAgent', label: 'Multi-Agent', type: 'boolean' }
       ]
     },
     gemini: {

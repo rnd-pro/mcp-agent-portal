@@ -346,8 +346,14 @@ export class AgentChat extends Symbiote {
         if (p.type === 'select' && Array.isArray(p.options)) {
           let paramValue = currentParams[p.id];
           if (!paramValue && p.options.length > 0 && p.id !== 'model') {
-            let firstOpt = p.options[0];
-            paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
+            // For agent selector, default to orchestrator if available
+            if (p.id === 'agent') {
+              let orch = p.options.find(o => (typeof o === 'string' ? o : o.val) === 'orchestrator');
+              paramValue = orch ? (typeof orch === 'string' ? orch : orch.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
+            } else {
+              let firstOpt = p.options[0];
+              paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
+            }
             // Persist visual default back to chatParams so it's included in send
             if (paramValue) {
               currentParams[p.id] = paramValue;
@@ -368,11 +374,11 @@ export class AgentChat extends Symbiote {
           }).join('');
           
           let disabledAttr = '';
-          if (p.id === 'provider' && this.$.messages && this.$.messages.length > 0) {
+          if ((p.id === 'provider' || p.id === 'agent') && this.$.messages && this.$.messages.length > 0) {
             disabledAttr = 'disabled title="Locked"';
           }
 
-          let iconName = p.id === 'provider' ? 'dns' : p.id === 'model' ? 'smart_toy' : 'tune';
+          let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
           
           return `<span class="composer-footer-btn"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" ${disabledAttr}>${optionsHtml}</select></span>`;
         } else if (p.type === 'boolean') {
