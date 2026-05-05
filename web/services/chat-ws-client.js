@@ -114,8 +114,8 @@ export class ChatWsClient {
                 let msgs = [...this.opts.getMessages()];
                 msgs.push({
                   role: 'tool',
-                  name: ev.name || ev.tool_name,
-                  input: ev.parameters || ev.arguments,
+                  name: ev.name ?? ev.tool_name ?? ev.toolCall?.name ?? ev.tool_call?.name ?? ev.function?.name ?? ev.part?.name ?? ev.part?.tool ?? 'unknown',
+                  input: ev.parameters ?? ev.arguments ?? ev.toolCall?.arguments ?? ev.tool_call?.arguments ?? ev.part?.parameters ?? ev.part?.state?.input ?? {},
                   result: null,
                   streaming: true
                 });
@@ -284,7 +284,7 @@ export class ChatWsClient {
               this.opts.setMessages(msgs);
             } else if (ev.type === 'tool_use') {
               let msgs = [...this.opts.getMessages()];
-              msgs.push({ role: 'tool', name: ev.name || ev.tool_name, input: ev.parameters || ev.arguments, result: null, streaming: true });
+              msgs.push({ role: 'tool', name: ev.name ?? ev.tool_name ?? ev.toolCall?.name ?? ev.tool_call?.name ?? ev.function?.name ?? ev.part?.name ?? ev.part?.tool ?? 'unknown', input: ev.parameters ?? ev.arguments ?? ev.toolCall?.arguments ?? ev.tool_call?.arguments ?? ev.part?.parameters ?? ev.part?.state?.input ?? {}, result: null, streaming: true });
               this.opts.setMessages(msgs);
             } else if (ev.type === 'tool_result') {
               let msgs = [...this.opts.getMessages()];
