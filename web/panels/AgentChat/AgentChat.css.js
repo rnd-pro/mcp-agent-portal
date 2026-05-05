@@ -52,7 +52,7 @@ chat-sidebar {
 }
 
 .chat-nav[collapsed] .chat-nav-header {
-  flex-direction: column;
+  flex-direction: column-reverse;
   justify-content: flex-start;
   padding: 4px 0;
   gap: 8px;
