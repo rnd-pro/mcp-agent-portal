@@ -113,7 +113,7 @@ export class AgentChat extends Symbiote {
     },
 
     onRemoveContext: (e) => {
-      let path = e.target.dataset.path;
+      let path = e.currentTarget.dataset.path;
       let ctx = this.$.attachedContext.filter(c => c.path !== path);
       this.$.attachedContext = ctx;
     },

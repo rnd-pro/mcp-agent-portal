@@ -14,7 +14,7 @@ export default html`
         <div class="context-chip">
           <span class="material-symbols-outlined" style="font-size:14px">description</span>
           <span class="context-path">{{path}}</span>
-          <button class="context-remove" data-path="{{path}}" ${{ onclick: '^onRemoveContext' }}>×</button>
+          <button class="context-remove" ${{ '@data-path': 'path', onclick: '^onRemoveContext' }}>×</button>
         </div>
       </div>
       <div class="composer-body">
