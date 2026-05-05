@@ -59,7 +59,9 @@ export class TaskRouter {
           if (chatWsServer) chatWsServer.taskChatMap.delete(taskId);
           fetchTaskResult(this.mcpProxy, taskId).then(result => {
             let text = result.content?.[0]?.text || '';
-            this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
+            let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
+            let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
+            this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt, parsedResult);
             getStateGraph().updateChatTask(chatId, null);
           }).catch(err => {
             console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
@@ -82,10 +84,11 @@ export class TaskRouter {
 
       fetchTaskResult(this.mcpProxy, taskId).then(result => {
         let text = result.content?.[0]?.text || '';
-        
+        let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
+        let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
 
         if (chatId) {
-          this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt);
+          this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt, parsedResult);
           getStateGraph().updateChatTask(chatId, null);
         }
 
@@ -134,8 +137,9 @@ export class TaskRouter {
    * @param {string} chatId 
    * @param {string} text 
    * @param {number} startedAt 
+   * @param {object} parsedResult
    */
-  _persistFinalTaskResult(chatId, text, startedAt) {
+  _persistFinalTaskResult(chatId, text, startedAt, parsedResult) {
     let sg = getStateGraph();
     let chat = sg.getChat(chatId);
     if (!chat) return;
@@ -147,6 +151,23 @@ export class TaskRouter {
       !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
       && !(m.role === 'thinking' && !m.done)
     );
+
+    // Remove old streaming tool blocks from UI
+    msgs = msgs.filter(m => !(m.role === 'tool' && m.streaming));
+
+    if (parsedResult?.toolCalls?.length > 0) {
+      for (let i = 0; i < parsedResult.toolCalls.length; i++) {
+        let call = parsedResult.toolCalls[i];
+        let tRes = parsedResult.toolResults?.[i];
+        msgs.push({
+          role: 'tool',
+          name: call.name,
+          input: call.args,
+          result: tRes ? (tRes.output || tRes.status) : null,
+          streaming: false
+        });
+      }
+    }
 
     let meta = {};
     if (text) {

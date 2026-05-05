@@ -103,10 +103,11 @@ export class ChatWsClient {
               } else if (ev.type === 'message' && ev.role === 'assistant') {
                 let msgs = [...this.opts.getMessages()];
                 let lastMsg = msgs[msgs.length - 1];
+                let textChunk = ev.content ?? ev.text ?? '';
                 if (!lastMsg || lastMsg.role !== 'agent' || !lastMsg.streaming) {
-                  msgs.push({ role: 'agent', text: ev.content || '', streaming: true });
+                  msgs.push({ role: 'agent', text: textChunk, streaming: true });
                 } else {
-                  lastMsg.text += (ev.content || '');
+                  lastMsg.text += textChunk;
                 }
                 this.opts.setMessages(msgs);
               } else if (ev.type === 'tool_use') {
@@ -129,6 +130,10 @@ export class ChatWsClient {
                   }
                 }
                 this.opts.setMessages(msgs);
+              } else if (ev.type === 'error') {
+                let msgs = [...this.opts.getMessages()];
+                msgs.push({ role: 'system', text: `⚠️ Error: ${ev.message || ev.error || JSON.stringify(ev)}` });
+                this.opts.setMessages(msgs);
               }
               break;
             }
@@ -143,17 +148,25 @@ export class ChatWsClient {
               
               // Backend persists final state and emits chats.updated to trigger UI refresh
               // We fetch the updated messages from the server to ensure we show the final parsed result
-              fetch(`/api/chats?id=${chatId}`).then(r => r.json()).then(d => {
-                if (d.chat && d.chat.messages) {
-                  this.opts.setMessages(d.chat.messages);
-                  if (d.chat.sessionMetaHtml && this.opts.onMetaHtml) {
-                    this.opts.onMetaHtml(d.chat.sessionMetaHtml);
+              fetch(`/api/chats/get`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: chatId })
+              }).then(r => r.json()).then(chat => {
+                if (chat && chat.messages) {
+                  this.opts.setMessages(chat.messages);
+                  if (chat.sessionMetaHtml && this.opts.onMetaHtml) {
+                    this.opts.onMetaHtml(chat.sessionMetaHtml);
                   }
-                  if (d.chat.sessionId && this.opts.onSessionId) {
-                    this.opts.onSessionId(d.chat.sessionId);
+                  if (chat.sessionId && this.opts.onSessionId) {
+                    this.opts.onSessionId(chat.sessionId);
                   }
                 }
-              }).catch(() => {});
+                dashEmit("chats-updated");
+                if (this.opts.onDone) this.opts.onDone();
+              }).catch(() => {
+                if (this.opts.onDone) this.opts.onDone();
+              });
 
               resolve('');
               break;
@@ -166,6 +179,21 @@ export class ChatWsClient {
               ws.removeEventListener('close', onClose);
               
               this.opts.onBackgroundToggle(false);
+              
+              fetch(`/api/chats/get`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: chatId })
+              }).then(r => r.json()).then(chat => {
+                if (chat && chat.messages) {
+                  this.opts.setMessages(chat.messages);
+                }
+                dashEmit("chats-updated");
+                if (this.opts.onDone) this.opts.onDone();
+              }).catch(() => {
+                if (this.opts.onDone) this.opts.onDone();
+              });
+
               let errText = msg.params?.text || msg.params?.error || 'Unknown error';
               resolve(errText);
               break;
@@ -235,19 +263,21 @@ export class ChatWsClient {
             if (ev.type === 'message' && ev.role === 'system') {
               let msgs = [...this.opts.getMessages()];
               let last = msgs[msgs.length - 1];
+              let textChunk = ev.content ?? ev.text ?? '';
               if (last && last.role === 'system') {
-                last.text = ev.content || '';
+                last.text = textChunk;
               } else {
-                msgs.push({ role: 'system', text: ev.content || '' });
+                msgs.push({ role: 'system', text: textChunk });
               }
               this.opts.setMessages(msgs);
             } else if (ev.type === 'message' && ev.role === 'assistant') {
               let msgs = [...this.opts.getMessages()];
               let last = msgs[msgs.length - 1];
+              let textChunk = ev.content ?? ev.text ?? '';
               if (!last || last.role !== 'agent' || !last.streaming) {
-                msgs.push({ role: 'agent', text: ev.content || '', streaming: true });
+                msgs.push({ role: 'agent', text: textChunk, streaming: true });
               } else {
-                last.text += (ev.content || '');
+                last.text += textChunk;
               }
               this.opts.setMessages(msgs);
             } else if (ev.type === 'tool_use') {
