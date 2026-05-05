@@ -192,7 +192,7 @@ let _currentProjectId = undefined;
  * even before the user navigates to them.
  */
 function getSubPanelsForSection(sectionId, projectId) {
-  let storageKey = `pg-layout-v2-${projectId || 'global'}-${sectionId}`;
+  let storageKey = `pg-layout-v4-${projectId || 'global'}-${sectionId}`;
   let saved = localStorage.getItem(storageKey);
   let tree;
   if (saved) {
@@ -308,7 +308,7 @@ function handleRoute() {
     let layout = document.getElementById('app-layout');
     if (!layout) return;
 
-    let storageKey = `pg-layout-v2-${projectId || 'global'}-${section}`;
+    let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
     layout.$['@storage-key'] = storageKey;
 
     let saved = localStorage.getItem(storageKey);
@@ -425,6 +425,7 @@ async function u() {
 
     localStorage.removeItem("pg-explorer-layout");
     localStorage.removeItem("pg-layout-v2");
+    localStorage.removeItem("pg-layout-v3");
 
     // Initial sidebar + route setup
     let savedProjectId = localStorage.getItem('pg-active-project-id');
