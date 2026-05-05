@@ -1,5 +1,5 @@
 // @ctx .context/web/components/code-block.ctx
-import o from"@symbiotejs/symbiote";import{highlight as n,renderMarkdown,highlightSQL,highlightJSON,highlightCSS,highlightHTML,highlightYAML,highlightShell,highlightINI,highlightPlain}from"../highlight.js";import{baseUrl}from"../app.js";
+import o from"@symbiotejs/symbiote";import{highlight as n,renderMarkdown,highlightSQL,highlightJSON,highlightCSS,highlightHTML,highlightYAML,highlightShell,highlightINI,highlightLang,highlightPlain}from"../highlight.js";import{baseUrl}from"../app.js";
 
 export class CodeBlock extends o{init$={code:"",lang:"js",highlighted:"",lineNums:"",isMarkdown:false,isImage:false,imageSrc:""};renderCallback(){
 this.sub("code",o=>{
@@ -28,6 +28,8 @@ else if(lang==="html"||lang==="htm"||lang==="xml")hl=highlightHTML(o);
 else if(lang==="yaml"||lang==="yml")hl=highlightYAML(o);
 else if(lang==="sh"||lang==="bash")hl=highlightShell(o);
 else if(lang==="env"||lang==="ini"||lang==="conf"||lang==="cfg"||lang==="toml")hl=highlightINI(o);
+else if(lang==="python"||lang==="ruby"||lang==="go"||lang==="rust"||lang==="java"||lang==="kotlin"||lang==="swift"||lang==="c"||lang==="csharp"||lang==="php"||lang==="dart"||lang==="lua"||lang==="dockerfile")hl=highlightLang(o,lang);
+else if(lang==="typescript"||lang==="graphql"||lang==="prisma")hl=n(o);
 else if(lang==="plain"||lang==="txt"||lang==="csv")hl=highlightPlain(o);
 else hl=n(o);
 this.$.highlighted=hl;

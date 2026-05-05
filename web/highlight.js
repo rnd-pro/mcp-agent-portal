@@ -347,6 +347,201 @@ export function highlightINI(src) {
   return html;
 }
 
+/** Language keyword/builtin/literal definitions for the universal highlighter */
+const LANG_DEFS = {
+  python: {
+    kw: new Set(['and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield']),
+    bi: new Set(['print','len','range','type','int','str','float','list','dict','tuple','set','bool','None','True','False','super','self','open','map','filter','zip','enumerate','sorted','reversed','isinstance','issubclass','hasattr','getattr','setattr','input','abs','max','min','sum','round','any','all','iter','next','format','repr','id','hash','dir','vars','globals','locals','staticmethod','classmethod','property']),
+    lit: new Set(['True','False','None']),
+    hashComment: true, tripleStr: true,
+  },
+  ruby: {
+    kw: new Set(['alias','and','begin','break','case','class','def','defined?','do','else','elsif','end','ensure','for','if','in','module','next','nil','not','or','redo','rescue','retry','return','self','super','then','undef','unless','until','when','while','yield','require','include','extend','attr_accessor','attr_reader','attr_writer','raise','puts','print']),
+    bi: new Set(['Array','Hash','String','Integer','Float','Symbol','Proc','Lambda','IO','File','Dir','Regexp','Range','Enumerable','Comparable','Kernel','Object','Class','Module','NilClass','TrueClass','FalseClass']),
+    lit: new Set(['true','false','nil']),
+    hashComment: true,
+  },
+  go: {
+    kw: new Set(['break','case','chan','const','continue','default','defer','else','fallthrough','for','func','go','goto','if','import','interface','map','package','range','return','select','struct','switch','type','var']),
+    bi: new Set(['append','cap','close','complex','copy','delete','imag','len','make','new','panic','print','println','real','recover','error','string','bool','byte','rune','int','int8','int16','int32','int64','uint','uint8','uint16','uint32','uint64','float32','float64','complex64','complex128','uintptr','fmt','os','io','net','http','context','sync','time','strings','strconv','errors','log']),
+    lit: new Set(['true','false','nil','iota']),
+  },
+  rust: {
+    kw: new Set(['as','async','await','break','const','continue','crate','dyn','else','enum','extern','fn','for','if','impl','in','let','loop','match','mod','move','mut','pub','ref','return','self','Self','static','struct','super','trait','type','unsafe','use','where','while','macro_rules']),
+    bi: new Set(['Vec','String','Option','Result','Box','Rc','Arc','Cell','RefCell','HashMap','HashSet','BTreeMap','BTreeSet','Iterator','IntoIterator','From','Into','Display','Debug','Clone','Copy','Default','Eq','PartialEq','Ord','PartialOrd','Hash','Send','Sync','Sized','Drop','Fn','FnMut','FnOnce','Some','None','Ok','Err','println','eprintln','format','write','writeln','todo','unimplemented','unreachable','assert','assert_eq','assert_ne','dbg','vec','panic']),
+    lit: new Set(['true','false']),
+  },
+  java: {
+    kw: new Set(['abstract','assert','boolean','break','byte','case','catch','char','class','const','continue','default','do','double','else','enum','extends','final','finally','float','for','goto','if','implements','import','instanceof','int','interface','long','native','new','package','private','protected','public','return','short','static','strictfp','super','switch','synchronized','this','throw','throws','transient','try','void','volatile','while','var','record','sealed','permits','yield']),
+    bi: new Set(['System','String','Integer','Long','Double','Float','Boolean','Character','Byte','Short','Object','Class','Math','Arrays','Collections','List','ArrayList','Map','HashMap','Set','HashSet','Queue','Stack','Optional','Stream','Thread','Runnable','Exception','RuntimeException','IOException','StringBuilder','Scanner','File','Path','Paths','Files']),
+    lit: new Set(['true','false','null']),
+  },
+  kotlin: {
+    kw: new Set(['abstract','annotation','as','break','by','catch','class','companion','const','constructor','continue','crossinline','data','do','else','enum','external','final','finally','for','fun','get','if','import','in','infix','init','inline','inner','interface','internal','is','lateinit','noinline','object','open','operator','out','override','package','private','protected','public','reified','return','sealed','set','super','suspend','tailrec','this','throw','try','typealias','val','var','vararg','when','where','while']),
+    bi: new Set(['Any','Boolean','Byte','Char','Double','Float','Int','Long','Nothing','Short','String','Unit','Array','List','Map','Set','MutableList','MutableMap','MutableSet','Pair','Triple','Sequence','Comparable','Iterable','println','print','readLine','listOf','mapOf','setOf','arrayOf','mutableListOf','mutableMapOf','mutableSetOf']),
+    lit: new Set(['true','false','null']),
+  },
+  swift: {
+    kw: new Set(['associatedtype','break','case','catch','class','continue','default','defer','deinit','do','else','enum','extension','fallthrough','fileprivate','for','func','guard','if','import','in','init','inout','internal','is','let','open','operator','private','protocol','public','repeat','rethrows','return','self','Self','static','struct','subscript','super','switch','throw','throws','try','typealias','var','where','while','async','await','actor']),
+    bi: new Set(['Array','Bool','Character','Dictionary','Double','Float','Int','Optional','Set','String','UInt','Any','AnyObject','Error','Codable','Decodable','Encodable','Equatable','Hashable','Comparable','CustomStringConvertible','DispatchQueue','URLSession','Data','URL','print','debugPrint','fatalError','precondition','assert']),
+    lit: new Set(['true','false','nil']),
+  },
+  c: {
+    kw: new Set(['auto','break','case','char','const','continue','default','do','double','else','enum','extern','float','for','goto','if','inline','int','long','register','restrict','return','short','signed','sizeof','static','struct','switch','typedef','union','unsigned','void','volatile','while','_Alignas','_Alignof','_Atomic','_Bool','_Complex','_Generic','_Imaginary','_Noreturn','_Static_assert','_Thread_local','#include','#define','#ifdef','#ifndef','#endif','#if','#else','#elif','#pragma','#error','#undef']),
+    bi: new Set(['printf','scanf','malloc','calloc','realloc','free','memcpy','memset','memmove','strcmp','strlen','strcpy','strcat','strncpy','strncat','fprintf','sprintf','snprintf','fopen','fclose','fread','fwrite','fgets','fputs','stdin','stdout','stderr','NULL','EOF','size_t','ptrdiff_t','FILE','EXIT_SUCCESS','EXIT_FAILURE','assert','abort','exit']),
+    lit: new Set(['true','false','NULL','TRUE','FALSE']),
+  },
+  csharp: {
+    kw: new Set(['abstract','as','base','bool','break','byte','case','catch','char','checked','class','const','continue','decimal','default','delegate','do','double','else','enum','event','explicit','extern','finally','fixed','float','for','foreach','goto','if','implicit','in','int','interface','internal','is','lock','long','namespace','new','object','operator','out','override','params','private','protected','public','readonly','ref','return','sbyte','sealed','short','sizeof','stackalloc','static','string','struct','switch','this','throw','try','typeof','uint','ulong','unchecked','unsafe','ushort','using','var','virtual','void','volatile','while','async','await','dynamic','nameof','record','init','required','yield']),
+    bi: new Set(['Console','String','Int32','Boolean','Object','Array','List','Dictionary','Task','Action','Func','Exception','DateTime','TimeSpan','Math','File','Path','Directory','Stream','StringBuilder','Enumerable','Linq','IEnumerable','IList','IDictionary','IDisposable','EventHandler','Attribute','Type','Convert','Guid','Nullable','Tuple','ValueTuple']),
+    lit: new Set(['true','false','null']),
+  },
+  php: {
+    kw: new Set(['abstract','and','array','as','break','callable','case','catch','class','clone','const','continue','declare','default','do','echo','else','elseif','empty','enddeclare','endfor','endforeach','endif','endswitch','endwhile','eval','extends','final','finally','fn','for','foreach','function','global','goto','if','implements','include','include_once','instanceof','insteadof','interface','isset','list','match','namespace','new','or','print','private','protected','public','readonly','require','require_once','return','static','switch','throw','trait','try','unset','use','var','while','xor','yield','from']),
+    bi: new Set(['array_map','array_filter','array_push','array_pop','array_shift','array_merge','array_keys','array_values','count','strlen','strpos','substr','str_replace','explode','implode','trim','strtolower','strtoupper','is_array','is_string','is_int','is_null','isset','empty','var_dump','print_r','json_encode','json_decode','date','time','file_get_contents','file_put_contents','preg_match','preg_replace','sprintf','intval','floatval','boolval']),
+    lit: new Set(['true','false','null','TRUE','FALSE','NULL']),
+    hashComment: true,
+  },
+  dart: {
+    kw: new Set(['abstract','as','assert','async','await','break','case','catch','class','const','continue','covariant','default','deferred','do','dynamic','else','enum','export','extends','extension','external','factory','final','finally','for','Function','get','hide','if','implements','import','in','interface','is','late','library','mixin','new','on','operator','part','required','rethrow','return','set','show','static','super','switch','sync','this','throw','try','typedef','var','void','while','with','yield']),
+    bi: new Set(['print','int','double','String','bool','List','Map','Set','Future','Stream','Duration','DateTime','RegExp','Object','Type','Iterable','Iterator','Null','Symbol','Function','dynamic','num','Comparable','Pattern','StringBuffer','Uri','Error','Exception','StateError','ArgumentError','RangeError','TypeError','FormatException']),
+    lit: new Set(['true','false','null']),
+  },
+  lua: {
+    kw: new Set(['and','break','do','else','elseif','end','for','function','goto','if','in','local','not','or','repeat','return','then','until','while']),
+    bi: new Set(['print','type','tostring','tonumber','error','assert','pcall','xpcall','require','select','pairs','ipairs','next','rawget','rawset','rawequal','setmetatable','getmetatable','unpack','table','string','math','io','os','coroutine','debug']),
+    lit: new Set(['true','false','nil']),
+    lineComment: '--', blockCommentOpen: '--[[', blockCommentClose: ']]',
+  },
+  dockerfile: {
+    kw: new Set(['FROM','RUN','CMD','LABEL','MAINTAINER','EXPOSE','ENV','ADD','COPY','ENTRYPOINT','VOLUME','USER','WORKDIR','ARG','ONBUILD','STOPSIGNAL','HEALTHCHECK','SHELL','AS']),
+    bi: new Set(['apt-get','apk','yum','npm','pip','curl','wget','chmod','chown','mkdir','rm','cp','mv','cat','echo','bash','sh']),
+    lit: new Set(['true','false']),
+    hashComment: true,
+  },
+};
+
+/**
+ * Universal C-like syntax highlighter.
+ * Works for Python, Go, Rust, Java, C/C++, C#, PHP, Ruby, Kotlin, Swift, Dart, Lua, Dockerfile.
+ * Uses the same tokenizer logic as the JS highlighter but with configurable keyword sets.
+ * @param {string} src - Source code
+ * @param {string} lang - Language key (must exist in LANG_DEFS)
+ */
+export function highlightLang(src, lang) {
+  const def = LANG_DEFS[lang];
+  if (!def) return highlightPlain(src);
+  const { kw, bi, lit, hashComment, tripleStr, lineComment, blockCommentOpen, blockCommentClose } = def;
+  const lc = lineComment || '//';
+  const bco = blockCommentOpen || '/*';
+  const bcc = blockCommentClose || '*/';
+  const out = [];
+  const len = src.length;
+  let i = 0;
+  while (i < len) {
+    const ch = src[i];
+    // Line comments (// or # or --)
+    if ((hashComment && ch === '#') ||
+        (src.substring(i, i + lc.length) === lc && !hashComment)) {
+      const s = i;
+      while (i < len && src[i] !== '\n') i++;
+      out.push(`<span class="t-cm">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Block comments (/* */ or --[[ ]])
+    if (src.substring(i, i + bco.length) === bco) {
+      const s = i;
+      i += bco.length;
+      while (i < len && src.substring(i, i + bcc.length) !== bcc) i++;
+      i += bcc.length;
+      out.push(`<span class="t-cm">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Triple-quoted strings (Python)
+    if (tripleStr && (src.substring(i, i+3) === '"""' || src.substring(i, i+3) === "'''")) {
+      const q = src.substring(i, i+3);
+      const s = i;
+      i += 3;
+      while (i < len && src.substring(i, i+3) !== q) { if (src[i] === '\\') i++; i++; }
+      i += 3;
+      out.push(`<span class="t-str">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Strings
+    if (ch === "'" || ch === '"') {
+      const s = i; i++;
+      while (i < len && src[i] !== ch) { if (src[i] === '\\') i++; i++; }
+      i++;
+      out.push(`<span class="t-str">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Backtick strings (Go raw strings, etc.)
+    if (ch === '`') {
+      const s = i; i++;
+      while (i < len && src[i] !== '`') i++;
+      i++;
+      out.push(`<span class="t-str">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Numbers
+    if (isDigit(ch) || (ch === '.' && i+1 < len && isDigit(src[i+1]))) {
+      const s = i;
+      if (ch === '0' && (src[i+1] === 'x' || src[i+1] === 'X')) {
+        i += 2; while (i < len && isHex(src[i])) i++;
+      } else if (ch === '0' && (src[i+1] === 'b' || src[i+1] === 'B')) {
+        i += 2; while (i < len && (src[i] === '0' || src[i] === '1')) i++;
+      } else if (ch === '0' && (src[i+1] === 'o' || src[i+1] === 'O')) {
+        i += 2; while (i < len && src[i] >= '0' && src[i] <= '7') i++;
+      } else {
+        while (i < len && (isDigit(src[i]) || src[i] === '.' || src[i] === 'e' || src[i] === 'E' || src[i] === '_')) i++;
+      }
+      // Numeric suffixes (f, u, l, i32, etc.)
+      while (i < len && isIdent(src[i])) i++;
+      out.push(`<span class="t-num">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Identifiers and keywords
+    if (isIdentStart(ch)) {
+      const s = i;
+      while (i < len && isIdent(src[i])) i++;
+      const word = src.substring(s, i);
+      let d = i; while (d < len && src[d] === ' ') d++;
+      if (kw.has(word)) out.push(`<span class="t-kw">${word}</span>`);
+      else if (lit.has(word)) out.push(`<span class="t-lit">${word}</span>`);
+      else if (bi.has(word)) out.push(`<span class="t-bi">${word}</span>`);
+      else if (src[d] === '(') out.push(`<span class="t-fn">${word}</span>`);
+      else if (s > 0 && src[s-1] === '.') out.push(`<span class="t-prop">${word}</span>`);
+      else out.push(escChar(word));
+      continue;
+    }
+    // PHP variables
+    if (ch === '$' && i+1 < len && isIdentStart(src[i+1])) {
+      const s = i; i++;
+      while (i < len && isIdent(src[i])) i++;
+      out.push(`<span class="t-fn">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    // Decorators / Attributes (@)
+    if (ch === '@' && i+1 < len && isIdentStart(src[i+1])) {
+      const s = i; i++;
+      while (i < len && isIdent(src[i])) i++;
+      out.push(`<span class="t-jd-tag">${esc(src, s, i)}</span>`);
+      continue;
+    }
+    out.push(escSingle(ch));
+    i++;
+  }
+  return out.join('');
+}
+
+function esc(src, from, to) { let r = ''; for (let i = from; i < to; i++) r += escSingle(src[i]); return r; }
+function escSingle(ch) { return ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch; }
+function escChar(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function isDigit(ch) { return ch >= '0' && ch <= '9'; }
+function isHex(ch) { return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'); }
+function isIdentStart(ch) { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_' || ch === '$'; }
+function isIdent(ch) { return isIdentStart(ch) || isDigit(ch); }
+
 /** Generic plain-text highlighter (no colors, just escape) */
 export function highlightPlain(src) {
   return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
