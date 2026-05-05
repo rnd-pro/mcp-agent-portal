@@ -11,6 +11,12 @@ import { ChatWsClient } from '../../services/chat-ws-client.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import { ChatSidebar } from '../../components/ChatSidebar/ChatSidebar.js';
 
+/** Extract display name from a full path (file or directory). */
+function shortName(fullPath) {
+  let clean = fullPath.endsWith('/') ? fullPath.slice(0, -1) : fullPath;
+  return (clean.split('/').pop() || fullPath) + (fullPath.endsWith('/') ? '/' : '');
+}
+
 /**
  * AgentChat — single layout panel with integrated chat-nav sidebar.
  *
@@ -109,9 +115,7 @@ export class AgentChat extends Symbiote {
       let path = await uiPrompt("Enter file or folder path to attach:");
       if (path && path.trim()) {
         let pathStr = path.trim();
-        let cleanPath = pathStr.endsWith('/') ? pathStr.slice(0, -1) : pathStr;
-        let name = (cleanPath.split('/').pop() || pathStr) + (pathStr.endsWith('/') ? '/' : '');
-        this.$.attachedContext = [...this.$.attachedContext, { path: pathStr, name }];
+        this.$.attachedContext = [...this.$.attachedContext, { path: pathStr, name: shortName(pathStr) }];
       }
     },
 
@@ -140,9 +144,7 @@ export class AgentChat extends Symbiote {
         let pathStr = path.trim();
         let ctx = this.$.attachedContext || [];
         if (!ctx.find(c => c.path === pathStr)) {
-          let cleanPath = pathStr.endsWith('/') ? pathStr.slice(0, -1) : pathStr;
-          let name = (cleanPath.split('/').pop() || pathStr) + (pathStr.endsWith('/') ? '/' : '');
-          this.$.attachedContext = [...ctx, { path: pathStr, name }];
+          this.$.attachedContext = [...ctx, { path: pathStr, name: shortName(pathStr) }];
         }
       }
     },
@@ -166,9 +168,7 @@ export class AgentChat extends Symbiote {
         this.ref.chatInput.value = newVal;
         let ctx = this.$.attachedContext || [];
         if (!ctx.find(c => c.path === path)) {
-          let cleanPath = path.endsWith('/') ? path.slice(0, -1) : path;
-          let name = (cleanPath.split('/').pop() || path) + (path.endsWith('/') ? '/' : '');
-          this.$.attachedContext = [...ctx, { path, name }];
+          this.$.attachedContext = [...ctx, { path, name: shortName(path) }];
         }
       },
       onInsertWorkflow: (newVal) => {

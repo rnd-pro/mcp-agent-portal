@@ -164,7 +164,8 @@ export class ChatWsClient {
                 }
                 dashEmit("chats-updated");
                 if (this.opts.onDone) this.opts.onDone();
-              }).catch(() => {
+              }).catch((err) => {
+                console.error('🔴 [ChatWsClient] Failed to fetch final chat state:', err.message);
                 if (this.opts.onDone) this.opts.onDone();
               });
 
@@ -190,7 +191,8 @@ export class ChatWsClient {
                 }
                 dashEmit("chats-updated");
                 if (this.opts.onDone) this.opts.onDone();
-              }).catch(() => {
+              }).catch((err) => {
+                console.error('🔴 [ChatWsClient] Failed to fetch chat state after error:', err.message);
                 if (this.opts.onDone) this.opts.onDone();
               });
 

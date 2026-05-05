@@ -13,7 +13,7 @@ export function uiConfirm(message) {
     d.style.cssText = "border:1px solid var(--sn-node-border); border-radius:6px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.3); background:var(--sn-panel-bg); color:var(--sn-text);";
     document.body.appendChild(d);
     d.showModal();
-    const close = (val) => { d.close(); d.remove(); resolve(val); };
+    let close = (val) => { d.close(); d.remove(); resolve(val); };
     d.querySelector('#dlg-no').onclick = () => close(false);
     d.querySelector('#dlg-yes').onclick = () => close(true);
   });
@@ -35,9 +35,9 @@ export function uiPrompt(message, defaultValue = '') {
     d.style.cssText = "border:1px solid var(--sn-node-border); border-radius:6px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.3); background:var(--sn-panel-bg); color:var(--sn-text);";
     document.body.appendChild(d);
     d.showModal();
-    const input = d.querySelector('#dlg-input');
+    let input = d.querySelector('#dlg-input');
     input.focus();
-    const close = (val) => { d.close(); d.remove(); resolve(val); };
+    let close = (val) => { d.close(); d.remove(); resolve(val); };
     input.onkeydown = e => { if (e.key === 'Enter') close(input.value); };
     d.querySelector('#dlg-no').onclick = () => close(null);
     d.querySelector('#dlg-yes').onclick = () => close(input.value);
@@ -58,7 +58,7 @@ export function uiAlert(message) {
     d.style.cssText = "border:1px solid var(--sn-node-border); border-radius:6px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.3); background:var(--sn-panel-bg); color:var(--sn-text);";
     document.body.appendChild(d);
     d.showModal();
-    const close = () => { d.close(); d.remove(); resolve(); };
+    let close = () => { d.close(); d.remove(); resolve(); };
     d.querySelector('#dlg-ok').onclick = close;
   });
 }
