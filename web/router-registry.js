@@ -93,39 +93,48 @@ export function hasSection(id) {
   return _sections.has(id);
 }
 
+/** Helper to wrap layout with a global right-sidebar chat */
+function withChat(layoutFn, isExpanded = false) {
+  return () => {
+    let main = layoutFn();
+    let chat = LayoutTree.createPanel('agent-chat');
+    chat.global = true;
+    chat.collapsed = !isExpanded;
+    // Set split ratio to 0.65 (chat takes 35% when expanded)
+    return LayoutTree.createSplit('horizontal', main, chat, 0.65);
+  };
+}
+
 // ── Core Sections ───────────────────────────────────────────────
 
 registerSection('dashboard', {
   icon: 'dashboard', label: 'Dashboard', order: 10, scope: 'home',
-  layout: () => {
-    let workspace = LayoutTree.createSplit('horizontal',
+  layout: withChat(() => {
+    return LayoutTree.createSplit('horizontal',
       LayoutTree.createPanel('project-list'),
       LayoutTree.createPanel('action-board'), 0.35
     );
-    let chat = LayoutTree.createPanel('agent-chat');
-    chat.global = true;
-    return LayoutTree.createSplit('horizontal', workspace, chat, 0.65);
-  }
+  }, true)
 });
 
 registerSection('marketplace', {
   icon: 'storefront', label: 'Marketplace', order: 25, scope: 'home',
-  layout: () => LayoutTree.createPanel('marketplace')
+  layout: withChat(() => LayoutTree.createPanel('marketplace'), false)
 });
 
 registerSection('topology', {
   icon: 'hub', label: 'Topology', order: 27, scope: 'home',
-  layout: () => LayoutTree.createPanel('topology-panel')
+  layout: withChat(() => LayoutTree.createPanel('topology-panel'), false)
 });
 
 registerSection('tool-explorer', {
   icon: 'build', label: 'Tool Explorer', order: 28, scope: 'home',
-  layout: () => LayoutTree.createPanel('tool-explorer')
+  layout: withChat(() => LayoutTree.createPanel('tool-explorer'), false)
 });
 
 registerSection('orchestration', {
   icon: 'account_tree', label: 'Orchestration', order: 29, scope: 'home',
-  layout: () => LayoutTree.createSplit('horizontal',
+  layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createSplit('vertical',
       LayoutTree.createPanel('active-tasks'),
       LayoutTree.createPanel('group-mgr'), 0.5
@@ -134,20 +143,20 @@ registerSection('orchestration', {
       LayoutTree.createPanel('workflow-exp'),
       LayoutTree.createPanel('pipeline-mgr'), 0.5
     ), 0.4
-  )
+  ), false)
 });
 
 registerSection('skills', {
   icon: 'school', label: 'Skills & Policies', order: 30, scope: 'home',
-  layout: () => LayoutTree.createSplit('horizontal',
+  layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('skill-mgr'),
     LayoutTree.createPanel('peer-review'), 0.6
-  )
+  ), false)
 });
 
 registerSection('explorer', {
   icon: 'folder_open', label: 'Explorer', order: 30, scope: 'project',
-  layout: () => LayoutTree.createSplit('horizontal',
+  layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createSplit('vertical',
       LayoutTree.createPanel('file-tree'),
       LayoutTree.createPanel('active-context'), 0.7
@@ -155,19 +164,19 @@ registerSection('explorer', {
     LayoutTree.createSplit('horizontal',
       LayoutTree.createPanel('code-viewer'),
       LayoutTree.createPanel('ctx-panel'), 0.65
-    ), 0.2)
+    ), 0.2), false)
 });
 
 registerSection('graph', {
   icon: 'developer_board', label: 'Graph', order: 40, scope: 'project',
-  layout: () => LayoutTree.createSplit('horizontal',
+  layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('file-tree'),
-    LayoutTree.createPanel('dep-graph'), 0.18)
+    LayoutTree.createPanel('dep-graph'), 0.18), false)
 });
 
 registerSection('follow', {
   icon: 'smart_toy', label: 'Follow', order: 50, scope: 'project',
-  layout: () => LayoutTree.createSplit('horizontal',
+  layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('file-tree'),
     LayoutTree.createSplit('vertical',
       LayoutTree.createSplit('horizontal',
@@ -175,25 +184,21 @@ registerSection('follow', {
         LayoutTree.createPanel('code-viewer'), 0.65
       ),
       LayoutTree.createPanel('monitor'), 0.72
-    ), 0.12)
+    ), 0.12), false)
 });
 
 registerSection('analysis', {
   icon: 'analytics', label: 'Analysis', order: 60, scope: 'project',
-  layout: () => LayoutTree.createPanel('health')
+  layout: withChat(() => LayoutTree.createPanel('health'), false)
 });
 
 registerSection('monitor', {
   icon: 'monitor_heart', label: 'Monitor', order: 70, scope: 'both',
-  layout: () => LayoutTree.createPanel('monitor')
+  layout: withChat(() => LayoutTree.createPanel('monitor'), false)
 });
 
 registerSection('settings', {
   icon: 'settings', label: 'Settings', order: 100, scope: 'both',
-  layout: () => LayoutTree.createPanel('settings')
+  layout: withChat(() => LayoutTree.createPanel('settings'), false)
 });
 
-registerSection('agent-chat', {
-  icon: 'smart_toy', label: 'Agent Chat', order: 20, scope: 'project',
-  layout: () => LayoutTree.createPanel('agent-chat')
-});
