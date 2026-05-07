@@ -450,9 +450,32 @@ export class MCPMultiplexer {
           return;
         }
 
+        if (['delegate_task', 'delegate_task_readonly'].includes(realToolName) && realArgs.parent_chat_id && !realArgs.chat_id) {
+          try {
+            let { getStateGraph } = await import('../state-graph.js');
+            let sg = getStateGraph();
+            let parentMeta = sg.get(`chats/${realArgs.parent_chat_id}`);
+            let chat = sg.createChat({
+              name: (realArgs.prompt || '').substring(0, 40) + ((realArgs.prompt || '').length > 40 ? '...' : ''),
+              adapter: 'pool',
+              parentChatId: realArgs.parent_chat_id,
+              projectId: parentMeta ? parentMeta.projectId : null
+            }, 'mcp');
+            realArgs.chat_id = chat.id;
+            this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+          } catch (e) {
+            console.error(`[MCP Multiplexer] failed to auto-create chat for delegate_task:`, e.message);
+          }
+        }
+
         // Proxy the call to the child server
         let internalId = this.nextInternalId++;
-        this.requestMap.set(internalId, { serverName: entry.server, originalId: msg.id });
+        this.requestMap.set(internalId, { 
+          serverName: entry.server, 
+          originalId: msg.id,
+          toolName: realToolName,
+          toolArgs: realArgs 
+        });
         this.proxyManager.sendToChild(entry.server, {
           jsonrpc: '2.0',
           id: internalId,
@@ -510,10 +533,32 @@ export class MCPMultiplexer {
   }
 
   handleChildMessage(serverName, msg) {
-    // If it's a response to a proxied request
     if (msg.id !== undefined && this.requestMap.has(msg.id)) {
       let req = this.requestMap.get(msg.id);
       this.requestMap.delete(msg.id);
+      
+      if (req.toolName === 'delegate_task' && msg.result && msg.result.content) {
+        let delegateText = msg.result.content[0]?.text || '';
+        let taskIdMatch = delegateText.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+        let taskId = taskIdMatch?.[1];
+        let chatId = req.toolArgs.parent_chat_id || req.toolArgs.chat_id;
+        if (taskId && chatId && this.proxyManager.chatWsServer) {
+          // Find the main task ID for this chat to broadcast to
+          let mainTaskId = null;
+          for (let [t, c] of this.proxyManager.chatWsServer.taskChatMap.entries()) {
+            if (c === chatId) {
+              mainTaskId = t;
+              break;
+            }
+          }
+          if (mainTaskId) {
+            this.proxyManager.chatWsServer.broadcastTaskEvent(mainTaskId, 'chat.delegated', { 
+              taskId, text: delegateText, chatId 
+            });
+          }
+        }
+      }
+
       this.sendToIde({ ...msg, id: req.originalId });
       return;
     }

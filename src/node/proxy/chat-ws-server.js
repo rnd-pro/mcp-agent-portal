@@ -74,7 +74,7 @@ export class ChatWsServer {
     }
     if (!resolvedCwd) resolvedCwd = this.mcpProxy.projectRoot !== '/' ? this.mcpProxy.projectRoot : process.env.HOME;
 
-    let multiAgent = true; // default
+
     if (!provider || !model || !sessionId) {
       let chatData = sg.getChat(chatId);
       if (chatData) {
@@ -84,21 +84,17 @@ export class ChatWsServer {
       }
     }
     
-    // params.adapterConfig comes from UI chatParams
-    if (params.adapterConfig && params.adapterConfig.multiAgent !== undefined) {
-      multiAgent = params.adapterConfig.multiAgent;
-    }
-    
     let delegateArgs = { prompt, timeout: timeout || 600, cwd: resolvedCwd };
     if (sessionId) delegateArgs.session_id = sessionId;
     if (model) delegateArgs.model = model;
     if (provider) delegateArgs.provider = provider;
     
-    // Apply Orchestration limits
-    if (multiAgent) {
-      delegateArgs.skill = 'orchestrator';
-    } else {
-      delegateArgs.policy = 'single-agent';
+    // Agent selection: read from UI chatParams (agent selector dropdown)
+    let agentSlug = params.agent;
+    if (agentSlug && agentSlug !== 'none') {
+      delegateArgs.agent_slug = agentSlug;
+      delegateArgs.chat_id = chatId;
+      console.log(`💬 [Chat] Using agent: ${agentSlug}`);
     }
 
     try {
@@ -160,12 +156,14 @@ export class ChatWsServer {
       
       if (text && !text.includes('still running')) {
         if (text.includes('Task not found')) {
-          ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Task was lost (e.g. server restart). Please try again.' } }));
+          // Agent-pool lost this task (e.g. server restart).
+          // Try to recover from StateGraph cached events.
+          this._recoverLostTask(ws, chatId, taskId);
         } else {
           ws.send(JSON.stringify({ method: 'chat.done', params: { taskId, text } }));
+          this.unsubscribe(taskId);
+          getStateGraph().updateChatTask(chatId, null);
         }
-        this.unsubscribe(taskId);
-        getStateGraph().updateChatTask(chatId, null);
       } else {
         ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
         if (liveEvents && Array.isArray(liveEvents)) {
@@ -176,7 +174,55 @@ export class ChatWsServer {
       }
     } catch (err) {
       console.error(`❌ [Chat] Failed to fetch task result for resume:`, err.message);
-      ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Failed to load task state: ' + err.message } }));
+      // Fallback: try StateGraph recovery
+      this._recoverLostTask(ws, chatId, taskId);
+    }
+  }
+
+  /**
+   * Recover a lost task from StateGraph cached events.
+   * When agent-pool restarts, tasks are lost from memory but their streaming
+   * events are persisted in StateGraph via WAL.
+   */
+  _recoverLostTask(ws, chatId, taskId) {
+    let sg = getStateGraph();
+    let task = sg.get(`tasks/${taskId}`);
+    let events = task?.events || [];
+
+    if (events.length > 0) {
+      console.log(`💬 [Chat] Recovering ${events.length} cached event(s) for lost task ${taskId.substring(0, 8)}`);
+      // Replay cached streaming events
+      for (let ev of events) {
+        ws.send(JSON.stringify({ method: 'chat.event', params: { taskId, event: ev } }));
+      }
+    }
+
+    // Check if the task had a final status (done/error) in StateGraph
+    let status = task?.status;
+    if (status === 'done' || status === 'error' || status === 'lost') {
+      // Task already completed — send done with whatever we have
+      let errorMsg = task?.error;
+      if (status === 'lost' && errorMsg) {
+        ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: `Task was lost: ${errorMsg}` } }));
+      } else {
+        ws.send(JSON.stringify({ method: 'chat.done', params: { taskId } }));
+      }
+      this.unsubscribe(taskId);
+      sg.updateChatTask(chatId, null);
+    } else {
+      // Task status unknown — check if PID is still alive
+      let pid = task?.pid;
+      let alive = false;
+      if (pid) {
+        try { process.kill(pid, 0); alive = true; } catch (e) { /* dead */ }
+      }
+      if (alive) {
+        ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Agent process is still running but connection was lost after server restart. Results will not be captured. Please try again.' } }));
+      } else {
+        ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Task was lost (server restart). Please try again.' } }));
+      }
+      this.unsubscribe(taskId);
+      sg.updateChatTask(chatId, null);
     }
   }
 

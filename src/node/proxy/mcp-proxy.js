@@ -276,6 +276,7 @@ export class MCPProxyManager {
       cwd: settings.cwd || this.projectRoot,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
     });
     settings.process = child;
     settings.pid = child.pid;
@@ -288,6 +289,9 @@ export class MCPProxyManager {
       }
     }, 500);
 
+    // Stderr line buffer: data arrives in arbitrary chunks that may split lines
+    let stderrBuffer = '';
+
     child.stderr.on('data', (data) => {
       // Kick all watchdogs for this server
       for (let [key, req] of this.pendingRequests) {
@@ -296,9 +300,13 @@ export class MCPProxyManager {
         }
       }
 
-      let text = data.toString();
+      stderrBuffer += data.toString();
+      let lines = stderrBuffer.split('\n');
+      // Keep the last (potentially incomplete) line in the buffer
+      stderrBuffer = lines.pop();
+
       // Parse task notifications from stderr side-channel
-      for (let line of text.split('\n')) {
+      for (let line of lines) {
         if (line.startsWith('__TASK_NOTIFY__')) {
           try {
             let msg = JSON.parse(line.slice('__TASK_NOTIFY__'.length));
@@ -526,7 +534,7 @@ export class MCPProxyManager {
     if (this.servers.has(name)) {
       let s = this.servers.get(name);
       if (s.process) {
-        try { process.kill(s.process.pid, 'SIGTERM'); } catch (e) {}
+        try { process.kill(-s.process.pid, 'SIGTERM'); } catch (e) {}
       }
       this.servers.delete(name);
       this._persistConfig();
@@ -802,7 +810,11 @@ export class MCPProxyManager {
     if (s.respawnTimer) clearTimeout(s.respawnTimer);
     s.respawnTimer = null;
     s.crashes = 0;
-    if (s.process) s.process.kill('SIGTERM');
+    if (s.process) {
+      try { process.kill(-s.process.pid, 'SIGTERM'); } catch (e) {
+        try { s.process.kill('SIGTERM'); } catch (e2) {}
+      }
+    }
   }
 
   // ── Health Check ────────────────────────────────────

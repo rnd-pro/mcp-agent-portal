@@ -20,11 +20,45 @@ export class TaskRouter {
 
     console.log(`💬 [TaskNotify] taskId=${taskId} type=${type}`);
 
-
     let sg = getStateGraph();
     let meta = data?.meta;
+
+    // Cache ALL events in StateGraph for delta sync and recovery
+    if (type === 'event' && data) {
+      try {
+        // Compact event summary for ring buffer (but keep enough for UI rendering)
+        let summary = {
+          type: data.type || 'unknown',
+          ts: Date.now(),
+        };
+        if (data.role) summary.role = data.role;
+        if (data.name) summary.name = data.name;
+        if (data.content && typeof data.content === 'string') {
+          summary.content = data.content;
+        }
+        if (data.arguments) summary.arguments = data.arguments;
+        if (data.output) summary.output = data.output;
+        if (data.status) summary.status = data.status;
+
+        // Initialize events array if needed
+        let task = sg.get(`tasks/${taskId}`);
+        if (task && !task.events) {
+          sg.merge(`tasks/${taskId}`, { events: [] }, 'task-init');
+        }
+
+        sg.commit([{
+          op: 'push',
+          path: `tasks/${taskId}/events`,
+          value: summary,
+        }], 'task-event');
+      } catch (err) {
+        // Non-critical: event caching failure shouldn't break routing
+        console.warn(`[TaskNotify] Event cache failed for ${taskId}:`, err.message);
+      }
+    }
+
     if (meta && type !== 'event') {
-      let ops = [{ op: 'set', path: `tasks/${taskId}`, value: {
+      let ops = [{ op: 'merge', path: `tasks/${taskId}`, value: {
         ...meta,
         type,
         updatedAt: Date.now(),
@@ -54,7 +88,7 @@ export class TaskRouter {
 
 
       if (type === 'done' || type === 'error') {
-        let chatId = (chatWsServer ? chatWsServer.taskChatMap.get(taskId) : null) || this._findChatForTask(taskId);
+        let chatId = (chatWsServer ? chatWsServer.taskChatMap.get(taskId) : null) || data?.meta?.chatId || this._findChatForTask(taskId);
         if (chatId) {
           if (chatWsServer) chatWsServer.taskChatMap.delete(taskId);
           fetchTaskResult(this.mcpProxy, taskId).then(result => {
@@ -79,9 +113,16 @@ export class TaskRouter {
       : 'chat.event';
 
     if (type === 'done' || type === 'error') {
-      let chatId = chatWsServer.taskChatMap.get(taskId) || this._findChatForTask(taskId);
+      let chatId = chatWsServer.taskChatMap.get(taskId) || data?.meta?.chatId || this._findChatForTask(taskId);
       if (chatId) chatWsServer.taskChatMap.delete(taskId);
 
+      // IMMEDIATELY notify WS clients so UI can finalize streaming state.
+      // Never block notification delivery on fetchTaskResult (which can timeout).
+      if (chatWsServer) {
+        chatWsServer.broadcastTaskEvent(taskId, method, { taskId });
+      }
+
+      // Then fetch + persist the rich parsed result in background
       fetchTaskResult(this.mcpProxy, taskId).then(result => {
         let text = result.content?.[0]?.text || '';
         let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
@@ -91,16 +132,11 @@ export class TaskRouter {
           this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt, parsedResult);
           getStateGraph().updateChatTask(chatId, null);
         }
-
-
-        if (chatWsServer) {
-          chatWsServer.broadcastTaskEvent(taskId, method, { taskId, text });
-          chatWsServer.unsubscribe(taskId);
-        }
       }).catch(err => {
         console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
-        if (chatWsServer) chatWsServer.unsubscribe(taskId);
         if (chatId) getStateGraph().updateChatTask(chatId, null);
+      }).finally(() => {
+        if (chatWsServer) chatWsServer.unsubscribe(taskId);
       });
     } else {
 
@@ -114,20 +150,43 @@ export class TaskRouter {
     let cached = this.pendingNotifications.get(taskId);
     if (cached && cached.length > 0) {
       console.log(`💬 [Chat] Replaying ${cached.length} cached notification(s) for taskId=${taskId}`);
+      
+      // Separate terminal notifications (done/error) from streaming events
+      let streamingNotes = [];
+      let terminalNotes = [];
       for (let note of cached) {
+        let type = note.params?.type;
+        if (type === 'done' || type === 'error') {
+          terminalNotes.push(note);
+        } else {
+          streamingNotes.push(note);
+        }
+      }
+
+      // Replay streaming events immediately
+      for (let note of streamingNotes) {
         this.route(note);
       }
+
+      // Delay terminal notifications so UI can process intermediate events first
+      if (terminalNotes.length > 0) {
+        setTimeout(() => {
+          for (let note of terminalNotes) {
+            this.route(note);
+          }
+        }, 200);
+      }
+
       this.pendingNotifications.delete(taskId);
     }
   }
 
   _findChatForTask(taskId) {
     let sg = getStateGraph();
-    let state = sg.getState();
-    if (!state.chats) return null;
-    for (let chatId in state.chats) {
-      if (state.chats[chatId].pendingTaskId === taskId) {
-        return chatId;
+    let chats = sg.listChats();
+    for (let chat of chats) {
+      if (chat.pendingTaskId === taskId) {
+        return chat.id;
       }
     }
     return null;
