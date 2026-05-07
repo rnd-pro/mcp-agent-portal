@@ -160,15 +160,15 @@ export class ChatWsServer {
           // Try to recover from StateGraph cached events.
           this._recoverLostTask(ws, chatId, taskId);
         } else {
-          ws.send(JSON.stringify({ method: 'chat.done', params: { taskId, text } }));
+          ws.send(JSON.stringify({ method: 'chat.done', params: { chatId, taskId, text } }));
           this.unsubscribe(taskId);
           getStateGraph().updateChatTask(chatId, null);
         }
       } else {
-        ws.send(JSON.stringify({ method: 'chat.resumed', params: { taskId, status: 'running' } }));
+        ws.send(JSON.stringify({ method: 'chat.resumed', params: { chatId, taskId, status: 'running' } }));
         if (liveEvents && Array.isArray(liveEvents)) {
           for (let ev of liveEvents) {
-            ws.send(JSON.stringify({ method: 'chat.event', params: { taskId, event: ev } }));
+            ws.send(JSON.stringify({ method: 'chat.event', params: { chatId, taskId, event: ev } }));
           }
         }
       }
@@ -260,7 +260,9 @@ export class ChatWsServer {
   broadcastTaskEvent(taskId, method, params) {
     let clients = this.chatSubscriptions.get(taskId);
     if (clients) {
-      let payload = JSON.stringify({ method, params });
+      // Include chatId so the client can filter events by chat ownership
+      let chatId = this.taskChatMap.get(taskId);
+      let payload = JSON.stringify({ method, params: { ...params, chatId } });
       for (let client of clients) {
         if (client.readyState === 1) {
           client.send(payload);

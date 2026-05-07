@@ -725,6 +725,9 @@ export class AgentChat extends Symbiote {
   async _loadChat(chatId) {
     console.log('[AgentChat] _loadChat called with', chatId);
     this._loadedChatId = chatId;
+    // Reset sending state — each chat manages its own task lifecycle independently.
+    // The correct state will be restored below if the chat has a pendingTaskId.
+    this._setSending(false);
     if (!chatId) {
       this.$.messages = [];
       this.$.chatName = 'New Chat';

@@ -16,6 +16,8 @@ export class ChatWsClient {
       buildSessionMetaHtml: (text) => string
     */
     this._chatWs = null;
+    /** @type {string|null} chatId that owns the current active WS session */
+    this._activeChatId = null;
   }
 
   _ensureChatWs() {
@@ -35,11 +37,14 @@ export class ChatWsClient {
     return new Promise((resolve, reject) => {
       let ws = this._ensureChatWs();
       let startTime = Date.now();
+      this._activeChatId = chatId;
       
       let thinkingMsg = { role: 'thinking', elapsed: 0, done: false };
       this.opts.setMessages([...this.opts.getMessages(), thinkingMsg]);
 
       let timerInterval = setInterval(() => {
+        // Stop updating if user switched to another chat
+        if (this._activeChatId !== chatId) return;
         thinkingMsg.elapsed = Math.round((Date.now() - startTime) / 1000);
         this.opts.setMessages([...this.opts.getMessages()]);
       }, 1000);
@@ -76,6 +81,9 @@ export class ChatWsClient {
       let onMessage = (e) => {
         try {
           let msg = JSON.parse(e.data);
+          // Ignore events from other chats — only process events for OUR chatId
+          let evChatId = msg.params?.chatId;
+          if (evChatId && evChatId !== chatId) return;
           
           switch (msg.method) {
             case 'chat.delegated': {
@@ -260,6 +268,7 @@ export class ChatWsClient {
   }
 
   resume(chatId, taskId) {
+    this._activeChatId = chatId;
     let msgs = [...this.opts.getMessages(), { role: 'system', text: `${ICONS.WAIT} Reconnecting to running task...` }];
     this.opts.setMessages(msgs);
     this.opts.onBackgroundToggle(true);
@@ -279,6 +288,9 @@ export class ChatWsClient {
     let onMessage = (e) => {
       try {
         let msg = JSON.parse(e.data);
+        // Ignore events from other chats
+        let evChatId = msg.params?.chatId;
+        if (evChatId && evChatId !== chatId) return;
         switch (msg.method) {
           case 'chat.resumed': {
             let msgs = [...this.opts.getMessages()];
