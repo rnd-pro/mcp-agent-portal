@@ -11,3 +11,4 @@ error.txt
 patch.js
 .context/
 output.txt
+coverage/
