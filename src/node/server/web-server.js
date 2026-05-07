@@ -205,7 +205,11 @@ export function startWebServer(projectRoot) {
 
   server.listen(0, '127.0.0.1', () => {
     let port = server.address().port;
-    let gateway = registerService('portal', port);
+    let projectName = path.basename(projectRoot);
+    let gateway = registerService('portal', port, {
+      projectName,
+      projectPath: projectRoot,
+    });
 
     setTimeout(() => {
       console.error(`\n  ⬡ mcp-agent-portal`);

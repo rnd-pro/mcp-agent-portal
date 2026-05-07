@@ -110,14 +110,19 @@ export async function ensureBackend(rootPath, { force } = {}) {
       }
     } else {
       // Verify the existing backend is actually accepting connections
-      const alive = await new Promise(resolve => {
-        const sock = createConnection({ host: '127.0.0.1', port: existing.port }, () => {
-          sock.destroy();
-          resolve(true);
+      // Use multiple attempts with generous timeout — the backend may be under load
+      // from another IDE or running heavy tool calls (AST parsing, delegation, etc.)
+      let alive = false;
+      for (let attempt = 0; attempt < 2 && !alive; attempt++) {
+        alive = await new Promise(resolve => {
+          const sock = createConnection({ host: '127.0.0.1', port: existing.port }, () => {
+            sock.destroy();
+            resolve(true);
+          });
+          sock.on('error', () => resolve(false));
+          sock.setTimeout(5000, () => { sock.destroy(); resolve(false); });
         });
-        sock.on('error', () => resolve(false));
-        sock.setTimeout(1000, () => { sock.destroy(); resolve(false); });
-      });
+      }
       if (alive) return existing.port;
       // Port file exists but backend isn't accepting connections — clean up and respawn
       console.error(`[portal] Backend PID ${existing.pid} alive but port ${existing.port} not responding, respawning...`);
