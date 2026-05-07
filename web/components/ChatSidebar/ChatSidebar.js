@@ -3,12 +3,14 @@ import { state as dashState, events as dashEvents, emit as dashEmit } from "../.
 import { setGlobalParam } from 'symbiote-node';
 import template from './ChatSidebar.tpl.js';
 import { stateSync } from '../../state-sync.js';
+import './ChatSidebarItem.js';
 
 export class ChatSidebar extends Symbiote {
   static isoMode = true;
 
   init$ = {
     navCollapsed: true,
+    chats: [],
     
     onToggleNav: () => {
       this.$.navCollapsed = !this.$.navCollapsed;
@@ -89,7 +91,12 @@ export class ChatSidebar extends Symbiote {
   }
 
   initCallback() {
-    this.$.navCollapsed = true;
+    let saved = localStorage.getItem('pg-chat-sidebar-collapsed');
+    if (saved !== null) {
+      this.$.navCollapsed = saved === 'true';
+    } else {
+      this.$.navCollapsed = false;
+    }
 
     this._fetchChats();
     dashEvents.addEventListener('chats-updated', () => this._fetchChats());
@@ -97,6 +104,7 @@ export class ChatSidebar extends Symbiote {
     dashEvents.addEventListener('active-chat-changed', () => this._renderNavItems());
     
     this.sub('navCollapsed', (val) => {
+      localStorage.setItem('pg-chat-sidebar-collapsed', String(val));
       let nav = this.querySelector('.chat-nav');
       if (nav) nav.toggleAttribute('collapsed', val);
     });
@@ -127,97 +135,71 @@ export class ChatSidebar extends Symbiote {
   }
 
   _renderNavItems() {
-    let container = this.querySelector('.chat-items');
-    if (!container) return;
-    container.innerHTML = '';
-
     let chats = dashState.chats || [];
 
     let projectId = dashState.activeProjectId;
     if (projectId) {
-      // Project scope: show ONLY chats bound to this project
       chats = chats.filter(c => c.projectId === projectId);
     }
 
-    // Build parent-child map
     let childMap = new Map();
     let rootChats = [];
+
+    // Formatter helpers
+    const getCleanName = (name) => (name || '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '').trim();
+    const getStatusHtml = (c) => {
+      if (c.pendingTaskId) return `<span class="material-symbols-outlined spin-icon" style="font-size:12px;color:var(--accent-color);margin-left:4px;" title="Running task...">hourglass_empty</span>`;
+      if (c.lastTaskStatus === 'done') return `<span class="material-symbols-outlined" style="font-size:12px;color:hsl(140,50%,45%);margin-left:4px;" title="Completed">check_circle</span>`;
+      if (c.lastTaskStatus === 'error') return `<span class="material-symbols-outlined" style="font-size:12px;color:hsl(0,60%,50%);margin-left:4px;" title="Error">error</span>`;
+      return '';
+    };
 
     for (let chat of chats) {
       if (chat.parentChatId) {
         if (!childMap.has(chat.parentChatId)) {
           childMap.set(chat.parentChatId, []);
         }
-        childMap.get(chat.parentChatId).push(chat);
+        childMap.get(chat.parentChatId).push({
+          ...chat,
+          cleanName: getCleanName(chat.name),
+          icon: chat.agentIcon || 'subdirectory_arrow_right',
+          iconStyle: chat.agentColor ? `color:${chat.agentColor}` : '',
+          statusHtml: getStatusHtml(chat),
+          agentType: chat.adapter, // Classify by adapter type
+          isActive: chat.id === dashState.activeChatId
+        });
       } else {
         rootChats.push(chat);
       }
     }
 
+    let processedChats = [];
     for (let chat of rootChats) {
       let children = childMap.get(chat.id) || [];
-      let hasChildren = children.length > 0;
-
-      this._renderChatItem(container, chat, hasChildren, false);
-
-      if (hasChildren) {
-        let subContainer = document.createElement('div');
-        subContainer.className = 'chat-sub-items';
-        subContainer.dataset.parent = chat.id;
-
-        for (let child of children) {
-          this._renderChatItem(subContainer, child, false, true);
-        }
-        container.appendChild(subContainer);
-      }
+      processedChats.push({
+        ...chat,
+        cleanName: getCleanName(chat.name),
+        icon: chat.agentIcon || 'chat',
+        iconStyle: chat.agentColor ? `color:${chat.agentColor}` : '',
+        statusHtml: getStatusHtml(chat),
+        isActive: chat.id === dashState.activeChatId,
+        subChats: children
+      });
     }
 
     // Orphan children
     for (let [parentId, children] of childMap) {
       if (rootChats.some(c => c.id === parentId)) continue;
       for (let child of children) {
-        this._renderChatItem(container, child, false, false);
+        processedChats.push({
+          ...child,
+          icon: child.agentIcon || 'chat',
+          subChats: []
+        });
       }
     }
-  }
 
-  _renderChatItem(container, chat, hasChildren, isChild) {
-    let div = document.createElement('div');
-    div.className = 'chat-item';
-    div.dataset.id = chat.id;
-    if (isChild) div.classList.add('chat-item-child');
-    if (chat.id === dashState.activeChatId) div.setAttribute('active', '');
-
-    let expandHtml = '';
-    if (hasChildren) {
-      expandHtml = `<span class="material-symbols-outlined chat-expand-icon">chevron_right</span>`;
-    }
-
-    // Agent-specific icon from metadata, fallback to generic
-    let icon = chat.agentIcon || (isChild ? 'subdirectory_arrow_right' : 'chat');
-    let iconStyle = chat.agentColor ? ` style="color:${chat.agentColor}"` : '';
-
-    // Richer status indicator
-    let statusIcon = '';
-    if (chat.pendingTaskId) {
-      statusIcon = `<span class="material-symbols-outlined spin-icon" style="font-size:12px;color:var(--accent-color);margin-left:4px;" title="Running task...">hourglass_empty</span>`;
-    } else if (chat.lastTaskStatus === 'done') {
-      statusIcon = `<span class="material-symbols-outlined" style="font-size:12px;color:hsl(140,50%,45%);margin-left:4px;" title="Completed">check_circle</span>`;
-    } else if (chat.lastTaskStatus === 'error') {
-      statusIcon = `<span class="material-symbols-outlined" style="font-size:12px;color:hsl(0,60%,50%);margin-left:4px;" title="Error">error</span>`;
-    }
-
-    let cleanName = (chat.name || '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '').trim();
-
-    div.innerHTML = `
-      ${expandHtml}
-      <span class="material-symbols-outlined"${iconStyle}>${icon}</span>
-      <span class="chat-item-label">${cleanName}${statusIcon}</span>
-      <span class="chat-item-adapter">${chat.adapter}</span>
-      <button class="chat-item-delete" title="Delete">×</button>
-    `;
-
-    container.appendChild(div);
+    this.$.chats = processedChats;
   }
 }
 ChatSidebar.template = template;

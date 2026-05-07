@@ -12,6 +12,6 @@ export default html`
       <span class="material-symbols-outlined chat-nav-collapse-icon">chevron_left</span>
     </button>
   </div>
-  <div class="chat-items"></div>
+  <div class="chat-items" itemize="chats" item-tag="chat-sidebar-item"></div>
 </div>
 `;

@@ -1,8 +1,8 @@
-import { Symbiote, PubSub } from "@symbiotejs/symbiote";
-import { state as dashState, events as dashEvents, emit as dashEmit } from "../../dashboard-state.js";
+import { Symbiote, PubSub } from '@symbiotejs/symbiote';
+import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
 import template from './AgentChat.tpl.js';
-import css from "./AgentChat.css.js";
+import css from './AgentChat.css.js';
 import '../../common/CellBg/CellBg.js';
 import { uiPrompt } from '../../common/ui-dialogs.js';
 import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
@@ -32,16 +32,16 @@ export class AgentChat extends Symbiote {
   static isoMode = true;
   init$ = {
     messages: [],
-    inputVal: "",
-    chatName: "Select a chat",
-    chatAdapter: "",
+    inputVal: '',
+    chatName: 'Select a chat',
+    chatAdapter: '',
     adapterMeta: {},
     adapterOptionsHtml: '',
     composerFooterHtml: '',
     chatParams: {},
     attachedContext: [],
     isInputDisabled: true,
-    inputPlaceholder: "Ask anything, @ to mention, / for workflows",
+    inputPlaceholder: 'Ask anything, @ to mention, / for workflows',
     sessionMetaHtml: '',
 
     onKeyDown: (e) => {
@@ -53,7 +53,7 @@ export class AgentChat extends Symbiote {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         if (this._ac?.isVisible) {
           e.preventDefault();
-          this._ac?.navigate(e.key === "ArrowDown" ? 1 : -1);
+          this._ac?.navigate(e.key === 'ArrowDown' ? 1 : -1);
         }
       }
       if (e.key === 'Tab' && this._ac?.isVisible) {
@@ -73,10 +73,11 @@ export class AgentChat extends Symbiote {
     },
 
     onSend: () => {
-      if (this._isSending && dashState.activeChatId) {
-        let chat = dashState.chats?.find(c => c.id === dashState.activeChatId);
+      let targetChatId = this._loadedChatId || dashState.activeChatId;
+      if (this._isSending && targetChatId) {
+        let chat = dashState.chats?.find(c => c.id === targetChatId);
         let taskId = chat?.pendingTaskId || this.$.chatParams?.pendingTaskId;
-        this._wsClient?.stop(dashState.activeChatId, taskId);
+        this._wsClient?.stop(targetChatId, taskId);
         return;
       }
       this._sendMessage();
@@ -99,7 +100,7 @@ export class AgentChat extends Symbiote {
 
       this.$.chatParams = updatedParams;
 
-      let chatId = dashState.activeChatId;
+      let chatId = this._loadedChatId || dashState.activeChatId;
       if (chatId) {
         let saveData = { id: chatId, [id]: val };
         if (id === 'provider') saveData.model = null;
@@ -112,7 +113,7 @@ export class AgentChat extends Symbiote {
     },
 
     onAttachClick: async () => {
-      let path = await uiPrompt("Enter file or folder path to attach:");
+      let path = await uiPrompt('Enter file or folder path to attach:');
       if (path && path.trim()) {
         let pathStr = path.trim();
         this.$.attachedContext = [...this.$.attachedContext, { path: pathStr, name: shortName(pathStr) }];
@@ -182,11 +183,14 @@ export class AgentChat extends Symbiote {
       setMessages: (msgs) => { this.$.messages = msgs; },
       onSessionId: (id) => {
         this._sessionId = id;
-        fetch("/api/chats/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId: dashState.activeChatId, sessionId: id }),
-        }).catch(() => {});
+        let targetChatId = this._loadedChatId || dashState.activeChatId;
+        if (targetChatId) {
+          fetch('/api/chats/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chatId: targetChatId, sessionId: id }),
+          }).catch(() => {});
+        }
       },
       onBackgroundToggle: (isActive) => this.ref.cellBg?.toggle(isActive),
       onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
@@ -201,13 +205,13 @@ export class AgentChat extends Symbiote {
       buildSessionMetaHtml: (text) => this._buildSessionMetaHtml(text)
     });
     dashEvents.addEventListener('active-chat-changed', (e) => {
-      console.log("[AgentChat] active-chat-changed received:", e.detail);
+      console.log('[AgentChat] active-chat-changed received:', e.detail);
       this._loadChat(e.detail?.id);
     });
 
     // Self-register with router: react to ?chat= URL param changes
     this.sub('ROUTER/query', (query) => {
-      console.log("[AgentChat] ROUTER/query changed:", query);
+      console.log('[AgentChat] ROUTER/query changed:', query);
       this._syncChatFromRouter();
     });
 
@@ -235,15 +239,15 @@ export class AgentChat extends Symbiote {
   }
 
   _updateInputState() {
-    let adapter = this.$.chatAdapter || "pool";
-    let isModelRequired = adapter === "pool" || adapter === "opencode";
+    let adapter = this.$.chatAdapter || 'pool';
+    let isModelRequired = adapter === 'pool' || adapter === 'opencode';
     let hasModel = !!this.$.chatParams?.model;
     
     let disabled = isModelRequired && !hasModel;
     this.$.isInputDisabled = disabled;
     this.$.inputPlaceholder = disabled 
-      ? "Select a model to start..." 
-      : "Ask anything, @ to mention, / for workflows";
+      ? 'Select a model to start...' 
+      : 'Ask anything, @ to mention, / for workflows';
   }
 
   /**
@@ -316,7 +320,7 @@ export class AgentChat extends Symbiote {
   }
 
   _updateComposerFooter() {
-    let adapter = this.$.chatAdapter || "pool";
+    let adapter = this.$.chatAdapter || 'pool';
     let meta = this.$.adapterMeta || {};
     let currentParams = this.$.chatParams || {};
     let paramsToMap = [];
@@ -343,22 +347,33 @@ export class AgentChat extends Symbiote {
 
     this._updatingOptions = true;
     if (paramsToMap.length > 0) {
+      let paramsChanged = false;
       let htmlStr = paramsToMap.map(p => {
         if (p.type === 'select' && Array.isArray(p.options)) {
           let paramValue = currentParams[p.id];
-          if (!paramValue && p.options.length > 0 && p.id !== 'model') {
-            // For agent selector, default to orchestrator if available
+          if (!paramValue && p.options.length > 0) {
             if (p.id === 'agent') {
               let orch = p.options.find(o => (typeof o === 'string' ? o : o.val) === 'orchestrator');
               paramValue = orch ? (typeof orch === 'string' ? orch : orch.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
+            } else if (p.id === 'model') {
+              let defMap = { 'gemini': 'gemini-3.1-pro-preview', 'opencode': 'DeepSeek: DeepSeek V4 Pro' };
+              let currentCtx = adapter === 'pool' ? currentParams.provider : adapter;
+              let expectedDef = defMap[currentCtx];
+              let found = expectedDef ? p.options.find(o => (typeof o === 'string' ? o : o.val) === expectedDef) : null;
+              if (found) {
+                paramValue = typeof found === 'string' ? found : found.val;
+              } else {
+                let firstOpt = p.options[0];
+                paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
+              }
             } else {
               let firstOpt = p.options[0];
               paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
             }
-            // Persist visual default back to chatParams so it's included in send
+            // Track default for batched update after loop
             if (paramValue) {
               currentParams[p.id] = paramValue;
-              this.$.chatParams = { ...currentParams };
+              paramsChanged = true;
             }
           }
           
@@ -387,7 +402,7 @@ export class AgentChat extends Symbiote {
           if (paramValue === undefined) {
             paramValue = true; // Default to true as requested
             currentParams[p.id] = paramValue;
-            this.$.chatParams = { ...currentParams };
+            paramsChanged = true;
           }
           let checked = paramValue ? 'checked' : '';
           let iconColor = paramValue ? '#aaa' : '#555';
@@ -402,6 +417,10 @@ export class AgentChat extends Symbiote {
         return '';
       }).join('');
       this.$.composerFooterHtml = htmlStr;
+      // Batch-persist all defaults in a single reactive update
+      if (paramsChanged) {
+        this.$.chatParams = { ...currentParams };
+      }
     } else {
       this.$.composerFooterHtml = '';
     }
@@ -412,14 +431,14 @@ export class AgentChat extends Symbiote {
     let route = getRoute();
     let globals = parseQuery(route.query || '');
     let chatId = globals.chat || null;
-    console.log("[AgentChat] _syncChatFromRouter: route=", route, "chatId=", chatId, "dashState.activeChatId=", dashState.activeChatId);
+    console.log('[AgentChat] _syncChatFromRouter: route=', route, 'chatId=', chatId, 'dashState.activeChatId=', dashState.activeChatId);
 
     if (chatId && chatId !== dashState.activeChatId) {
-      console.log("[AgentChat] Emitting active-chat-changed for", chatId);
+      console.log('[AgentChat] Emitting active-chat-changed for', chatId);
       dashState.activeChatId = chatId;
       dashEmit('active-chat-changed', { id: chatId, fromRoute: true });
     } else if (chatId !== this._loadedChatId) {
-      console.log("[AgentChat] dashState already matches but not loaded locally. Loading", chatId);
+      console.log('[AgentChat] dashState already matches but not loaded locally. Loading', chatId);
       this._loadChat(chatId);
     }
   }
@@ -477,6 +496,20 @@ export class AgentChat extends Symbiote {
         }
 
         div.appendChild(details);
+      } else if (msg.role === 'board') {
+        // Delegation board — inline sub-agent task cards
+        let board = document.createElement('div');
+        board.className = 'delegation-board';
+        let taskIds = msg.taskIds || [];
+        for (let taskId of taskIds) {
+          let card = this._renderDelegationCard(taskId, msg.streaming);
+          board.appendChild(card);
+        }
+        div.appendChild(board);
+        // Start polling for task status updates while streaming
+        if (msg.streaming && taskIds.length > 0) {
+          this._startDelegationPolling(taskIds, board);
+        }
       } else if (msg.role === 'thinking') {
         // "Thinking for Xs" / "Worked for Xm" collapsible
         let details = document.createElement('details');
@@ -541,7 +574,7 @@ export class AgentChat extends Symbiote {
 
   async _sendMessage() {
     console.log('[AgentChat] _sendMessage called!', new Error().stack);
-    let chatId = dashState.activeChatId;
+    let chatId = this._loadedChatId || dashState.activeChatId;
 
     // Auto-create chat on first message (quick-start flow)
     if (!chatId) {
@@ -601,8 +634,8 @@ export class AgentChat extends Symbiote {
       prompt = contextText + prompt;
     }
 
-    this.$.messages = [...this.$.messages, { role: "user", text: prompt }];
-    this.$.inputVal = "";
+    this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
+    this.$.inputVal = '';
     this.$.attachedContext = []; // Clear context after send
     if (this.ref.chatInput) {
       this.ref.chatInput.value = '';
@@ -611,35 +644,35 @@ export class AgentChat extends Symbiote {
     this._setSending(true);
 
     // Persist
-    await fetch("/api/chats/message", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, role: "user", text: prompt }),
+    await fetch('/api/chats/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId, role: 'user', text: prompt }),
     });
 
     try {
-      let adapter = this.$.chatAdapter || "pool";
-      let reply = "";
+      let adapter = this.$.chatAdapter || 'pool';
+      let reply = '';
       let structuredEvents = null;
 
-      if (adapter === "pool") {
+      if (adapter === 'pool') {
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
         reply = await this._wsClient.send(chatId, prompt, this.$.chatParams, this._sessionId);
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
-        this.$.messages = [...this.$.messages, { role: "system", text: "Processing..." }];
+        this.$.messages = [...this.$.messages, { role: 'system', text: 'Processing...' }];
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
         let payload = { type: adapter, prompt, timeout: 300, ...this.$.chatParams };
-        let res = await fetch("/api/adapter/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        let res = await fetch('/api/adapter/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         let data = await res.json();
-        this.$.messages = this.$.messages.filter(m => m.text !== "Processing...");
+        this.$.messages = this.$.messages.filter(m => m.text !== 'Processing...');
 
         if (data.error) {
           reply = `Error: ${data.error}`;
@@ -651,7 +684,7 @@ export class AgentChat extends Symbiote {
       }
 
       // If we got structured events from HTTP adapter, render them
-      if (adapter !== "pool") {
+      if (adapter !== 'pool') {
         if (structuredEvents?.length) {
           let newMessages = [];
           for (let block of structuredEvents) {
@@ -666,7 +699,7 @@ export class AgentChat extends Symbiote {
           }
           this.$.messages = [...this.$.messages, ...newMessages];
         } else {
-          this.$.messages = [...this.$.messages, { role: "agent", text: reply }];
+          this.$.messages = [...this.$.messages, { role: 'agent', text: reply }];
         }
       } else {
         // Pool adapter: Handler in _sendViaWs already merged the final result
@@ -675,27 +708,27 @@ export class AgentChat extends Symbiote {
 
       // Persist the full chat state (pool adapter persists inside _sendViaWs handler)
       if (adapter !== 'pool') {
-        await fetch("/api/chats/messages", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
+        await fetch('/api/chats/messages', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chatId, messages: this.$.messages }),
         });
-        dashEmit("chats-updated");
+        dashEmit('chats-updated');
       }
     } catch (err) {
-      this.$.messages = [...this.$.messages, { role: "system", text: `Error: ${err.message}` }];
+      this.$.messages = [...this.$.messages, { role: 'system', text: `Error: ${err.message}` }];
     }
     this._setSending(false);
     if (this.ref.cellBg) this.ref.cellBg.toggle(false);
   }
 
   async _loadChat(chatId) {
-    console.log("[AgentChat] _loadChat called with", chatId);
+    console.log('[AgentChat] _loadChat called with', chatId);
     this._loadedChatId = chatId;
     if (!chatId) {
       this.$.messages = [];
-      this.$.chatName = "New Chat";
-      this.$.chatAdapter = "pool";
+      this.$.chatName = 'New Chat';
+      this.$.chatAdapter = 'pool';
       this.$.chatParams = {};
       this._sessionId = null;
       this.$.sessionMetaHtml = '';
@@ -704,27 +737,27 @@ export class AgentChat extends Symbiote {
     }
 
     try {
-      console.log("[AgentChat] Fetching /api/chats/get for", chatId);
-      let res = await fetch("/api/chats/get", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      console.log('[AgentChat] Fetching /api/chats/get for', chatId);
+      let res = await fetch('/api/chats/get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: chatId }),
       });
       if (!res.ok) {
-        console.error("[AgentChat] Server error:", res.status);
-        this.$.messages = [{ role: "system", text: `Server error: ${res.status}` }];
+        console.error('[AgentChat] Server error:', res.status);
+        this.$.messages = [{ role: 'system', text: `Server error: ${res.status}` }];
         return;
       }
       let chat = await res.json();
       if (chat.error) {
-        console.error("[AgentChat] API error:", chat.error);
-        this.$.messages = [{ role: "system", text: chat.error }];
+        console.error('[AgentChat] API error:', chat.error);
+        this.$.messages = [{ role: 'system', text: chat.error }];
         return;
       }
 
-      console.log("[AgentChat] Successfully loaded chat:", chat);
-      this.$.chatName = chat.name || "Chat";
-      this.$.chatAdapter = chat.adapter || "pool";
+      console.log('[AgentChat] Successfully loaded chat:', chat);
+      this.$.chatName = chat.name || 'Chat';
+      this.$.chatAdapter = chat.adapter || 'pool';
       // Filter out stale transient status messages (process artifacts, not conversation content)
       let msgs = (chat.messages || []).filter(m => {
         if (m.role !== 'system') return true;
@@ -750,16 +783,167 @@ export class AgentChat extends Symbiote {
       // Resume pending task if exists (e.g. browser was reloaded mid-chat)
       if (chat.pendingTaskId) {
         console.log(`[AgentChat] Resuming pending task: ${chat.pendingTaskId}`);
+        this._setSending(true);
         this._wsClient.resume(chatId, chat.pendingTaskId);
       }
       
     } catch (err) {
-      console.error("[AgentChat] Catch error:", err);
-      this.$.messages = [{ role: "system", text: `Load error: ${err.message}` }];
+      console.error('[AgentChat] Catch error:', err);
+      this.$.messages = [{ role: 'system', text: `Load error: ${err.message}` }];
     }
+  }
+
+  /**
+   * Render a single delegation card for a sub-agent task.
+   * @param {string} taskId
+   * @param {boolean} isStreaming
+   * @returns {HTMLElement}
+   */
+  _renderDelegationCard(taskId, isStreaming) {
+    let card = document.createElement('div');
+    card.className = 'delegation-card';
+    card.dataset.taskId = taskId;
+    card.dataset.status = isStreaming ? 'running' : 'idle';
+
+    let header = document.createElement('div');
+    header.className = 'delegation-card-header';
+    let statusIcon = isStreaming ? 'pending' : 'schedule';
+    let spinClass = isStreaming ? 'spin-icon' : '';
+    header.innerHTML = `<span class="material-symbols-outlined ${spinClass}">${statusIcon}</span><span class="card-title">${escapeHtml(taskId.substring(0, 8))}…</span>`;
+    card.appendChild(header);
+
+    let statusRow = document.createElement('div');
+    statusRow.className = 'delegation-card-status';
+    statusRow.textContent = isStreaming ? 'Running…' : 'Queued';
+    card.appendChild(statusRow);
+
+    let eventsRow = document.createElement('div');
+    eventsRow.className = 'delegation-card-events';
+    card.appendChild(eventsRow);
+
+    // Click-to-navigate — resolve chatId and open that chat
+    card.addEventListener('click', () => {
+      let chatId = card.dataset.chatId;
+      if (chatId) {
+        dashState.activeChatId = chatId;
+        setGlobalParam('chat', chatId);
+        dashEmit('active-chat-changed', { id: chatId });
+      }
+    });
+
+    return card;
+  }
+
+  /**
+   * Poll StateGraph for task status and update delegation cards.
+   * @param {string[]} taskIds
+   * @param {HTMLElement} boardEl
+   */
+  _startDelegationPolling(taskIds, boardEl) {
+    // Clear any previous polling interval
+    if (this._delegationPoller) clearInterval(this._delegationPoller);
+
+    let allDone = new Set();
+
+    this._delegationPoller = setInterval(async () => {
+      try {
+        let res = await fetch('/api/state/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskIds })
+        });
+        let data = await res.json();
+        if (!data || !data.tasks) return;
+
+        for (let taskId of taskIds) {
+          let task = data.tasks[taskId];
+          let card = boardEl.querySelector(`[data-task-id="${taskId}"]`);
+          if (!card) continue;
+
+          let status = task?.type || task?.status || 'running';
+          let isDone = status === 'done' || status === 'error' || status === 'cancelled' || status === 'lost';
+
+          card.dataset.status = isDone ? status : 'running';
+
+          // Update header icon
+          let headerEl = card.querySelector('.delegation-card-header');
+          if (headerEl) {
+            let icon = isDone
+              ? (status === 'done' ? 'check_circle' : 'error')
+              : 'pending';
+            let spin = isDone ? '' : 'spin-icon';
+            let iconColor = status === 'done' ? 'color:hsl(140,50%,45%)' : status === 'error' ? 'color:hsl(0,55%,50%)' : '';
+            headerEl.querySelector('.material-symbols-outlined').className = `material-symbols-outlined ${spin}`;
+            headerEl.querySelector('.material-symbols-outlined').textContent = icon;
+            if (iconColor) headerEl.querySelector('.material-symbols-outlined').setAttribute('style', iconColor);
+          }
+
+          // Update status text
+          let statusEl = card.querySelector('.delegation-card-status');
+          if (statusEl) {
+            if (isDone) {
+              statusEl.textContent = status === 'done' ? 'Completed' : status === 'error' ? 'Failed' : 'Cancelled';
+            } else {
+              let elapsed = task?.updatedAt ? formatElapsed(Math.round((Date.now() - (task.startedAt || task.updatedAt)) / 1000)) : '';
+              statusEl.textContent = `Running${elapsed ? ' · ' + elapsed : ''}`;
+            }
+          }
+
+          // Update events feed
+          let eventsEl = card.querySelector('.delegation-card-events');
+          if (eventsEl && task?.events?.length) {
+            let recentEvents = task.events.slice(-5); // Show last 5 events
+            eventsEl.innerHTML = recentEvents.map(ev => {
+              let label = ev.name || (ev.content ? ev.content.substring(0, 30) : '') || ev.type;
+              let tooltip = '';
+              
+              if (ev.type === 'tool_use' || ev.type === 'tool_result') {
+                label = `[tool] ${ev.name}`;
+                if (ev.status === 'error') label = `[err] ${ev.name}`;
+                
+                tooltip = `${ev.type.toUpperCase()}: ${ev.name}`;
+                if (ev.arguments) tooltip += `\nArgs: ${JSON.stringify(ev.arguments, null, 2)}`;
+                if (ev.output) tooltip += `\nOutput: ${String(ev.output).substring(0, 500)}`;
+              } else if (ev.content) {
+                tooltip = ev.content;
+              } else {
+                tooltip = ev.type;
+              }
+
+              return `<span class="delegation-card-event" data-type="${escapeHtml(ev.type)}" data-status="${escapeHtml(ev.status || '')}" title="${escapeHtml(tooltip)}">${escapeHtml(label)}</span>`;
+            }).join('');
+          }
+
+          // Link card to associated chat when resolved
+          if (task?.chatId && !card.dataset.chatId) {
+            card.dataset.chatId = task.chatId;
+            card.classList.add('delegation-card-linked');
+            // Update title to show chat name instead of task ID
+            let titleEl = card.querySelector('.card-title');
+            if (titleEl && task.chatName) {
+              titleEl.textContent = task.chatName;
+            }
+          }
+
+          if (isDone) allDone.add(taskId);
+        }
+
+        // Stop polling when all tasks are done
+        if (allDone.size === taskIds.length) {
+          clearInterval(this._delegationPoller);
+          this._delegationPoller = null;
+          // Mark board message as no longer streaming
+          let msgs = [...this.$.messages];
+          let boardMsg = msgs.find(m => m.role === 'board');
+          if (boardMsg) boardMsg.streaming = false;
+        }
+      } catch (err) {
+        console.warn('[AgentChat] Delegation poll error:', err.message);
+      }
+    }, 2000); // Poll every 2s
   }
 }
 
 AgentChat.template = template;
 AgentChat.rootStyles = css;
-AgentChat.reg("pg-agent-chat");
+AgentChat.reg('pg-agent-chat');

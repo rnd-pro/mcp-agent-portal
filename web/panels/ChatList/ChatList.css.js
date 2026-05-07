@@ -35,6 +35,22 @@ export default /*css*/ `
   gap: 6px;
 }
 
+.chat-item-nested {
+  margin-left: 16px;
+  border-left: 2px solid var(--border-color, #333);
+  position: relative;
+}
+
+.chat-item-nested::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: -2px;
+  width: 10px;
+  height: 2px;
+  background: var(--border-color, #333);
+}
+
 .chat-project-badge {
   font-size: 9px;
   font-weight: 600;

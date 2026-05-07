@@ -79,10 +79,20 @@ export class ChatWsClient {
           
           switch (msg.method) {
             case 'chat.delegated': {
-              // Orchestrator delegated sub-tasks — inject inline board
-              let taskIds = msg.params?.taskIds || [];
+              // Orchestrator delegated a sub-task — inject inline board card
+              let taskId = msg.params?.taskId;
+              let taskIds = msg.params?.taskIds || (taskId ? [taskId] : []);
+              if (taskIds.length === 0) break;
               let msgs = [...this.opts.getMessages()];
-              msgs.push({ role: 'board', taskIds, streaming: true });
+              // Merge into existing board if one is already streaming
+              let existingBoard = msgs.find(m => m.role === 'board' && m.streaming);
+              if (existingBoard) {
+                for (let id of taskIds) {
+                  if (!existingBoard.taskIds.includes(id)) existingBoard.taskIds.push(id);
+                }
+              } else {
+                msgs.push({ role: 'board', taskIds, streaming: true });
+              }
               this.opts.setMessages(msgs);
               break;
             }
@@ -107,7 +117,7 @@ export class ChatWsClient {
                 if (!lastMsg || lastMsg.role !== 'agent' || !lastMsg.streaming) {
                   msgs.push({ role: 'agent', text: textChunk, streaming: true });
                 } else {
-                  lastMsg.text += textChunk;
+                  lastMsg.text = textChunk;
                 }
                 this.opts.setMessages(msgs);
               } else if (ev.type === 'tool_use') {
@@ -146,29 +156,41 @@ export class ChatWsClient {
               
               this.opts.onBackgroundToggle(false);
               
-              // Backend persists final state and emits chats.updated to trigger UI refresh
-              // We fetch the updated messages from the server to ensure we show the final parsed result
-              fetch(`/api/chats/get`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: chatId })
-              }).then(r => r.json()).then(chat => {
-                if (chat && chat.messages) {
-                  this.opts.setMessages(chat.messages);
-                  if (chat.sessionMetaHtml && this.opts.onMetaHtml) {
-                    this.opts.onMetaHtml(chat.sessionMetaHtml);
-                  }
-                  if (chat.sessionId && this.opts.onSessionId) {
-                    this.opts.onSessionId(chat.sessionId);
-                  }
-                }
-                dashEmit("chats-updated");
-                if (this.opts.onDone) this.opts.onDone();
-              }).catch((err) => {
-                console.error('🔴 [ChatWsClient] Failed to fetch final chat state:', err.message);
-                if (this.opts.onDone) this.opts.onDone();
-              });
+              // Finalize streaming messages locally FIRST — these are the live data the user saw
+              let msgs = this.opts.getMessages()
+                .filter(m => !(m.role === 'thinking' && !m.done))
+                .filter(m => !(m.role === 'system' && (m.text?.startsWith('⏳') || m.text?.startsWith('✅'))))
+                .map(m => ({ ...m, streaming: false }));
+              
+              // Add thinking-done marker
+              msgs.push({ role: 'thinking', elapsed: Math.round((Date.now() - startTime) / 1000), done: true });
+              this.opts.setMessages(msgs);
 
+              // Persist streaming messages immediately — safety net if server-side persist fails
+              fetch('/api/chats/messages', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chatId, messages: msgs }),
+              }).catch(() => {});
+
+              // After a short delay, try to refresh with the richer server-parsed result (metadata, session info)
+              setTimeout(() => {
+                fetch(`/api/chats/get`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: chatId })
+                }).then(r => r.json()).then(chat => {
+                  if (chat && chat.messages && chat.messages.length >= msgs.length) {
+                    this.opts.setMessages(chat.messages);
+                    if (chat.sessionId && this.opts.onSessionId) {
+                      this.opts.onSessionId(chat.sessionId);
+                    }
+                  }
+                  dashEmit("chats-updated");
+                }).catch(() => { dashEmit("chats-updated"); });
+              }, 800);
+
+              if (this.opts.onDone) this.opts.onDone();
               resolve('');
               break;
             }
@@ -225,6 +247,18 @@ export class ChatWsClient {
     });
   }
 
+  stop(chatId, taskId) {
+    let ws = this._ensureChatWs();
+    let sendCancel = () => {
+      ws.send(JSON.stringify({ method: 'chat.cancel', params: { chatId, taskId } }));
+    };
+    if (ws.readyState === WebSocket.OPEN) {
+      sendCancel();
+    } else {
+      ws.addEventListener('open', sendCancel, { once: true });
+    }
+  }
+
   resume(chatId, taskId) {
     let msgs = [...this.opts.getMessages(), { role: 'system', text: `${ICONS.WAIT} Reconnecting to running task...` }];
     this.opts.setMessages(msgs);
@@ -279,7 +313,7 @@ export class ChatWsClient {
               if (!last || last.role !== 'agent' || !last.streaming) {
                 msgs.push({ role: 'agent', text: textChunk, streaming: true });
               } else {
-                last.text += textChunk;
+                last.text = textChunk;
               }
               this.opts.setMessages(msgs);
             } else if (ev.type === 'tool_use') {

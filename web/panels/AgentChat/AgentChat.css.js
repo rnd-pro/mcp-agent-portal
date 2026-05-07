@@ -23,6 +23,10 @@ chat-sidebar {
   z-index: 10;
 }
 
+chat-sidebar-item, chat-sidebar-sub-item {
+  display: block;
+}
+
 .chat-nav {
   height: 100%;
   width: 200px;
@@ -140,10 +144,12 @@ chat-sidebar {
   color: #d4d4d4;
 }
 
-.chat-item[active] {
+.chat-item[data-active],
+chat-sidebar-item[data-active] > .chat-item,
+chat-sidebar-sub-item[data-active] > .chat-item-child {
   color: #d4d4d4;
   background: rgba(255, 255, 255, 0.06);
-  border-left: 2px solid #888;
+  border-left: 2px solid var(--sn-cat-server, #5cb8ff);
   padding-left: 12px;
 }
 
@@ -161,10 +167,28 @@ chat-sidebar {
   color: #ccc;
 }
 
+.chat-status-container {
+  display: flex;
+  align-items: center;
+}
+
 .chat-item-adapter {
   font-size: 9px;
   color: #555;
   font-family: var(--sn-font-mono, monospace);
+  margin-left: 6px;
+}
+
+.chat-item-type {
+  font-size: 9px;
+  color: var(--sn-cat-server, #5cb8ff);
+  background: color-mix(in srgb, var(--sn-cat-server, #5cb8ff) 10%, transparent);
+  font-family: var(--sn-font-mono, monospace);
+  margin-left: auto;
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .chat-item-delete {
@@ -180,9 +204,18 @@ chat-sidebar {
   align-items: center;
   justify-content: center;
   border-radius: 3px;
+  margin-left: auto;
 }
 
-.chat-item:hover .chat-item-delete { display: flex; }
+.chat-item:hover .chat-item-delete,
+.chat-item-child:hover .chat-item-delete { display: flex; }
+
+/* Hide adapter and type badge when hovering, so delete button shows clearly */
+.chat-item:hover .chat-item-adapter,
+.chat-item-child:hover .chat-item-type {
+  display: none;
+}
+
 .chat-item-delete:hover { color: #ef5350; }
 
 .chat-nav[collapsed] .chat-item {
@@ -209,56 +242,63 @@ chat-sidebar {
 /* ── Chat Hierarchy (delegation tree) ── */
 
 .chat-expand-icon {
+  margin-left: auto;
   font-size: 14px !important;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease;
   cursor: pointer;
   flex-shrink: 0;
+  opacity: 0.2;
+}
+
+chat-sidebar-item[data-has-sub] .chat-expand-icon {
   opacity: 0.5;
 }
 
-.chat-expand-icon:hover {
+chat-sidebar-item[data-has-sub] .chat-expand-icon:hover {
   opacity: 1;
 }
 
-.chat-item-expanded .chat-expand-icon {
+chat-sidebar-item[data-expanded] .chat-expand-icon {
   transform: rotate(90deg);
 }
 
 .chat-sub-items {
+  width: 100%;
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.2s ease;
 }
 
-.chat-sub-items[expanded] {
+chat-sidebar-item[data-expanded] .chat-sub-items {
   max-height: 500px;
 }
 
 .chat-item-child {
-  padding-left: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 4px 38px;
   font-size: 12px;
   min-height: 24px;
   position: relative;
+  color: #888;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.chat-item-child:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d4;
 }
 
 .chat-item-child::before {
   content: '';
   position: absolute;
-  left: 18px;
+  left: 20px;
   top: 0;
   bottom: 0;
   width: 1px;
   background: rgba(255, 255, 255, 0.08);
-}
-
-.chat-item-child .material-symbols-outlined {
-  font-size: 14px;
-  opacity: 0.5;
-}
-
-.chat-item-child[active] {
-  border-left: 2px solid #666;
-  padding-left: 26px;
 }
 
 .chat-nav[collapsed] .chat-sub-items,
@@ -306,6 +346,10 @@ chat-sidebar {
 .message {
   max-width: 100%;
   display: flex;
+}
+
+.message.board {
+  width: 100%;
 }
 
 .msg-content {
@@ -858,5 +902,137 @@ chat-sidebar {
   font-weight: 400;
   color: #666;
   font-style: italic;
+}
+
+/* ── Delegation Board (inline sub-agent cards) ── */
+
+.delegation-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  width: 100%;
+}
+
+.delegation-card {
+  flex: 1 1 220px;
+  max-width: 320px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.delegation-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--card-accent, rgba(255,255,255,0.06));
+  transition: background 0.3s ease;
+}
+
+.delegation-card[data-status="running"] {
+  border-color: rgba(120, 180, 255, 0.15);
+  --card-accent: hsl(215, 70%, 55%);
+}
+
+.delegation-card[data-status="running"]::before {
+  animation: card-progress 1.8s ease-in-out infinite;
+}
+
+@keyframes card-progress {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.delegation-card[data-status="done"] {
+  border-color: rgba(100, 200, 120, 0.12);
+  --card-accent: hsl(140, 50%, 45%);
+}
+
+.delegation-card[data-status="error"] {
+  border-color: rgba(220, 100, 100, 0.12);
+  --card-accent: hsl(0, 55%, 50%);
+}
+
+.delegation-card-linked {
+  cursor: pointer;
+}
+
+.delegation-card-linked:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 12px rgba(120, 180, 255, 0.08);
+}
+
+.delegation-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ccc;
+}
+
+.delegation-card-header .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.delegation-card-header .spin-icon {
+  animation: spin 1.2s linear infinite;
+}
+
+.delegation-card-status {
+  font-size: 11px;
+  color: #777;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.delegation-card-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.delegation-card-event {
+  display: inline-block;
+  background: var(--bg-surface, #222);
+  color: var(--text-dim, #888);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid var(--border-color, #333);
+}
+
+.delegation-card-event[data-type="tool_use"],
+.delegation-card-event[data-type="tool_result"] {
+  color: var(--text-color, #ccc);
+  border-color: var(--accent-color, #1976d2);
+  background: rgba(25, 118, 210, 0.1);
+}
+
+.delegation-card-event[data-status="error"] {
+  color: #ff5252;
+  border-color: #ff5252;
+  background: rgba(255, 82, 82, 0.1);
+}
+
+.delegation-card-event[data-type="message"] {
+  color: hsl(215, 50%, 60%);
+  background: hsla(215, 50%, 60%, 0.08);
 }
 `;

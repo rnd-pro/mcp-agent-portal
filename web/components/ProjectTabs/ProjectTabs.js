@@ -5,15 +5,16 @@ import css from './ProjectTabs.css.js';
 import tpl from './ProjectTabs.tpl.js';
 import { uiPrompt } from '../../common/ui-dialogs.js';
 
-/**
- * ProjectTabs — browser-style tab bar for switching between project workspaces.
- *
- * Unified routing: tab clicks navigate via URL ?project= param.
- * No multi-workspace DOM — a single sidebar + panel-layout is managed by app.js.
- */
 export class ProjectTabs extends Symbiote {
   init$ = {
     activeId: null,
+    tabs: [],
+    onHomeClick: () => {
+      navigate('dashboard', '', { project: null });
+    },
+    onAddClick: () => {
+      this._showAddDialog();
+    }
   };
 
   renderCallback() {
@@ -24,26 +25,21 @@ export class ProjectTabs extends Symbiote {
       let newId = e.detail?.id || null;
       if (newId === this.$.activeId) return;
       this.$.activeId = newId;
-      this._highlightActive();
+      this._renderTabs();
     });
 
-    // Sync tab highlight from URL on hash change
     this.sub('ROUTER/query', () => {
       this._syncProjectFromRouter();
     });
 
-    // Initial sync
     this._syncProjectFromRouter();
 
-    // Home tab click
-    let homeTab = this.querySelector('.tab:not([data-id])') || this.querySelector('.tab');
-    homeTab?.addEventListener('click', () => {
-      // Navigate to dashboard, clearing project param
-      navigate('dashboard', '', { project: null });
+    this.addEventListener('tab-closed', (e) => {
+      if (this.$.activeId === e.detail.id) {
+        navigate('dashboard', '', { project: null });
+      }
+      this._renderTabs();
     });
-
-    // Add button
-    this.ref.addBtn.addEventListener('click', () => this._showAddDialog());
   }
 
   _syncProjectFromRouter() {
@@ -53,76 +49,28 @@ export class ProjectTabs extends Symbiote {
 
     if (projectId !== this.$.activeId) {
       this.$.activeId = projectId;
-      this._highlightActive();
+      this._renderTabs();
     }
   }
 
   _renderTabs() {
-    let container = this.ref.tabsContainer;
-    container.innerHTML = '';
-
     let openIds = dashState.openProjectIds || [];
     let history = dashState.projectHistory || [];
+    let newTabs = [];
 
     for (let id of openIds) {
       let proj = history.find(p => p.id === id);
       if (!proj) continue;
 
-      let btn = document.createElement('button');
-      btn.className = 'tab';
-      btn.dataset.id = id;
-      if (proj.color) btn.style.setProperty('--tab-accent', proj.color);
-      if (id === this.$.activeId) btn.setAttribute('active', '');
-
-      btn.innerHTML = `
-        <span class="material-symbols-outlined" style="color: var(--tab-accent, var(--sn-node-selected, #4c8bf5));">folder</span>
-        <span>${proj.name}</span>
-        <button class="tab-close" title="Close">×</button>
-      `;
-
-      btn.addEventListener('click', (e) => {
-        if (e.target.closest('.tab-close')) return;
-        // Navigate to project default section via URL
-        let defaultSection = 'explorer';
-        // If already on this project, keep current section
-        let route = getRoute();
-        let currentGlobals = parseQuery(route.query || '');
-        if (currentGlobals.project === id) return;
-
-        navigate(defaultSection, '', { project: id });
+      newTabs.push({
+        id,
+        name: proj.name,
+        color: proj.color,
+        isActive: id === this.$.activeId,
       });
-
-      btn.querySelector('.tab-close').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch('/api/projects/close', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id }),
-        });
-
-        dashState.openProjectIds = dashState.openProjectIds.filter(i => i !== id);
-
-        if (this.$.activeId === id) {
-          // Switch to Home
-          navigate('dashboard', '', { project: null });
-        }
-        this._renderTabs();
-      });
-
-      container.appendChild(btn);
     }
-  }
-
-  _highlightActive() {
-    let tabs = this.querySelectorAll('.tab');
-    tabs.forEach(tab => {
-      let isHome = !tab.dataset.id;
-      let isActive = isHome
-        ? !this.$.activeId
-        : tab.dataset.id === this.$.activeId;
-      if (isActive) tab.setAttribute('active', '');
-      else tab.removeAttribute('active');
-    });
+    
+    this.$.tabs = newTabs;
   }
 
   async _showAddDialog() {
@@ -158,8 +106,7 @@ export class ProjectTabs extends Symbiote {
       if (!dashState.openProjectIds.includes(id)) {
         dashState.openProjectIds.push(id);
       }
-      // Navigate via URL
-      navigate('explorer', '', { project: id });
+      navigate('agent-chat', '', { project: id });
       this._renderTabs();
     }
   }
@@ -177,8 +124,7 @@ export class ProjectTabs extends Symbiote {
       if (!dashState.openProjectIds.includes(data.id)) {
         dashState.openProjectIds.push(data.id);
       }
-      // Navigate via URL
-      navigate('explorer', '', { project: data.id });
+      navigate('agent-chat', '', { project: data.id });
       this._renderTabs();
     }
   }
@@ -195,6 +141,53 @@ export class ProjectTabs extends Symbiote {
     }
   }
 }
+
+import { html } from '@symbiotejs/symbiote';
+
+class ProjectTabItem extends Symbiote {
+  init$ = {
+    id: '',
+    name: '',
+    color: '',
+    isActive: false,
+    onClick: (e) => {
+      if (e.target.closest('.tab-close')) return;
+      let defaultSection = 'agent-chat';
+      let route = getRoute();
+      let currentGlobals = parseQuery(route.query || '');
+      if (currentGlobals.project === this.$.id) return;
+      navigate(defaultSection, '', { project: this.$.id });
+    },
+    onCloseClick: async (e) => {
+      e.stopPropagation();
+      await fetch('/api/projects/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: this.$.id }),
+      });
+      dashState.openProjectIds = dashState.openProjectIds.filter(i => i !== this.$.id);
+      this.dispatchEvent(new CustomEvent('tab-closed', { bubbles: true, composed: true, detail: { id: this.$.id } }));
+    }
+  };
+
+  renderCallback() {
+    this.sub('color', (c) => {
+      if (c) this.style.setProperty('--tab-accent', c);
+      else this.style.removeProperty('--tab-accent');
+    });
+    this.sub('isActive', (val) => {
+      this.toggleAttribute('active', val);
+    });
+    this.onclick = this.$.onClick;
+  }
+}
+
+ProjectTabItem.template = html`
+  <span class="material-symbols-outlined" style="color: var(--tab-accent, var(--sn-node-selected, #4c8bf5));">folder</span>
+  <span ${{textContent: 'name'}}></span>
+  <button class="tab-close" title="Close" ${{onclick: 'onCloseClick'}}>×</button>
+`;
+ProjectTabItem.reg('project-tab-item');
 
 ProjectTabs.template = tpl;
 ProjectTabs.rootStyles = css;

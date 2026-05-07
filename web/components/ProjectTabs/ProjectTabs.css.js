@@ -35,7 +35,7 @@ export default /*css*/ `
   display: none;
 }
 
-.tab {
+.tab, project-tab-item {
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -57,16 +57,19 @@ export default /*css*/ `
   border-bottom: none;
 }
 
-.tab .material-symbols-outlined {
+.tab .material-symbols-outlined,
+project-tab-item .material-symbols-outlined {
   font-size: 15px;
 }
 
-.tab:hover {
+.tab:hover,
+project-tab-item:hover {
   background: rgba(255, 255, 255, 0.04);
   color: var(--sn-text, #e0e0e0);
 }
 
-.tab[active] {
+.tab[active],
+project-tab-item[active] {
   background: var(--sn-node-bg, #2a2a2a);
   color: var(--sn-text, #e0e0e0);
   border-color: transparent;
@@ -74,7 +77,8 @@ export default /*css*/ `
 }
 
 /* Left flare */
-.tab[active]::before {
+.tab[active]::before,
+project-tab-item[active]::before {
   content: '';
   position: absolute;
   bottom: 0;
@@ -90,7 +94,8 @@ export default /*css*/ `
 }
 
 /* Right flare */
-.tab[active]::after {
+.tab[active]::after,
+project-tab-item[active]::after {
   content: '';
   position: absolute;
   bottom: 0;
@@ -106,7 +111,8 @@ export default /*css*/ `
 }
 
 /* Separator line between inactive tabs */
-.tab:not([active]):not(:hover)::after {
+.tab:not([active]):not(:hover)::after,
+project-tab-item:not([active]):not(:hover)::after {
   content: '';
   position: absolute;
   right: -2px;
@@ -118,10 +124,15 @@ export default /*css*/ `
 
 /* Hide separator if the next tab (or first dynamic tab) is active/hovered, or if it's the last tab */
 .tab:not([active]):not(:hover):has(+ .tab[active])::after,
+.tab:not([active]):not(:hover):has(+ project-tab-item[active])::after,
 .tab:not([active]):not(:hover):has(+ .tab:hover)::after,
-.tab:not([active]):not(:hover):has(+ div > .tab:first-child[active])::after,
-.tab:not([active]):not(:hover):has(+ div > .tab:first-child:hover)::after,
+.tab:not([active]):not(:hover):has(+ project-tab-item:hover)::after,
+project-tab-item:not([active]):not(:hover):has(+ project-tab-item[active])::after,
+project-tab-item:not([active]):not(:hover):has(+ project-tab-item:hover)::after,
+.tab:not([active]):not(:hover):has(+ div > project-tab-item:first-child[active])::after,
+.tab:not([active]):not(:hover):has(+ div > project-tab-item:first-child:hover)::after,
 .tab:not([active]):not(:hover):last-child::after,
+project-tab-item:not([active]):not(:hover):last-child::after,
 .tab:not([active]):not(:hover):has(+ div:empty)::after {
   content: none;
 }
@@ -153,7 +164,9 @@ export default /*css*/ `
 }
 
 .tab:hover .tab-close,
-.tab[active] .tab-close {
+.tab[active] .tab-close,
+project-tab-item:hover .tab-close,
+project-tab-item[active] .tab-close {
   opacity: 1;
 }
 

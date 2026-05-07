@@ -114,9 +114,21 @@ export class ChatList extends Symbiote {
       return;
     }
 
+    let chatsById = new Map();
+    let childrenByParentId = new Map();
     for (let chat of chats) {
+      chatsById.set(chat.id, chat);
+      let pid = chat.parentChatId;
+      if (pid) {
+        if (!childrenByParentId.has(pid)) childrenByParentId.set(pid, []);
+        childrenByParentId.get(pid).push(chat);
+      }
+    }
+
+    let renderChatNode = (chat, depth) => {
       let div = document.createElement('div');
       div.className = 'ui-item';
+      if (depth > 0) div.classList.add('chat-item-nested');
       if (chat.id === dashState.activeChatId) div.classList.add('active');
 
       let projectName = '';
@@ -127,7 +139,7 @@ export class ChatList extends Symbiote {
 
       div.innerHTML = `
         <div class="chat-item-top">
-          ${projectName ? `<span class="chat-project-badge">${projectName}</span>` : ''}
+          ${projectName && depth === 0 ? `<span class="chat-project-badge">${projectName}</span>` : ''}
           <span class="chat-name">${chat.name}</span>
           <span class="chat-adapter">${chat.adapter}</span>
           <button class="chat-delete" title="Delete">×</button>
@@ -163,6 +175,20 @@ export class ChatList extends Symbiote {
       });
 
       container.appendChild(div);
+
+      let children = childrenByParentId.get(chat.id) || [];
+      // Children are already sorted by updatedAt from _getFilteredChats, but we can ensure stability
+      children.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+      for (let child of children) {
+        renderChatNode(child, depth + 1);
+      }
+    };
+
+    // Render roots (chats with no parent, or parent isn't in the filtered list)
+    for (let chat of chats) {
+      if (!chat.parentChatId || !chatsById.has(chat.parentChatId)) {
+        renderChatNode(chat, 0);
+      }
     }
   }
 }
