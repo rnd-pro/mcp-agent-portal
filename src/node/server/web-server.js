@@ -8,6 +8,7 @@ import { MCPProxyManager } from '../proxy/mcp-proxy.js';
 import { createRoutes, dispatch } from './api-routes.js';
 import { createProjectRoutes } from './api-routes-projects.js';
 import { discoverOpenCodeModels } from '../adapters/index.js';
+import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
@@ -139,6 +140,28 @@ export function startWebServer(projectRoot) {
   let projectRoutes = createProjectRoutes();
   let allRoutes = { ...routes, ...projectRoutes };
 
+  // ── MCP HTTP Gateway ──────────────────────────────────
+  // Spawned sub-agents connect here instead of launching isolated stdio MCP.
+  // All tool calls are routed through the same proxyManager as the stdio multiplexer.
+  let mcpHttpHandler = null;
+  // Deferred init: tools aren't available until servers start (~3s)
+  function getMcpHandler() {
+    if (mcpHttpHandler) return mcpHttpHandler;
+    // Lazy-create with live tools from proxy manager
+    mcpHttpHandler = createMcpHttpHandler({
+      getTools: async () => {
+        return await _collectAllTools(proxyManager);
+      },
+      onToolCall: async (name, args) => {
+        return _routeToolCall(proxyManager, name, args);
+      },
+      onResourcesList: async () => {
+        return _aggregateResources(proxyManager);
+      },
+    });
+    return mcpHttpHandler;
+  }
+
   let server = http.createServer((req, res) => {
     let url = new URL(req.url, 'http://localhost');
 
@@ -146,10 +169,17 @@ export function startWebServer(projectRoot) {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'GET, POST, DELETE',
+        'Access-Control-Allow-Headers': 'Content-Type, Accept, Mcp-Session-Id',
+        'Access-Control-Expose-Headers': 'Mcp-Session-Id',
       });
       res.end();
+      return;
+    }
+
+    // MCP Streamable HTTP endpoint
+    if (url.pathname === '/mcp' || url.pathname === '/mcp/message') {
+      getMcpHandler()(req, res);
       return;
     }
 
@@ -202,3 +232,118 @@ export function startWebServer(projectRoot) {
 }
 
 export default startWebServer;
+
+// ═══════════════════════════════════════════════════════
+//  MCP HTTP Gateway helpers
+// ═══════════════════════════════════════════════════════
+
+/** @type {Map<string, {tools: Array, ts: number}>} Cached tool lists per server */
+const _toolCache = new Map();
+const TOOL_CACHE_TTL = 10_000; // 10s
+
+/**
+ * Collect all tools from all child MCP servers.
+ * Returns a flat array of MCP tool definitions.
+ */
+async function _collectAllTools(proxyManager) {
+  let allTools = [];
+  for (let serverName of proxyManager.servers.keys()) {
+    let cached = _toolCache.get(serverName);
+    if (cached && Date.now() - cached.ts < TOOL_CACHE_TTL) {
+      allTools.push(...cached.tools);
+    }
+  }
+  // If cache is empty, trigger async refresh and AWAIT IT
+  if (allTools.length === 0) {
+    await _refreshToolCache(proxyManager).catch(() => {});
+    
+    // Collect tools again after refresh
+    for (let serverName of proxyManager.servers.keys()) {
+      let cached = _toolCache.get(serverName);
+      if (cached && Date.now() - cached.ts < TOOL_CACHE_TTL) {
+        allTools.push(...cached.tools);
+      }
+    }
+  }
+  return allTools;
+}
+
+async function _refreshToolCache(proxyManager) {
+  for (let serverName of proxyManager.servers.keys()) {
+    try {
+      let result = await proxyManager.requestFromChild(serverName, 'tools/list', {});
+      // console.log(`[DEBUG] tools/list from ${serverName}:`, result ? Object.keys(result) : 'null');
+      if (result?.tools) {
+        _toolCache.set(serverName, { tools: result.tools, ts: Date.now() });
+      } else {
+        console.warn(`[MCP Gateway] no tools array returned from ${serverName}`);
+      }
+    } catch (e) { 
+      console.error(`[MCP Gateway] failed to refresh tools for ${serverName}:`, e.message); 
+    }
+  }
+}
+
+/**
+ * Route a tool call to the correct child MCP server.
+ */
+async function _routeToolCall(proxyManager, toolName, args) {
+  let isDelegate = toolName === 'delegate_task' || toolName === 'delegate_task_readonly' ||
+                   toolName === 'mcp_agent-portal_delegate_task' || toolName === 'mcp_agent-portal_delegate_task_readonly';
+  if (isDelegate && args.parent_chat_id && !args.chat_id) {
+    try {
+      let { getStateGraph } = await import('../state-graph.js');
+      let sg = getStateGraph();
+      let parentMeta = sg.get(`chats/${args.parent_chat_id}`);
+      let chat = sg.createChat({
+        name: (args.prompt || '').substring(0, 40) + ((args.prompt || '').length > 40 ? '...' : ''),
+        adapter: 'pool',
+        parentChatId: args.parent_chat_id,
+        projectId: parentMeta ? parentMeta.projectId : null
+      }, 'mcp');
+      args.chat_id = chat.id;
+      proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+    } catch (e) {
+      console.error(`[MCP Gateway] failed to auto-create chat for delegate_task:`, e.message);
+    }
+  }
+
+  // Find which server owns this tool
+  for (let [serverName, cached] of _toolCache) {
+    if (cached.tools.some(t => t.name === toolName)) {
+      let result = await proxyManager.requestFromChild(serverName, 'tools/call', {
+        name: toolName,
+        arguments: args,
+      }, 600_000); // 10 min timeout for long-running tools
+      return result;
+    }
+  }
+
+  // Cache miss — refresh and retry
+  await _refreshToolCache(proxyManager);
+  for (let [serverName, cached] of _toolCache) {
+    if (cached.tools.some(t => t.name === toolName)) {
+      let result = await proxyManager.requestFromChild(serverName, 'tools/call', {
+        name: toolName,
+        arguments: args,
+      }, 600_000);
+      return result;
+    }
+  }
+
+  return { content: [{ type: 'text', text: `Unknown tool: ${toolName}` }], isError: true };
+}
+
+/**
+ * Aggregate resources from all child MCP servers.
+ */
+async function _aggregateResources(proxyManager) {
+  let allResources = [];
+  for (let serverName of proxyManager.servers.keys()) {
+    try {
+      let result = await proxyManager.requestFromChild(serverName, 'resources/list', {});
+      if (result?.resources) allResources.push(...result.resources);
+    } catch { /* skip */ }
+  }
+  return { resources: allResources };
+}

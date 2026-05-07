@@ -395,8 +395,16 @@ export class StateGraph extends EventEmitter {
           if (chat.pendingTaskId === id) {
             chat.pendingTaskId = null;
             chat.lastTaskStatus = 'error';
-            // Also write to file so it's persisted
-            fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+            // Update the FULL chat file (not just metadata — that would erase messages)
+            let chatFile = path.join(CHATS_DIR, `${chatId}.json`);
+            if (fs.existsSync(chatFile)) {
+              try {
+                let fullChat = JSON.parse(fs.readFileSync(chatFile, 'utf8'));
+                fullChat.pendingTaskId = null;
+                fullChat.lastTaskStatus = 'error';
+                fs.writeFileSync(chatFile, JSON.stringify(fullChat, null, 2));
+              } catch (e) { console.warn(`[StateGraph] Failed to update chat file ${chatId}:`, e.message); }
+            }
           }
         }
       }
@@ -654,7 +662,7 @@ export class StateGraph extends EventEmitter {
       projectId: opts.projectId || null,
       parentChatId: opts.parentChatId || null,
       adapter: opts.adapter || 'pool',
-      model: opts.model || null,
+      model: opts.model || (opts.adapter === 'gemini' ? 'gemini-3.1-pro-preview' : opts.adapter === 'opencode' ? 'DeepSeek: DeepSeek V4 Pro' : null),
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
       messageCount: 0,
@@ -671,7 +679,7 @@ export class StateGraph extends EventEmitter {
       parentChatId: opts.parentChatId || null,
       name: opts.name || 'New Chat',
       adapter: opts.adapter || 'pool',
-      model: opts.model || null,
+      model: opts.model || (opts.adapter === 'gemini' ? 'gemini-3.1-pro-preview' : opts.adapter === 'opencode' ? 'DeepSeek: DeepSeek V4 Pro' : null),
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
       messages: [],

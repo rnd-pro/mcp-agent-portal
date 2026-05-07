@@ -1,13 +1,26 @@
-#!/usr/bin/env node
-// @ctx backend.ctx
-import { resolve } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { startWebServer } from './web-server.js';
 import { writePortFile, removePortFile } from './backend-lifecycle.js';
 
 const projectRoot = resolve(process.argv[2] || '.');
 
+// Only remove port file if it belongs to THIS process (prevents restart race)
 function cleanup() {
-  removePortFile(projectRoot);
+  try {
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const gwDir = join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway', 'backends');
+    const hash = createHash('md5').update(resolve(projectRoot)).digest('hex').slice(0, 8);
+    const portFile = join(gwDir, `portal-${hash}.json`);
+    if (existsSync(portFile)) {
+      const data = JSON.parse(readFileSync(portFile, 'utf8'));
+      if (data.pid === process.pid) {
+        removePortFile(projectRoot);
+      }
+    }
+  } catch { /* non-critical */ }
 }
 
 process.on('exit', cleanup);

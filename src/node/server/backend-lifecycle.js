@@ -50,7 +50,9 @@ export function writePortFile(rootPath, port) {
     project: absPath,
     name: 'mcp-agent-portal',
     version: _getVersion(),
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    mcpUrl: `http://portal.local/mcp`,
+    mcpDirect: `http://localhost:${port}/mcp`,
   };
   writeFileSync(getPortFilePath(rootPath), JSON.stringify(data, null, 2));
 }
@@ -158,14 +160,15 @@ export async function ensureBackend(rootPath, { force } = {}) {
 }
 
 export function startStdioProxy(port, buffered = []) {
-  const key = randomBytes(16).toString('base64');
-  const ws = createConnection({ host: '127.0.0.1', port }, () => {
-    ws.write(`GET /mcp-ws HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
-  });
-
+  const MAX_RETRIES = 5;
+  let retries = 0;
   let connected = false;
-  let buffer = Buffer.alloc(0);
   let queue = [...buffered];
+  let ws = null;
+  let wsBuffer = Buffer.alloc(0);
+  // Once connected successfully at least once, don't retry on close (intentional shutdown)
+  let everConnected = false;
+
   const rl = createInterface({ input: process.stdin, terminal: false });
 
   function maskAndFrame(str) {
@@ -217,7 +220,7 @@ export function startStdioProxy(port, buffered = []) {
   }
 
   rl.on('line', line => {
-    if (connected) {
+    if (connected && ws) {
       try { ws.write(maskAndFrame(line)); } catch (e) { console.warn('[portal] Proxy write failed:', e.message); }
     } else {
       queue.push(line);
@@ -225,55 +228,96 @@ export function startStdioProxy(port, buffered = []) {
   });
 
   rl.on('close', () => {
-    ws.end();
+    if (ws) ws.end();
     process.exit(0);
   });
 
-  ws.on('data', chunk => {
-    if (!connected) {
-      const combined = Buffer.concat([buffer, chunk]);
-      const idx = combined.indexOf('\r\n\r\n');
-      if (idx === -1) {
-        buffer = combined;
-        return;
-      }
-      if (!combined.slice(0, idx).toString().includes('101')) {
-        console.error('[portal] WebSocket handshake failed');
-        process.exit(1);
-      }
-      connected = true;
-      buffer = combined.slice(idx + 4);
-      for (const line of queue) {
-        try { ws.write(maskAndFrame(line)); } catch (e) { console.warn('[portal] Proxy queued write failed:', e.message); }
-      }
-      queue = [];
-    } else {
-      buffer = Buffer.concat([buffer, chunk]);
-    }
+  function connect() {
+    connected = false;
+    wsBuffer = Buffer.alloc(0);
+    let retryScheduled = false; // Guard: prevent double-retry from error+close
+    const key = randomBytes(16).toString('base64');
 
-    while (buffer.length >= 2) {
-      const frame = parseFrame(buffer);
-      if (!frame) break;
-      buffer = buffer.slice(frame.totalLen);
-      
-      if (frame.opcode === 1) { // text
-        process.stdout.write(frame.data + '\n');
-      } else if (frame.opcode === 8) { // close
+    ws = createConnection({ host: '127.0.0.1', port }, () => {
+      ws.write(`GET /mcp-ws HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+    });
+
+    ws.on('data', chunk => {
+      if (!connected) {
+        const combined = Buffer.concat([wsBuffer, chunk]);
+        const idx = combined.indexOf('\r\n\r\n');
+        if (idx === -1) {
+          wsBuffer = combined;
+          return;
+        }
+        if (!combined.slice(0, idx).toString().includes('101')) {
+          console.error('[portal] WebSocket handshake failed');
+          if (!retryScheduled) { retryScheduled = true; scheduleRetry(); }
+          return;
+        }
+        connected = true;
+        everConnected = true;
+        retries = 0; // Reset retries on successful connection
+        wsBuffer = combined.slice(idx + 4);
+        // Flush queued stdin messages
+        for (const line of queue) {
+          try { ws.write(maskAndFrame(line)); } catch (e) { console.warn('[portal] Proxy queued write failed:', e.message); }
+        }
+        queue = [];
+      } else {
+        wsBuffer = Buffer.concat([wsBuffer, chunk]);
+      }
+
+      while (wsBuffer.length >= 2) {
+        const frame = parseFrame(wsBuffer);
+        if (!frame) break;
+        wsBuffer = wsBuffer.slice(frame.totalLen);
+        
+        if (frame.opcode === 1) { // text
+          process.stdout.write(frame.data + '\n');
+        } else if (frame.opcode === 8) { // close
+          process.exit(0);
+        } else if (frame.opcode === 9) { // ping
+          const mask = randomBytes(4);
+          const pong = Buffer.alloc(6);
+          pong[0] = 0x8a;
+          pong[1] = 0x80; // masked, 0-length payload
+          mask.copy(pong, 2);
+          ws.write(pong);
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      if (everConnected) {
+        // Backend intentionally closed the connection — shut down cleanly
         process.exit(0);
-      } else if (frame.opcode === 9) { // ping
-        const mask = randomBytes(4);
-        const pong = Buffer.alloc(6);
-        pong[0] = 0x8a;
-        pong[1] = 0x80; // masked, 0-length payload
-        mask.copy(pong, 2);
-        ws.write(pong);
       }
-    }
-  });
+      // Never connected — retry
+      if (!retryScheduled) { retryScheduled = true; scheduleRetry(); }
+    });
 
-  ws.on('close', () => process.exit(0));
-  ws.on('error', err => {
-    console.error(`[portal] Proxy connection error: ${err.message}`);
-    process.exit(1);
-  });
+    ws.on('error', err => {
+      console.error(`[portal] Proxy connection error: ${err.message}`);
+      if (!everConnected && !retryScheduled) {
+        retryScheduled = true;
+        try { ws.destroy(); } catch {}
+        scheduleRetry();
+      }
+    });
+  }
+
+  function scheduleRetry() {
+    retries++;
+    if (retries > MAX_RETRIES) {
+      console.error(`[portal] Proxy failed after ${MAX_RETRIES} retries — giving up`);
+      process.exit(1);
+    }
+    const delay = Math.min(500 * Math.pow(2, retries - 1), 8000);
+    console.error(`[portal] Retrying WS connection in ${delay}ms (attempt ${retries}/${MAX_RETRIES})...`);
+    setTimeout(connect, delay);
+  }
+
+  // Start first connection attempt
+  connect();
 }

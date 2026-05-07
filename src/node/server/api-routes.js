@@ -99,6 +99,36 @@ export function createRoutes(ctx) {
       res.end(JSON.stringify(proxyManager.adapterPool?.getStatus() || { adapters: {} }));
     },
 
+    'POST /api/state/tasks': async (req, res) => {
+      try {
+        let { taskIds, parentChatId } = await parseBody(req);
+        let sg = getStateGraph();
+        let tasks = {};
+        for (let id of (taskIds || [])) {
+          let task = sg.get(`tasks/${id}`) || null;
+          if (task) task = { ...task };
+          tasks[id] = task;
+        }
+        // Resolve chatId for each task — find chats with matching pendingTaskId
+        // Also find child chats of parentChatId that might be associated
+        let allChats = sg.listChats?.() || [];
+        for (let id of (taskIds || [])) {
+          if (!tasks[id]) tasks[id] = {};
+          // Direct match: chat.pendingTaskId === taskId
+          let linkedChat = allChats.find(c => c.pendingTaskId === id);
+          if (linkedChat) {
+            tasks[id].chatId = linkedChat.id;
+            tasks[id].chatName = linkedChat.name;
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ tasks }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
     'GET /api/flywheel/stats': (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(getFlywheelStats()));
@@ -181,13 +211,26 @@ export function createRoutes(ctx) {
       res.end(JSON.stringify({ ok: true, message: 'Restarting...' }));
       setTimeout(async () => {
         let { removePortFile } = await import('./backend-lifecycle.js');
+        let { unlinkSync, openSync } = await import('node:fs');
+        let { homedir } = await import('node:os');
         let backendScript = path.join(__dirname, 'backend.js');
+        // 1. Stop child MCP servers
+        proxyManager.stopAll();
+        // 2. Remove port file and gateway.pid
         removePortFile(projectRoot);
-        spawn(process.execPath, [backendScript, path.resolve(projectRoot)], {
+        let gwDir = path.join(homedir(), '.local-gateway');
+        try { unlinkSync(path.join(gwDir, 'gateway.pid')); } catch {}
+        // 3. Close our HTTP server to release port 80 (gateway runs in-process)
+        //    Use a wrapper script that waits before starting, so port 80 is free
+        let logFile = path.join(gwDir, 'restart.log');
+        let logFd = openSync(logFile, 'a');
+        // Spawn with a shell wrapper that sleeps 2s to let old process fully exit
+        spawn('/bin/sh', ['-c', `sleep 2 && exec ${JSON.stringify(process.execPath)} ${JSON.stringify(backendScript)} ${JSON.stringify(path.resolve(projectRoot))}`], {
           detached: true,
-          stdio: 'ignore',
+          stdio: ['ignore', logFd, logFd],
           env: { ...process.env, PORTAL_BACKEND: '1' },
         }).unref();
+        // 4. Exit immediately — the spawned shell waits 2s before starting new backend
         setTimeout(() => process.exit(0), 300);
       }, 200);
     },
