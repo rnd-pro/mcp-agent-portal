@@ -75,6 +75,24 @@ for (let f of ['demo-adapter.js', 'mock-data.js']) {
   copyFile(path.join(ROOT, 'demo', f), path.join(DIST, 'demo', f));
 }
 
+// ── Inject README.md into mock-data.js ───────────────────────────
+let readmePath = path.join(ROOT, 'README.md');
+if (fs.existsSync(readmePath)) {
+  console.log('  → Injecting README.md into mock-data.js');
+  let readme = fs.readFileSync(readmePath, 'utf-8');
+  // Strip badge lines at the top ([![...]) and blank lines before first heading
+  readme = readme.replace(/^(\[!\[.*?\]\(.*?\)\]\(.*?\)\s*\n?)+\n*/m, '');
+  // Escape for JS string literal: backslashes, backticks, ${}, newlines
+  let escaped = readme
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n');
+  let mockPath = path.join(DIST, 'demo', 'mock-data.js');
+  let mockSrc = fs.readFileSync(mockPath, 'utf-8');
+  mockSrc = mockSrc.replace('__README_CONTENT__', escaped);
+  fs.writeFileSync(mockPath, mockSrc);
+}
+
 // ── Copy packages/symbiote-node/ ─────────────────────────────────
 console.log('  → Copying packages/symbiote-node/');
 copyDir(
