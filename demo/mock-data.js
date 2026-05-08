@@ -131,7 +131,7 @@ export const chats = [
     name: 'What is Agent Portal?',
     adapter: 'pool',
     provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3.1-pro-preview',
     agent: 'orchestrator',
     createdAt: Date.now() - 7200_000,
     updatedAt: Date.now() - 1800_000,
@@ -169,7 +169,7 @@ export const chats = [
       { role: 'tool', name: 'consult_peer', input: { question: 'What message types does AgentChat support?', context: 'Reviewing the UI rendering pipeline' }, result: '6 message types:\n1. user — text input\n2. agent — markdown with streaming cursor\n3. tool — collapsible cards with input/result\n4. thinking — elapsed time + meta chips (mode, tokens, cost)\n5. board — delegation cards with live status polling\n6. system — status notifications' },
 
       // 10. Final comprehensive response
-      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (gemini-2.5-pro)\n  ├── delegate_task → Coder (gemini-2.5-flash)\n  ├── delegate_task → Reviewer (claude-sonnet-4)\n  └── consult_peer → Research (deepseek-v4)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-node](https://github.com/rnd-pro/symbiote-node) layout framework. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
+      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (gemini-3.1-pro-preview)\n  ├── delegate_task → Coder (gemini-3.1-flash-lite-preview)\n  ├── delegate_task → Reviewer (claude-sonnet-4)\n  └── consult_peer → Research (deepseek-v4)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-node](https://github.com/rnd-pro/symbiote-node) layout framework. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
 
       // 11. System message
       { role: 'system', text: '⏱ Session completed in 42s · 2 sub-agents · 11 tool calls · $0.0738 total' },
@@ -182,7 +182,7 @@ export const chats = [
     name: 'What is Agent Pool?',
     adapter: 'pool',
     provider: 'gemini',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.1-flash-lite-preview',
     agent: 'single',
     createdAt: Date.now() - 86400_000,
     updatedAt: Date.now() - 43200_000,
@@ -201,7 +201,7 @@ export const chats = [
     name: 'What is Project Graph?',
     adapter: 'pool',
     provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3.1-pro-preview',
     agent: 'single',
     createdAt: Date.now() - 172800_000,
     updatedAt: Date.now() - 172800_000,
@@ -220,7 +220,7 @@ export const chats = [
     name: 'What is Symbiote Node?',
     adapter: 'pool',
     provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3-pro-preview',
     agent: 'single',
     createdAt: Date.now() - 259200_000,
     updatedAt: Date.now() - 259200_000,
@@ -239,7 +239,7 @@ export const chats = [
     name: 'Setup CI pipeline',
     adapter: 'pool',
     provider: 'gemini',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.1-flash-lite-preview',
     agent: 'single',
     createdAt: Date.now() - 604800_000,
     updatedAt: Date.now() - 604800_000,
@@ -257,7 +257,7 @@ export const chats = [
     name: 'Fix training data loader',
     adapter: 'pool',
     provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3.1-pro-preview',
     agent: 'single',
     createdAt: Date.now() - 432000_000,
     updatedAt: Date.now() - 432000_000,
@@ -362,12 +362,12 @@ export const adapterTypes = {
           label: 'Model',
           type: 'select',
           options: [
+            { val: 'gemini-3.1-pro-preview', text: 'Gemini 3.1 Pro' },
+            { val: 'gemini-3.1-flash-lite-preview', text: 'Gemini 3.1 Flash Lite' },
+            { val: 'gemini-3-pro-preview', text: 'Gemini 3.0 Pro' },
+            { val: 'gemini-3-flash-preview', text: 'Gemini 3.0 Flash' },
             { val: 'gemini-2.5-pro', text: 'Gemini 2.5 Pro' },
-            { val: 'gemini-2.5-flash', text: 'Gemini 2.5 Flash' },
-            { val: 'gemini-2.0-pro-exp', text: 'Gemini 2.0 Pro Exp' },
-            { val: 'gemini-2.0-flash', text: 'Gemini 2.0 Flash' },
           ],
-        },
       ],
     },
     opencode: {
@@ -378,12 +378,10 @@ export const adapterTypes = {
           label: 'Model',
           type: 'select',
           options: [
-            { val: 'anthropic/claude-3.7-sonnet', text: 'Claude 3.7 Sonnet' },
-            { val: 'anthropic/claude-3.5-sonnet', text: 'Claude 3.5 Sonnet' },
-            { val: 'openai/gpt-4o', text: 'GPT-4o' },
-            { val: 'openai/o3-mini', text: 'o3-mini' },
-            { val: 'deepseek/deepseek-r1', text: 'DeepSeek R1' },
-            { val: 'deepseek/deepseek-chat', text: 'DeepSeek V3' },
+            { val: 'claude-sonnet-4', text: 'Claude Sonnet 4' },
+            { val: 'claude-opus-4', text: 'Claude Opus 4' },
+            { val: 'gpt-4.5', text: 'GPT-4.5' },
+            { val: 'deepseek-v4', text: 'DeepSeek V4 Pro' },
           ],
         },
       ],
@@ -396,7 +394,7 @@ export const adapterTypes = {
 export const cliConfig = {
   global: {
     defaultAdapter: 'pool',
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: 'gemini-3.1-pro-preview',
   },
 };
 
