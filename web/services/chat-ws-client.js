@@ -1,6 +1,22 @@
 import { ICONS } from '../../common/icons.js';
 import { emit as dashEmit } from '../../dashboard-state.js';
 
+/**
+ * Server-authoritative chat WS client.
+ * 
+ * The server (TaskRouter) is the single source of truth for chat.messages[].
+ * This client receives only lightweight meta-deltas (phase, messageCount, lastToolName)
+ * and fetches full messages from the server on demand.
+ * 
+ * WS protocol:
+ *   → chat.send    { chatId, prompt, ... }
+ *   → chat.resume  { chatId, taskId }
+ *   → chat.cancel  { chatId, taskId }
+ *   ← chat.delegated  { chatId, taskId }
+ *   ← chat.meta       { chatId, phase, messageCount, lastToolName }
+ *   ← chat.done       { chatId, taskId }
+ *   ← chat.error      { chatId, error }
+ */
 export class ChatWsClient {
   constructor(opts) {
     this.opts = opts;
@@ -13,11 +29,14 @@ export class ChatWsClient {
       onMetaHtml: (html) => void
       onDone: () => void
       onError: (errText) => void
+      onMeta: ({ phase, messageCount, lastToolName, thinkingStatus }) => void
       buildSessionMetaHtml: (text) => string
     */
     this._chatWs = null;
-    /** @type {string|null} chatId that owns the current active WS session */
-    this._activeChatId = null;
+    /** @type {number|null} Periodic pull timer for messages during streaming */
+    this._pullTimer = null;
+    /** @type {number} Last known messageCount from server */
+    this._lastMessageCount = 0;
   }
 
   _ensureChatWs() {
@@ -33,21 +52,55 @@ export class ChatWsClient {
     return this._chatWs;
   }
 
+  /**
+   * Fetch current messages from server and update UI.
+   * @param {string} chatId
+   */
+  async _pullMessages(chatId) {
+    try {
+      let res = await fetch('/api/chats/get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: chatId }),
+      });
+      if (!res.ok) return;
+      let chat = await res.json();
+      if (chat && chat.messages) {
+        this.opts.setMessages(chat.messages);
+        if (chat.sessionId && this.opts.onSessionId) {
+          this.opts.onSessionId(chat.sessionId);
+        }
+      }
+    } catch (e) {
+      // Non-critical: pull failure doesn't break the flow
+    }
+  }
+
+  /**
+   * Start periodic message pulling during streaming.
+   * @param {string} chatId
+   */
+  _startPull(chatId) {
+    this._stopPull();
+    this._pullTimer = setInterval(() => this._pullMessages(chatId), 2000);
+  }
+
+  _stopPull() {
+    if (this._pullTimer) {
+      clearInterval(this._pullTimer);
+      this._pullTimer = null;
+    }
+  }
+
   send(chatId, prompt, chatParams, sessionId) {
     return new Promise((resolve, reject) => {
       let ws = this._ensureChatWs();
       let startTime = Date.now();
-      this._activeChatId = chatId;
       
-      let thinkingMsg = { role: 'thinking', elapsed: 0, done: false };
-      this.opts.setMessages([...this.opts.getMessages(), thinkingMsg]);
-
-      let timerInterval = setInterval(() => {
-        // Stop updating if user switched to another chat
-        if (this._activeChatId !== chatId) return;
-        thinkingMsg.elapsed = Math.round((Date.now() - startTime) / 1000);
-        this.opts.setMessages([...this.opts.getMessages()]);
-      }, 1000);
+      // Show initial thinking indicator via onMeta
+      if (this.opts.onMeta) {
+        this.opts.onMeta({ phase: 'thinking', messageCount: 0, lastToolName: null, thinkingStatus: '' });
+      }
 
       let sendMsg = () => {
         let params = { chatId, prompt, timeout: 600, ...chatParams };
@@ -61,142 +114,61 @@ export class ChatWsClient {
       let onClose = () => {
         if (isFinished) return;
         isFinished = true;
-        clearInterval(timerInterval);
+        this._stopPull();
         ws.removeEventListener('message', onMessage);
         
-        let crashMsg = `${ICONS.WAIT} Process crashed or connection closed unexpectedly.`;
-        
-        let msgs = this.opts.getMessages()
-          .filter(m => !(m.role === 'thinking' && !m.done))
-          .map(m => ({ ...m, streaming: false }));
-          
-        msgs.push({ role: 'system', text: crashMsg });
-        this.opts.setMessages(msgs);
         this.opts.onBackgroundToggle(false);
+        if (this.opts.onMeta) this.opts.onMeta(null);
+
+        // Fetch final state from server
+        this._pullMessages(chatId).then(() => {
+          let msgs = [...this.opts.getMessages()];
+          msgs.push({ role: 'system', text: `${ICONS.WAIT} Process crashed or connection closed unexpectedly.` });
+          this.opts.setMessages(msgs);
+        });
         
-        resolve(crashMsg);
+        resolve('');
       };
       ws.addEventListener('close', onClose);
 
       let onMessage = (e) => {
         try {
           let msg = JSON.parse(e.data);
-          // Ignore events from other chats — only process events for OUR chatId
           let evChatId = msg.params?.chatId;
           if (evChatId && evChatId !== chatId) return;
           
           switch (msg.method) {
             case 'chat.delegated': {
-              // Orchestrator delegated a sub-task — inject inline board card
-              let taskId = msg.params?.taskId;
-              let taskIds = msg.params?.taskIds || (taskId ? [taskId] : []);
-              if (taskIds.length === 0) break;
-              let msgs = [...this.opts.getMessages()];
-              // Merge into existing board if one is already streaming
-              let existingBoard = msgs.find(m => m.role === 'board' && m.streaming);
-              if (existingBoard) {
-                for (let id of taskIds) {
-                  if (!existingBoard.taskIds.includes(id)) existingBoard.taskIds.push(id);
-                }
-              } else {
-                msgs.push({ role: 'board', taskIds, streaming: true });
-              }
-              this.opts.setMessages(msgs);
+              // Server created the task — start periodic pulling for messages
+              this._startPull(chatId);
               break;
             }
 
-            case 'chat.event': {
-              let ev = msg.params?.event;
-              if (!ev) break;
-              
-              if (ev.type === 'message' && ev.role === 'system') {
-                let msgs = [...this.opts.getMessages()];
-                let thinkingIdx = msgs.findIndex(m => m.role === 'thinking' && !m.done);
-                if (thinkingIdx >= 0) {
-                  msgs[thinkingIdx].status = ev.content || '';
-                } else {
-                  msgs.push({ role: 'system', text: ev.content || '' });
-                }
-                this.opts.setMessages(msgs);
-              } else if (ev.type === 'message' && ev.role === 'assistant') {
-                let msgs = [...this.opts.getMessages()];
-                let lastMsg = msgs[msgs.length - 1];
-                let textChunk = ev.content ?? ev.text ?? '';
-                if (!lastMsg || lastMsg.role !== 'agent' || !lastMsg.streaming) {
-                  msgs.push({ role: 'agent', text: textChunk, streaming: true });
-                } else {
-                  lastMsg.text = textChunk;
-                }
-                this.opts.setMessages(msgs);
-              } else if (ev.type === 'tool_use') {
-                let msgs = [...this.opts.getMessages()];
-                msgs.push({
-                  role: 'tool',
-                  name: ev.name ?? ev.tool_name ?? ev.toolCall?.name ?? ev.tool_call?.name ?? ev.function?.name ?? ev.part?.name ?? ev.part?.tool ?? 'unknown',
-                  input: ev.parameters ?? ev.arguments ?? ev.toolCall?.arguments ?? ev.tool_call?.arguments ?? ev.part?.parameters ?? ev.part?.state?.input ?? {},
-                  result: null,
-                  streaming: true
-                });
-                this.opts.setMessages(msgs);
-              } else if (ev.type === 'tool_result') {
-                let msgs = [...this.opts.getMessages()];
-                for (let i = msgs.length - 1; i >= 0; i--) {
-                  if (msgs[i].role === 'tool' && msgs[i].streaming) {
-                    msgs[i].result = ev.output || ev.status;
-                    msgs[i].streaming = false;
-                    break;
-                  }
-                }
-                this.opts.setMessages(msgs);
-              } else if (ev.type === 'error') {
-                let msgs = [...this.opts.getMessages()];
-                msgs.push({ role: 'system', text: `⚠️ Error: ${ev.message || ev.error || JSON.stringify(ev)}` });
-                this.opts.setMessages(msgs);
+            case 'chat.meta': {
+              // Lightweight status update — no message content
+              let { phase, messageCount, lastToolName, thinkingStatus } = msg.params;
+              this._lastMessageCount = messageCount;
+              if (this.opts.onMeta) {
+                this.opts.onMeta({ phase, messageCount, lastToolName, thinkingStatus });
               }
               break;
             }
 
             case 'chat.done': {
               isFinished = true;
-              clearInterval(timerInterval);
+              this._stopPull();
               ws.removeEventListener('message', onMessage);
               ws.removeEventListener('close', onClose);
               
               this.opts.onBackgroundToggle(false);
-              
-              // Finalize streaming messages locally FIRST — these are the live data the user saw
-              let msgs = this.opts.getMessages()
-                .filter(m => !(m.role === 'thinking' && !m.done))
-                .filter(m => !(m.role === 'system' && (m.text?.startsWith('⏳') || m.text?.startsWith('✅'))))
-                .map(m => ({ ...m, streaming: false }));
-              
-              // Add thinking-done marker
-              msgs.push({ role: 'thinking', elapsed: Math.round((Date.now() - startTime) / 1000), done: true });
-              this.opts.setMessages(msgs);
+              if (this.opts.onMeta) this.opts.onMeta(null);
 
-              // Persist streaming messages immediately — safety net if server-side persist fails
-              fetch('/api/chats/messages', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatId, messages: msgs }),
-              }).catch(() => {});
-
-              // After a short delay, try to refresh with the richer server-parsed result (metadata, session info)
+              // Fetch final messages from server — single source of truth
               setTimeout(() => {
-                fetch(`/api/chats/get`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ id: chatId })
-                }).then(r => r.json()).then(chat => {
-                  if (chat && chat.messages && chat.messages.length >= msgs.length) {
-                    this.opts.setMessages(chat.messages);
-                    if (chat.sessionId && this.opts.onSessionId) {
-                      this.opts.onSessionId(chat.sessionId);
-                    }
-                  }
+                this._pullMessages(chatId).then(() => {
                   dashEmit("chats-updated");
                 }).catch(() => { dashEmit("chats-updated"); });
-              }, 800);
+              }, 500);
 
               if (this.opts.onDone) this.opts.onDone();
               resolve('');
@@ -205,29 +177,29 @@ export class ChatWsClient {
 
             case 'chat.error': {
               isFinished = true;
-              clearInterval(timerInterval);
+              this._stopPull();
               ws.removeEventListener('message', onMessage);
               ws.removeEventListener('close', onClose);
               
               this.opts.onBackgroundToggle(false);
-              
-              fetch(`/api/chats/get`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: chatId })
-              }).then(r => r.json()).then(chat => {
-                if (chat && chat.messages) {
-                  this.opts.setMessages(chat.messages);
-                }
+              if (this.opts.onMeta) this.opts.onMeta(null);
+
+              // Fetch current state from server
+              this._pullMessages(chatId).then(() => {
                 dashEmit("chats-updated");
                 if (this.opts.onDone) this.opts.onDone();
-              }).catch((err) => {
-                console.error('🔴 [ChatWsClient] Failed to fetch chat state after error:', err.message);
+              }).catch(() => {
                 if (this.opts.onDone) this.opts.onDone();
               });
 
               let errText = msg.params?.text || msg.params?.error || 'Unknown error';
               resolve(errText);
+              break;
+            }
+
+            case 'chat.resumed': {
+              // Resume confirmed — start pulling
+              this._startPull(chatId);
               break;
             }
           }
@@ -237,7 +209,7 @@ export class ChatWsClient {
       ws.addEventListener('message', onMessage);
 
       let timeout = setTimeout(() => {
-        clearInterval(timerInterval);
+        this._stopPull();
         ws.removeEventListener('message', onMessage);
         resolve('');
       }, 600_000);
@@ -247,7 +219,7 @@ export class ChatWsClient {
       } else {
         ws.addEventListener('open', () => sendMsg(), { once: true });
         ws.addEventListener('error', () => {
-          clearInterval(timerInterval);
+          this._stopPull();
           ws.removeEventListener('message', onMessage);
           reject(new Error('WebSocket connection failed'));
         }, { once: true });
@@ -268,9 +240,9 @@ export class ChatWsClient {
   }
 
   resume(chatId, taskId) {
-    this._activeChatId = chatId;
-    let msgs = [...this.opts.getMessages(), { role: 'system', text: `${ICONS.WAIT} Reconnecting to running task...` }];
-    this.opts.setMessages(msgs);
+    if (this.opts.onMeta) {
+      this.opts.onMeta({ phase: 'thinking', messageCount: 0, lastToolName: null, thinkingStatus: 'Reconnecting...' });
+    }
     this.opts.onBackgroundToggle(true);
 
     let ws = this._ensureChatWs();
@@ -288,116 +260,53 @@ export class ChatWsClient {
     let onMessage = (e) => {
       try {
         let msg = JSON.parse(e.data);
-        // Ignore events from other chats
         let evChatId = msg.params?.chatId;
         if (evChatId && evChatId !== chatId) return;
+
         switch (msg.method) {
           case 'chat.resumed': {
-            let msgs = [...this.opts.getMessages()];
-            let last = msgs[msgs.length - 1];
-            let isRunning = msg.params?.status === 'running';
-            if (last && last.role === 'system' && last.text.startsWith(`${ICONS.WAIT} Reconnecting`)) {
-              last.text = isRunning 
-                ? `${ICONS.OK} Reconnected — task still running...`
-                : `${ICONS.WAIT} Task status unknown, waiting...`;
+            // Resume confirmed — start periodic message pulling
+            this._startPull(chatId);
+            if (this.opts.onMeta) {
+              this.opts.onMeta({ phase: 'thinking', messageCount: 0, lastToolName: null, thinkingStatus: 'Reconnected' });
             }
-            this.opts.setMessages(msgs);
             break;
           }
 
-          case 'chat.event': {
-            let ev = msg.params?.event;
-            if (!ev) break;
-            if (ev.type === 'message' && ev.role === 'system') {
-              let msgs = [...this.opts.getMessages()];
-              let last = msgs[msgs.length - 1];
-              let textChunk = ev.content ?? ev.text ?? '';
-              if (last && last.role === 'system') {
-                last.text = textChunk;
-              } else {
-                msgs.push({ role: 'system', text: textChunk });
-              }
-              this.opts.setMessages(msgs);
-            } else if (ev.type === 'message' && ev.role === 'assistant') {
-              let msgs = [...this.opts.getMessages()];
-              let last = msgs[msgs.length - 1];
-              let textChunk = ev.content ?? ev.text ?? '';
-              if (!last || last.role !== 'agent' || !last.streaming) {
-                msgs.push({ role: 'agent', text: textChunk, streaming: true });
-              } else {
-                last.text = textChunk;
-              }
-              this.opts.setMessages(msgs);
-            } else if (ev.type === 'tool_use') {
-              let msgs = [...this.opts.getMessages()];
-              msgs.push({ role: 'tool', name: ev.name ?? ev.tool_name ?? ev.toolCall?.name ?? ev.tool_call?.name ?? ev.function?.name ?? ev.part?.name ?? ev.part?.tool ?? 'unknown', input: ev.parameters ?? ev.arguments ?? ev.toolCall?.arguments ?? ev.tool_call?.arguments ?? ev.part?.parameters ?? ev.part?.state?.input ?? {}, result: null, streaming: true });
-              this.opts.setMessages(msgs);
-            } else if (ev.type === 'tool_result') {
-              let msgs = [...this.opts.getMessages()];
-              for (let i = msgs.length - 1; i >= 0; i--) {
-                if (msgs[i].role === 'tool' && msgs[i].streaming) {
-                  msgs[i].result = ev.output || ev.status;
-                  msgs[i].streaming = false;
-                  break;
-                }
-              }
-              this.opts.setMessages(msgs);
+          case 'chat.meta': {
+            let { phase, messageCount, lastToolName, thinkingStatus } = msg.params;
+            this._lastMessageCount = messageCount;
+            if (this.opts.onMeta) {
+              this.opts.onMeta({ phase, messageCount, lastToolName, thinkingStatus });
             }
             break;
           }
 
           case 'chat.done': {
             ws.removeEventListener('message', onMessage);
-            let msgs = this.opts.getMessages().map(m => ({ ...m, streaming: false }));
+            this._stopPull();
             this.opts.onBackgroundToggle(false);
+            if (this.opts.onMeta) this.opts.onMeta(null);
 
-            let text = msg.params?.text || '';
-            let sessionMatch = text.match(/Session ID:\s*`([a-f0-9-]+)`/);
-            if (sessionMatch) {
-              this.opts.onSessionId(sessionMatch[1]);
-            }
-
-            let cleaned = msgs.filter(m => !(m.role === 'system' && (m.text.startsWith(ICONS.WAIT) || m.text.startsWith(ICONS.OK))));
-            this.opts.setMessages(cleaned);
-
-            // Fetch the updated messages from the server since the backend persisted the final result
-            fetch(`/api/chats?id=${chatId}`).then(r => r.json()).then(d => {
-              if (d.chat && d.chat.messages) {
-                this.opts.setMessages(d.chat.messages);
-                if (d.chat.sessionMetaHtml && this.opts.onMetaHtml) {
-                  this.opts.onMetaHtml(d.chat.sessionMetaHtml);
-                }
-                if (d.chat.sessionId && this.opts.onSessionId) {
-                  this.opts.onSessionId(d.chat.sessionId);
-                }
-              }
+            // Fetch final state from server
+            this._pullMessages(chatId).then(() => {
+              dashEmit("chats-updated");
             }).catch(() => {});
 
-            dashEmit("chats-updated");
             this.opts.onDone();
             break;
           }
 
           case 'chat.error': {
             ws.removeEventListener('message', onMessage);
-            let msgs = this.opts.getMessages().map(m => ({ ...m, streaming: false }));
+            this._stopPull();
             this.opts.onBackgroundToggle(false);
+            if (this.opts.onMeta) this.opts.onMeta(null);
             
+            // Fetch current state from server
+            this._pullMessages(chatId);
+
             let errText = msg.params?.text || msg.params?.error || 'Task failed';
-            
-            if (errText.includes('lost')) {
-              msgs.push({ role: 'system', text: `${ICONS.WARN} ${errText}` });
-              this.opts.setMessages(msgs);
-              fetch("/api/chats/messages", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chatId, messages: this.opts.getMessages() }),
-              }).catch(() => {});
-            } else {
-              msgs.push({ role: 'system', text: `Error: ${errText}` });
-              this.opts.setMessages(msgs);
-            }
-            
             this.opts.onError(errText);
             break;
           }

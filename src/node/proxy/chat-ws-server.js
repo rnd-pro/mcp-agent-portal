@@ -149,32 +149,22 @@ export class ChatWsServer {
 
     try {
       let result = await fetchTaskResult(this.mcpProxy, taskId);
-      
-      let eventsStr = result.content?.find(c => c.text && c.text.startsWith('__EVENTS__:'))?.text;
-      let liveEvents = eventsStr ? JSON.parse(eventsStr.substring(11)) : null;
       let text = result.content?.find(c => c.text && !c.text.startsWith('__EVENTS__:'))?.text || '';
       
       if (text && !text.includes('still running')) {
         if (text.includes('Task not found')) {
-          // Agent-pool lost this task (e.g. server restart).
-          // Try to recover from StateGraph cached events.
           this._recoverLostTask(ws, chatId, taskId);
         } else {
-          ws.send(JSON.stringify({ method: 'chat.done', params: { chatId, taskId, text } }));
+          ws.send(JSON.stringify({ method: 'chat.done', params: { chatId, taskId } }));
           this.unsubscribe(taskId);
           getStateGraph().updateChatTask(chatId, null);
         }
       } else {
+        // Task still running — client will start pulling messages via /api/chats/get
         ws.send(JSON.stringify({ method: 'chat.resumed', params: { chatId, taskId, status: 'running' } }));
-        if (liveEvents && Array.isArray(liveEvents)) {
-          for (let ev of liveEvents) {
-            ws.send(JSON.stringify({ method: 'chat.event', params: { chatId, taskId, event: ev } }));
-          }
-        }
       }
     } catch (err) {
       console.error(`❌ [Chat] Failed to fetch task result for resume:`, err.message);
-      // Fallback: try StateGraph recovery
       this._recoverLostTask(ws, chatId, taskId);
     }
   }
@@ -187,15 +177,8 @@ export class ChatWsServer {
   _recoverLostTask(ws, chatId, taskId) {
     let sg = getStateGraph();
     let task = sg.get(`tasks/${taskId}`);
-    let events = task?.events || [];
-
-    if (events.length > 0) {
-      console.log(`💬 [Chat] Recovering ${events.length} cached event(s) for lost task ${taskId.substring(0, 8)}`);
-      // Replay cached streaming events
-      for (let ev of events) {
-        ws.send(JSON.stringify({ method: 'chat.event', params: { taskId, event: ev } }));
-      }
-    }
+    // No need to replay raw events — chat.messages[] is already persisted
+    // by TaskRouter._appendEventToChat. Client fetches via /api/chats/get.
 
     // Check if the task had a final status (done/error) in StateGraph
     let status = task?.status;

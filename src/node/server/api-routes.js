@@ -106,15 +106,22 @@ export function createRoutes(ctx) {
         let tasks = {};
         for (let id of (taskIds || [])) {
           let task = sg.get(`tasks/${id}`) || null;
-          if (task) task = { ...task };
-          tasks[id] = task;
+          // Return only meta — no raw events (server-authoritative model)
+          if (task) {
+            tasks[id] = {
+              status: task.status || task.type || 'running',
+              updatedAt: task.updatedAt || null,
+              startedAt: task.startedAt || null,
+              eventCount: task.events?.length || 0,
+            };
+          } else {
+            tasks[id] = null;
+          }
         }
         // Resolve chatId for each task — find chats with matching pendingTaskId
-        // Also find child chats of parentChatId that might be associated
         let allChats = sg.listChats?.() || [];
         for (let id of (taskIds || [])) {
           if (!tasks[id]) tasks[id] = {};
-          // Direct match: chat.pendingTaskId === taskId
           let linkedChat = allChats.find(c => c.pendingTaskId === id);
           if (linkedChat) {
             tasks[id].chatId = linkedChat.id;

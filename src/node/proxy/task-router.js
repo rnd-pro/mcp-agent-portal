@@ -9,6 +9,8 @@ export class TaskRouter {
     this.mcpProxy = mcpProxy;
     /** @type {Map<string, object[]>} taskId → cached notifications before subscription */
     this.pendingNotifications = new Map();
+    /** @type {Map<string, object>} taskId → streaming state for live message building */
+    this._streamState = new Map();
   }
 
   /**
@@ -75,6 +77,14 @@ export class TaskRouter {
     }
 
     let chatWsServer = this.mcpProxy.chatWsServer;
+    let chatId = chatWsServer?.taskChatMap.get(taskId) || data?.meta?.chatId || this._findChatForTask(taskId);
+
+    // ── Phase 1: Atomically update chat.messages[] on server ──
+    let metaDelta = null;
+    if (type === 'event' && data && chatId) {
+      metaDelta = this._appendEventToChat(chatId, taskId, data);
+    }
+
     let clients = chatWsServer ? chatWsServer.chatSubscriptions.get(taskId) : null;
 
     if (!clients || clients.size === 0) {
@@ -88,7 +98,6 @@ export class TaskRouter {
 
 
       if (type === 'done' || type === 'error') {
-        let chatId = (chatWsServer ? chatWsServer.taskChatMap.get(taskId) : null) || data?.meta?.chatId || this._findChatForTask(taskId);
         if (chatId) {
           if (chatWsServer) chatWsServer.taskChatMap.delete(taskId);
           fetchTaskResult(this.mcpProxy, taskId).then(result => {
@@ -108,19 +117,17 @@ export class TaskRouter {
 
     console.log(`💬 [TaskNotify] Routing to ${clients.size} client(s)`);
 
-    let method = type === 'done' ? 'chat.done'
-      : type === 'error' ? 'chat.error'
-      : 'chat.event';
-
     if (type === 'done' || type === 'error') {
-      let chatId = chatWsServer.taskChatMap.get(taskId) || data?.meta?.chatId || this._findChatForTask(taskId);
+      let method = type === 'done' ? 'chat.done' : 'chat.error';
       if (chatId) chatWsServer.taskChatMap.delete(taskId);
 
-      // IMMEDIATELY notify WS clients so UI can finalize streaming state.
-      // Never block notification delivery on fetchTaskResult (which can timeout).
+      // IMMEDIATELY notify WS clients — terminal signal only, no data
       if (chatWsServer) {
-        chatWsServer.broadcastTaskEvent(taskId, method, { taskId });
+        chatWsServer.broadcastTaskEvent(taskId, method, { taskId, chatId });
       }
+
+      // Clean up streaming state
+      this._streamState.delete(taskId);
 
       // Then fetch + persist the rich parsed result in background
       fetchTaskResult(this.mcpProxy, taskId).then(result => {
@@ -139,11 +146,112 @@ export class TaskRouter {
         if (chatWsServer) chatWsServer.unsubscribe(taskId);
       });
     } else {
-
-      if (chatWsServer) {
-        chatWsServer.broadcastTaskEvent(taskId, method, { taskId, event: data });
+      // ── Phase 2: Send only meta-delta, NOT raw event data ──
+      if (chatWsServer && metaDelta) {
+        chatWsServer.broadcastTaskEvent(taskId, 'chat.meta', metaDelta);
       }
     }
+  }
+
+  /**
+   * Atomically append a streaming event to chat.messages[] in StateGraph.
+   * Returns a meta-delta object for WS broadcast (lightweight, no content).
+   * 
+   * @param {string} chatId
+   * @param {string} taskId
+   * @param {object} data - Raw event from agent-pool
+   * @returns {object|null} Meta-delta for WS broadcast
+   */
+  _appendEventToChat(chatId, taskId, data) {
+    let sg = getStateGraph();
+    let chat = sg.getChat(chatId);
+    if (!chat) return null;
+
+    let msgs = chat.messages || [];
+    let state = this._streamState.get(taskId) || { phase: 'thinking' };
+    let changed = false;
+
+    switch (data.type) {
+      case 'message': {
+        if (data.role === 'system') {
+          // System status — update thinking indicator status
+          state.phase = 'thinking';
+          state.thinkingStatus = data.content || '';
+          // Don't persist transient system messages to chat.messages
+        } else if (data.role === 'assistant') {
+          let text = data.content ?? data.text ?? '';
+          if (!text) break;
+          state.phase = 'responding';
+
+          // Find or create the streaming agent message
+          let lastIdx = msgs.length - 1;
+          let last = lastIdx >= 0 ? msgs[lastIdx] : null;
+          if (last && last.role === 'agent' && last.streaming) {
+            // Replace content (cumulative delivery from opencode/gemini)
+            msgs[lastIdx] = { ...last, text };
+          } else {
+            msgs.push({ role: 'agent', text, streaming: true });
+          }
+          changed = true;
+        }
+        break;
+      }
+
+      case 'tool_use': {
+        let toolName = data.name ?? data.tool_name ?? data.toolCall?.name ?? data.tool_call?.name ?? data.function?.name ?? data.part?.name ?? data.part?.tool ?? 'unknown';
+        let input = data.parameters ?? data.arguments ?? data.toolCall?.arguments ?? data.tool_call?.arguments ?? data.part?.parameters ?? data.part?.state?.input ?? {};
+        
+        state.phase = 'tool';
+        state.lastToolName = toolName;
+
+        msgs.push({
+          role: 'tool',
+          name: toolName,
+          input,
+          result: null,
+          streaming: true,
+        });
+        changed = true;
+        break;
+      }
+
+      case 'tool_result': {
+        let result = data.output || data.status || '';
+        state.phase = 'responding';
+
+        // Find the last streaming tool and close it
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === 'tool' && msgs[i].streaming) {
+            msgs[i] = { ...msgs[i], result, streaming: false };
+            changed = true;
+            break;
+          }
+        }
+        break;
+      }
+
+      case 'error': {
+        let errText = data.message || data.error || JSON.stringify(data);
+        msgs.push({ role: 'system', text: `⚠️ Error: ${errText}` });
+        changed = true;
+        break;
+      }
+    }
+
+    this._streamState.set(taskId, state);
+
+    if (changed) {
+      sg.replaceChatMessages(chatId, msgs);
+    }
+
+    return {
+      chatId,
+      taskId,
+      phase: state.phase,
+      messageCount: msgs.length,
+      lastToolName: state.lastToolName || null,
+      thinkingStatus: state.thinkingStatus || null,
+    };
   }
 
   replayCachedNotifications(taskId) {
@@ -274,6 +382,9 @@ export class TaskRouter {
       done: true,
       meta: Object.keys(meta).length > 0 ? meta : null
     });
+
+    // Finalize all streaming flags
+    msgs = msgs.map(m => m.streaming ? { ...m, streaming: false } : m);
 
     sg.replaceChatMessages(chatId, msgs);
     sg.updateChatTask(chatId, null);

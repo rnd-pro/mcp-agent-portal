@@ -1035,4 +1035,25 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   color: hsl(215, 50%, 60%);
   background: hsla(215, 50%, 60%, 0.08);
 }
+
+/* ── Live Status Indicator (server-authoritative streaming) ── */
+
+.live-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #888;
+  animation: status-fade-in 0.2s ease;
+}
+
+.live-status-indicator .material-symbols-outlined {
+  color: hsl(215, 60%, 55%);
+}
+
+@keyframes status-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 `;

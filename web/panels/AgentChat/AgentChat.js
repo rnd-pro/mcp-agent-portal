@@ -194,12 +194,15 @@ export class AgentChat extends Symbiote {
       },
       onBackgroundToggle: (isActive) => this.ref.cellBg?.toggle(isActive),
       onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
+      onMeta: (meta) => this._renderLiveStatus(meta),
       onDone: () => {
         this._setSending(false);
+        this._renderLiveStatus(null);
         this._updateEmptyState();
       },
       onError: (errText) => {
         this._setSending(false);
+        this._renderLiveStatus(null);
         this._updateEmptyState();
       },
       buildSessionMetaHtml: (text) => this._buildSessionMetaHtml(text)
@@ -838,12 +841,62 @@ export class AgentChat extends Symbiote {
   }
 
   /**
-   * Poll StateGraph for task status and update delegation cards.
+   * Render a live status indicator below messages during streaming.
+   * Shows lightweight phase info (thinking/tool/responding) without message content.
+   * @param {object|null} meta - { phase, messageCount, lastToolName, thinkingStatus } or null to clear
+   */
+  _renderLiveStatus(meta) {
+    let container = this.querySelector('.chat-messages');
+    if (!container) return;
+
+    // Remove existing status indicator
+    let existing = container.querySelector('.live-status-indicator');
+    if (existing) existing.remove();
+
+    if (!meta) return;
+
+    let indicator = document.createElement('div');
+    indicator.className = 'live-status-indicator';
+
+    let icon, text, spinClass;
+    switch (meta.phase) {
+      case 'thinking':
+        icon = 'pending';
+        spinClass = 'spin-icon';
+        text = meta.thinkingStatus || 'Thinking…';
+        break;
+      case 'tool':
+        icon = 'build_circle';
+        spinClass = 'spin-icon';
+        text = `Running: ${escapeHtml(meta.lastToolName || 'tool')}`;
+        break;
+      case 'responding':
+        icon = 'edit_note';
+        spinClass = '';
+        text = 'Writing response…';
+        break;
+      default:
+        icon = 'pending';
+        spinClass = 'spin-icon';
+        text = 'Processing…';
+    }
+
+    indicator.innerHTML = `<span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> <span>${text}</span>`;
+    container.appendChild(indicator);
+
+    // Auto-scroll
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }
+
+  /**
+   * Poll StateGraph for delegation task statuses and update cards.
+   * Only fetches meta (status, eventCount) — no raw event data.
    * @param {string[]} taskIds
    * @param {HTMLElement} boardEl
    */
   _startDelegationPolling(taskIds, boardEl) {
-    // Clear any previous polling interval
     if (this._delegationPoller) clearInterval(this._delegationPoller);
 
     let allDone = new Set();
@@ -861,9 +914,9 @@ export class AgentChat extends Symbiote {
         for (let taskId of taskIds) {
           let task = data.tasks[taskId];
           let card = boardEl.querySelector(`[data-task-id="${taskId}"]`);
-          if (!card) continue;
+          if (!card || !task) continue;
 
-          let status = task?.type || task?.status || 'running';
+          let status = task.status || 'running';
           let isDone = status === 'done' || status === 'error' || status === 'cancelled' || status === 'lost';
 
           card.dataset.status = isDone ? status : 'running';
@@ -887,41 +940,15 @@ export class AgentChat extends Symbiote {
             if (isDone) {
               statusEl.textContent = status === 'done' ? 'Completed' : status === 'error' ? 'Failed' : 'Cancelled';
             } else {
-              let elapsed = task?.updatedAt ? formatElapsed(Math.round((Date.now() - (task.startedAt || task.updatedAt)) / 1000)) : '';
+              let elapsed = task.updatedAt ? formatElapsed(Math.round((Date.now() - (task.startedAt || task.updatedAt)) / 1000)) : '';
               statusEl.textContent = `Running${elapsed ? ' · ' + elapsed : ''}`;
             }
           }
 
-          // Update events feed
-          let eventsEl = card.querySelector('.delegation-card-events');
-          if (eventsEl && task?.events?.length) {
-            let recentEvents = task.events.slice(-5); // Show last 5 events
-            eventsEl.innerHTML = recentEvents.map(ev => {
-              let label = ev.name || (ev.content ? ev.content.substring(0, 30) : '') || ev.type;
-              let tooltip = '';
-              
-              if (ev.type === 'tool_use' || ev.type === 'tool_result') {
-                label = `[tool] ${ev.name}`;
-                if (ev.status === 'error') label = `[err] ${ev.name}`;
-                
-                tooltip = `${ev.type.toUpperCase()}: ${ev.name}`;
-                if (ev.arguments) tooltip += `\nArgs: ${JSON.stringify(ev.arguments, null, 2)}`;
-                if (ev.output) tooltip += `\nOutput: ${String(ev.output).substring(0, 500)}`;
-              } else if (ev.content) {
-                tooltip = ev.content;
-              } else {
-                tooltip = ev.type;
-              }
-
-              return `<span class="delegation-card-event" data-type="${escapeHtml(ev.type)}" data-status="${escapeHtml(ev.status || '')}" title="${escapeHtml(tooltip)}">${escapeHtml(label)}</span>`;
-            }).join('');
-          }
-
           // Link card to associated chat when resolved
-          if (task?.chatId && !card.dataset.chatId) {
+          if (task.chatId && !card.dataset.chatId) {
             card.dataset.chatId = task.chatId;
             card.classList.add('delegation-card-linked');
-            // Update title to show chat name instead of task ID
             let titleEl = card.querySelector('.card-title');
             if (titleEl && task.chatName) {
               titleEl.textContent = task.chatName;
@@ -943,7 +970,7 @@ export class AgentChat extends Symbiote {
       } catch (err) {
         console.warn('[AgentChat] Delegation poll error:', err.message);
       }
-    }, 2000); // Poll every 2s
+    }, 3000); // Poll every 3s — status-only, lightweight
   }
 }
 
