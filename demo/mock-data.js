@@ -277,6 +277,48 @@ export const chats = [
       { role: 'system', text: '✅ Fix applied and verified. Memory usage stable at ~200MB for a 4GB test file.' },
     ],
   },
+
+  // ── Chat 1 Sub-Task 1: Architecture Analysis ──
+  {
+    id: 'task-arch-analysis',
+    name: 'Analyze the delegation architecture',
+    adapter: 'pool',
+    provider: 'gemini',
+    model: 'gemini-3.1-pro-preview',
+    agent: 'researcher',
+    createdAt: Date.now() - 7100_000,
+    updatedAt: Date.now() - 7000_000,
+    projectId: 'proj-portal',
+    parentChatId: 'chat-1',
+    messages: [
+      { role: 'user', text: 'Analyze the delegation architecture: task-router.js, agent-pool-mcp tools, and chat-ws-server.js' },
+      { role: 'thinking', elapsed: 14, done: true, meta: { tools: 4, tokens: 9200, cost: 0.0276 } },
+      { role: 'tool', name: 'search_context', input: { query: 'delegate_task', scope: 'packages/agent-pool-mcp' }, result: 'Found 3 files matching "delegate_task"' },
+      { role: 'agent', text: '### Delegation Architecture Analysis\n\n1. **`task-router.js`**: Intercepts `delegate_task` tool calls from the orchestrator.\n2. **`agent-pool-mcp tools`**: Defines the `delegate_task` schema and creates new isolated Agent contexts.\n3. **`chat-ws-server.js`**: Streams live telemetry via WebSockets to the `EventFeed` and `ActionBoard`.\n\nThe system runs sub-agents in independent detached processes to guarantee zero zombie lockups.' },
+      { role: 'system', text: '✅ Task completed and returned to orchestrator.' }
+    ]
+  },
+
+  // ── Chat 1 Sub-Task 2: UI Audit ──
+  {
+    id: 'task-ui-audit',
+    name: 'Audit the Agent Chat UI',
+    adapter: 'pool',
+    provider: 'claude',
+    model: 'claude-sonnet-4',
+    agent: 'reviewer',
+    createdAt: Date.now() - 7050_000,
+    updatedAt: Date.now() - 6900_000,
+    projectId: 'proj-portal',
+    parentChatId: 'chat-1',
+    messages: [
+      { role: 'user', text: 'Audit the Agent Chat UI: message types, rendering pipeline, live status indicators' },
+      { role: 'thinking', elapsed: 21, done: true, meta: { tools: 6, tokens: 11400, cost: 0.0342 } },
+      { role: 'tool', name: 'get_skeleton', input: { path: 'web/panels/AgentChat' }, result: 'Found files: AgentChat.js, AgentChat.tpl.js, AgentChat.css.js' },
+      { role: 'agent', text: '### UI Audit Complete\n\nThe UI pipeline supports 6 core message types. The `chat-messages` container properly renders all types natively using the Symbiote layout engine.\n\nThe delegation board (`role: board`) relies on the `chat.subTasks` structure injected via WebSocket polling.' },
+      { role: 'system', text: '✅ Task completed and returned to orchestrator.' }
+    ]
+  }
 ];
 
 export function getChatById(id) {

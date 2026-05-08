@@ -302,7 +302,8 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
 }
 
 .chat-nav[collapsed] .chat-sub-items,
-.chat-nav[collapsed] .chat-expand-icon {
+.chat-nav[collapsed] .chat-expand-icon,
+.chat-nav[collapsed] .chat-status-container {
   display: none;
 }
 
@@ -314,6 +315,18 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   flex-direction: column;
   min-width: 0;
   position: relative;
+}
+
+.chat-view::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: linear-gradient(to bottom, var(--sn-bg, #1a1a1a) 0%, transparent 100%);
+  z-index: 2;
+  pointer-events: none;
 }
 
 /* Empty state: composer centered */
