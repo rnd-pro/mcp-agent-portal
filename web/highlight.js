@@ -106,7 +106,7 @@ export function renderMarkdown(src, basePath) {
     if (inCode) { codeLines.push(raw); continue; }
 
     const trimmed = raw.trim();
-    if (!trimmed) { closeList(); out.push(''); continue; }
+    if (!trimmed) { closeList(); out.push('<br>'); continue; }
 
     // Headings
     const hm = trimmed.match(/^(#{1,6})\s+(.+)/);

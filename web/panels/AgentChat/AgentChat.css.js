@@ -354,11 +354,10 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
 
 .msg-content {
   padding: 12px 16px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.5;
   border-radius: 16px;
   width: 100%;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .message.user .msg-content {
@@ -772,6 +771,7 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   margin: 6px 0;
   font-family: var(--sn-font-mono, 'JetBrains Mono', monospace);
   font-size: 12px;
+  white-space: pre;
 }
 
 .md-inline-code {
@@ -808,7 +808,7 @@ h1.md-h { font-size: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); paddi
 h2.md-h { font-size: 18px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
 h3.md-h { font-size: 16px; }
 h4.md-h { font-size: 14px; }
-.md-p { margin: 8px 0; }
+.md-p { margin: 0; }
 .md-quote {
   margin: 8px 0;
   padding: 8px 16px;
