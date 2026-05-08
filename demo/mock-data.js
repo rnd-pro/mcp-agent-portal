@@ -176,10 +176,10 @@ export const chats = [
     ],
   },
 
-  // ── Chat 2: Debug with diff ──────────────────────────────────
+  // ── Chat 2: agent-pool-mcp overview (README injected at build) ──
   {
     id: 'chat-2',
-    name: 'Debug WebSocket reconnection',
+    name: 'What is Agent Pool?',
     adapter: 'pool',
     provider: 'gemini',
     model: 'gemini-2.5-flash',
@@ -188,51 +188,48 @@ export const chats = [
     updatedAt: Date.now() - 43200_000,
     projectId: 'proj-portal',
     messages: [
-      { role: 'user', text: 'The WebSocket connection drops after ~30 seconds of inactivity. Can you find the root cause?' },
-      { role: 'thinking', elapsed: 6, done: true, meta: { tools: 2, tokens: 3200 } },
-      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/project/src/ws' }, result: '{ files: ["server.js", "client.js", "heartbeat.js"], exports: 8 }' },
-      { role: 'agent', text: "Found the issue! The heartbeat interval is set to **60 seconds** but the server's idle timeout is **30 seconds**.\n\n```diff\n// heartbeat.js\n-const HEARTBEAT_INTERVAL = 60_000;\n+const HEARTBEAT_INTERVAL = 15_000;\n\n// server.js  \n-server.timeout = 30_000;\n+server.timeout = 0; // Disable — heartbeat handles liveness\n```\n\nThe fix is to either:\n1. Reduce heartbeat to 15s (recommended)\n2. Increase server timeout\n\nI've applied option 1 since aggressive keepalive prevents proxy timeouts too." },
+      { role: 'user', text: 'Describe the agent-pool-mcp package — what it does, its tools, and how delegation works.' },
+      { role: 'thinking', elapsed: 6, done: true, meta: { tools: 2, tokens: 4800, cost: 0.0072 } },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal/packages/agent-pool-mcp' }, result: '{\n  "project": "agent-pool-mcp",\n  "stats": { "files": 32, "functions": 89, "lines": 4200 },\n  "dirs": ["src/runner/", "src/tools/", "src/adapters/"]\n}' },
+      { role: 'agent', text: "__SUBREADME:packages/agent-pool-mcp/README.md__" },
     ],
   },
 
-  // ── Chat 3: Simple single-agent ──────────────────────────────
+  // ── Chat 3: project-graph-mcp overview (README injected at build) ──
   {
     id: 'chat-3',
-    name: 'Add dark mode toggle',
-    adapter: 'pool',
-    provider: 'opencode',
-    model: 'claude-sonnet-4',
-    agent: 'single',
-    createdAt: Date.now() - 172800_000,
-    updatedAt: Date.now() - 172800_000,
-    projectId: 'proj-video',
-    messages: [
-      { role: 'user', text: 'Add a dark/light mode toggle to the settings panel.' },
-      { role: 'thinking', elapsed: 3, done: true, meta: { mode: 'normal', tools: 1, tokens: 1800, cost: 0.0054 } },
-      { role: 'tool', name: 'search_context', input: { query: 'theme toggle dark mode CSS custom properties', scope: 'web/' }, result: 'Found 3 matches:\n  web/style.css:12 — :root { --bg: #1a1a2e; ... }\n  web/style.css:45 — [data-theme="light"] { --bg: #f5f5f5; ... }\n  web/panels/SettingsPanel/SettingsPanel.js:8' },
-      { role: 'agent', text: "Implementation complete:\n- Added toggle switch in SettingsPanel\n- Stores preference in `localStorage`\n- Applies `data-theme=\"light\"` attribute on `<html>`\n- Smooth 200ms transition on all color properties\n\n> The existing CSS custom properties already define both dark and light palettes — I just wired up the toggle UI." },
-    ],
-  },
-
-  // ── Chat 4: Performance with tables ──────────────────────────
-  {
-    id: 'chat-4',
-    name: 'Performance audit',
+    name: 'What is Project Graph?',
     adapter: 'pool',
     provider: 'gemini',
     model: 'gemini-2.5-pro',
-    agent: 'orchestrator',
+    agent: 'single',
+    createdAt: Date.now() - 172800_000,
+    updatedAt: Date.now() - 172800_000,
+    projectId: 'proj-portal',
+    messages: [
+      { role: 'user', text: 'Describe the project-graph-mcp package — AST analysis, tools, and how it provides codebase context.' },
+      { role: 'thinking', elapsed: 5, done: true, meta: { tools: 2, tokens: 3600, cost: 0.0108 } },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal/packages/project-graph-mcp' }, result: '{\n  "project": "project-graph-mcp",\n  "stats": { "files": 28, "functions": 76, "lines": 3800 },\n  "dirs": ["src/analysis/", "src/tools/", "src/rules/"]\n}' },
+      { role: 'agent', text: "__SUBREADME:packages/project-graph-mcp/README.md__" },
+    ],
+  },
+
+  // ── Chat 4: symbiote-node overview (README injected at build) ──
+  {
+    id: 'chat-4',
+    name: 'What is Symbiote Node?',
+    adapter: 'pool',
+    provider: 'gemini',
+    model: 'gemini-2.5-pro',
+    agent: 'single',
     createdAt: Date.now() - 259200_000,
     updatedAt: Date.now() - 259200_000,
-    projectId: 'proj-portal',
-    parentChatId: null,
+    projectId: 'proj-video',
     messages: [
-      { role: 'user', text: 'Run a performance audit on the frontend. Focus on bundle size and initial load time.' },
-      { role: 'thinking', elapsed: 18, done: true, meta: { tools: 6, tokens: 15200, cost: 0.0456 } },
-      { role: 'tool', name: 'analyze', input: { action: 'full_analysis', path: '/home/dev/project' }, result: '{ totalFiles: 142, totalLines: 28450, avgComplexity: 3.2 }' },
-      { role: 'tool', name: 'delegate_task', input: { prompt: 'Profile bundle sizes and identify code-split opportunities', agent: 'researcher' }, result: 'Task delegated → task-perf-001' },
-      { role: 'board', taskIds: ['task-perf-001'], streaming: false },
-      { role: 'agent', text: "## Performance Audit Results\n\n| Metric | Value | Status |\n|---|---|---|\n| Total JS size | 847 KB | ⚠️ |\n| Largest module | dep-graph.js (75 KB) | 🔴 |\n| Initial load (3G) | 2.1s | ✅ |\n| Component count | 32 | ✅ |\n| Unused exports | 14 | ⚠️ |\n\n### Recommendations\n1. **Code-split** `dep-graph.js` — it's only used in the Graph section\n2. **Tree-shake** 14 unused exports (mostly in utils/)\n3. **Lazy-load** Marketplace and PeerReview panels\n\nEstimated savings: **~180 KB** (21% reduction)." },
+      { role: 'user', text: 'Describe symbiote-node — the Studio UX framework, layout engine, and node graph system.' },
+      { role: 'thinking', elapsed: 7, done: true, meta: { tools: 2, tokens: 5100, cost: 0.0153 } },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal/packages/symbiote-node' }, result: '{\n  "project": "symbiote-node",\n  "stats": { "files": 45, "functions": 128, "lines": 6200 },\n  "dirs": ["layout/", "canvas/", "node/", "inspector/", "engine/"]\n}' },
+      { role: 'agent', text: "__SUBREADME:packages/symbiote-node/README.md__" },
     ],
   },
 

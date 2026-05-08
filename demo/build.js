@@ -75,23 +75,44 @@ for (let f of ['demo-adapter.js', 'mock-data.js']) {
   copyFile(path.join(ROOT, 'demo', f), path.join(DIST, 'demo', f));
 }
 
-// ── Inject README.md into mock-data.js ───────────────────────────
-let readmePath = path.join(ROOT, 'README.md');
-if (fs.existsSync(readmePath)) {
-  console.log('  → Injecting README.md into mock-data.js');
-  let readme = fs.readFileSync(readmePath, 'utf-8');
-  // Strip badge lines at the top ([![...]) and blank lines before first heading
-  readme = readme.replace(/^(\[!\[.*?\]\(.*?\)\]\(.*?\)\s*\n?)+\n*/m, '');
-  // Escape for JS string literal: backslashes, backticks, ${}, newlines
-  let escaped = readme
+// ── Inject README content into mock-data.js ──────────────────────
+console.log('  → Injecting README content into mock-data.js');
+
+function escapeForJsString(text) {
+  return text
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
     .replace(/\n/g, '\\n');
-  let mockPath = path.join(DIST, 'demo', 'mock-data.js');
-  let mockSrc = fs.readFileSync(mockPath, 'utf-8');
-  mockSrc = mockSrc.replace('__README_CONTENT__', escaped);
-  fs.writeFileSync(mockPath, mockSrc);
 }
+
+function stripBadges(text) {
+  return text.replace(/^(\[!\[.*?\]\(.*?\)\]\(.*?\)\s*\n?)+\n*/m, '');
+}
+
+let mockPath = path.join(DIST, 'demo', 'mock-data.js');
+let mockSrc = fs.readFileSync(mockPath, 'utf-8');
+
+// 1. Inject main README.md → __README_CONTENT__
+let readmePath = path.join(ROOT, 'README.md');
+if (fs.existsSync(readmePath)) {
+  let readme = stripBadges(fs.readFileSync(readmePath, 'utf-8'));
+  let escaped = escapeForJsString(readme);
+  mockSrc = mockSrc.replace('__README_CONTENT__', () => escaped);
+}
+
+// 2. Inject subproject READMEs → __SUBREADME:relative/path__
+mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
+  let fullPath = path.join(ROOT, relPath);
+  if (fs.existsSync(fullPath)) {
+    let content = stripBadges(fs.readFileSync(fullPath, 'utf-8'));
+    return escapeForJsString(content);
+  }
+  console.warn(`  ⚠ README not found: ${relPath}`);
+  return `*README not found: ${relPath}*`;
+});
+
+fs.writeFileSync(mockPath, mockSrc);
 
 // ── Copy packages/symbiote-node/ ─────────────────────────────────
 console.log('  → Copying packages/symbiote-node/');
