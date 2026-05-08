@@ -166,6 +166,37 @@ function handleMcpCall(body) {
       }));
     }
 
+    if (toolName === 'compact') {
+      let code = `// Mock source for ${args.path}\n\nexport function demoMock() {\n  return "This is a simulated file content for the demo.";\n}\n`;
+      return Promise.resolve(jsonResponse({
+        result: { content: [{ type: 'text', text: JSON.stringify({ code }) }] },
+      }));
+    }
+
+    if (toolName === 'docs') {
+      return Promise.resolve(jsonResponse({
+        result: { content: [{ type: 'text', text: JSON.stringify({ content: `## Mock Documentation\n\nDocumentation for \`${args.file || args.path}\` would appear here in a real environment.\n\n* **Status**: Simulated\n* **Mode**: Demo` }) }] },
+      }));
+    }
+
+    if (toolName === 'analyze') {
+      return Promise.resolve(jsonResponse({
+        result: { content: [{ type: 'text', text: JSON.stringify({ summary: `Analysis of ${args.path}: Code appears healthy.`, details: "Detailed AST metrics are unavailable in the demo." }) }] },
+      }));
+    }
+
+    if (toolName === 'navigate') {
+      return Promise.resolve(jsonResponse({
+        result: { content: [{ type: 'text', text: JSON.stringify({ usages: [], definitions: [], message: `Navigation to ${args.symbol} is mocked.` }) }] },
+      }));
+    }
+
+    if (toolName === 'get_tracked_files') {
+      return Promise.resolve(jsonResponse({
+        result: { content: [{ type: 'text', text: JSON.stringify({ tracked_files: ['src/node/proxy/mcp-proxy.js', 'web/app.js'] }) }] },
+      }));
+    }
+
     // Default tool response
     return Promise.resolve(jsonResponse({
       result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, tool: toolName, args }) }] },

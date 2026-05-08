@@ -29,6 +29,7 @@ export class ActiveContext extends Symbiote {
       if (typeof data === 'string') {
         try { data = JSON.parse(data); } catch(e) { data = { tracked_files: [] }; }
       }
+      if (!data) data = { tracked_files: [] };
       
       let files = data.tracked_files || [];
       if (files.length === 0) {

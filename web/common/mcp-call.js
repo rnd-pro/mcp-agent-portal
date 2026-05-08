@@ -20,7 +20,7 @@ export async function mcpCall(serverName, toolName, args = {}) {
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   let data = await res.json();
   if (data.isError) throw new Error(data.content?.[0]?.text || data.error || 'Tool error');
-  let text = data.content?.[0]?.text || data.text || data.response;
+  let text = data.result?.content?.[0]?.text || data.content?.[0]?.text || data.text || data.response || JSON.stringify(data.result || data);
   try { return JSON.parse(text); }
   catch { return text; }
 }
