@@ -1,5 +1,5 @@
-import { ICONS } from '../../common/icons.js';
-import { emit as dashEmit } from '../../dashboard-state.js';
+import { ICONS } from '../common/icons.js';
+import { emit as dashEmit } from '../dashboard-state.js';
 
 /**
  * Server-authoritative chat WS client.

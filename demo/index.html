@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Portal — Live Demo</title>
+<meta name="description" content="Interactive live demo of Agent Portal — unified control center for MCP servers and AI agents. No backend required.">
+<meta property="og:title" content="Agent Portal — Live Demo">
+<meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+<link rel="stylesheet" href="../web/style.css">
+<script type="importmap">
+    {
+      "imports": {
+        "@symbiotejs/symbiote": "../node_modules/@symbiotejs/symbiote/core/index.js",
+        "@symbiotejs/symbiote/": "../node_modules/@symbiotejs/symbiote/",
+        "symbiote-node": "../packages/symbiote-node/index.js",
+        "symbiote-node/": "../packages/symbiote-node/"
+      }
+    }
+  </script>
+<!-- Load demo adapter BEFORE app — intercepts fetch/WS -->
+<script type="module" src="./demo-adapter.js"></script>
+</head>
+<body>
+<div class="app-shell">
+<header class="app-topbar">
+<div class="topbar-left">
+<span class="material-symbols-outlined" style="font-size:20px;color:var(--project-accent,var(--sn-node-selected,#4c8bf5))">hub</span>
+<span class="app-title">Agent Portal</span>
+</div>
+<div class="topbar-center" style="position: absolute; left: 50%; transform: translateX(-50%); font-family: 'SF Mono', monospace; font-size: 11px; color: var(--sn-text-dim, #999); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw;">
+  <span class="material-symbols-outlined" style="font-size: 14px;">folder_open</span>
+  <span id="active-project-path">Workspace not selected</span>
+</div>
+</header>
+<project-tabs></project-tabs>
+<div id="main-layout" class="app-workspace">
+<layout-sidebar id="app-sidebar"></layout-sidebar>
+<div class="app-content">
+  <panel-layout id="app-layout" min-panel-size="150"></panel-layout>
+</div>
+</div>
+</div>
+<script type="module" src="../web/app.js"></script>
+</body>
+</html>

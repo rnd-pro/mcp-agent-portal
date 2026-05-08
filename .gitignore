@@ -12,3 +12,4 @@ patch.js
 .context/
 output.txt
 coverage/
+dist/
