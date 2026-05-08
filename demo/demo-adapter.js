@@ -170,7 +170,7 @@ async function handleMcpCall(body) {
       let relativePath = args.path.replace(/^.*\/mcp-agent-portal\//, '').replace(/^(\.\/|\/)/, '');
       let code;
       try {
-        let codeRes = await _realFetch(`https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}`);
+        let codeRes = await _realFetch(`https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}?t=${Date.now()}`);
         if (codeRes.ok) {
           code = await codeRes.text();
         } else {
