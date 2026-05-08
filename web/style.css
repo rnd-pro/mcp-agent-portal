@@ -204,13 +204,14 @@ html, body {
 }
 
 /* Layout panels: hide scrollbars by default, show on hover */
-layout-node[node-type="panel"] ::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+layout-node[node-type="panel"] ::-webkit-scrollbar-thumb {
+  background: transparent;
 }
-layout-node[node-type="panel"]:hover ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+layout-node[node-type="panel"]:hover ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+}
+layout-node[node-type="panel"]:hover ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 /* Split resizer: invisible by default, visible on hover */
