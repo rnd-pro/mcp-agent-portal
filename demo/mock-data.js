@@ -305,18 +305,13 @@ export const skeleton = {
       ".cursorrules",
       ".gitignore",
       ".gitmodules",
-      ".project-graph-cache.json",
       ".windsurfrules",
       "ARCHITECTURE.md",
       "README.md",
-      "error.txt",
       "eslint.config.js",
       "index.js",
-      "logs.txt",
-      "notify.log",
-      "output.txt",
-      "package.json",
-      "patch.js"
+      "package-lock.json",
+      "package.json"
     ],
     ".github/workflows/": [
       "demo.yml"
@@ -330,70 +325,10 @@ export const skeleton = {
       "index.html",
       "mock-data.js"
     ],
-    "packages/agent-pool-mcp/": [
-      ".git",
-      ".gitignore",
-      "ARCHITECTURE.md",
-      "GUIDE.md",
-      "LICENSE",
-      "README.md",
-      "index.js",
-      "package.json"
-    ],
-    "packages/agent-pool-mcp/examples/": [
-      "code-reviewer.md",
-      "parallel-work.md",
-      "research-analyst.md"
-    ],
-    "packages/agent-pool-mcp/policies/": [
-      "read-only.yaml",
-      "safe-edit.yaml",
-      "single-agent.yaml"
-    ],
-    "packages/agent-pool-mcp/skills/": [
-      "code-reviewer.md",
-      "doc-fixer.md",
-      "group-lead.md",
-      "orchestrator.md",
-      "test-writer.md"
-    ],
-    "packages/agent-pool-mcp/src/": [
-      "cli.js",
-      "server.js",
-      "tool-definitions.js"
-    ],
-    "packages/agent-pool-mcp/src/agents/": [
-      "agent-resolver.js"
-    ],
-    "packages/agent-pool-mcp/src/runner/": [
-      "config.js",
-      "gemini-runner.js",
-      "history-cleanup.js",
-      "opencode-runner.js",
-      "process-manager.js",
-      "provider-config.js",
-      "ssh.js",
-      "timeout-manager.js",
-      "url-resolver.js"
-    ],
-    "packages/agent-pool-mcp/src/scheduler/": [
-      "cron.js",
-      "daemon.js",
-      "pipeline.js",
-      "resolve-content.js",
-      "run-signals.js",
-      "scheduler.js"
-    ],
-    "packages/agent-pool-mcp/src/tools/": [
-      "agents.js",
-      "board-store.js",
-      "consult.js",
-      "groups.js",
-      "markdown-parser.js",
-      "messaging.js",
-      "results.js",
-      "scripts.js",
-      "skills.js"
+    "packages/": [
+      "agent-pool-mcp",
+      "project-graph-mcp",
+      "symbiote-node"
     ],
     "packages/context-x-mcp/": [
       "package.json"
@@ -421,485 +356,10 @@ export const skeleton = {
     "packages/context-x-mcp/workflows/meta/": [
       "skill-reflect.md"
     ],
-    "packages/project-graph-mcp/": [
-      ".git",
-      ".gitignore",
-      ".gitmodules",
-      ".graphignore",
-      ".npmignore",
-      ".pgignore",
-      ".project-graph-cache.json",
-      "ARCHITECTURE.md",
-      "CHANGELOG.md",
-      "CONFIGURATION.md",
-      "GUIDE.md",
-      "LICENSE",
-      "README.md",
-      "package.json"
-    ],
-    "packages/project-graph-mcp/docs/": [
-      "AGENT_INSTRUCTIONS.md"
-    ],
-    "packages/project-graph-mcp/docs/examples/": [
-      "AGENT_ROLE.md",
-      "AGENT_ROLE_MINIMAL.md"
-    ],
-    "packages/project-graph-mcp/docs/img/": [
-      "explorer-compact.jpg",
-      "explorer-expanded.jpg"
-    ],
-    "packages/project-graph-mcp/rules/": [
-      "express-5.json",
-      "fastify-5.json",
-      "nestjs-10.json",
-      "nextjs-15.json",
-      "node-22.json",
-      "react-18.json",
-      "react-19.json",
-      "symbiote-2x.json",
-      "symbiote-3x.json",
-      "test-rules.json",
-      "typescript-5.json",
-      "vue-3.json"
-    ],
-    "packages/project-graph-mcp/scripts/": [
-      "consumer-test.mjs",
-      "fill-ctx-coverage.mjs",
-      "fix-ctx-quality.mjs",
-      "restore-ctx-params.mjs",
-      "theater-test.mjs"
-    ],
-    "packages/project-graph-mcp/src/": [
-      ".contextignore"
-    ],
-    "packages/project-graph-mcp/src/analysis/": [
-      "analysis-cache.ctx",
-      "analysis-cache.js",
-      "complexity.ctx",
-      "complexity.js",
-      "custom-rules.ctx",
-      "custom-rules.js",
-      "db-analysis.ctx",
-      "db-analysis.js",
-      "dead-code.ctx",
-      "dead-code.js",
-      "full-analysis.ctx",
-      "full-analysis.js",
-      "jsdoc-checker.ctx",
-      "jsdoc-checker.js",
-      "jsdoc-generator.ctx",
-      "jsdoc-generator.js",
-      "large-files.ctx",
-      "large-files.js",
-      "outdated-patterns.ctx",
-      "outdated-patterns.js",
-      "similar-functions.ctx",
-      "similar-functions.js",
-      "test-annotations.ctx",
-      "test-annotations.js",
-      "type-checker.ctx",
-      "type-checker.js",
-      "undocumented.ctx",
-      "undocumented.js"
-    ],
-    "packages/project-graph-mcp/src/cli/": [
-      "cli-handlers.ctx",
-      "cli-handlers.js",
-      "cli.ctx",
-      "cli.js"
-    ],
-    "packages/project-graph-mcp/src/compact/": [
-      "ai-context.ctx",
-      "ai-context.js",
-      "compact-migrate.ctx",
-      "compact-migrate.js",
-      "compact.ctx",
-      "compact.js",
-      "compress.ctx",
-      "compress.js",
-      "ctx-resolver.ctx",
-      "ctx-resolver.js",
-      "ctx-to-jsdoc.ctx",
-      "ctx-to-jsdoc.js",
-      "doc-dialect.ctx",
-      "doc-dialect.js",
-      "expand.ctx",
-      "expand.js",
-      "framework-references.ctx",
-      "framework-references.js",
-      "instructions.ctx",
-      "instructions.js",
-      "jsdoc-builder.ctx",
-      "jsdoc-builder.js",
-      "mode-config.ctx",
-      "mode-config.js",
-      "split-declarations.ctx",
-      "split-declarations.js",
-      "validate-pipeline.ctx",
-      "validate-pipeline.js"
-    ],
-    "packages/project-graph-mcp/src/core/": [
-      "event-bus.ctx",
-      "event-bus.js",
-      "file-walker.ctx",
-      "file-walker.js",
-      "filters.ctx",
-      "filters.js",
-      "graph-builder.ctx",
-      "graph-builder.js",
-      "parser.ctx",
-      "parser.js",
-      "utils.ctx",
-      "utils.js",
-      "workspace.ctx",
-      "workspace.js"
-    ],
-    "packages/project-graph-mcp/src/lang/": [
-      "lang-go.ctx",
-      "lang-go.js",
-      "lang-python.ctx",
-      "lang-python.js",
-      "lang-sql.ctx",
-      "lang-sql.js",
-      "lang-typescript.ctx",
-      "lang-typescript.js",
-      "lang-utils.ctx",
-      "lang-utils.js"
-    ],
-    "packages/project-graph-mcp/src/mcp/": [
-      "mcp-server.ctx",
-      "mcp-server.js",
-      "tool-defs.ctx",
-      "tool-defs.js",
-      "tools.ctx",
-      "tools.js"
-    ],
-    "packages/project-graph-mcp/src/network/": [
-      "backend-lifecycle.ctx",
-      "backend-lifecycle.js",
-      "server.ctx",
-      "server.js"
-    ],
-    "packages/project-graph-mcp/tests/": [
-      "check_canvas.js",
-      "check_errors.js",
-      "compact.test.js",
-      "orm.test.js",
-      "parser.test.js",
-      "perf-graph-scale.js",
-      "roundtrip.test.js",
-      "temp_debug.js",
-      "test_flat_edges.mjs"
-    ],
-    "packages/project-graph-mcp/tests/lib/": [
-      "asserts.js",
-      "fixture.js",
-      "mcp-client.js"
-    ],
-    "packages/project-graph-mcp/tests/tmp-consumer-test/": [
-      "package.json"
-    ],
-    "packages/project-graph-mcp/vendor/": [
-      "acorn.mjs",
-      "terser.mjs",
-      "walk.mjs"
-    ],
-    "packages/symbiote-node/": [
-      ".git",
-      ".gitignore",
-      ".npmignore",
-      "CHANGELOG.md",
-      "LICENSE",
-      "README.md",
-      "index.js",
-      "package.json"
-    ],
-    "packages/symbiote-node/.agent/workflows/": [
-      "symbiote-docs.md"
-    ],
-    "packages/symbiote-node/canvas/": [
-      "AutoLayout.js",
-      "CanvasConnectionRenderer.js",
-      "CanvasViewport.js",
-      "ConnectionRenderer.js",
-      "FlowSimulator.js",
-      "ForceLayout.js",
-      "ForceWorker.js",
-      "FrameManager.js",
-      "LODManager.js",
-      "NodeViewManager.js",
-      "PinExpansion.js",
-      "PseudoConnection.js",
-      "SelectionSync.js",
-      "SubgraphManager.js",
-      "SubgraphRouter.js",
-      "ViewportActions.js"
-    ],
-    "packages/symbiote-node/canvas/Breadcrumb/": [
-      "Breadcrumb.css.js",
-      "Breadcrumb.js",
-      "Breadcrumb.tpl.js"
-    ],
-    "packages/symbiote-node/canvas/GraphTabs/": [
-      "GraphTabs.css.js",
-      "GraphTabs.js",
-      "GraphTabs.tpl.js"
-    ],
-    "packages/symbiote-node/canvas/Minimap/": [
-      "Minimap.css.js",
-      "Minimap.js",
-      "Minimap.tpl.js"
-    ],
-    "packages/symbiote-node/canvas/NodeCanvas/": [
-      "NodeCanvas.css.js",
-      "NodeCanvas.js",
-      "NodeCanvas.tpl.js"
-    ],
-    "packages/symbiote-node/canvas/NodeSearch/": [
-      "NodeSearch.css.js",
-      "NodeSearch.js",
-      "NodeSearch.tpl.js"
-    ],
-    "packages/symbiote-node/core/": [
-      "Connection.js",
-      "Editor.js",
-      "Frame.js",
-      "GraphMermaid.js",
-      "GraphText.js",
-      "Node.js",
-      "Portal.js",
-      "Socket.js",
-      "SubgraphNode.js"
-    ],
-    "packages/symbiote-node/demo/": [
-      "benchmark.html",
-      "benchmark.js",
-      "demo.js",
-      "index.html",
-      "tree-layout-test.html"
-    ],
-    "packages/symbiote-node/demo/AiChat/": [
-      "AiChat.css.js",
-      "AiChat.js",
-      "AiChat.tpl.js"
-    ],
-    "packages/symbiote-node/demo/EventLog/": [
-      "EventLog.css.js",
-      "EventLog.js",
-      "EventLog.tpl.js"
-    ],
-    "packages/symbiote-node/engine/": [
-      "AgentUICommands.js",
-      "Executor.js",
-      "Graph.js",
-      "GraphServer.js",
-      "HandlerLoader.js",
-      "History.js",
-      "Lifecycle.js",
-      "Persistence.js",
-      "Registry.js",
-      "SocketTypes.js",
-      "cli.js",
-      "index.js",
-      "nanoid.js",
-      "package.json"
-    ],
-    "packages/symbiote-node/engine/extensions/grok-bridge/": [
-      "background.js",
-      "content.js",
-      "manifest.json",
-      "sidepanel.html",
-      "sidepanel.js",
-      "websocket-interceptor.js"
-    ],
-    "packages/symbiote-node/engine/packs/": [
-      "video-pack.js"
-    ],
-    "packages/symbiote-node/engine/packs/ai/": [
-      "beat-detect.handler.js",
-      "content-adapt.handler.js",
-      "face-detect.handler.js",
-      "grok-generate.handler.js",
-      "kling-lipsync.handler.js",
-      "lesson-generate.handler.js",
-      "opencode.handler.js",
-      "replicate-lipsync.handler.js",
-      "tts.handler.js",
-      "whisper.handler.js"
-    ],
-    "packages/symbiote-node/engine/packs/data/": [
-      "db-query.handler.js",
-      "news-accumulate.handler.js",
-      "personas.handler.js",
-      "prompt-loader.handler.js",
-      "roles.handler.js",
-      "rss-feed.handler.js"
-    ],
-    "packages/symbiote-node/engine/packs/debug/": [
-      "inject.handler.js"
-    ],
-    "packages/symbiote-node/engine/packs/flow/": [
-      "agent.handler.js",
-      "if.handler.js",
-      "loop.handler.js",
-      "merge.handler.js",
-      "retry.handler.js",
-      "switch.handler.js",
-      "wait-all.handler.js"
-    ],
-    "packages/symbiote-node/engine/packs/io/": [
-      "http-request.handler.js",
-      "read-file.handler.js",
-      "write-file.handler.js"
-    ],
-    "packages/symbiote-node/engine/packs/transform/": [
-      "anchor-match.handler.js",
-      "effects-skeleton.handler.js",
-      "json-parse.handler.js",
-      "lipsync-select.handler.js",
-      "riopla-adapt.handler.js",
-      "set.handler.js",
-      "template-builder.handler.js",
-      "template.handler.js",
-      "timeline-build.handler.js"
-    ],
-    "packages/symbiote-node/engine/packs/util/": [
-      "delay.handler.js",
-      "log.handler.js"
-    ],
-    "packages/symbiote-node/inspector/InspectorPanel/": [
-      "InspectorPanel.css.js",
-      "InspectorPanel.js",
-      "InspectorPanel.tpl.js"
-    ],
-    "packages/symbiote-node/inspector/TemplatePreview/": [
-      "TemplatePreview.css.js",
-      "TemplatePreview.js",
-      "TemplatePreview.tpl.js"
-    ],
-    "packages/symbiote-node/interactions/": [
-      "ConnectFlow.js",
-      "Drag.js",
-      "Selector.js",
-      "SnapGrid.js",
-      "Zoom.js"
-    ],
-    "packages/symbiote-node/layout/": [
-      "LayoutTree.js",
-      "index.js"
-    ],
-    "packages/symbiote-node/layout/ActionZone/": [
-      "ActionZone.css.js",
-      "ActionZone.js",
-      "ActionZone.tpl.js"
-    ],
-    "packages/symbiote-node/layout/Layout/": [
-      "Layout.css.js",
-      "Layout.js",
-      "Layout.tpl.js"
-    ],
-    "packages/symbiote-node/layout/LayoutNode/": [
-      "LayoutNode.css.js",
-      "LayoutNode.js",
-      "LayoutNode.tpl.js"
-    ],
-    "packages/symbiote-node/layout/LayoutPreview/": [
-      "LayoutPreview.css.js",
-      "LayoutPreview.js",
-      "LayoutPreview.tpl.js"
-    ],
-    "packages/symbiote-node/layout/LayoutRouter/": [
-      "LayoutRouter.js",
-      "routerSync.js"
-    ],
-    "packages/symbiote-node/layout/LayoutSidebar/": [
-      "LayoutSidebar.css.js",
-      "LayoutSidebar.js",
-      "LayoutSidebar.tpl.js",
-      "SidebarSection.js"
-    ],
-    "packages/symbiote-node/layout/PanelMenu/": [
-      "PanelMenu.css.js",
-      "PanelMenu.js",
-      "PanelMenu.tpl.js"
-    ],
-    "packages/symbiote-node/menu/ContextMenu/": [
-      "ContextMenu.css.js",
-      "ContextMenu.js",
-      "ContextMenu.tpl.js"
-    ],
-    "packages/symbiote-node/node/CtrlItem/": [
-      "CtrlItem.css.js",
-      "CtrlItem.js",
-      "CtrlItem.tpl.js"
-    ],
-    "packages/symbiote-node/node/GraphFrame/": [
-      "GraphFrame.css.js",
-      "GraphFrame.js",
-      "GraphFrame.tpl.js"
-    ],
-    "packages/symbiote-node/node/GraphNode/": [
-      "GraphNode.css.js",
-      "GraphNode.js",
-      "GraphNode.tpl.js"
-    ],
-    "packages/symbiote-node/node/NodeSocket/": [
-      "NodeSocket.js",
-      "NodeSocket.tpl.js"
-    ],
-    "packages/symbiote-node/node/PortItem/": [
-      "PortItem.css.js",
-      "PortItem.js",
-      "PortItem.tpl.js"
-    ],
-    "packages/symbiote-node/palette/PaletteBrowser/": [
-      "PaletteBrowser.css.js",
-      "PaletteBrowser.js",
-      "PaletteBrowser.tpl.js"
-    ],
-    "packages/symbiote-node/plugins/": [
-      "History.js",
-      "Readonly.js"
-    ],
-    "packages/symbiote-node/shapes/": [
-      "CircleShape.js",
-      "CommentShape.js",
-      "DiamondShape.js",
-      "NodeShape.js",
-      "PillShape.js",
-      "RectShape.js",
-      "SVGShape.js",
-      "index.js"
-    ],
-    "packages/symbiote-node/tests/": [
-      "force-layout.test.js",
-      "geometry.test.js",
-      "graph-serialization.test.js",
-      "isomorphic-graph.test.js"
-    ],
-    "packages/symbiote-node/themes/": [
-      "Palette.js",
-      "Skin.js",
-      "Theme.js",
-      "carbon.js",
-      "dark.js",
-      "ebook.js",
-      "grey.js",
-      "light.js",
-      "neon.js",
-      "pcb.js",
-      "synthwave.js"
-    ],
-    "packages/symbiote-node/toolbar/QuickToolbar/": [
-      "QuickToolbar.css.js",
-      "QuickToolbar.js",
-      "QuickToolbar.tpl.js"
-    ],
     "src/iso/": [
       "README.md"
     ],
     "src/node/": [
-      ".project-graph-cache.json",
       "config-store.ctx",
       "config-store.js",
       "memory-store.js",
@@ -941,7 +401,6 @@ export const skeleton = {
       "index.js"
     ],
     "src/node/proxy/": [
-      ".project-graph-cache.json",
       "chat-ws-server.ctx",
       "chat-ws-server.js",
       "mcp-helpers.js",
@@ -998,7 +457,6 @@ export const skeleton = {
       "workspace-registration.test.js"
     ],
     "web/": [
-      ".project-graph-cache.json",
       "WsClient.js",
       "app.js",
       "dashboard-state.js",
@@ -1064,6 +522,7 @@ export const skeleton = {
       "dep-graph.js",
       "file-tree.js",
       "health-panel.js",
+      "live-monitor.js",
       "ops-panel.js"
     ],
     "web/panels/ActionBoard/": [
@@ -1125,7 +584,6 @@ export const skeleton = {
       "ProjectList.tpl.js"
     ],
     "web/panels/SettingsPanel/": [
-      ".project-graph-cache.json",
       "SettingsPanel.css.js",
       "SettingsPanel.js",
       "SettingsPanel.tpl.js"
