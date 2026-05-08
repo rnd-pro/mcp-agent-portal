@@ -444,6 +444,7 @@ export const skeleton = {
     ],
     "src/node/proxy/": [
       "chat-ws-server.ctx",
+      "chat-ws-server.ctx.md",
       "chat-ws-server.js",
       "mcp-helpers.js",
       "mcp-http-handler.js",
@@ -451,9 +452,12 @@ export const skeleton = {
       "mcp-multiplexer.js",
       "mcp-proxy.ctx",
       "mcp-proxy.js",
+      "project.ctx",
       "task-router.ctx",
+      "task-router.ctx.md",
       "task-router.js",
       "tool-index.ctx",
+      "tool-index.ctx.md",
       "tool-index.js"
     ],
     "src/node/server/": [
@@ -500,13 +504,23 @@ export const skeleton = {
     ],
     "web/": [
       "WsClient.js",
+      "app.ctx",
+      "app.ctx.md",
       "app.js",
+      "dashboard-state.ctx",
+      "dashboard-state.ctx.md",
       "dashboard-state.js",
+      "dashboard.ctx",
+      "dashboard.ctx.md",
       "follow-controller.js",
+      "highlight.ctx",
+      "highlight.ctx.md",
       "highlight.js",
       "index.html",
       "router-registry.js",
       "state-sync.js",
+      "state.ctx",
+      "state.ctx.md",
       "state.js",
       "stats-format.js",
       "style.css"
@@ -524,8 +538,12 @@ export const skeleton = {
     ],
     "web/components/": [
       "canvas-graph.js",
+      "code-block.ctx",
+      "code-block.ctx.md",
       "code-block.js",
       "follow-ribbon.js",
+      "quick-open.ctx",
+      "quick-open.ctx.md",
       "quick-open.js"
     ],
     "web/components/AgentBoard/": [
@@ -559,16 +577,31 @@ export const skeleton = {
       "MiniGraphWidget.js"
     ],
     "web/panels/": [
+      "code-viewer.ctx",
+      "code-viewer.ctx.md",
       "code-viewer.js",
+      "ctx-panel.ctx",
+      "ctx-panel.ctx.md",
       "ctx-panel.js",
+      "dep-graph.ctx",
+      "dep-graph.ctx.md",
       "dep-graph.js",
+      "file-tree.ctx",
+      "file-tree.ctx.md",
       "file-tree.js",
+      "health-panel.ctx",
+      "health-panel.ctx.md",
       "health-panel.js",
-      "live-monitor.js",
+      "live-monitor.ctx",
+      "live-monitor.ctx.md",
       "ops-panel.js"
     ],
     "web/panels/ActionBoard/": [
+      "ActionBoard.css.ctx",
+      "ActionBoard.ctx",
+      "ActionBoard.ctx.md",
       "ActionBoard.js",
+      "ActionBoard.tpl.ctx",
       "ActionBoard.tpl.js"
     ],
     "web/panels/ActiveContext/": [
@@ -595,8 +628,12 @@ export const skeleton = {
       "ChatList.tpl.js"
     ],
     "web/panels/EventItem/": [
+      "EventItem.css.ctx",
       "EventItem.css.js",
+      "EventItem.ctx",
+      "EventItem.ctx.md",
       "EventItem.js",
+      "EventItem.tpl.ctx",
       "EventItem.tpl.js"
     ],
     "web/panels/GroupManager/": [
@@ -617,17 +654,29 @@ export const skeleton = {
       "PipelineManager.tpl.js"
     ],
     "web/panels/ProjectItem/": [
+      "ProjectItem.css.ctx",
       "ProjectItem.css.js",
+      "ProjectItem.ctx",
+      "ProjectItem.ctx.md",
       "ProjectItem.js",
+      "ProjectItem.tpl.ctx",
       "ProjectItem.tpl.js"
     ],
     "web/panels/ProjectList/": [
+      "ProjectList.css.ctx",
+      "ProjectList.ctx",
+      "ProjectList.ctx.md",
       "ProjectList.js",
+      "ProjectList.tpl.ctx",
       "ProjectList.tpl.js"
     ],
     "web/panels/SettingsPanel/": [
+      "SettingsPanel.css.ctx",
       "SettingsPanel.css.js",
+      "SettingsPanel.ctx",
+      "SettingsPanel.ctx.md",
       "SettingsPanel.js",
+      "SettingsPanel.tpl.ctx",
       "SettingsPanel.tpl.js"
     ],
     "web/panels/SkillLibraryPanel/": [
