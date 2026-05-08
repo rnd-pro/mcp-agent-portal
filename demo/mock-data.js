@@ -125,10 +125,10 @@ export const projectHistory = {
 // ── Chats ────────────────────────────────────────────────────────
 
 export const chats = [
-  // ── Showcase chat: ALL message types ──────────────────────────
+  // ── Showcase chat: project overview with ALL message types ─────
   {
     id: 'chat-1',
-    name: 'Multi-agent auth refactor',
+    name: 'What is Agent Portal?',
     adapter: 'pool',
     provider: 'gemini',
     model: 'gemini-2.5-pro',
@@ -137,42 +137,42 @@ export const chats = [
     updatedAt: Date.now() - 1800_000,
     projectId: 'proj-portal',
     messages: [
-      // 1. User message
-      { role: 'user', text: 'Refactor the authentication middleware to use JWT tokens instead of session cookies. The current implementation in `src/auth/session.js` uses express-session. Delegate implementation to sub-agents.' },
+      // 1. User asks about the project
+      { role: 'user', text: 'Give me a comprehensive overview of Agent Portal — architecture, features, and how everything fits together.' },
 
-      // 2. Thinking block (completed, with meta chips)
-      { role: 'thinking', elapsed: 12, done: true, status: 'Analyzing codebase…', meta: { mode: 'yolo', exitCode: 0, sessionId: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4', tools: 4, tokens: 8420, cost: 0.0253 } },
+      // 2. Thinking block with meta chips
+      { role: 'thinking', elapsed: 8, done: true, status: 'Analyzing project structure…', meta: { mode: 'yolo', exitCode: 0, sessionId: 'demo-session-00000001', tools: 3, tokens: 6200, cost: 0.0186 } },
 
-      // 3. Tool calls — skeleton + compact
-      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/project/src/auth' }, result: '{\n  "files": ["session.js", "middleware.js", "tokens.js", "oauth.js"],\n  "exports": 16,\n  "lines": 890\n}' },
-      { role: 'tool', name: 'compact', input: { action: 'compact_file', path: '/home/dev/project/src/auth/session.js' }, result: 'export function createSession(user) {\n  // Creates express-session with Redis store\n  // ... 45 lines\n}\nexport function validateSession(req, res, next) {\n  // Checks req.session.user\n  // ... 30 lines\n}\nexport function destroySession(req, res) {\n  // req.session.destroy()\n  // ... 12 lines\n}' },
-      { role: 'tool', name: 'navigate', input: { action: 'usages', symbol: 'validateSession', path: '/home/dev/project' }, result: '8 usages found:\n  src/routes/api.js:14\n  src/routes/admin.js:8\n  src/routes/users.js:22\n  src/routes/billing.js:11\n  src/routes/webhooks.js:5\n  src/routes/upload.js:19\n  src/routes/settings.js:7\n  src/routes/teams.js:31' },
+      // 3. Tool calls — research phase
+      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal' }, result: '{\n  "project": "mcp-agent-portal",\n  "stats": { "files": 87, "functions": 234, "lines": 12450 },\n  "dirs": ["src/node/server/", "src/node/proxy/", "web/panels/", "web/services/", "packages/"]\n}' },
+      { role: 'tool', name: 'analyze', input: { action: 'full_analysis', path: '/home/dev/mcp-agent-portal' }, result: '{\n  "totalFiles": 87,\n  "totalLines": 12450,\n  "avgComplexity": 3.1,\n  "topModules": ["web-server.js", "mcp-proxy.js", "AgentChat.js", "state-sync.js"],\n  "frameworks": ["Symbiote.js", "Node.js", "MCP SDK"]\n}' },
+      { role: 'tool', name: 'navigate', input: { action: 'deps', symbol: 'startWebServer', path: '/home/dev/mcp-agent-portal' }, result: 'Dependencies of startWebServer:\n  → createRoutes (api-routes.js)\n  → MCPProxyManager (mcp-proxy.js)\n  → TaskRouter (task-router.js)\n  → BackendLifecycle (backend-lifecycle.js)\n  → LocalGateway (local-gateway.js)' },
 
-      // 4. Agent response — rich markdown (headers, code, tables, lists)
-      { role: 'agent', text: "I've analyzed the auth middleware. Here's my plan:\n\n## Changes Required\n\n| File | Action | Impact |\n|---|---|---|\n| `session.js` | Rewrite → `jwt-auth.js` | **High** — core auth |\n| `middleware.js` | Update token extraction | Medium |\n| `tokens.js` | Add refresh token logic | Medium |\n| 8 route files | Update imports | Low |\n\n### Implementation\n\n```javascript\nimport jwt from 'jsonwebtoken';\n\nexport function createToken(user) {\n  return jwt.sign(\n    { id: user.id, role: user.role },\n    process.env.JWT_SECRET,\n    { expiresIn: '24h' }\n  );\n}\n\nexport function validateToken(req, res, next) {\n  const token = req.headers.authorization?.split(' ')[1];\n  if (!token) return res.status(401).json({ error: 'No token' });\n  try {\n    req.user = jwt.verify(token, process.env.JWT_SECRET);\n    next();\n  } catch {\n    res.status(401).json({ error: 'Invalid token' });\n  }\n}\n```\n\nI'll delegate the implementation to two sub-agents:\n1. **Coder** — JWT auth module + route updates\n2. **Reviewer** — validate the changes" },
+      // 4. Agent: full project overview
+      { role: 'agent', text: "# Agent Portal — Overview\n\n**Unified MCP aggregator + AI agent runtime.** A single MCP server that proxies any number of child MCP servers — your IDE sees one `tools/list` combined from all of them. Runs a web dashboard for visual management, agent chat, and live monitoring.\n\n## Architecture\n\n```\n┌─────────────────────────────────┐\n│  IDE Agent                      │  ← Claude, GPT, Gemini, etc.\n│  (Antigravity / Cursor / ...)   │\n└────────────┬────────────────────┘\n             │ MCP (stdio)\n┌────────────▼────────────────────┐\n│  mcp-agent-portal               │  ← This server\n│  (MCP aggregator + web UI)      │\n└──┬────────┬────────┬────────────┘\n   │        │        │\n   ▼        ▼        ▼\n project  agent    browser        ← Child MCP servers\n -graph   -pool    -x-mcp           (stdio, auto-spawned)\n```\n\nThe portal runs as a **detached singleton backend** — multiple IDE windows connect to the same instance via WebSocket, each registering its workspace as a project tab.\n\n## MCP Ecosystem\n\n| Server | Description | Status |\n|---|---|---|\n| **project-graph-mcp** | AST-based codebase analysis, navigation, documentation | ✅ Production |\n| **agent-pool-mcp** | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |\n| **browser-x-mcp** | Browser automation, form testing, visual regression | 🟡 Beta |\n| **terminal-x-mcp** | Multi-terminal automation with security validation | 🔴 Alpha |\n| **context-x-mcp** | Context enrichment with auto-topic detection | 🔴 Alpha |\n\n## Key Features\n\n- **MCP Aggregation** — unified `tools/list` from all child servers through a single entry point\n- **Web Dashboard** — 10+ panels: Agent Chat, Action Board, Graph, Explorer, Topology, Monitor\n- **Agent Pool** — heterogeneous CLI adapters (Gemini, Claude, OpenCode) running in parallel\n- **Multi-Agent Orchestration** — delegate tasks to specialized sub-agents with status tracking\n- **Distributed Mode** — master/client topology via WebSocket for multi-machine tool sharing\n- **Auto-Restart** — crashed child processes respawn with exponential backoff\n- **Local Gateway** — `portal.local` DNS-like service discovery across projects" },
 
-      // 5. User confirmation
-      { role: 'user', text: 'Yes, go ahead. Delegate as planned.' },
+      // 5. User asks for delegation demo
+      { role: 'user', text: 'Show me how the multi-agent delegation works.' },
 
-      // 6. Tool: delegate_task calls
-      { role: 'tool', name: 'delegate_task', input: { prompt: 'Implement JWT auth module: replace session.js with jwt-auth.js, add refresh tokens, update all 8 route files', agent: 'coder', timeout: 300 }, result: 'Task delegated → task-jwt-impl-001' },
-      { role: 'tool', name: 'delegate_task', input: { prompt: 'Review JWT auth refactor for security issues, token expiry edge cases, and missing error handling', agent: 'reviewer', timeout: 300 }, result: 'Task delegated → task-jwt-review-002' },
+      // 6. Delegate analysis tasks
+      { role: 'tool', name: 'delegate_task', input: { prompt: 'Analyze the delegation architecture: task-router.js, agent-pool-mcp tools, and chat-ws-server.js', agent: 'researcher', timeout: 300 }, result: 'Task delegated → task-arch-analysis' },
+      { role: 'tool', name: 'delegate_task', input: { prompt: 'Audit the Agent Chat UI: message types, rendering pipeline, live status indicators', agent: 'reviewer', timeout: 300 }, result: 'Task delegated → task-ui-audit' },
 
-      // 7. Delegation board — sub-agent task cards
-      { role: 'board', taskIds: ['task-jwt-impl-001', 'task-jwt-review-002'], streaming: false },
+      // 7. Delegation board
+      { role: 'board', taskIds: ['task-arch-analysis', 'task-ui-audit'], streaming: false },
 
-      // 8. Second thinking block (completed)
-      { role: 'thinking', elapsed: 47, done: true, meta: { mode: 'yolo', exitCode: 0, tools: 12, tokens: 24100, cost: 0.0723 } },
+      // 8. Thinking block (research complete)
+      { role: 'thinking', elapsed: 34, done: true, meta: { mode: 'yolo', exitCode: 0, tools: 8, tokens: 18400, cost: 0.0552 } },
 
-      // 9. Tool: get_task_result
-      { role: 'tool', name: 'get_task_result', input: { task_id: 'task-jwt-impl-001' }, result: '✅ Implementation complete:\n- Created jwt-auth.js (createToken, validateToken, refreshToken)\n- Updated 8 route files\n- Added token rotation on refresh\n- All 24 tests passing' },
-      { role: 'tool', name: 'consult_peer', input: { question: 'Is the refresh token rotation secure against replay attacks?', context: 'Using httpOnly cookie with token family tracking' }, result: 'The implementation is secure. Token family tracking prevents replay attacks by invalidating the entire family when a reused token is detected. Recommendation: add a 1-minute grace period for concurrent requests.' },
+      // 9. Tool results
+      { role: 'tool', name: 'get_task_result', input: { task_id: 'task-arch-analysis' }, result: '✅ Analysis complete:\n- TaskRouter dispatches to AdapterPool based on agent type\n- delegate_task creates isolated sub-agent sessions\n- Status tracked via StateGraph with WebSocket deltas\n- Zero-Zombie process groups ensure clean shutdown' },
+      { role: 'tool', name: 'consult_peer', input: { question: 'What message types does AgentChat support?', context: 'Reviewing the UI rendering pipeline' }, result: '6 message types:\n1. user — text input\n2. agent — markdown with streaming cursor\n3. tool — collapsible cards with input/result\n4. thinking — elapsed time + meta chips (mode, tokens, cost)\n5. board — delegation cards with live status polling\n6. system — status notifications' },
 
-      // 10. Agent final summary with diff
-      { role: 'agent', text: "## ✅ Refactor Complete\n\nBoth sub-agents finished successfully.\n\n### Changes Applied\n\n```diff\n// session.js → jwt-auth.js\n-import session from 'express-session';\n-import RedisStore from 'connect-redis';\n+import jwt from 'jsonwebtoken';\n+import { v4 as uuid } from 'uuid';\n \n-export function createSession(user) {\n-  return session({ store: new RedisStore(), ... });\n-}\n+export function createToken(user) {\n+  return jwt.sign({ id: user.id, role: user.role },\n+    process.env.JWT_SECRET, { expiresIn: '24h' });\n+}\n+\n+export function refreshToken(req, res) {\n+  const family = req.cookies.refreshFamily;\n+  // Token rotation with family tracking\n+}\n```\n\n### Reviewer Notes\n- ✅ No security issues found\n- ✅ Token family tracking prevents replay attacks\n- 💡 Added 1-minute grace period for concurrent requests\n\n### Test Results\n\n| Suite | Tests | Status |\n|---|---|---|\n| Auth unit | 12 | ✅ Pass |\n| Auth integration | 8 | ✅ Pass |\n| Route regression | 24 | ✅ Pass |\n| E2E login flow | 4 | ✅ Pass |" },
+      // 10. Final comprehensive response
+      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (gemini-2.5-pro)\n  ├── delegate_task → Coder (gemini-2.5-flash)\n  ├── delegate_task → Reviewer (claude-sonnet-4)\n  └── consult_peer → Research (deepseek-v4)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-node](https://github.com/rnd-pro/symbiote-node) layout framework. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
 
       // 11. System message
-      { role: 'system', text: '⏱ Session completed in 1m 12s. All sub-agent tasks resolved.' },
+      { role: 'system', text: '⏱ Session completed in 42s · 2 sub-agents · 11 tool calls · $0.0738 total' },
     ],
   },
 
