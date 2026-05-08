@@ -356,7 +356,7 @@ export class TaskRouter {
 
       let modeMatch = text.match(/- Mode:\s*(.+)/i);
       if (modeMatch) meta.mode = modeMatch[1].trim();
-      let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
+      let sidMatch = text.match(new RegExp('- Session ID:\\\\s*`([^`]+)`', 'i'));
       if (sidMatch) {
         meta.sessionId = sidMatch[1];
         sg.updateChatSession(chatId, meta.sessionId);
