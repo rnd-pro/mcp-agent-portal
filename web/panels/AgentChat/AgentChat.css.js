@@ -764,7 +764,7 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   50% { opacity: 0; }
 }
 
-.markdown-pre {
+.md-code-block {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 8px;
   padding: 12px;
@@ -774,7 +774,7 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   font-size: 12px;
 }
 
-.markdown-code {
+.md-inline-code {
   background: rgba(255, 255, 255, 0.08);
   padding: 2px 5px;
   border-radius: 4px;
@@ -792,15 +792,69 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   word-break: break-all;
 }
 
-.markdown-link {
+.md-link {
   color: #aaa;
   text-decoration: underline;
   text-decoration-color: rgba(255, 255, 255, 0.2);
 }
 
-.markdown-link:hover {
+.md-link:hover {
   color: #ddd;
 }
+
+/* Extended Markdown Styles */
+.md-h { margin: 16px 0 8px; color: #eee; font-weight: 700; }
+h1.md-h { font-size: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
+h2.md-h { font-size: 18px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
+h3.md-h { font-size: 16px; }
+h4.md-h { font-size: 14px; }
+.md-p { margin: 8px 0; }
+.md-quote {
+  margin: 8px 0;
+  padding: 8px 16px;
+  border-left: 4px solid #64b5f6;
+  background: rgba(100, 181, 246, 0.05);
+  border-radius: 0 4px 4px 0;
+  font-style: italic;
+  color: #aaa;
+}
+.md-list { margin: 8px 0; padding-left: 24px; }
+.md-list li { margin: 3px 0; }
+.md-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.md-hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  margin: 16px 0;
+}
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 12px;
+}
+.md-table th, .md-table td {
+  padding: 6px 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  text-align: left;
+}
+.md-table th { background: rgba(255,255,255,0.05); font-weight: 600; }
+.md-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+/* Syntax Highlight Token Colors */
+.t-kw   { color: rgb(254, 165, 176); }
+.t-str  { color: rgb(251, 182, 79); }
+.t-cm   { color: rgb(149, 149, 149); font-style: italic; }
+.t-fn   { color: rgb(180, 243, 255); }
+.t-num  { color: rgb(251, 182, 79); }
+.t-bi   { color: rgb(180, 243, 255); }
+.t-prop { color: rgb(238, 131, 252); }
+.t-lit  { color: rgb(254, 165, 176); }
 
 /* ── Thinking / Worked blocks ── */
 
