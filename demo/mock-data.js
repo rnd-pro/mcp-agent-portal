@@ -368,6 +368,7 @@ export const adapterTypes = {
             { val: 'gemini-3-flash-preview', text: 'Gemini 3.0 Flash' },
             { val: 'gemini-2.5-pro', text: 'Gemini 2.5 Pro' },
           ],
+        },
       ],
     },
     opencode: {
