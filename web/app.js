@@ -9,7 +9,7 @@ import "./panels/code-viewer.js";
 import "./panels/ctx-panel.js";
 import "./panels/dep-graph.js";
 import "./panels/health-panel.js";
-import "./panels/live-monitor.js";
+import "./panels/ops-panel.js";
 import "./components/quick-open.js";
 import "./components/canvas-graph.js";
 import "./panels/ActiveContext/ActiveContext.js";
@@ -258,6 +258,17 @@ function handleProjectSwitch(projectId) {
   } else {
     localStorage.removeItem('pg-active-project-id');
   }
+
+  // Clear active chat if it does not belong to the new project
+  if (dashState.activeChatId) {
+    let chat = (dashState.chats || []).find(c => c.id === dashState.activeChatId);
+    if (!chat || chat.projectId !== projectId) {
+      dashState.activeChatId = null;
+      updateParams({ chat: null });
+      dashEmit('active-chat-changed', { id: null });
+    }
+  }
+
   dashEmit('active-project-changed', { id: projectId });
 
   // Re-fetch skeleton for the new project context

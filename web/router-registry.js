@@ -14,7 +14,7 @@ export const panelTypes = {
   'ctx-panel':    { title: 'Documentation', icon: 'description',   component: 'pg-ctx-panel' },
   'dep-graph':    { title: 'Dependencies',  icon: 'account_tree',  component: 'pg-dep-graph' },
   'health':       { title: 'Health',        icon: 'analytics',     component: 'pg-health-panel' },
-  'monitor':      { title: 'Live Monitor',  icon: 'monitor_heart', component: 'pg-live-monitor' },
+  'monitor':      { title: 'Live Monitor',  icon: 'monitor_heart', component: 'pg-ops-panel' },
   'settings':     { title: 'Settings',      icon: 'settings',      component: 'pg-settings-panel' },
   'project-list': { title: 'Servers',       icon: 'dashboard',     component: 'pg-project-list' },
   'action-board': { title: 'Action Board',  icon: 'monitor_heart', component: 'pg-action-board' },
