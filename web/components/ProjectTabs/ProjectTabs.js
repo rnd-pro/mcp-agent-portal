@@ -57,10 +57,13 @@ export class ProjectTabs extends Symbiote {
     let openIds = dashState.openProjectIds || [];
     let history = dashState.projectHistory || [];
     let newTabs = [];
+    let activeColor = null;
 
     for (let id of openIds) {
       let proj = history.find(p => p.id === id);
       if (!proj) continue;
+
+      if (id === this.$.activeId) activeColor = proj.color;
 
       newTabs.push({
         id,
@@ -71,6 +74,18 @@ export class ProjectTabs extends Symbiote {
     }
     
     this.$.tabs = newTabs;
+
+    // Update dynamic favicon
+    let link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+    link.type = 'image/svg+xml';
+    link.rel = 'shortcut icon';
+    if (!activeColor) {
+      link.href = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%234c8bf5" /></svg>';
+    } else {
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${encodeURIComponent(activeColor)}"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`;
+      link.href = 'data:image/svg+xml,' + svg;
+    }
+    document.head.appendChild(link);
   }
 
   async _showAddDialog() {
