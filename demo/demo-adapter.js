@@ -140,14 +140,14 @@ function mockFetch(input, init) {
 }
 
 /** Handle /api/mcp-call — route to appropriate mock tool response */
-function handleMcpCall(body) {
+async function handleMcpCall(body) {
   let serverName = body?.serverName || 'project-graph';
   let method = body?.method;
   let params = body?.params || {};
 
   if (method === 'tools/list') {
     let tools = toolsByServer[serverName] || toolsByServer['project-graph'] || [];
-    return Promise.resolve(jsonResponse({ tools }));
+    return jsonResponse({ tools });
   }
 
   if (method === 'tools/call') {
@@ -155,59 +155,70 @@ function handleMcpCall(body) {
     let args = params.arguments || {};
 
     if (toolName === 'get_skeleton') {
-      return Promise.resolve(jsonResponse({
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify(skeleton) }] },
-      }));
+      });
     }
 
     if (toolName === 'list_skills') {
-      return Promise.resolve(jsonResponse({
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify(skills) }] },
-      }));
+      });
     }
 
     if (toolName === 'compact') {
-      let code = `// Mock source for ${args.path}\n\nexport function demoMock() {\n  return "This is a simulated file content for the demo.";\n}\n`;
-      return Promise.resolve(jsonResponse({
+      let relativePath = args.path.replace(/^.*\/mcp-agent-portal\//, '').replace(/^(\.\/|\/)/, '');
+      let code;
+      try {
+        let codeRes = await _realFetch(`https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}`);
+        if (codeRes.ok) {
+          code = await codeRes.text();
+        } else {
+          code = `// Failed to load source from GitHub for ${relativePath} (HTTP ${codeRes.status})`;
+        }
+      } catch (err) {
+        code = `// Error loading source from GitHub for ${relativePath}: ${err.message}`;
+      }
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify({ code }) }] },
-      }));
+      });
     }
 
     if (toolName === 'docs') {
-      return Promise.resolve(jsonResponse({
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify({ content: `## Mock Documentation\n\nDocumentation for \`${args.file || args.path}\` would appear here in a real environment.\n\n* **Status**: Simulated\n* **Mode**: Demo` }) }] },
-      }));
+      });
     }
 
     if (toolName === 'analyze') {
-      return Promise.resolve(jsonResponse({
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify({ summary: `Analysis of ${args.path}: Code appears healthy.`, details: "Detailed AST metrics are unavailable in the demo." }) }] },
-      }));
+      });
     }
 
     if (toolName === 'navigate') {
-      return Promise.resolve(jsonResponse({
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify({ usages: [], definitions: [], message: `Navigation to ${args.symbol} is mocked.` }) }] },
-      }));
+      });
     }
 
     if (toolName === 'get_tracked_files') {
-      return Promise.resolve(jsonResponse({
+      return jsonResponse({
         result: { content: [{ type: 'text', text: JSON.stringify({ tracked_files: ['src/node/proxy/mcp-proxy.js', 'web/app.js'] }) }] },
-      }));
+      });
     }
 
     // Default tool response
-    return Promise.resolve(jsonResponse({
+    return jsonResponse({
       result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, tool: toolName, args }) }] },
-    }));
+    });
   }
 
   if (method === 'resources/list') {
-    return Promise.resolve(jsonResponse({ resources: [] }));
+    return jsonResponse({ resources: [] });
   }
 
-  return Promise.resolve(jsonResponse({ result: { content: [{ type: 'text', text: '{}' }] } }));
+  return jsonResponse({ result: { content: [{ type: 'text', text: '{}' }] } });
 }
 
 window.fetch = mockFetch;
