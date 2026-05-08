@@ -98,6 +98,11 @@ export class ChatSidebar extends Symbiote {
       this.$.navCollapsed = false;
     }
 
+    // On cold load, dashState.chats may already be populated by app.js init.
+    // Render immediately if available, then also async-fetch as backup.
+    if (dashState.chats?.length) {
+      this._renderNavItems();
+    }
     this._fetchChats();
     dashEvents.addEventListener('chats-updated', () => this._fetchChats());
     dashEvents.addEventListener('active-project-changed', () => this._renderNavItems());

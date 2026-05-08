@@ -232,7 +232,7 @@ class MockWebSocket extends EventTarget {
             serverVersion: '1.0.0-alpha.4+demo',
             state: {
               tasks: {},
-              chats: Object.fromEntries(chats.map(c => [c.id, { id: c.id, name: c.name, status: 'idle' }])),
+              chats: Object.fromEntries(chats.map(c => [c.id, { id: c.id, name: c.name, projectId: c.projectId, adapter: c.adapter, status: 'idle' }])),
               ui: { theme: 'dark' },
             },
           },
