@@ -4294,6 +4294,88 @@ export const skeleton = {
   }
 };
 
+// ── Tools ────────────────────────────────────────────────────────
+
+export const toolsByServer = {
+  'project-graph': [
+    { name: 'get_skeleton', description: 'Get the project skeleton — high-level structural overview of the codebase.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+    { name: 'compact', description: 'Compact or expand a file for efficient reading.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['compact_file', 'expand_file'] }, path: { type: 'string' }, beautify: { type: 'boolean' } }, required: ['action', 'path'] } },
+    { name: 'analyze', description: 'Run analysis on the project codebase.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['full_analysis', 'analysis_summary'] }, path: { type: 'string' } }, required: ['action', 'path'] } },
+    { name: 'navigate', description: 'Navigate code symbols — find deps, usages, call chains.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['deps', 'usages', 'expand', 'call_chain'] }, symbol: { type: 'string' }, path: { type: 'string' } }, required: ['action'] } },
+    { name: 'docs', description: 'Get or generate documentation for a file.', inputSchema: { type: 'object', properties: { action: { type: 'string' }, path: { type: 'string' }, file: { type: 'string' } } } },
+    { name: 'get_ai_context', description: 'Get AI-optimized context for a symbol or file.', inputSchema: { type: 'object', properties: { symbol: { type: 'string' }, path: { type: 'string' } } } },
+  ],
+  'agent-pool': [
+    { name: 'delegate_task', description: 'Delegate a task to a sub-agent for parallel execution.', inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, agent: { type: 'string' }, timeout: { type: 'number' } }, required: ['prompt'] } },
+    { name: 'delegate_task_readonly', description: 'Delegate a read-only task (no file writes).', inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, agent: { type: 'string' } }, required: ['prompt'] } },
+    { name: 'consult_peer', description: 'Ask a peer agent for a second opinion on a design or implementation.', inputSchema: { type: 'object', properties: { question: { type: 'string' }, context: { type: 'string' } }, required: ['question'] } },
+    { name: 'get_task_result', description: 'Get the result of a previously delegated task.', inputSchema: { type: 'object', properties: { task_id: { type: 'string' } }, required: ['task_id'] } },
+    { name: 'list_skills', description: 'List available agent skills and policies.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'create_group', description: 'Create a named agent group for coordinated work.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, agents: { type: 'array' } }, required: ['name'] } },
+  ],
+  'context-x': [
+    { name: 'search_context', description: 'Semantic search across codebase context.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, scope: { type: 'string' } }, required: ['query'] } },
+    { name: 'get_related', description: 'Find related files and symbols.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+  ],
+};
+
+// ── Adapter Metadata ─────────────────────────────────────────────
+
+export const adapterTypes = {
+  metadata: {
+    pool: {
+      label: 'Agent Pool',
+      parameters: [
+        {
+          id: 'agent',
+          label: 'Agent',
+          type: 'select',
+          options: ['orchestrator', 'single', 'coder', 'reviewer'],
+        },
+        {
+          id: 'chatType',
+          label: 'Chat Type',
+          type: 'select',
+          options: ['chat', 'task'],
+        },
+      ],
+    },
+    gemini: {
+      label: 'Gemini CLI',
+      parameters: [
+        {
+          id: 'model',
+          label: 'Model',
+          type: 'select',
+          options: [
+            { val: 'gemini-3.1-pro-preview', text: 'Gemini 3.1 Pro' },
+            { val: 'gemini-3.1-flash-lite-preview', text: 'Gemini 3.1 Flash Lite' },
+            { val: 'gemini-3-pro-preview', text: 'Gemini 3.0 Pro' },
+            { val: 'gemini-3-flash-preview', text: 'Gemini 3.0 Flash' },
+            { val: 'gemini-2.5-pro', text: 'Gemini 2.5 Pro' },
+          ],
+        },
+      ],
+    },
+    opencode: {
+      label: 'OpenCode',
+      parameters: [
+        {
+          id: 'model',
+          label: 'Model',
+          type: 'select',
+          options: [
+            { val: 'claude-sonnet-4', text: 'Claude Sonnet 4' },
+            { val: 'claude-opus-4', text: 'Claude Opus 4' },
+            { val: 'gpt-4.5', text: 'GPT-4.5' },
+            { val: 'deepseek-v4', text: 'DeepSeek V4 Pro' },
+          ],
+        },
+      ],
+    },
+  },
+};
+
 // ── CLI Config ───────────────────────────────────────────────────
 
 export const cliConfig = {
