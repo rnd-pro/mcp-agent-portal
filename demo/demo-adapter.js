@@ -231,7 +231,7 @@ async function handleMcpCall(body) {
         if (mdStr || ctxStr) {
           contentStr = [ctxStr, mdStr].filter(Boolean).join('\n\n---\n\n');
         } else {
-          contentStr = `// Failed to load documentation for ${relativePath} (tried ${ctxMdPath} and ${ctxPath})`;
+          contentStr = `// Documentation not found for ${relativePath}`;
         }
       } catch (err) {
         contentStr = `// Error loading docs for ${relativePath}: ${err.message}`;
