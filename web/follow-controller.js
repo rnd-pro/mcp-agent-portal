@@ -201,8 +201,8 @@ class FollowController {
     }
 
     // === Documentation ===
-    if (tool === 'docs' && args.file) {
-      return { focus: { type: 'file', target: args.file }, debounce: HEAVY_DEBOUNCE };
+    if (tool === 'docs' && (args.file || args.path)) {
+      return { focus: { type: 'file', target: args.file || args.path }, debounce: HEAVY_DEBOUNCE };
     }
 
     // === Analysis ===
