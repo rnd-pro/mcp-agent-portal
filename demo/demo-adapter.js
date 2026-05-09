@@ -206,7 +206,11 @@ async function handleMcpCall(body) {
       
       let relativePath = targetPath.replace(/^.*\/mcp-agent-portal\//, '').replace(/^(\.\/|\/)/, '');
       
-      let baseWithoutExt = relativePath.replace(/\.[a-zA-Z0-9]+$/, '');
+      let baseWithoutExt = relativePath
+        .replace(/\.ctx\.md$/, '')
+        .replace(/\.ctx$/, '')
+        .replace(/\.[a-zA-Z0-9]+$/, '');
+      
       let ctxMdPath = baseWithoutExt + '.ctx.md';
       let ctxPath = baseWithoutExt + '.ctx';
       
