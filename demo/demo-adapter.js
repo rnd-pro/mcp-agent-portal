@@ -168,9 +168,19 @@ async function handleMcpCall(body) {
 
     if (toolName === 'compact') {
       let relativePath = args.path.replace(/^.*\/mcp-agent-portal\//, '').replace(/^(\.\/|\/)/, '');
+      
+      let repoUrl = `https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}`;
+      if (relativePath.startsWith('packages/project-graph-mcp/')) {
+        repoUrl = `https://raw.githubusercontent.com/rnd-pro/project-graph-mcp/main/${relativePath.replace('packages/project-graph-mcp/', '')}`;
+      } else if (relativePath.startsWith('packages/agent-pool-mcp/')) {
+        repoUrl = `https://raw.githubusercontent.com/rnd-pro/agent-pool-mcp/main/${relativePath.replace('packages/agent-pool-mcp/', '')}`;
+      } else if (relativePath.startsWith('packages/symbiote-node/')) {
+        repoUrl = `https://raw.githubusercontent.com/rnd-pro/symbiote-node/main/${relativePath.replace('packages/symbiote-node/', '')}`;
+      }
+
       let code;
       try {
-        let codeRes = await _realFetch(`https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}?t=${Date.now()}`);
+        let codeRes = await _realFetch(`${repoUrl}?t=${Date.now()}`);
         if (codeRes.ok) {
           code = await codeRes.text();
         } else {
