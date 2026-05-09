@@ -101,8 +101,17 @@ export function renderMarkdown(src, basePath) {
   const out = [];
   let inCode = false, codeLang = '', codeLines = [];
   let inList = false, listType = '';
+  let paragraph = [];
+
+  function flushP() {
+    if (paragraph.length > 0) {
+      out.push(`<p class="md-p">${paragraph.map(inline).join('<br>')}</p>`);
+      paragraph = [];
+    }
+  }
 
   function closeList() {
+    flushP();
     if (inList) { out.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false; }
   }
 
@@ -111,6 +120,7 @@ export function renderMarkdown(src, basePath) {
 
     // Fenced code blocks
     if (raw.trimStart().startsWith('```')) {
+      flushP();
       if (inCode) {
         out.push(`<pre class="md-code-block"><code>${esc(codeLines.join('\n'))}</code></pre>`);
         inCode = false; codeLines = [];
@@ -125,11 +135,12 @@ export function renderMarkdown(src, basePath) {
     if (inCode) { codeLines.push(raw); continue; }
 
     const trimmed = raw.trim();
-    if (!trimmed) { closeList(); out.push('<br>'); continue; }
+    if (!trimmed) { flushP(); closeList(); continue; }
 
     // Headings
     const hm = trimmed.match(/^(#{1,6})\s+(.+)/);
     if (hm) {
+      flushP();
       closeList();
       const level = hm[1].length;
       out.push(`<h${level} class="md-h">${inline(hm[2])}</h${level}>`);
@@ -138,6 +149,7 @@ export function renderMarkdown(src, basePath) {
 
     // Horizontal rule
     if (/^[-*_]{3,}\s*$/.test(trimmed)) {
+      flushP();
       closeList();
       out.push('<hr class="md-hr">');
       continue;
@@ -145,6 +157,7 @@ export function renderMarkdown(src, basePath) {
 
     // Blockquote
     if (trimmed.startsWith('> ')) {
+      flushP();
       closeList();
       out.push(`<blockquote class="md-quote">${inline(trimmed.slice(2))}</blockquote>`);
       continue;
@@ -153,6 +166,7 @@ export function renderMarkdown(src, basePath) {
     // Unordered list
     const ulm = trimmed.match(/^[-*+]\s+(.+)/);
     if (ulm) {
+      flushP();
       if (!inList || listType !== 'ul') { closeList(); out.push('<ul class="md-list">'); inList = true; listType = 'ul'; }
       out.push(`<li>${inline(ulm[1])}</li>`);
       continue;
@@ -161,6 +175,7 @@ export function renderMarkdown(src, basePath) {
     // Ordered list
     const olm = trimmed.match(/^\d+[.)]\s+(.+)/);
     if (olm) {
+      flushP();
       if (!inList || listType !== 'ol') { closeList(); out.push('<ol class="md-list">'); inList = true; listType = 'ol'; }
       out.push(`<li>${inline(olm[1])}</li>`);
       continue;
@@ -168,6 +183,7 @@ export function renderMarkdown(src, basePath) {
 
     // Table detection
     if (trimmed.includes('|') && i + 1 < lines.length && /^\|?\s*[-:]+/.test(lines[i+1].trim())) {
+      flushP();
       closeList();
       const headers = trimmed.split('|').map(c => c.trim()).filter(Boolean);
       i++; // skip separator
@@ -186,10 +202,10 @@ export function renderMarkdown(src, basePath) {
     }
 
     // Paragraph
-    closeList();
-    out.push(`<p class="md-p">${inline(trimmed)}</p>`);
+    paragraph.push(trimmed);
   }
 
+  flushP();
   // Close any open code block
   if (inCode) {
     out.push(`<pre class="md-code-block"><code>${esc(codeLines.join('\n'))}</code></pre>`);
