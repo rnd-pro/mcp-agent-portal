@@ -7,3 +7,6 @@
 [submodule "packages/project-graph-mcp"]
 	path = packages/project-graph-mcp
 	url = https://github.com/rnd-pro/project-graph-mcp.git
+[submodule ".agent-portal"]
+	path = .agent-portal
+	url = git@github.com:rnd-pro/team-memory.git
