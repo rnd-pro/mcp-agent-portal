@@ -1130,7 +1130,7 @@ export class DepGraph extends Symbiote {
     const nodeCount = editor.getNodes().length;
     if (!isStructured && nodeCount > 50) {
       if (!this._forceLayout) {
-        const workerUrl = new URL('/packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
+        const workerUrl = new URL('../../packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
         this._forceLayout = new ForceLayout(workerUrl);
       }
 
@@ -1486,7 +1486,7 @@ export class DepGraph extends Symbiote {
           // Start force simulation. Apply circular seed BEFORE starting so there's no
           // position race between the random seed write (below) and the first worker tick.
           if (!this._forceLayout) {
-            const workerUrl = new URL('/packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
+            const workerUrl = new URL('../../packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
             this._forceLayout = new ForceLayout(workerUrl);
           }
 
