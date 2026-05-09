@@ -216,16 +216,18 @@ async function handleMcpCall(body) {
 
       let contentStr = '';
       try {
-        let resMd = await _realFetch(`${resolveRepoUrl(ctxMdPath)}?t=${Date.now()}`);
-        if (resMd.ok) {
-          contentStr = await resMd.text();
+        let [resMd, resCtx] = await Promise.all([
+          _realFetch(`${resolveRepoUrl(ctxMdPath)}?t=${Date.now()}`),
+          _realFetch(`${resolveRepoUrl(ctxPath)}?t=${Date.now()}`)
+        ]);
+
+        let mdStr = resMd.ok ? await resMd.text() : '';
+        let ctxStr = resCtx.ok ? await resCtx.text() : '';
+
+        if (mdStr || ctxStr) {
+          contentStr = [ctxStr, mdStr].filter(Boolean).join('\n\n---\n\n');
         } else {
-          let resCtx = await _realFetch(`${resolveRepoUrl(ctxPath)}?t=${Date.now()}`);
-          if (resCtx.ok) {
-            contentStr = await resCtx.text();
-          } else {
-            contentStr = `// Failed to load documentation for ${relativePath} (tried ${ctxMdPath} and ${ctxPath})`;
-          }
+          contentStr = `// Failed to load documentation for ${relativePath} (tried ${ctxMdPath} and ${ctxPath})`;
         }
       } catch (err) {
         contentStr = `// Error loading docs for ${relativePath}: ${err.message}`;
