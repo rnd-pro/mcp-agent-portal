@@ -215,7 +215,16 @@ export function renderMarkdown(src, basePath) {
   return out.join('\n');
 
   function inline(text) {
-    return esc(text)
+    let escaped = esc(text);
+    
+    // Unescape safe HTML tags commonly used in markdown
+    escaped = escaped.replace(/&lt;(\/?)(details|summary|kbd|br|hr|sub|sup)(.*?)&gt;/gi, (m, slash, tag, rest) => {
+      // To prevent malicious attribute injection, only allow specific safe characters in rest
+      if (rest && !/^[ \w="'-]*$/.test(rest)) return m; 
+      return `<${slash}${tag}${rest}>`;
+    });
+
+    return escaped
       // Images: ![alt](src)
       .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
         const resolved = resolveImagePath(src, basePath);

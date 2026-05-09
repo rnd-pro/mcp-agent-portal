@@ -230,3 +230,26 @@ action-zone .zone-icon {
 action-zone:hover .zone-icon {
   color: #6e6e6e !important;
 }
+
+/* Markdown details / summary */
+.md-viewer details {
+  background: var(--bg-level-2);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin: 12px 0;
+  padding: 8px 12px;
+}
+.md-viewer summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-color);
+  outline: none;
+}
+.md-viewer summary:hover {
+  color: var(--primary-color);
+}
+.md-viewer details[open] summary {
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+}
