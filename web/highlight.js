@@ -1,8 +1,27 @@
 // @ctx .context/web/highlight.ctx
 const t=new Set(["async","await","break","case","catch","class","const","continue","debugger","default","delete","do","else","export","extends","finally","for","from","function","if","import","in","instanceof","let","new","of","return","super","switch","this","throw","try","typeof","var","void","while","with","yield","static","get","set"]),n=new Set(["true","false","null","undefined","NaN","Infinity"]),s=new Set(["console","document","window","global","process","module","require","Promise","Array","Object","String","Number","Boolean","Map","Set","WeakMap","WeakSet","Symbol","RegExp","Error","JSON","Math","Date","parseInt","parseFloat","setTimeout","setInterval","clearTimeout","clearInterval","fetch","URL","Buffer","EventTarget","CustomEvent","HTMLElement","requestAnimationFrame","queueMicrotask"]);function e(t){return"&"===t?"&amp;":"<"===t?"&lt;":">"===t?"&gt;":t}
 export function highlight(i){const l=[],f=i.length;
-let h=0;for(;h<f;){const g=i[h];if("/"===g&&"/"===i[h+1]){const t=h;for(;h<f&&"\n"!==i[h];)h++;l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("/"===g&&"*"===i[h+1]){const t=h;for(h+=2;h<f&&("*"!==i[h]||"/"!==i[h+1]);)h++;h+=2;
-const n=i.substring(t,h);n.startsWith("/**")?l.push(u(n)):l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("'"===g||'"'===g){const t=h;for(h++;h<f&&i[h]!==g;)"\\"===i[h]&&h++,h++;h++,l.push(`<span class="t-str">${a(i,t,h)}</span>`);continue}if("`"===g){const t=h;for(h++;h<f&&"`"!==i[h];)"\\"===i[h]&&h++,h++;h++,l.push(highlightTemplateLiteral(i.substring(t,h)));continue}if(r(g)||"."===g&&h+1<f&&r(i[h+1])){const t=h;if("0"!==g||"x"!==i[h+1]&&"X"!==i[h+1])for(;h<f&&(r(i[h])||"."===i[h]||"e"===i[h]||"E"===i[h]||"_"===i[h]);)h++;else for(h+=2;h<f&&o(i[h]);)h++;h<f&&"n"===i[h]&&h++,l.push(`<span class="t-num">${a(i,t,h)}</span>`);continue}if(c(g)){const g=h;for(;h<f&&p(i[h]);)h++;
+let h=0;for(;h<f;){const g=i[h];if("/"===g&&"/"===i[h+1]){const t=h;for(;h<f&&"\n"!==i[h];)h++;l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("/"===g&&"*"===i[h+1]){const t=h;for(h+=2;h<f&&("*"!==i[h]||"/"!==i[h+1]);)h++;if(h<f-1)h+=2;else h=f;
+const n=i.substring(t,h);n.startsWith("/**")?l.push(u(n)):l.push(`<span class="t-cm">${a(i,t,h)}</span>`);continue}if("/"===g&&h+1<f&&"*"!==i[h+1]&&"/"!==i[h+1]){
+    let isRegex = false;
+    let prev = h - 1;
+    while(prev >= 0 && (i[prev]===" "||i[prev]==="\t"||i[prev]==="\n")) prev--;
+    if (prev < 0 || "=([{;:,!?&|<>+-*%~/^".includes(i[prev])) isRegex = true;
+    if (isRegex) {
+      const t=h;
+      for(h++;h<f&&"\n"!==i[h]&&"/"!==i[h];){
+        "\\"===i[h]&&h++;
+        h++;
+      }
+      if(h<f&&"/"===i[h]){
+        h++;
+        while(h<f&&c(i[h])) h++;
+      }
+      l.push(`<span class="t-str">${a(i,t,h)}</span>`);
+      continue;
+    }
+  }
+  if("'"===g||'"'===g){const t=h;for(h++;h<f&&i[h]!==g;)"\\"===i[h]&&h++,h++;if(h<f)h++;l.push(`<span class="t-str">${a(i,t,h)}</span>`);continue}if("`"===g){const t=h;for(h++;h<f&&"`"!==i[h];)"\\"===i[h]&&h++,h++;if(h<f)h++;l.push(highlightTemplateLiteral(i.substring(t,h)));continue}if(r(g)||"."===g&&h+1<f&&r(i[h+1])){const t=h;if("0"!==g||"x"!==i[h+1]&&"X"!==i[h+1])for(;h<f&&(r(i[h])||"."===i[h]||"e"===i[h]||"E"===i[h]||"_"===i[h]);)h++;else for(h+=2;h<f&&o(i[h]);)h++;h<f&&"n"===i[h]&&h++,l.push(`<span class="t-num">${a(i,t,h)}</span>`);continue}if(c(g)){const g=h;for(;h<f&&p(i[h]);)h++;
 const m=i.substring(g,h);
 let d=h;for(;d<f&&" "===i[d];)d++;t.has(m)?l.push(`<span class="t-kw">${m}</span>`):n.has(m)?l.push(`<span class="t-lit">${m}</span>`):s.has(m)?l.push(`<span class="t-bi">${m}</span>`):"("===i[d]?l.push(`<span class="t-fn">${m}</span>`):g>0&&"."===i[g-1]?l.push(`<span class="t-prop">${m}</span>`):l.push(m);continue}l.push(e(g)),h++}return l.join("")}
 function a(t,n,s){let i="";for(let l=n;l<s;l++)i+=e(t[l]);return i}
