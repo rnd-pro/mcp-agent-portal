@@ -139,6 +139,18 @@ function mockFetch(input, init) {
   return Promise.resolve(jsonResponse({ error: 'Not found (demo)' }, 404));
 }
 
+function resolveRepoUrl(relativePath) {
+  let repoUrl = `https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}`;
+  if (relativePath.startsWith('packages/project-graph-mcp/')) {
+    repoUrl = `https://raw.githubusercontent.com/rnd-pro/project-graph-mcp/main/${relativePath.replace('packages/project-graph-mcp/', '')}`;
+  } else if (relativePath.startsWith('packages/agent-pool-mcp/')) {
+    repoUrl = `https://raw.githubusercontent.com/rnd-pro/agent-pool-mcp/main/${relativePath.replace('packages/agent-pool-mcp/', '')}`;
+  } else if (relativePath.startsWith('packages/symbiote-node/')) {
+    repoUrl = `https://raw.githubusercontent.com/rnd-pro/symbiote-node/main/${relativePath.replace('packages/symbiote-node/', '')}`;
+  }
+  return repoUrl;
+}
+
 /** Handle /api/mcp-call — route to appropriate mock tool response */
 async function handleMcpCall(body) {
   let serverName = body?.serverName || 'project-graph';
@@ -168,15 +180,7 @@ async function handleMcpCall(body) {
 
     if (toolName === 'compact') {
       let relativePath = args.path.replace(/^.*\/mcp-agent-portal\//, '').replace(/^(\.\/|\/)/, '');
-      
-      let repoUrl = `https://raw.githubusercontent.com/rnd-pro/mcp-agent-portal/main/${relativePath}`;
-      if (relativePath.startsWith('packages/project-graph-mcp/')) {
-        repoUrl = `https://raw.githubusercontent.com/rnd-pro/project-graph-mcp/main/${relativePath.replace('packages/project-graph-mcp/', '')}`;
-      } else if (relativePath.startsWith('packages/agent-pool-mcp/')) {
-        repoUrl = `https://raw.githubusercontent.com/rnd-pro/agent-pool-mcp/main/${relativePath.replace('packages/agent-pool-mcp/', '')}`;
-      } else if (relativePath.startsWith('packages/symbiote-node/')) {
-        repoUrl = `https://raw.githubusercontent.com/rnd-pro/symbiote-node/main/${relativePath.replace('packages/symbiote-node/', '')}`;
-      }
+      let repoUrl = resolveRepoUrl(relativePath);
 
       let code;
       try {
@@ -195,8 +199,40 @@ async function handleMcpCall(body) {
     }
 
     if (toolName === 'docs') {
+      let targetPath = args.file || args.path;
+      if (!targetPath) {
+        return jsonResponse({ result: { content: [{ type: 'text', text: JSON.stringify({ content: 'No path provided' }) }] } });
+      }
+      
+      let relativePath = targetPath.replace(/^.*\/mcp-agent-portal\//, '').replace(/^(\.\/|\/)/, '');
+      
+      let baseWithoutExt = relativePath.replace(/\.[a-zA-Z0-9]+$/, '');
+      let ctxMdPath = baseWithoutExt + '.ctx.md';
+      let ctxPath = baseWithoutExt + '.ctx';
+      
+      if (!relativePath.includes('.')) {
+         ctxMdPath = relativePath + '/project.ctx';
+      }
+
+      let contentStr = '';
+      try {
+        let resMd = await _realFetch(`${resolveRepoUrl(ctxMdPath)}?t=${Date.now()}`);
+        if (resMd.ok) {
+          contentStr = await resMd.text();
+        } else {
+          let resCtx = await _realFetch(`${resolveRepoUrl(ctxPath)}?t=${Date.now()}`);
+          if (resCtx.ok) {
+            contentStr = await resCtx.text();
+          } else {
+            contentStr = `// Failed to load documentation for ${relativePath} (tried ${ctxMdPath} and ${ctxPath})`;
+          }
+        }
+      } catch (err) {
+        contentStr = `// Error loading docs for ${relativePath}: ${err.message}`;
+      }
+
       return jsonResponse({
-        result: { content: [{ type: 'text', text: JSON.stringify({ content: `## Mock Documentation\n\nDocumentation for \`${args.file || args.path}\` would appear here in a real environment.\n\n* **Status**: Simulated\n* **Mode**: Demo` }) }] },
+        result: { content: [{ type: 'text', text: JSON.stringify({ content: contentStr }) }] },
       });
     }
 
