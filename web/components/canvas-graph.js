@@ -646,7 +646,7 @@ export class CanvasGraph extends Symbiote {
 
   startWorker(customOptions = null) {
     if (this.worker) this.worker.terminate();
-    const workerUrl = new URL('/packages/symbiote-node/canvas/ForceWorker.js', location.href).href;
+    const workerUrl = new URL('../../packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
     this.worker = new Worker(workerUrl);
 
     this.worker.onmessage = (e) => {
