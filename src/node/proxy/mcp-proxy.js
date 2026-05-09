@@ -118,7 +118,7 @@ export class MCPProxyManager {
     }
 
     // Auto-install core servers if missing
-    const CORE_SERVERS = ['project-graph', 'agent-pool', 'context-x'];
+    const CORE_SERVERS = ['project-graph', 'agent-pool'];
     let configUpdated = false;
     for (let coreName of CORE_SERVERS) {
       if (!this.servers.has(coreName)) {

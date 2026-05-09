@@ -1,7 +1,7 @@
 /**
  * Agent Entity Parser
  * 
- * Parses `.agents/agents/*.md` files with YAML frontmatter and resolves skill composition.
+ * Parses `.agent-portal/agents/*.md` files with YAML frontmatter and resolves skill composition.
  * 
  * Frontmatter schema:
  *   name, description, role, icon, color, models[], rotation,
@@ -110,7 +110,7 @@ function getSkillMap(skillsDir) {
 
 /**
  * Load a single skill file by name.
- * @param {string} skillsDir - path to `.agents/skills/`
+ * @param {string} skillsDir - path to `.agent-portal/skills/`
  * @param {string} skillName - skill name (without .md)
  * @returns {string|null}
  */
@@ -182,8 +182,8 @@ export function parseAgent(filePath, skillsDir) {
 
 /**
  * Load all agents from a directory.
- * @param {string} agentsDir - path to `.agents/agents/`
- * @param {string} skillsDir - path to `.agents/skills/`
+ * @param {string} agentsDir - path to `.agent-portal/agents/`
+ * @param {string} skillsDir - path to `.agent-portal/skills/`
  * @returns {Map<string, object>} slug → agent definition
  */
 export function loadAgents(agentsDir, skillsDir) {

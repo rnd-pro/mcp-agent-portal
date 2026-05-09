@@ -138,20 +138,20 @@ function getEffectiveModels(provider) {
 }
 
 // ── Agent catalog ─────────────────────────────────────────
-// Cached agent list from .agents/agents/*.md (refreshes every 5s).
+// Cached agent list from .agent-portal/agents/*.md (refreshes every 5s).
 let _agentCache = null;
 let _agentCacheTime = 0;
 let _portalRoot = null;
 
-/** Set the portal root so agent-parser can find .agents/ */
+/** Set the portal root so agent-parser can find .agent-portal/ */
 export function setPortalRoot(root) { _portalRoot = root; }
 
 /** Get agent catalog (slug, icon, color, description, role). Cached 5s. */
 export function getAgentList() {
   if (_agentCache && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
   if (!_portalRoot) return [];
-  let agentsDir = join(_portalRoot, '.agents', 'agents');
-  let skillsDir = join(_portalRoot, '.agents', 'skills');
+  let agentsDir = join(_portalRoot, '.agent-portal', 'agents');
+  let skillsDir = join(_portalRoot, '.agent-portal', 'skills');
   let agents = loadAgents(agentsDir, skillsDir);
   _agentCache = getAgentCatalog(agents);
   _agentCacheTime = Date.now();
@@ -160,7 +160,7 @@ export function getAgentList() {
 
 // Adapter metadata — describes providers and their parameters.
 // The UI uses this to build dynamic cascading selects:
-//   pool → Agent (from .agents/agents/) → Provider → Model → ChatType
+//   pool → Agent (from .agent-portal/agents/) → Provider → Model → ChatType
 function buildAdapterMetadata() {
   let agentOptions = getAgentList().map(a => {
     // Humanize slug: backend-engineer → Backend Engineer, qa-engineer → QA Engineer
