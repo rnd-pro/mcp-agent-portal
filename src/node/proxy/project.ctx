@@ -1,4 +1,4 @@
 === PROJECT: proxy ===
-ARCH: {DESCRIBE}
-FLOW: {DESCRIBE}
+ARCH: MCP proxy layer bridging child MCP servers, chat WebSockets, task routing, and tool index
+FLOW: client WS/API requests -> agent-pool delegate_task -> task events -> StateGraph + WS updates
 STATS: 5 files|5 classes|2 functions

@@ -1,16 +1,13 @@
 --- chat-ws-server.js ---
 @sig 68171036
-@enrich: Replace each {DESCRIBE} below. Read chat-ws-server.js for context.
-  Rules: max 80ch, pipe|separated, abbrev (fn/ret/cfg/init/auth/db/msg).
-  Save this file after filling all markers. Remove @enrich lines when done.
-class ChatWsServer|7m|{DESCRIBE}
-  .handleUpgrade()|{DESCRIBE}
-  ._handleChatSend()|{DESCRIBE}
-  ._handleChatResume()|{DESCRIBE}
-  ._handleChatCancel()|{DESCRIBE}
-  .subscribe()|{DESCRIBE}
-  .unsubscribe()|{DESCRIBE}
-  .broadcastTaskEvent()|{DESCRIBE}
+class ChatWsServer|7m|upgrades chat sockets and binds chat sessions to agent task streams
+  .handleUpgrade()|creates WS server and dispatches chat.send/resume/cancel messages
+  ._handleChatSend()|creates or resolves chat, delegates prompt, subscribes to task id
+  ._handleChatResume()|resubscribes existing task and recovers completed/lost state
+  ._handleChatCancel()|resolves task id and forwards cancel_task to agent-pool
+  .subscribe()|adds websocket client to task subscription and maps task to chat
+  .unsubscribe()|removes all websocket clients for a task
+  .broadcastTaskEvent()|sends task event payloads with chat ownership metadata
   CALLS→data.toString,JSON.parse,_handleChatSend,_handleChatResume,_handleChatCancel,console.error,JSON.stringify,ws.send
-PATTERNS: {DESCRIBE}
-EDGE_CASES: {DESCRIBE}
+PATTERNS: task-id subscription map|chat/task ownership map|StateGraph resume recovery
+EDGE_CASES: CLI-created chat fallback|lost in-memory task after restart|dead pid recovery errors
