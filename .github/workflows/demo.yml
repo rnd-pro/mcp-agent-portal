@@ -20,8 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Checkout demo submodules
+        run: git submodule update --init --depth=1 packages/symbiote-node
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
