@@ -34,6 +34,7 @@ import { persistUiValue, readUiValue } from '../common/ui-state.js';
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
+import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-routing.js';
 export class DepGraph extends Symbiote {
   init$ = {};
 
@@ -125,13 +126,12 @@ export class DepGraph extends Symbiote {
         const path = e.detail.path;
         const hash = path ? `#graph/${path}` : `#graph`;
         // Preserve mode query param but clear focus= when returning to root
-        let searchStr = window.location.hash.includes('?') ? '?' + window.location.hash.split('?')[1] : '';
-        if (!path && searchStr) {
+        const { params } = parseGraphHash();
+        if (!path) {
           // Remove focus param when exiting to root
-          const params = new URLSearchParams(searchStr.slice(1));
           params.delete('focus');
-          searchStr = params.toString() ? '?' + params.toString() : '';
         }
+        const searchStr = params.toString() ? '?' + params.toString() : '';
         history.replaceState(null, '', hash + searchStr);
       }
     });
@@ -205,8 +205,7 @@ export class DepGraph extends Symbiote {
       });
     });
 
-    const searchStr = window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
-    const urlParams = new URLSearchParams(searchStr);
+    const urlParams = getGraphUrlParams();
     // Support both ?mode=flat and legacy ?flat=true
     const modeParam = urlParams.get('mode') || (urlParams.get('flat') === 'true' ? 'flat' : null);
     this._viewMode = modeParam === 'flat' ? 'flat' : 'structured';
@@ -456,14 +455,10 @@ export class DepGraph extends Symbiote {
       if (!hash.startsWith('#graph')) return;
       
       if (this._viewMode === 'flat') {
-        const [hashBase, queryStr] = hash.replace('#', '').split('?');
-        const hashParams = hashBase.split('/');
-        if (hashParams[0] === 'graph') hashParams.shift();
-        const pathStr = hashParams.join('/');
+        const { path: pathStr, params } = parseGraphHash(hash);
         if (this._pgCanvasGraph) this._pgCanvasGraph.setPath(pathStr);
         // Parse and apply focus= parameter
-        if (queryStr) {
-          const params = new URLSearchParams(queryStr);
+        if (params.size) {
           const focusParam = params.get('focus');
           if (focusParam && this._pgCanvasGraph) {
             this._pgCanvasGraph.flyToNode(decodeURIComponent(focusParam));
@@ -522,20 +517,13 @@ export class DepGraph extends Symbiote {
    * Parses the hash, extracts path drill + focus param, and calls flyToNode.
    */
   _restoreFlatFocus() {
-    const hash = window.location.hash;
-    const [hashBase, queryStr] = hash.replace('#', '').split('?');
-    
-    // Apply drill path if present: #graph/src/core/ → setPath('src/core')
-    const hashParams = hashBase.split('/');
-    if (hashParams[0] === 'graph') hashParams.shift();
-    const pathStr = hashParams.join('/');
+    const { path: pathStr, params } = parseGraphHash();
     if (pathStr && this._pgCanvasGraph) {
       this._pgCanvasGraph.setPath(pathStr);
     }
     
     // Apply focus= if present
-    if (queryStr) {
-      const params = new URLSearchParams(queryStr);
+    if (params.size) {
       const focusParam = params.get('focus');
       if (focusParam && this._pgCanvasGraph) {
         const decoded = decodeURIComponent(focusParam);
@@ -566,12 +554,6 @@ export class DepGraph extends Symbiote {
   }
 
   /**
-   * Update a single URL hash parameter without page reload.
-   * Preserves existing hash path and other params.
-   * @param {string} key - Parameter name (e.g. 'mode', 'focus')
-   * @param {string|null} value - Parameter value, null to remove
-   */
-  /**
    * Show/hide toolbar buttons that only apply in structured mode.
    * @param {string} mode - 'flat' or 'structured'
    */
@@ -583,17 +565,7 @@ export class DepGraph extends Symbiote {
   }
 
   _updateHashParam(key, value) {
-    const hash = window.location.hash;
-    const [basePath, queryStr] = hash.split('?');
-    const params = new URLSearchParams(queryStr || '');
-    if (value === null || value === undefined) {
-      params.delete(key);
-    } else {
-      params.set(key, value);
-    }
-    const newQuery = params.toString();
-    const newHash = newQuery ? `${basePath}?${newQuery}` : basePath;
-    history.replaceState(null, '', newHash);
+    updateHashParam(key, value);
   }
 
   /**
@@ -785,13 +757,7 @@ export class DepGraph extends Symbiote {
         this._pgCanvasGraph.setSkeleton(skeleton);
         
         // Restore path from URL
-        const hashData = location.hash.replace('#', '').split('?')[0];
-        const hashParams = hashData.split('/');
-        if (hashParams[0] === 'graph') {
-          hashParams.shift(); // remove "graph"
-        }
-        const pathStr = hashParams.join('/');
-        this._pgCanvasGraph.setPath(pathStr);
+        this._pgCanvasGraph.setPath(parseGraphHash().path);
       } else {
         this._hideLoader();
       }
@@ -852,8 +818,7 @@ export class DepGraph extends Symbiote {
 
     // Apply settings
     this._canvas.setReadonly(true);
-    const searchStr = window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
-    const urlParams = new URLSearchParams(searchStr);
+    const urlParams = getGraphUrlParams();
     this._canvas.setPathStyle(urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb'));
 
     // Auto-layout
@@ -1130,8 +1095,7 @@ export class DepGraph extends Symbiote {
             this._canvas.refreshConnections();
 
             if (window.location.hash.includes('focus=')) {
-              const searchStr = window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
-              const params = new URLSearchParams(searchStr);
+              const params = getGraphUrlParams();
               const focusParam = params.get('focus');
               if (focusParam && this._router) {
                 // Defer to allow DOM to settle, then fly to the correct newly measured position
@@ -1457,8 +1421,7 @@ export class DepGraph extends Symbiote {
           } else {
              // Handle late layout updates for drilled views
              if (window.location.hash.includes('focus=')) {
-               const searchStr = window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
-               const params = new URLSearchParams(searchStr);
+               const params = getGraphUrlParams();
                const focusParam = params.get('focus');
                if (focusParam && this._router) {
                  this._router.navigateTo(decodeURIComponent(focusParam));
