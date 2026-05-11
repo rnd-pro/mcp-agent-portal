@@ -92,3 +92,18 @@ export function resolveFlatHashChange(hash) {
     focus: focus ? decodeURIComponent(focus) : null,
   };
 }
+
+export function getGraphHashNavigationState(hash = '') {
+  const hasPath = /^#graph\//.test(hash);
+  const hasParams = hash.includes('?');
+
+  return {
+    hasPath,
+    hasParams,
+    shouldRestore: hasPath || hasParams,
+  };
+}
+
+export function shouldFitForceLayoutInitialTick(hash = '') {
+  return !(hash.includes('?') || hash.includes('focus='));
+}

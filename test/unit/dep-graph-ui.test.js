@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
+  getGraphHashNavigationState,
   resolveFlatHashChange,
   resolveGraphNodeClick,
   resolveToolbarAction,
   selectLabelMode,
   shouldClearFocusOnSelection,
+  shouldFitForceLayoutInitialTick,
 } from '../../web/panels/dep-graph-ui.js';
 
 test('buildFlatPathHash preserves query params for nested paths', () => {
@@ -174,4 +176,28 @@ test('resolveFlatHashChange returns path and decoded focus for graph hashes', ()
     { path: '', focus: 'src/app.js' },
   );
   assert.equal(resolveFlatHashChange('#dashboard'), null);
+});
+
+test('getGraphHashNavigationState detects graph paths and query params', () => {
+  assert.deepEqual(getGraphHashNavigationState('#graph/src/components'), {
+    hasPath: true,
+    hasParams: false,
+    shouldRestore: true,
+  });
+  assert.deepEqual(getGraphHashNavigationState('#graph?focus=src/app.js'), {
+    hasPath: false,
+    hasParams: true,
+    shouldRestore: true,
+  });
+  assert.deepEqual(getGraphHashNavigationState('#graph'), {
+    hasPath: false,
+    hasParams: false,
+    shouldRestore: false,
+  });
+});
+
+test('shouldFitForceLayoutInitialTick skips fit when graph hash has params', () => {
+  assert.equal(shouldFitForceLayoutInitialTick('#graph'), true);
+  assert.equal(shouldFitForceLayoutInitialTick('#graph?focus=src/app.js'), false);
+  assert.equal(shouldFitForceLayoutInitialTick('#graph?mode=flat'), false);
 });

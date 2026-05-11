@@ -49,11 +49,13 @@ import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
+  getGraphHashNavigationState,
   resolveFlatHashChange,
   resolveGraphNodeClick,
   resolveToolbarAction,
   selectLabelMode,
   shouldClearFocusOnSelection,
+  shouldFitForceLayoutInitialTick,
 } from './dep-graph-ui.js';
 export class DepGraph extends Symbiote {
   init$ = {};
@@ -792,16 +794,12 @@ export class DepGraph extends Symbiote {
           this._canvas.style.transition = 'opacity 0.2s ease-in';
           this._canvas.style.opacity = '1';
           // Only fitView on first tick if there's no focus= param to preserve
-          const _hashHasFocus = window.location.hash.includes('?') || window.location.hash.includes('focus=');
-          if (!_hashHasFocus) {
+          if (shouldFitForceLayoutInitialTick(window.location.hash)) {
             this._canvas.fitView();
           }
           // In continuous mode: restore hash navigation after initial convergence settles
           setTimeout(() => {
-            const fullHash = window.location.hash;
-            const hasPath = /^#graph\//.test(fullHash);
-            const hasParams = fullHash.includes('?');
-            if (hasPath || hasParams) {
+            if (getGraphHashNavigationState(window.location.hash).shouldRestore) {
               if (this._router) {
                 this._router.restoreFromHash(editor);
               } else if (this._pgCanvasGraph) {
@@ -833,10 +831,7 @@ export class DepGraph extends Symbiote {
           this._hideLoader();
         }
         // Restore focus/hash navigation now that all node positions are final
-        const fullHash = window.location.hash;
-        const hasPath = /^#graph\//.test(fullHash);
-        const hasParams = fullHash.includes('?');
-        if (hasPath || hasParams) {
+        if (getGraphHashNavigationState(window.location.hash).shouldRestore) {
           if (this._router) {
             this._router.restoreFromHash(editor);
           } else if (this._pgCanvasGraph) {
@@ -1144,10 +1139,7 @@ export class DepGraph extends Symbiote {
             // Reveal canvas and fit view on convergence
             if (!this._initialViewRestored) {
               this._initialViewRestored = true;
-              const fullHash = window.location.hash;
-              const hasPath = /^#graph\//.test(fullHash);
-              const hasParams = fullHash.includes('?');
-              if (hasPath || hasParams) {
+              if (getGraphHashNavigationState(window.location.hash).shouldRestore) {
                 if (this._router) {
                   this._router.restoreFromHash(editor);
                 } else if (this._pgCanvasGraph) {
@@ -1199,10 +1191,7 @@ export class DepGraph extends Symbiote {
         this._initialViewRestored = true;
 
         // restoreFromHash handles path, ?focus=, and ?in= params
-        const fullHash = window.location.hash;
-        const hasPath = /^#graph\//.test(fullHash);
-        const hasParams = fullHash.includes('?');
-        if (hasPath || hasParams) {
+        if (getGraphHashNavigationState(window.location.hash).shouldRestore) {
           if (this._router) {
             this._router.restoreFromHash(editor);
           } else if (this._pgCanvasGraph) {
