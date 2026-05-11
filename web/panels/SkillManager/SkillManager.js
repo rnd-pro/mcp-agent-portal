@@ -158,10 +158,7 @@ export class SkillManager extends Symbiote {
           </div>
           <div class="ui-field">
             <label>Scope / Tier</label>
-            <select id="s-scope">
-              <option value="project">Project (.gemini/skills)</option>
-              <option value="global">Global (~/.gemini/skills)</option>
-            </select>
+            <input type="text" value="Project (.agent-portal/skills)" disabled>
           </div>
           <div class="ui-field">
             <label>Instructions (Markdown) *</label>
@@ -175,7 +172,7 @@ export class SkillManager extends Symbiote {
     this.ref.mainContent.querySelector('#save-btn').onclick = async () => {
       let name = this.ref.mainContent.querySelector('#s-name').value;
       let desc = this.ref.mainContent.querySelector('#s-desc').value;
-      let scope = this.ref.mainContent.querySelector('#s-scope').value;
+      let scope = 'project';
       let inst = this.ref.mainContent.querySelector('#s-inst').value;
       
       if (!name || !desc || !inst) return alert('Name, description, and instructions are required');
