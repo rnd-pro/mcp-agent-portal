@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { getRoute, setDefaultPanel, navigate } from 'symbiote-node';
 import { panelTypes, getHomeSections, getProjectSections, getLayout, hasSection } from '../../router-registry.js';
 import { emit as dashEmit } from '../../dashboard-state.js';
+import { persistLayout, readLayout } from '../../common/ui-state.js';
 import tpl from './PgWorkspace.tpl.js';
 
 /**
@@ -42,6 +43,10 @@ export class PgWorkspace extends Symbiote {
 
     // Disable automatic ROUTER/panel subscription in sidebar
     this.ref.sidebar.routerSync = false;
+
+    this.ref.layout.sub?.('layoutTree', (tree) => {
+      if (this._layoutStorageKey && tree) persistLayout(this._layoutStorageKey, tree);
+    });
 
     // Active state handler — core freeze/unfreeze logic
     this.sub('active', (val) => {
@@ -125,12 +130,13 @@ export class PgWorkspace extends Symbiote {
     if (hasSection(section) && section !== this.lastSection) {
       this.lastSection = section;
       let storageKey = `pg-layout-v4-${this._projectId}-${section}`;
+      this._layoutStorageKey = storageKey;
       this.ref.layout.$['@storage-key'] = storageKey;
 
-      let saved = localStorage.getItem(storageKey);
+      let saved = readLayout(storageKey);
       if (saved) {
         try {
-          this.ref.layout.setLayout(JSON.parse(saved));
+          this.ref.layout.setLayout(saved);
         } catch (err) {
           this._fallbackLayout(section);
         }

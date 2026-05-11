@@ -35,4 +35,31 @@ describe('api-routes', () => {
     let handled = dispatch(routes, req, res);
     assert.equal(handled, false, 'unknown route should not be handled');
   });
+
+  it('POST /api/ui rejects non-UI state paths', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+
+    let routes = createRoutes({
+      proxyManager: { servers: new Map(), config: {}, getStatus() { return []; } },
+      projectRoot: '/tmp',
+    });
+
+    let req = {
+      on(event, cb) {
+        if (event === 'data') cb(JSON.stringify({ path: 'settings/mcpServers', value: {} }));
+        if (event === 'end') cb();
+      },
+    };
+    let status;
+    let payload;
+    let res = {
+      writeHead(code) { status = code; },
+      end(body) { payload = JSON.parse(body); },
+    };
+
+    await routes['POST /api/ui'](req, res);
+
+    assert.equal(status, 400);
+    assert.match(payload.error, /Invalid UI state path/);
+  });
 });

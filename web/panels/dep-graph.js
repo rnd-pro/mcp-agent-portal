@@ -29,6 +29,7 @@ import {
   PCB_DARK,
 } from 'symbiote-node';
 import { api, state, events, emit } from '../app.js';
+import { persistUiValue, readUiValue } from '../common/ui-state.js';
 
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
@@ -435,7 +436,7 @@ export class DepGraph extends Symbiote {
     // Connection Path Style toggling
     const pathStyleBtn = this.querySelector('[data-action="path-style"]');
     if (pathStyleBtn) {
-      let currentStyle = urlParams.get('style') || window.localStorage.getItem('connection-style') || 'pcb';
+      let currentStyle = urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb');
       const styles = ['pcb', 'bezier', 'orthogonal', 'straight'];
       
       const updateStyleUI = () => {
@@ -460,7 +461,7 @@ export class DepGraph extends Symbiote {
       pathStyleBtn.addEventListener('click', () => {
         const idx = styles.indexOf(currentStyle);
         currentStyle = styles[(idx + 1) % styles.length] || 'pcb';
-        window.localStorage.setItem('connection-style', currentStyle);
+        persistUiValue('ui/preferences/graphStyle', currentStyle, 'connection-style');
         this._canvas.setPathStyle(currentStyle);
         updateStyleUI();
       });
@@ -1026,7 +1027,7 @@ export class DepGraph extends Symbiote {
     this._canvas.setReadonly(true);
     const searchStr = window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
     const urlParams = new URLSearchParams(searchStr);
-    this._canvas.setPathStyle(urlParams.get('style') || window.localStorage.getItem('connection-style') || 'pcb');
+    this._canvas.setPathStyle(urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb'));
 
     // Auto-layout
     const rawPos = this._canvas.getPositions() || {};

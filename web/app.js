@@ -31,6 +31,7 @@ import "./panels/PeerReview/PeerReview.js";
 import "./components/ProjectTabs/ProjectTabs.js";
 import { state as dashState, events as dashEvents, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
+import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
 
 export const state = { skeleton: null, activeFile: null, ws: null, monitorEvents: [] };
 export { formatStats } from "./stats-format.js";
@@ -193,11 +194,7 @@ let _currentProjectId = undefined;
  */
 function getSubPanelsForSection(sectionId, projectId) {
   let storageKey = `pg-layout-v4-${projectId || 'global'}-${sectionId}`;
-  let saved = localStorage.getItem(storageKey);
-  let tree;
-  if (saved) {
-    try { tree = JSON.parse(saved); } catch (e) {}
-  }
+  let tree = readLayout(storageKey);
   if (!tree) {
     let fallback = getLayout(sectionId);
     if (fallback) tree = fallback;
@@ -253,11 +250,7 @@ function handleProjectSwitch(projectId) {
 
   // Update dashboard state (single source of truth for other panels)
   dashState.activeProjectId = projectId;
-  if (projectId) {
-    localStorage.setItem('pg-active-project-id', projectId);
-  } else {
-    localStorage.removeItem('pg-active-project-id');
-  }
+  persistUiValue('ui/activeProjectId', projectId || null, 'pg-active-project-id');
 
   // Clear active chat if it does not belong to the new project
   if (dashState.activeChatId) {
@@ -322,10 +315,10 @@ function handleRoute() {
     let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
     layout.$['@storage-key'] = storageKey;
 
-    let saved = localStorage.getItem(storageKey);
+    let saved = readLayout(storageKey);
     if (saved) {
       try {
-        layout.setLayout(JSON.parse(saved));
+        layout.setLayout(saved);
       } catch (err) {
         let fallback = getLayout(section);
         if (fallback) layout.setLayout(fallback);
@@ -386,6 +379,11 @@ async function u() {
           sidebar.updateSubPanels(_currentSection, panelsToSet);
         });
 
+        layout.sub?.('layoutTree', (tree) => {
+          let storageKey = layout.$['@storage-key'];
+          if (storageKey && tree) persistLayout(storageKey, tree);
+        });
+
         // Listen for panel close requests from the sidebar submenu
         sidebar.addEventListener('panel-close', (e) => {
           let pid = e.detail?.panelId;
@@ -417,16 +415,19 @@ async function u() {
     // Connect StateGraph sync for reactive task/chat/settings updates
     stateSync.connect();
 
+    let uiRes = {};
     try {
-      const [histRes, cliRes, chatRes] = await Promise.all([
+      const [histRes, cliRes, chatRes, uiStateRes] = await Promise.all([
         fetch('/api/projects/history').then(r => r.json()),
         fetch('/api/cli/config').then(r => r.json()),
         fetch('/api/chats').then(r => r.json()),
+        fetch('/api/ui').then(r => r.json()).catch(() => ({})),
       ]);
       dashState.projectHistory = histRes.projects || [];
       dashState.openProjectIds = histRes.activeIds || [];
       dashState.globalCli = cliRes.global || {};
       dashState.chats = chatRes.chats || [];
+      uiRes = uiStateRes || {};
       dashEmit('projects-history-updated', dashState.projectHistory);
       dashEmit('chats-updated');
       updateTopbarPath();
@@ -439,10 +440,10 @@ async function u() {
     localStorage.removeItem("pg-layout-v3");
 
     // Initial sidebar + route setup
-    let savedProjectId = localStorage.getItem('pg-active-project-id');
+    let savedProjectId = readUiValue('ui/activeProjectId', 'pg-active-project-id', null);
     let route = getRoute();
     let globals = parseQuery(route.query);
-    let initialProjectId = globals.project || savedProjectId || null;
+    let initialProjectId = globals.project || uiRes.activeProjectId || savedProjectId || null;
 
     // If no hash or default, navigate to appropriate default
     if (!location.hash || location.hash === '#' || location.hash === '#default') {

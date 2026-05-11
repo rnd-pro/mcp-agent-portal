@@ -147,6 +147,28 @@ export function createRoutes(ctx) {
       res.end(JSON.stringify(sg.getSettings()));
     },
 
+    'GET /api/ui': (req, res) => {
+      let sg = getStateGraph();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(sg.get('ui') || {}));
+    },
+
+    'POST /api/ui': async (req, res) => {
+      try {
+        let { path, value } = await parseBody(req);
+        if (!path || (!path.startsWith('ui/') && !path.startsWith('layouts/'))) {
+          throw new Error('Invalid UI state path');
+        }
+        let sg = getStateGraph();
+        sg.set(path, value, 'http');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
     'POST /api/settings': async (req, res) => {
       try {
         let settings = await parseBody(req);

@@ -3,6 +3,7 @@ import { state as dashState, events as dashEvents, emit as dashEmit } from "../.
 import { setGlobalParam } from 'symbiote-node';
 import template from './ChatSidebar.tpl.js';
 import { stateSync } from '../../state-sync.js';
+import { persistUiValue, readUiValue } from '../../common/ui-state.js';
 import './ChatSidebarItem.js';
 
 export class ChatSidebar extends Symbiote {
@@ -91,12 +92,7 @@ export class ChatSidebar extends Symbiote {
   }
 
   initCallback() {
-    let saved = localStorage.getItem('pg-chat-sidebar-collapsed');
-    if (saved !== null) {
-      this.$.navCollapsed = saved === 'true';
-    } else {
-      this.$.navCollapsed = false;
-    }
+    this.$.navCollapsed = readUiValue('ui/preferences/chatNavCollapsed', 'pg-chat-sidebar-collapsed', false) === true;
 
     // On cold load, dashState.chats may already be populated by app.js init.
     // Render immediately if available, then also async-fetch as backup.
@@ -109,9 +105,16 @@ export class ChatSidebar extends Symbiote {
     dashEvents.addEventListener('active-chat-changed', () => this._renderNavItems());
     
     this.sub('navCollapsed', (val) => {
-      localStorage.setItem('pg-chat-sidebar-collapsed', String(val));
+      persistUiValue('ui/preferences/chatNavCollapsed', Boolean(val), 'pg-chat-sidebar-collapsed');
       let nav = this.querySelector('.chat-nav');
       if (nav) nav.toggleAttribute('collapsed', val);
+    });
+
+    this._unsubUi = stateSync.on('ui', (ui) => {
+      let collapsed = ui?.preferences?.chatNavCollapsed;
+      if (collapsed !== undefined && collapsed !== this.$.navCollapsed) {
+        this.$.navCollapsed = Boolean(collapsed);
+      }
     });
 
     this._unsubChats = stateSync.on('chats', (chatsObj) => {
