@@ -34,6 +34,7 @@ import { persistUiValue, readUiValue } from '../common/ui-state.js';
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
+import { getDrillableFiles, getGraphCacheKey, getOrBuildGraph } from './dep-graph-build.js';
 import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
@@ -676,33 +677,29 @@ export class DepGraph extends Symbiote {
     if (this._canvas) this._canvas.style.display = '';
 
     // Cache key: reuse previously built graph for same skeleton+mode
-    const cacheKey = isStructured ? 'structured' : 'flat';
+    const cacheKey = getGraphCacheKey(isStructured);
     if (!this._graphCache) this._graphCache = {};
 
-    let editor, fileMap, dirFiles, dirNodeMap, idToPath, symbolMap;
-
-    if (this._graphCache[cacheKey] && this._graphCache[cacheKey].skeleton === skeleton) {
-      // Reuse cached build result — avoids 5+ second rebuild on mode toggle
-      ({ editor, fileMap, dirFiles, dirNodeMap, idToPath, symbolMap } = this._graphCache[cacheKey]);
-      this._setProgress(40, 'Building nodes…', `${editor.getNodes().length} nodes (cached)`);
-    } else {
-
+    const wasCached = this._graphCache[cacheKey]?.skeleton === skeleton;
+    if (!wasCached) {
       this._setProgress(15, 'Parsing graph…', isStructured ? 'structured mode' : 'flat mode');
-      if (isStructured) {
-        ({ editor, fileMap, dirFiles, dirNodeMap, idToPath, symbolMap } = buildStructuredGraph(skeleton));
-      } else {
-        ({ editor, fileMap, dirFiles, idToPath, symbolMap: symbolMap = new Map() } = buildFileGraph(skeleton));
-      }
-
-      this._setProgress(40, 'Building nodes…', `${editor.getNodes().length} nodes`);
-      this._graphCache[cacheKey] = { skeleton, editor, fileMap, dirFiles, dirNodeMap, idToPath, symbolMap };
     }
+    const { graph, cached } = getOrBuildGraph({
+      cache: this._graphCache,
+      skeleton,
+      isStructured,
+      buildStructuredGraphFn: buildStructuredGraph,
+      buildFileGraphFn: buildFileGraph,
+    });
+    const { editor, fileMap, dirFiles, dirNodeMap, idToPath, symbolMap } = graph;
+    this._setProgress(40, 'Building nodes…', `${editor.getNodes().length} nodes${cached ? ' (cached)' : ''}`);
+
     this._editor = editor;
     this._fileMap = fileMap;
     this._dirNodeMap = dirNodeMap;
     this._idToPath = idToPath;
     this._symbolMap = symbolMap;
-    this._drillableFiles = new Set([...symbolMap.values()].map(s => s.file));
+    this._drillableFiles = getDrillableFiles(symbolMap);
 
     if (this._router) this._router.destroy();
     this._router = new SubgraphRouter(this._canvas, {
