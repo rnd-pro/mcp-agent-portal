@@ -35,6 +35,7 @@ import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parse
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
+import { addDirectoryFrames, setGraphLayerVisible } from './dep-graph-frames.js';
 import { buildFlatGroups, computeInitialGraphPositions } from './dep-graph-layout.js';
 import {
   getNextPathStyle,
@@ -1491,18 +1492,6 @@ export class DepGraph extends Symbiote {
 
   // ── Phase 3: Directory Frames & Via Markers ──
 
-  /** @type {string[]} Directory color palette — PCB silkscreen tones */
-  static DIR_COLORS = [
-    'rgba(200, 117, 51, 0.25)',  // copper
-    'rgba(212, 160, 74, 0.20)',  // gold
-    'rgba(100, 180, 120, 0.20)', // solder mask green
-    'rgba(80, 150, 200, 0.20)',  // blue layer
-    'rgba(160, 100, 200, 0.20)', // purple trace
-    'rgba(200, 80, 80, 0.20)',   // power layer red
-    'rgba(120, 200, 200, 0.20)', // teal
-    'rgba(200, 180, 80, 0.20)',  // yellow
-  ];
-
   /**
    * Create directory grouping frames from dirFiles map and node positions
    * @param {NodeEditor} editor
@@ -1511,53 +1500,7 @@ export class DepGraph extends Symbiote {
    * @param {Object<string, {x: number, y: number}>} positions
    */
   _addDirectoryFrames(editor, fileMap, dirFiles, positions) {
-    if (!dirFiles || dirFiles.size < 2) return; // frames only useful with 2+ dirs
-
-    const padding = 30;
-    const nodeW = 120;
-    const nodeH = 80;
-    let colorIdx = 0;
-
-    for (const [dir, files] of dirFiles) {
-      if (files.length < 2) continue; // skip single-file dirs
-
-      // Compute bounding box of all nodes in this directory
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      let hasPositions = false;
-
-      for (const file of files) {
-        const nodeId = fileMap.get(file);
-        if (!nodeId) continue;
-        const pos = positions[nodeId];
-        if (!pos) continue;
-        hasPositions = true;
-
-        if (pos.x < minX) minX = pos.x;
-        if (pos.y < minY) minY = pos.y;
-        if (pos.x + nodeW > maxX) maxX = pos.x + nodeW;
-        if (pos.y + nodeH > maxY) maxY = pos.y + nodeH;
-      }
-
-      if (!hasPositions) continue;
-
-      // Create frame with padding
-      const dirLabel = dir.replace(/\/$/, '').split('/').pop() || 'root';
-      const color = DepGraph.DIR_COLORS[colorIdx % DepGraph.DIR_COLORS.length];
-      colorIdx++;
-
-      try {
-        const frame = new Frame(dirLabel, {
-          x: minX - padding,
-          y: minY - padding,
-          width: (maxX - minX) + padding * 2,
-          height: (maxY - minY) + padding * 2,
-          color,
-        });
-        editor.addFrame(frame);
-      } catch {
-        // Skip if frame creation fails
-      }
-    }
+    addDirectoryFrames({ editor, fileMap, dirFiles, positions, FrameClass: Frame });
   }
 
   /**
@@ -1566,23 +1509,7 @@ export class DepGraph extends Symbiote {
    * @param {boolean} visible
    */
   _toggleLayer(layer, visible) {
-    if (!this._canvas) return;
-
-    if (layer === 'zones') {
-      // Toggle all graph-frame elements
-      const frames = this._canvas.querySelectorAll('graph-frame');
-      for (const frame of frames) {
-        frame.style.display = visible ? '' : 'none';
-      }
-    } else if (layer === 'vias') {
-      // Toggle dash styling on via connections
-      // We use a data attribute on the canvas itself, CSS handles the rest
-      if (visible) {
-        this._canvas.removeAttribute('data-hide-vias');
-      } else {
-        this._canvas.setAttribute('data-hide-vias', '');
-      }
-    }
+    setGraphLayerVisible(this._canvas, layer, visible);
   }
 
   /**
