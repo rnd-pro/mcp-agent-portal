@@ -34,6 +34,7 @@ import { persistUiValue, readUiValue } from '../common/ui-state.js';
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
+import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 import { addDirectoryFrames, setGraphLayerVisible } from './dep-graph-frames.js';
 import { buildFlatGroups, computeInitialGraphPositions } from './dep-graph-layout.js';
@@ -1614,14 +1615,10 @@ export class DepGraph extends Symbiote {
    */
   _focusSymbol(symbol) {
     if (!this._skeleton) return;
-    // Try to find the file containing this symbol
-    for (const [key, data] of Object.entries(this._skeleton.n || {})) {
-      if (key === symbol && data.f) {
-        this._focusFile(data.f);
-        this._pulseFile(data.f);
-        return;
-      }
-    }
+    const filePath = resolveSymbolFile(this._skeleton, symbol);
+    if (!filePath) return;
+    this._focusFile(filePath);
+    this._pulseFile(filePath);
   }
 
   /**
@@ -1630,15 +1627,15 @@ export class DepGraph extends Symbiote {
    */
   _highlightDeps(symbol) {
     if (!this._skeleton) return;
-    const data = (this._skeleton.n || {})[symbol];
-    if (!data?.f) return;
+    const filePath = resolveSymbolFile(this._skeleton, symbol);
+    if (!filePath) return;
 
     // Focus + pulse the main file
-    this._focusFile(data.f);
-    this._pulseFile(data.f);
+    this._focusFile(filePath);
+    this._pulseFile(filePath);
 
     // Highlight connections from this file
-    const nodeId = this._fileMap.get(data.f);
+    const nodeId = this._fileMap.get(filePath);
     if (!nodeId) return;
 
     const connections = this._editor.getConnections()
@@ -1665,42 +1662,16 @@ export class DepGraph extends Symbiote {
     if (!this._skeleton) return;
 
     // Resolve files
-    const fromData = (this._skeleton.n || {})[fromSymbol];
-    const toData = (this._skeleton.n || {})[toSymbol];
-    const fromFile = fromData?.f;
-    const toFile = toData?.f;
+    const fromFile = resolveSymbolFile(this._skeleton, fromSymbol);
+    const toFile = resolveSymbolFile(this._skeleton, toSymbol);
     if (!fromFile || !toFile) return;
 
     const fromId = this._fileMap.get(fromFile);
     const toId = this._fileMap.get(toFile);
     if (!fromId || !toId) return;
 
-    // Find shortest path via BFS on connection graph
-    const adj = new Map();
-    for (const conn of this._editor.getConnections()) {
-      if (!adj.has(conn.from)) adj.set(conn.from, []);
-      adj.get(conn.from).push({ to: conn.to, connId: conn.id });
-    }
-
-    const visited = new Set([fromId]);
-    const queue = [[fromId, []]];
-    let path = null;
-
-    while (queue.length > 0) {
-      const [current, connPath] = queue.shift();
-      if (current === toId) {
-        path = connPath;
-        break;
-      }
-      for (const edge of (adj.get(current) || [])) {
-        if (!visited.has(edge.to)) {
-          visited.add(edge.to);
-          queue.push([edge.to, [...connPath, edge.connId]]);
-        }
-      }
-    }
-
-    if (!path || path.length === 0) return;
+    const path = findConnectionPath(this._editor.getConnections(), fromId, toId);
+    if (path.length === 0) return;
 
     // Focus on source node first
     this._animateToNode(fromId, 0.8, 300);
