@@ -26,6 +26,7 @@ const SERVER_VERSION = `${pkgJson.version}+${Date.now()}`;
 const CONFIG_PATH = path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
 
 const MAX_CRASHES = 10;
+const DISABLED_MCP_SERVERS = new Set(['context-x']);
 
 /**
  * Inactivity Watchdog
@@ -79,6 +80,10 @@ export class MCPProxyManager {
         let config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
         if (config.mcpServers) {
           for (let [name, settings] of Object.entries(config.mcpServers)) {
+            if (DISABLED_MCP_SERVERS.has(name)) {
+              console.error(`🟡 [config] Server "${name}" is disabled and will not be started`);
+              continue;
+            }
             let color = `hsl(${Math.floor(Math.random() * 360)}, 65%, 55%)`;
             this.servers.set(name, {
               ...settings,
@@ -913,4 +918,3 @@ export class MCPProxyManager {
 }
 
 export default MCPProxyManager;
-

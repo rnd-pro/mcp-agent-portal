@@ -62,7 +62,7 @@ describe('groups.js', () => {
     assert.strictEqual(getGroupNextModel(TEST_CWD, 'test-group'), 'modelA'); // Wraps around
 
     // Check persistence in file
-    const stateFile = path.join(TEST_CWD, '.agents', 'group-states.json');
+    const stateFile = path.join(TEST_CWD, '.agent-portal', 'group-states.json');
     assert.ok(fs.existsSync(stateFile));
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
     assert.strictEqual(state['test-group'].currentIndex, 1);

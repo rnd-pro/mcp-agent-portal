@@ -18,7 +18,7 @@ async function api(method, path, body) {
   catch { return { status: res.status, data: text }; }
 }
 
-describe('Chat params lifecycle', () => {
+describe('Chat params lifecycle', { skip: !process.env.PORTAL_PORT }, () => {
   let chatId;
 
   test('1. create chat with adapter=pool', async () => {

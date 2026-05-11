@@ -17,7 +17,7 @@ export class WorkflowExplorer extends Symbiote {
   }
 
   _mcpCall(toolName, args = {}) {
-    return mcpCall('context-x', toolName, args);
+    return mcpCall('agent-pool', toolName, args);
   }
 
   async loadWorkflows() {
@@ -130,9 +130,10 @@ export class WorkflowExplorer extends Symbiote {
   async loadStepContent(nodeId, containerElement) {
     containerElement.innerHTML = '<div class="ui-empty-state">Fetching markdown content...</div>';
     try {
-      let md = await this._mcpCall('get_workflow_content', { nodeId });
-      if (typeof md !== 'string') {
-        md = JSON.stringify(md, null, 2);
+      let data = await this._mcpCall('get_workflow_content', { nodeId });
+      let md = data;
+      if (typeof data !== 'string') {
+        md = data?.content || JSON.stringify(data, null, 2);
       }
       
       // We can use the existing <code-block> component in markdown mode

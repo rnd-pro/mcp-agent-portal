@@ -181,7 +181,7 @@ node index.js --master         # master — orchestrates client nodes
 IDE ──stdio──→ Portal (master)
                 ├── local: project-graph, agent-pool
                 ├──WSS──→ Client A (machine-1): browser-x, crypto
-                └──WSS──→ Client B (cloud-vm): terminal-x, context-x
+                └──WSS──→ Client B (cloud-vm): terminal-x, browser-x
 ```
 
 ## Web Dashboard
@@ -265,10 +265,6 @@ Portal configuration is stored at `~/.agent-portal/agent-portal.json`:
     "agent-pool": {
       "command": "node",
       "args": ["packages/agent-pool-mcp/index.js"]
-    },
-    "context-x": {
-      "command": "node",
-      "args": ["packages/context-x-mcp/src/mcp-server.js"]
     }
   },
   "projects": [],
@@ -288,8 +284,7 @@ Agent Portal aggregates the full RND-PRO MCP ecosystem:
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
-| [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |
-| context-x-mcp | Context enrichment, workflow discovery, script management | 🟡 Beta |
+| [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review, file tracking, workflow discovery | ✅ Production |
 | browser-x-mcp | Browser automation, form testing | 🟡 Beta |
 | terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
 
@@ -381,7 +376,6 @@ mcp-agent-portal/
 │   ├── symbiote-node/                # UI framework (layout, canvas, themes)
 │   ├── project-graph-mcp/            # Codebase analysis MCP server
 │   ├── agent-pool-mcp/               # Agent orchestration MCP server
-│   ├── context-x-mcp/                # Context enrichment MCP server
 │   ├── browser-x-mcp/                # Browser automation MCP server
 │   └── terminal-x-mcp/               # Terminal sessions MCP server
 ├── src/node/
@@ -491,8 +485,7 @@ mcp-agent-portal/
 ## Related Projects
 
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
-- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration via Gemini CLI
-- [context-x-mcp](https://github.com/rnd-pro/context-x-mcp) — Context enrichment and team memory
+- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration, file tracking, and workflow discovery
 - [browser-x-mcp](https://github.com/nicholasgriffintn/browser-x-mcp) — Browser automation MCP server
 - [terminal-x-mcp](https://github.com/nicholasgriffintn/terminal-x-mcp) — Terminal sessions MCP server
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework

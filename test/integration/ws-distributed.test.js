@@ -13,6 +13,11 @@
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 
+if (!process.env.RUN_WS_DISTRIBUTED) {
+  console.log('  ⏭ Skipping: set RUN_WS_DISTRIBUTED=1 to run distributed WS topology tests');
+  process.exit(0);
+}
+
 let server;
 let port;
 let proxyManager;

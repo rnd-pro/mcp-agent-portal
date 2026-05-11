@@ -6,11 +6,11 @@ import os from 'node:os';
 
 let parseFrontmatter, buildTagIndex, searchByTags, toLightList;
 
-const TEST_DIR = path.join(os.tmpdir(), `context-x-mcp-test-${Date.now()}`);
+const TEST_DIR = path.join(os.tmpdir(), `agent-pool-mcp-test-${Date.now()}`);
 
 describe('workflow-index', () => {
   before(async () => {
-    const mod = await import('../../packages/context-x-mcp/src/workflow-index.js');
+    const mod = await import('../../packages/agent-pool-mcp/src/tools/workflow-index.js');
     parseFrontmatter = mod.parseFrontmatter;
     buildTagIndex = mod.buildTagIndex;
     searchByTags = mod.searchByTags;

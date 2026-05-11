@@ -14,7 +14,7 @@ export class ActiveContext extends Symbiote {
     // Auto-refresh when tools are called
     events.addEventListener('global-tool-event', (e) => {
       let t = e.detail;
-      if (t && t.server === 'context-x' && (t.tool === 'track_files' || t.tool === 'untrack_files')) {
+      if (t && t.server === 'agent-pool' && (t.tool === 'track_files' || t.tool === 'untrack_files')) {
         setTimeout(() => this.loadContext(), 500);
       }
     });
@@ -23,7 +23,7 @@ export class ActiveContext extends Symbiote {
   async loadContext() {
     try {
       this.ref.fileList.innerHTML = '<div class="ui-empty-state" style="padding:10px;">Loading...</div>';
-      let res = await mcpCall('context-x', 'get_tracked_files', {});
+      let res = await mcpCall('agent-pool', 'get_tracked_files', {});
       
       let data = res;
       if (typeof data === 'string') {
@@ -60,7 +60,7 @@ export class ActiveContext extends Symbiote {
 
   async untrack(path) {
     try {
-      await mcpCall('context-x', 'untrack_files', { paths: [path] });
+      await mcpCall('agent-pool', 'untrack_files', { files: [path] });
       this.loadContext();
     } catch (e) {
       console.error('Untrack failed', e);

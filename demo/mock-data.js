@@ -29,17 +29,6 @@ export const instances = [
     projectPath: '/home/dev/mcp-agent-portal',
   },
   {
-    name: 'context-x-mcp',
-    prefix: '/cx',
-    command: 'node',
-    args: ['packages/context-x-mcp/index.js'],
-    pid: 41210,
-    color: '#34a853',
-    agents: 0,
-    projectName: 'mcp-agent-portal',
-    projectPath: '/home/dev/mcp-agent-portal',
-  },
-  {
     name: 'browser-x-mcp',
     prefix: '/bx',
     command: 'node',
@@ -1719,7 +1708,7 @@ export const skeleton = {
       "AT2",
       "TR3"
     ],
-    "packages/context-x-mcp/src/script-store.js": [
+    "packages/agent-pool-mcp/src/script-store.js": [
       "sS4",
       "lS2"
     ],
@@ -1757,17 +1746,17 @@ export const skeleton = {
       "APM",
       "PM4"
     ],
-    "packages/context-x-mcp/src/file-tracker.js": [
+    "packages/agent-pool-mcp/src/file-tracker.js": [
       "tF",
       "uF",
       "TF"
     ],
-    "packages/context-x-mcp/src/git-sync.js": [
+    "packages/agent-pool-mcp/src/git-sync.js": [
       "GR",
       "sM1",
       "AP1"
     ],
-    "packages/context-x-mcp/src/workflow-index.js": [
+    "packages/agent-pool-mcp/src/workflow-index.js": [
       "TI2",
       "BT",
       "LL"
@@ -2270,7 +2259,7 @@ export const skeleton = {
     "packages/agent-pool-mcp/src/tools/": [
       "scripts.js"
     ],
-    "packages/context-x-mcp/src/": [
+    "packages/agent-pool-mcp/src/": [
       "config.js",
       "mcp-server.js"
     ],
@@ -2442,10 +2431,10 @@ export const skeleton = {
       "orchestrator.md",
       "test-writer.md"
     ],
-    "packages/context-x-mcp/": [
+    "packages/agent-pool-mcp/": [
       "package.json"
     ],
-    "packages/context-x-mcp/workflows/debug_protocol/": [
+    ".agent-portal/workflows/debug_protocol/": [
       "01-reproduce.md",
       "02-localize.md",
       "03-hypothesize.md",
@@ -2454,10 +2443,10 @@ export const skeleton = {
       "06-verify-fix.md",
       "07-complete.md"
     ],
-    "packages/context-x-mcp/workflows/meta/": [
+    ".agent-portal/workflows/meta/": [
       "skill-reflect.md"
     ],
-    "packages/context-x-mcp/workflows/": [
+    ".agent-portal/workflows/": [
       "test-integration-workflow.md"
     ],
     "packages/project-graph-mcp/": [
@@ -3072,7 +3061,7 @@ export const skeleton = {
       "./tools/scripts.js",
       "./tools/board-store.js",
       "./agents/agent-resolver.js",
-      "../../context-x-mcp/src/file-tracker.js",
+      "../../agent-pool-mcp/src/file-tracker.js",
       "./tool-definitions.js",
       "node:fs",
       "node:path",
@@ -3118,21 +3107,21 @@ export const skeleton = {
       "node:url",
       "./markdown-parser.js"
     ],
-    "packages/context-x-mcp/src/config.js": [
+    "packages/agent-pool-mcp/src/config.js": [
       "node:fs",
       "node:path",
       "node:os"
     ],
-    "packages/context-x-mcp/src/file-tracker.js": [
+    "packages/agent-pool-mcp/src/file-tracker.js": [
       "node:fs",
       "node:path"
     ],
-    "packages/context-x-mcp/src/git-sync.js": [
+    "packages/agent-pool-mcp/src/git-sync.js": [
       "child_process",
       "fs",
       "path"
     ],
-    "packages/context-x-mcp/src/mcp-server.js": [
+    "packages/agent-pool-mcp/src/mcp-server.js": [
       "./config.js",
       "./git-sync.js",
       "./workflow-index.js",
@@ -3143,11 +3132,11 @@ export const skeleton = {
       "./script-store.js",
       "./file-tracker.js"
     ],
-    "packages/context-x-mcp/src/script-store.js": [
+    "packages/agent-pool-mcp/src/script-store.js": [
       "node:fs",
       "node:path"
     ],
-    "packages/context-x-mcp/src/workflow-index.js": [
+    "packages/agent-pool-mcp/src/workflow-index.js": [
       "node:fs",
       "node:path"
     ],
@@ -4313,10 +4302,6 @@ export const toolsByServer = {
     { name: 'list_skills', description: 'List available agent skills and policies.', inputSchema: { type: 'object', properties: {} } },
     { name: 'create_group', description: 'Create a named agent group for coordinated work.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, agents: { type: 'array' } }, required: ['name'] } },
   ],
-  'context-x': [
-    { name: 'search_context', description: 'Semantic search across codebase context.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, scope: { type: 'string' } }, required: ['query'] } },
-    { name: 'get_related', description: 'Find related files and symbols.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
-  ],
 };
 
 // ── Adapter Metadata ─────────────────────────────────────────────
@@ -4440,9 +4425,9 @@ export const skills = [
 // ── Workflows ────────────────────────────────────────────────────
 
 export const workflows = [
-  { name: 'publish', path: '.agents/workflows/publish.md', description: 'Cross-project publication workflow for Git and NPM.' },
-  { name: 'testing', path: '.agents/workflows/testing.md', description: 'Testing workflow and conventions.' },
-  { name: 'deploy', path: '.agents/workflows/deploy.md', description: 'Production deployment pipeline.' },
+  { name: 'publish', path: '.agent-portal/workflows/publish.md', description: 'Cross-project publication workflow for Git and NPM.' },
+  { name: 'testing', path: '.agent-portal/workflows/testing.md', description: 'Testing workflow and conventions.' },
+  { name: 'deploy', path: '.agent-portal/workflows/deploy.md', description: 'Production deployment pipeline.' },
 ];
 
 // ── Pipelines ────────────────────────────────────────────────────

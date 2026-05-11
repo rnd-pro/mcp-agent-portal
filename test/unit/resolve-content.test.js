@@ -12,8 +12,33 @@ describe('resolve-content.js', () => {
   before(() => {
     if (!fs.existsSync(TEST_CWD)) fs.mkdirSync(TEST_CWD, { recursive: true });
     
-    // Set up a mock context file to test active_files variable substitution
-    const contextDir = path.join(TEST_CWD, '.agents');
+    // Set up bundled-style workflows and active file context in the test project.
+    const workflowDir = path.join(TEST_CWD, '.agent-portal', 'workflows', 'debug_protocol');
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(path.join(workflowDir, '01-reproduce.md'), `---
+name: "Debug Protocol: Reproduce"
+workflow: debug_protocol
+tags:
+  - debug
+  - first-step
+description: "Entry point for the debug protocol."
+---
+
+# Step 1: Reproduce the Error
+`);
+    fs.writeFileSync(path.join(workflowDir, '03-hypothesize.md'), `---
+name: "Debug Protocol: Hypothesize"
+workflow: debug_protocol
+tags:
+  - debug
+  - hypothesize-step
+description: "Formulate a hypothesis."
+---
+
+# Step 3: Formulate Hypothesis
+`);
+
+    const contextDir = path.join(TEST_CWD, '.agent-portal');
     fs.mkdirSync(contextDir, { recursive: true });
     fs.writeFileSync(path.join(contextDir, 'active_context.json'), JSON.stringify(['src/main.js', 'src/util.js']));
   });

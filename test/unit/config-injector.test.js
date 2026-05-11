@@ -29,7 +29,7 @@ describe('Provider Config Injector', () => {
     assert.ok(tmpDir.includes('gemini-hub-'), 'Should be a gemini-hub temp dir');
     assert.deepEqual(envOverrides, { GEMINI_CLI_HOME: tmpDir }, 'Should return GEMINI_CLI_HOME env var');
     
-    let configPath = path.join(tmpDir, 'settings.json');
+    let configPath = path.join(tmpDir, '.gemini', 'settings.json');
     assert.ok(fs.existsSync(configPath), 'Should create settings.json');
     
     let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));

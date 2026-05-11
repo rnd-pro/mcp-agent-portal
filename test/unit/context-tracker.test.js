@@ -6,11 +6,11 @@ import os from 'node:os';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-context-test-${Date.now()}`);
 
-describe('context.js', () => {
+describe('file-tracker', () => {
   let trackFiles, untrackFiles, getTrackedFiles;
 
   before(async () => {
-    const mod = await import('../../packages/context-x-mcp/src/file-tracker.js');
+    const mod = await import('../../packages/agent-pool-mcp/src/tools/file-tracker.js');
     trackFiles = mod.trackFiles;
     untrackFiles = mod.untrackFiles;
     getTrackedFiles = mod.getTrackedFiles;

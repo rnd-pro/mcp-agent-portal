@@ -310,24 +310,7 @@ class Marketplace extends Symbiote {
     }
   }
   async loadOpenMemory() {
-    try {
-      this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">Loading open memory...</div>';
-      
-      let data = await mcpCall('context-x', 'list_open_memory');
-      let text = typeof data === 'string' ? data : (data && data.content ? data.content[0].text : '');
-      
-      if (text) {
-        let lines = text.split('\n').filter(l => l && !l.startsWith('Available'));
-        this._renderContextItems(lines);
-      } else if (Array.isArray(data)) {
-        this._renderContextItems(data);
-      } else {
-        throw new Error('Invalid response format');
-      }
-    } catch (err) {
-      console.error('[ERROR] [marketplace] Failed to load open memory:', err);
-      this.ref.contextGrid.innerHTML = `<div class="ui-empty-state" style="color:#f87171">Failed to load open memory: ${err.message}. Make sure context-x-mcp is installed and running.</div>`;
-    }
+    this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">Open Memory marketplace is not connected. Use project skills and workflows from .agent-portal.</div>';
   }
 
   _renderContextItems(paths) {
@@ -396,15 +379,7 @@ class Marketplace extends Symbiote {
         throw new Error('No active project selected to install into.');
       }
       
-      let res = await mcpCall('context-x', 'install_memory_item', { itemPath, destination, projectPath });
-      
-      if (res.isError) {
-        throw new Error(res.content[0].text);
-      }
-      
-      statusDiv.innerHTML = 'Installed <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle">check_circle</span>';
-      statusDiv.style.color = '#10b981';
-      setTimeout(() => { statusDiv.textContent = ''; }, 3000);
+      throw new Error('Open Memory installation is no longer available.');
       
     } catch (err) {
       console.error(err);

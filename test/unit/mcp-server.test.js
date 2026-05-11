@@ -42,7 +42,7 @@ describe('mcp-server integration', () => {
 
   before(() => {
     // Spawn the MCP server as a child process
-    const serverPath = path.resolve('packages/context-x-mcp/src/mcp-server.js');
+    const serverPath = path.resolve('packages/agent-pool-mcp/index.js');
     serverProc = spawn('node', [serverPath], {
       env: { ...process.env, PIPELINE_RUN_ID: 'test' }
     });
@@ -64,7 +64,7 @@ describe('mcp-server integration', () => {
       clientInfo: { name: 'test-client', version: '1.0' }
     });
     
-    assert.strictEqual(res.serverInfo.name, 'context-x-mcp');
+    assert.strictEqual(res.serverInfo.name, 'agent-pool');
   });
 
   it('lists workflow tools via tools/list', async () => {

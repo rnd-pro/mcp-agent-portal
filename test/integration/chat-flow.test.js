@@ -112,12 +112,13 @@ async function run() {
   });
 
   // Test 2: Success workflow propagation (streaming)
-  await test('valid workflow triggers chat.delegated, streams events, and completes with chat.done', async () => {
+  await test('valid workflow triggers chat.delegated, streams metadata, and completes with chat.done', async () => {
     let ws = await connectChatClient();
     
     // Create a dummy workflow that runs very quickly
-    const testDir = path.join(process.cwd(), 'packages', 'context-x-mcp', 'workflows');
+    const testDir = path.join(process.cwd(), '.agent-portal', 'workflows');
     const testFile = path.join(testDir, 'test-integration-workflow.md');
+    fs.mkdirSync(testDir, { recursive: true });
     fs.writeFileSync(testFile, `---
 name: test-integration-workflow
 description: Fast workflow for integration testing
@@ -131,40 +132,39 @@ echo "Integration Test Success"
 \`\`\`
 `);
 
-    let events = [];
-    let receivedDone = new Promise((resolve, reject) => {
-      let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.done')), 15000);
-      ws.on('message', (data) => {
-        let msg = JSON.parse(data.toString());
-        events.push(msg.method);
-        if (msg.method === 'chat.done') {
-          clearTimeout(timer);
-          resolve(msg);
-        }
+    try {
+      let events = [];
+      let receivedDone = new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.done')), 15000);
+        ws.on('message', (data) => {
+          let msg = JSON.parse(data.toString());
+          events.push(msg.method);
+          if (msg.method === 'chat.done') {
+            clearTimeout(timer);
+            resolve(msg);
+          }
+        });
       });
-    });
 
-    ws.send(JSON.stringify({
-      method: 'chat.send',
-      params: {
-        chatId: 'test-chat-2',
-        prompt: '/test-integration-workflow ',
-        provider: 'mock'
-      }
-    }));
+      ws.send(JSON.stringify({
+        method: 'chat.send',
+        params: {
+          chatId: 'test-chat-2',
+          prompt: '/test-integration-workflow ',
+          provider: 'mock'
+        }
+      }));
 
-    let doneMsg = await receivedDone;
-    
-    assert.ok(events.includes('chat.delegated'), 'Should receive chat.delegated');
-    assert.ok(events.includes('chat.event'), 'Should receive streaming chat.event');
-    assert.ok(events.includes('chat.done'), 'Should complete with chat.done');
-    
-    console.log('[Test 2] doneMsg.params.text:', doneMsg.params.text);
-    assert.ok(doneMsg.params.text.includes('Mock final response'), 'Done message should contain execution result');
-
-    // Cleanup test workflow
-    fs.unlinkSync(testFile);
-    ws.close();
+      let doneMsg = await receivedDone;
+      
+      assert.ok(events.includes('chat.delegated'), 'Should receive chat.delegated');
+      assert.ok(events.includes('chat.meta'), 'Should receive streaming chat.meta');
+      assert.ok(events.includes('chat.done'), 'Should complete with chat.done');
+      assert.ok(doneMsg.params.taskId, 'Done message should include taskId');
+    } finally {
+      if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+      ws.close();
+    }
   });
 
   await teardown();

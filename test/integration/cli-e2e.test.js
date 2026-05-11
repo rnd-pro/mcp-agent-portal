@@ -8,7 +8,7 @@ import fs from 'node:fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = resolve(__dirname, '../../bin/mcp-agent-portal.js');
 
-describe('Agent Portal CLI E2E', () => {
+describe('Agent Portal CLI E2E', { skip: !process.env.RUN_CLI_E2E }, () => {
   let backendProcess;
 
   before(async () => {

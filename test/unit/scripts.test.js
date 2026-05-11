@@ -32,7 +32,7 @@ describe('scripts.js', () => {
 
   it('saveScript creates a file and returns relative path', () => {
     const relPath = saveScript(TEST_CWD, 'test-script', 'console.log("hello");', 'js');
-    assert.strictEqual(relPath, path.join('.agents', 'scripts', 'test-script.js'));
+    assert.strictEqual(relPath, path.join('.agent-portal', 'scripts', 'test-script.js'));
     
     const fullPath = path.join(TEST_CWD, relPath);
     assert.ok(fs.existsSync(fullPath));
@@ -45,6 +45,6 @@ describe('scripts.js', () => {
     assert.strictEqual(scripts[0].name, 'test-script');
     assert.strictEqual(scripts[0].ext, 'js');
     assert.ok(scripts[0].size > 0);
-    assert.strictEqual(scripts[0].path, path.join('.agents', 'scripts', 'test-script.js'));
+    assert.strictEqual(scripts[0].path, path.join('.agent-portal', 'scripts', 'test-script.js'));
   });
 });
