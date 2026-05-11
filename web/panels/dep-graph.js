@@ -34,6 +34,14 @@ import { persistUiValue, readUiValue } from '../common/ui-state.js';
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
+import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
+import { buildFlatGroups, computeInitialGraphPositions } from './dep-graph-layout.js';
+import {
+  getNextPathStyle,
+  renderPathStyleButton,
+  renderViewModeButton,
+  resolveInitialViewMode,
+} from './dep-graph-modes.js';
 import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-routing.js';
 export class DepGraph extends Symbiote {
   init$ = {};
@@ -80,34 +88,7 @@ export class DepGraph extends Symbiote {
 
   initCallback() {
     // Build DOM
-    this.innerHTML = `
-      <div class="pcb-toolbar">
-        <button class="pcb-btn" data-action="fit" title="Fit view">
-          <span class="material-symbols-outlined">fit_screen</span>
-          FIT
-        </button>
-        <div class="pcb-toolbar-sep"></div>
-        <button class="pcb-btn label-mode-btn pcb-structured-only" data-mode="always" data-active title="Always show labels">LBL:ALW</button>
-        <button class="pcb-btn label-mode-btn pcb-structured-only" data-mode="hover" title="Hover labels">LBL:HOV</button>
-        <button class="pcb-btn label-mode-btn pcb-structured-only" data-mode="focus" title="Focus labels">LBL:FOC</button>
-        <div class="pcb-toolbar-sep pcb-structured-only"></div>
-        <button class="pcb-btn pcb-layer-btn pcb-structured-only" data-layer="zones" data-active title="Toggle directory zones">ZONES</button>
-        <button class="pcb-btn pcb-layer-btn pcb-structured-only" data-layer="vias" data-active title="Toggle via markers">VIAS</button>
-        <div class="pcb-toolbar-sep"></div>
-        <button class="pcb-btn" data-action="view-mode" title="Toggle view: Flat ↔ Structured">
-          <span class="material-symbols-outlined">account_tree</span>
-          FLAT
-        </button>
-        <button class="pcb-btn pcb-structured-only" data-action="path-style" title="Toggle lines: PCB ↔ Bezier">
-          <span class="material-symbols-outlined">route</span>
-          PCB
-        </button>
-      </div>
-      <loading-overlay ref="loader"></loading-overlay>
-      <node-canvas connection-engine="canvas"></node-canvas>
-      <pg-canvas-graph></pg-canvas-graph>
-      <div class="pcb-stats"></div>
-    `;
+    this.innerHTML = DEP_GRAPH_TEMPLATE;
 
     this._canvas = this.querySelector('node-canvas');
     this._pgCanvasGraph = this.querySelector('pg-canvas-graph');
@@ -206,33 +187,15 @@ export class DepGraph extends Symbiote {
     });
 
     const urlParams = getGraphUrlParams();
-    // Support both ?mode=flat and legacy ?flat=true
-    const modeParam = urlParams.get('mode') || (urlParams.get('flat') === 'true' ? 'flat' : null);
-    this._viewMode = modeParam === 'flat' ? 'flat' : 'structured';
+    this._viewMode = resolveInitialViewMode(urlParams);
     const viewModeBtn = this.querySelector('[data-action="view-mode"]');
-    if (viewModeBtn) {
-      const icon = modeParam === 'flat' ? 'account_tree' : 'grid_view';
-      const text = modeParam === 'flat' ? 'FLAT' : 'TREE';
-      viewModeBtn.innerHTML = `<span class="material-symbols-outlined">${icon}</span>${text}`;
-      if (modeParam === 'flat') {
-        viewModeBtn.removeAttribute('data-active');
-      }
-    }
+    renderViewModeButton(viewModeBtn, this._viewMode);
     this._updateStructuredOnlyVisibility(this._viewMode);
     
     this._setMode = (newMode) => {
       if (this._viewMode === newMode) return;
       this._viewMode = newMode;
-      const label = this._viewMode === 'flat' ? 'FLAT' : 'TREE';
-      const icon = this._viewMode === 'flat' ? 'account_tree' : 'grid_view';
-      if (viewModeBtn) {
-        viewModeBtn.innerHTML = `<span class="material-symbols-outlined">${icon}</span>${label}`;
-        if (this._viewMode === 'structured') {
-          viewModeBtn.setAttribute('data-active', '');
-        } else {
-          viewModeBtn.removeAttribute('data-active');
-        }
-      }
+      renderViewModeButton(viewModeBtn, this._viewMode);
       this._updateStructuredOnlyVisibility(this._viewMode);
 
       // Persist mode in URL hash
@@ -263,30 +226,14 @@ export class DepGraph extends Symbiote {
     const pathStyleBtn = this.querySelector('[data-action="path-style"]');
     if (pathStyleBtn) {
       let currentStyle = urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb');
-      const styles = ['pcb', 'bezier', 'orthogonal', 'straight'];
       
       const updateStyleUI = () => {
-        let icon, text;
-        switch(currentStyle) {
-          case 'bezier': icon = 'timeline'; text = 'BEZIER'; break;
-          case 'orthogonal': icon = 'polyline'; text = 'ORTHO'; break;
-          case 'straight': icon = 'horizontal_rule'; text = 'STRAIGHT'; break;
-          case 'pcb':
-          default:
-            icon = 'route'; text = 'PCB'; break;
-        }
-        pathStyleBtn.innerHTML = `<span class="material-symbols-outlined">${icon}</span>${text}`;
-        if (currentStyle === 'pcb') {
-          pathStyleBtn.setAttribute('data-active', '');
-        } else {
-          pathStyleBtn.removeAttribute('data-active');
-        }
+        renderPathStyleButton(pathStyleBtn, currentStyle);
       };
       updateStyleUI();
       
       pathStyleBtn.addEventListener('click', () => {
-        const idx = styles.indexOf(currentStyle);
-        currentStyle = styles[(idx + 1) % styles.length] || 'pcb';
+        currentStyle = getNextPathStyle(currentStyle);
         persistUiValue('ui/preferences/graphStyle', currentStyle, 'connection-style');
         this._canvas.setPathStyle(currentStyle);
         updateStyleUI();
@@ -821,90 +768,18 @@ export class DepGraph extends Symbiote {
     const urlParams = getGraphUrlParams();
     this._canvas.setPathStyle(urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb'));
 
-    // Auto-layout
-    const rawPos = this._canvas.getPositions() || {};
-    const existingPositions = {};
-    for (const [id, coords] of Object.entries(rawPos)) {
-      if (typeof coords[0] === 'number' && !isNaN(coords[0]) &&
-          typeof coords[1] === 'number' && !isNaN(coords[1])) {
-        existingPositions[id] = { x: coords[0], y: coords[1] };
-      }
-    }
-
     // Groups for layout clustering (flat mode only — structured has fewer top-level nodes)
-    const groups = {};
-    if (!isStructured && dirFiles) {
-      for (const [dir, files] of dirFiles.entries()) {
-        const nodeIds = [];
-        for (const f of files) {
-          if (fileMap.has(f)) nodeIds.push(fileMap.get(f));
-        }
-        if (nodeIds.length > 0) groups[dir] = nodeIds;
-      }
-    }
+    const groups = !isStructured ? buildFlatGroups(dirFiles, fileMap) : {};
 
     // --- Layout strategy depends on mode ---
-    let positions;
-
-    if (isStructured && dirFiles) {
-      // TREE mode: directory tree layout (like file explorer)
-      // Build dirPaths map ONLY for nodes that are in the root editor
-      const dirPaths = {};
-      const rootNodeIds = new Set(editor.getNodes().map(n => n.id));
-      for (const [dir, nodeId] of dirNodeMap.entries()) {
-        if (rootNodeIds.has(nodeId)) {
-          dirPaths[nodeId] = dir;
-        }
-      }
-
-      positions = computeTreeLayout(editor, {
-        dirPaths,
-        nodeWidth: 250,
-        nodeHeight: 100,
-        gapX: 40,
-        gapY: 60,
-        startX: 60,
-        startY: 60,
-      });
-    } else {
-      // FLAT mode: group-aware circular initial positions for force simulation.
-      // AutoLayout (Sugiyama) creates a vertical line that ForceWorker cannot fix,
-      // so we start with a balanced 2D circular layout.
-      const allNodes = [...editor.getNodes()];
-      const totalNodes = allNodes.length;
-      const groupEntries = Object.entries(groups);
-      positions = {};
-
-      if (groupEntries.length > 1) {
-        // Place each group's centroid on a spiral, fan members around it
-        const globalRadius = Math.sqrt(totalNodes) * 80;
-        let groupIdx = 0;
-        for (const [, memberIds] of groupEntries) {
-          const angle = (2 * Math.PI * groupIdx) / groupEntries.length;
-          const r = globalRadius * (0.3 + 0.7 * (groupIdx / groupEntries.length));
-          const cx = Math.cos(angle) * r;
-          const cy = Math.sin(angle) * r;
-          const memberRadius = Math.sqrt(memberIds.length) * 60;
-          for (let mi = 0; mi < memberIds.length; mi++) {
-            const mAngle = (2 * Math.PI * mi) / memberIds.length;
-            positions[memberIds[mi]] = {
-              x: cx + Math.cos(mAngle) * memberRadius + (Math.random() - 0.5) * 20,
-              y: cy + Math.sin(mAngle) * memberRadius + (Math.random() - 0.5) * 20,
-            };
-          }
-          groupIdx++;
-        }
-      }
-
-      // Fill ungrouped nodes in a ring
-      for (const n of allNodes) {
-        if (!positions[n.id]) {
-          const angle = Math.random() * 2 * Math.PI;
-          const r = Math.sqrt(totalNodes) * 50 + Math.random() * 200;
-          positions[n.id] = { x: Math.cos(angle) * r, y: Math.sin(angle) * r };
-        }
-      }
-    }
+    const positions = computeInitialGraphPositions({
+      editor,
+      isStructured,
+      dirFiles,
+      dirNodeMap,
+      groups,
+      computeTreeLayoutFn: computeTreeLayout,
+    });
 
     this._canvas.setBatchMode(true);
     for (const [nodeId, pos] of Object.entries(positions)) {
