@@ -142,7 +142,7 @@ function buildFileGraph(skeleton) {
     dirFiles.get(dir).push(file);
   }
 
-  // TODO Phase 2: Create directory hub nodes when LOD zoom expansion is ready
+  // Phase 2 candidate: create directory hub nodes when LOD zoom expansion is ready.
   // Hub nodes without connections create disconnected groups — skip for now
 
   // Create file nodes (standard HTML nodes with icons)
