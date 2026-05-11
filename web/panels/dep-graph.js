@@ -45,6 +45,7 @@ import {
   resolveInitialViewMode,
 } from './dep-graph-modes.js';
 import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-routing.js';
+import { buildFlatPathHash, selectLabelMode } from './dep-graph-ui.js';
 export class DepGraph extends Symbiote {
   init$ = {};
 
@@ -107,15 +108,8 @@ export class DepGraph extends Symbiote {
     this._pgCanvasGraph.addEventListener('path-changed', (e) => {
       if (this._viewMode === 'flat' && this._initialViewRestored) {
         const path = e.detail.path;
-        const hash = path ? `#graph/${path}` : `#graph`;
-        // Preserve mode query param but clear focus= when returning to root
         const { params } = parseGraphHash();
-        if (!path) {
-          // Remove focus param when exiting to root
-          params.delete('focus');
-        }
-        const searchStr = params.toString() ? '?' + params.toString() : '';
-        history.replaceState(null, '', hash + searchStr);
+        history.replaceState(null, '', buildFlatPathHash(path, params));
       }
     });
     
@@ -164,11 +158,8 @@ export class DepGraph extends Symbiote {
     // Label Mode controls
     const labelBtns = this.querySelectorAll('.label-mode-btn');
     labelBtns.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        labelBtns.forEach(b => b.removeAttribute('data-active'));
-        btn.setAttribute('data-active', '');
-        const mode = btn.getAttribute('data-mode');
-        this._canvas.setAttribute('data-label-mode', mode);
+      btn.addEventListener('click', () => {
+        selectLabelMode(labelBtns, btn, this._canvas);
       });
     });
 
