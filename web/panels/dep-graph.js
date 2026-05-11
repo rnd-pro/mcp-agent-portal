@@ -36,7 +36,7 @@ import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
 import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
-import { addDirectoryFrames, setGraphLayerVisible } from './dep-graph-frames.js';
+import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
 import { buildFlatGroups, computeInitialGraphPositions } from './dep-graph-layout.js';
 import {
   getNextPathStyle,
@@ -176,15 +176,7 @@ export class DepGraph extends Symbiote {
     this.querySelectorAll('.pcb-layer-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const layer = btn.getAttribute('data-layer');
-        const isActive = btn.hasAttribute('data-active');
-        if (isActive) {
-          btn.removeAttribute('data-active');
-          btn.setAttribute('data-hidden', '');
-        } else {
-          btn.setAttribute('data-active', '');
-          btn.removeAttribute('data-hidden');
-        }
-        this._toggleLayer(layer, !isActive);
+        this._toggleLayer(layer, toggleLayerButtonState(btn));
       });
     });
 

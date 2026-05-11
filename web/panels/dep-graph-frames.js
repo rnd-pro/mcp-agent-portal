@@ -76,3 +76,15 @@ export function setGraphLayerVisible(canvas, layer, visible) {
     }
   }
 }
+
+export function toggleLayerButtonState(button) {
+  const isActive = button.hasAttribute('data-active');
+  if (isActive) {
+    button.removeAttribute('data-active');
+    button.setAttribute('data-hidden', '');
+  } else {
+    button.setAttribute('data-active', '');
+    button.removeAttribute('data-hidden');
+  }
+  return !isActive;
+}

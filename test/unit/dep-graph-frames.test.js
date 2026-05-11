@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { addDirectoryFrames, setGraphLayerVisible } from '../../web/panels/dep-graph-frames.js';
+import {
+  addDirectoryFrames,
+  setGraphLayerVisible,
+  toggleLayerButtonState,
+} from '../../web/panels/dep-graph-frames.js';
 
 test('addDirectoryFrames creates bounded frames for multi-file directories', () => {
   class TestFrame {
@@ -89,4 +93,27 @@ test('setGraphLayerVisible toggles via visibility attribute', () => {
 
   setGraphLayerVisible(canvas, 'vias', true);
   assert.equal(attrs.has('data-hide-vias:'), false);
+});
+
+test('toggleLayerButtonState flips active and hidden attributes', () => {
+  const attrs = new Set(['data-active']);
+  const button = {
+    hasAttribute(name) {
+      return attrs.has(name);
+    },
+    setAttribute(name) {
+      attrs.add(name);
+    },
+    removeAttribute(name) {
+      attrs.delete(name);
+    },
+  };
+
+  assert.equal(toggleLayerButtonState(button), false);
+  assert.equal(attrs.has('data-active'), false);
+  assert.equal(attrs.has('data-hidden'), true);
+
+  assert.equal(toggleLayerButtonState(button), true);
+  assert.equal(attrs.has('data-active'), true);
+  assert.equal(attrs.has('data-hidden'), false);
 });
