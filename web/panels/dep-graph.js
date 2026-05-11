@@ -45,7 +45,13 @@ import {
   resolveInitialViewMode,
 } from './dep-graph-modes.js';
 import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-routing.js';
-import { buildFlatPathHash, selectLabelMode } from './dep-graph-ui.js';
+import {
+  buildFlatPathHash,
+  getFileSelectionNodeId,
+  resolveGraphNodeClick,
+  resolveToolbarAction,
+  selectLabelMode,
+} from './dep-graph-ui.js';
 export class DepGraph extends Symbiote {
   init$ = {};
 
@@ -264,8 +270,7 @@ export class DepGraph extends Symbiote {
       const file = e.detail.path;
       if (file) {
         this._updateHashParam('focus', file);
-        // Strip trailing slash for directory paths — canvas-graph stores dirs without trailing /
-        const nodeId = file.endsWith('/') ? file.replace(/\/$/, '') : file;
+        const nodeId = getFileSelectionNodeId(file);
         if (this._viewMode === 'flat' && this._pgCanvasGraph) {
           this._pgCanvasGraph.flyToNode(nodeId);
         } else {
@@ -306,38 +311,15 @@ export class DepGraph extends Symbiote {
       
       const nodeId = nodeEl.getAttribute('node-id');
       const path = this._idToPath?.get(nodeId);
-      const isSymbol = this._symbolMap?.has(nodeId);
+      const symbol = this._symbolMap?.get(nodeId);
       const depth = this._router?.depth || 0;
+      const clickAction = resolveGraphNodeClick({ nodeId, path, symbol, depth, hash: window.location.hash });
+      if (!clickAction) return;
 
-      if (isSymbol) {
-        // Symbol click: keep current drill URL, append &symbol=
-        const sym = this._symbolMap.get(nodeId);
-        this._updateHashParam('symbol', sym.name);
-        // Highlight the parent file in the tree sidebar
-        if (sym.file) {
-          emit('file-selected', { path: sym.file, source: 'canvas' });
-        }
-      } else if (path) {
-        if (depth === 0) {
-          // Root level: path goes into ?focus= parameter
-          this._updateHashParam('focus', path);
-          this._updateHashParam('in', null);
-
-        } else {
-          // Inside a group: preserve drill context URL, set &focus= with relative name
-          const drillBase = window.location.hash.split('?')[0]; // e.g. #graph/src/analysis/
-          const drillPath = drillBase.replace('#graph/', '');
-          // Get relative name inside the drilled group
-          const relativeName = path.startsWith(drillPath) ? path.slice(drillPath.length) : path;
-          // Keep existing parameters except we update focus and ensure in=1 is set
-          this._updateHashParam('focus', relativeName);
-          this._updateHashParam('in', '1');
-          
-
-        }
-        // Sync: highlight file in the tree sidebar
-        emit('file-selected', { path, source: 'canvas' });
+      for (const [key, value] of clickAction.hashUpdates) {
+        this._updateHashParam(key, value);
       }
+      if (clickAction.fileEvent) emit('file-selected', clickAction.fileEvent);
 
     });
 
@@ -354,28 +336,22 @@ export class DepGraph extends Symbiote {
     // Toolbar custom actions (e.g. explore, view-code, enter)
     this.addEventListener('toolbar-action', (e) => {
       const { action, nodeId } = e.detail;
-      if (action === 'explore') {
-        if (this._viewMode === 'flat') {
-          this._pgCanvasGraph?.flyToNode(nodeId);
-        } else {
-          this._exploreFromNode(nodeId);
-        }
-      } else if (action === 'view-code') {
-        let file;
-        if (this._viewMode === 'flat') {
-          file = nodeId;
-        } else {
-          const path = this._idToPath?.get(nodeId);
-          const isSymbol = this._symbolMap?.has(nodeId);
-          file = isSymbol ? this._symbolMap.get(nodeId).file : path;
-        }
-        if (file) {
-          window.location.hash = `#explorer/${file}`;
-        }
-      } else if (action === 'enter') {
-        if (this._viewMode === 'flat' && this._pgCanvasGraph) {
-          this._pgCanvasGraph.drill(nodeId);
-        }
+      const toolbarAction = resolveToolbarAction({
+        action,
+        nodeId,
+        viewMode: this._viewMode,
+        path: this._idToPath?.get(nodeId),
+        symbol: this._symbolMap?.get(nodeId),
+      });
+
+      if (toolbarAction?.type === 'fly-to-node') {
+        this._pgCanvasGraph?.flyToNode(toolbarAction.nodeId);
+      } else if (toolbarAction?.type === 'explore-node') {
+        this._exploreFromNode(toolbarAction.nodeId);
+      } else if (toolbarAction?.type === 'open-file') {
+        window.location.hash = toolbarAction.hash;
+      } else if (toolbarAction?.type === 'drill-node') {
+        this._pgCanvasGraph?.drill(toolbarAction.nodeId);
       }
     });
 
