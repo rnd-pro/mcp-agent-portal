@@ -4,9 +4,11 @@ import assert from 'node:assert/strict';
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
+  resolveFlatHashChange,
   resolveGraphNodeClick,
   resolveToolbarAction,
   selectLabelMode,
+  shouldClearFocusOnSelection,
 } from '../../web/panels/dep-graph-ui.js';
 
 test('buildFlatPathHash preserves query params for nested paths', () => {
@@ -125,4 +127,51 @@ test('resolveToolbarAction maps toolbar actions to component effects', () => {
     resolveToolbarAction({ action: 'enter', nodeId: 'src/components', viewMode: 'flat' }),
     { type: 'drill-node', nodeId: 'src/components' },
   );
+});
+
+test('shouldClearFocusOnSelection only clears focus after restored deselection', () => {
+  assert.equal(
+    shouldClearFocusOnSelection({
+      selectedNodes: [],
+      initialViewRestored: true,
+      hash: '#graph?focus=src/app.js',
+    }),
+    true,
+  );
+  assert.equal(
+    shouldClearFocusOnSelection({
+      selectedNodes: ['node-1'],
+      initialViewRestored: true,
+      hash: '#graph?focus=src/app.js',
+    }),
+    false,
+  );
+  assert.equal(
+    shouldClearFocusOnSelection({
+      selectedNodes: [],
+      initialViewRestored: false,
+      hash: '#graph?focus=src/app.js',
+    }),
+    false,
+  );
+  assert.equal(
+    shouldClearFocusOnSelection({
+      selectedNodes: [],
+      initialViewRestored: true,
+      hash: '#graph',
+    }),
+    false,
+  );
+});
+
+test('resolveFlatHashChange returns path and decoded focus for graph hashes', () => {
+  assert.deepEqual(
+    resolveFlatHashChange('#graph/src/components?focus=Button.js&mode=flat'),
+    { path: 'src/components', focus: 'Button.js' },
+  );
+  assert.deepEqual(
+    resolveFlatHashChange('#graph?focus=src%2Fapp.js'),
+    { path: '', focus: 'src/app.js' },
+  );
+  assert.equal(resolveFlatHashChange('#dashboard'), null);
 });

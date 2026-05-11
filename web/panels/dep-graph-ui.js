@@ -71,3 +71,24 @@ export function resolveToolbarAction({ action, nodeId, viewMode, path, symbol })
 
   return null;
 }
+
+export function shouldClearFocusOnSelection({ selectedNodes = [], initialViewRestored, hash = '' }) {
+  return selectedNodes.length === 0 && Boolean(initialViewRestored) && hash.includes('focus=');
+}
+
+export function resolveFlatHashChange(hash) {
+  if (!hash.startsWith('#graph')) return null;
+
+  const [hashBase, queryStr] = hash.replace('#', '').split('?');
+  const hashParams = hashBase.split('/');
+  if (hashParams[0] === 'graph') hashParams.shift();
+
+  const path = hashParams.join('/');
+  const params = new URLSearchParams(queryStr || '');
+  const focus = params.get('focus');
+
+  return {
+    path,
+    focus: focus ? decodeURIComponent(focus) : null,
+  };
+}

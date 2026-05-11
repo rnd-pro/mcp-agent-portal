@@ -48,9 +48,11 @@ import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
+  resolveFlatHashChange,
   resolveGraphNodeClick,
   resolveToolbarAction,
   selectLabelMode,
+  shouldClearFocusOnSelection,
 } from './dep-graph-ui.js';
 export class DepGraph extends Symbiote {
   init$ = {};
@@ -325,10 +327,11 @@ export class DepGraph extends Symbiote {
 
     // Deselect: when no nodes selected → clear focus from URL
     this._canvas?.addEventListener('selection-changed', (e) => {
-      if (e.detail.nodes.length > 0) return; // Still has selection
-      if (!this._initialViewRestored) return; // Don't clear URL during initial load
-      const hash = window.location.hash;
-      if (hash.includes('focus=')) {
+      if (shouldClearFocusOnSelection({
+        selectedNodes: e.detail.nodes,
+        initialViewRestored: this._initialViewRestored,
+        hash: window.location.hash,
+      })) {
         this._updateHashParam('focus', null);
       }
     });
@@ -363,14 +366,10 @@ export class DepGraph extends Symbiote {
       if (!hash.startsWith('#graph')) return;
       
       if (this._viewMode === 'flat') {
-        const { path: pathStr, params } = parseGraphHash(hash);
-        if (this._pgCanvasGraph) this._pgCanvasGraph.setPath(pathStr);
-        // Parse and apply focus= parameter
-        if (params.size) {
-          const focusParam = params.get('focus');
-          if (focusParam && this._pgCanvasGraph) {
-            this._pgCanvasGraph.flyToNode(decodeURIComponent(focusParam));
-          }
+        const flatHash = resolveFlatHashChange(hash);
+        if (flatHash && this._pgCanvasGraph) {
+          this._pgCanvasGraph.setPath(flatHash.path);
+          if (flatHash.focus) this._pgCanvasGraph.flyToNode(flatHash.focus);
         }
         return;
       }
