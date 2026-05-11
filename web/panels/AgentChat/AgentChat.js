@@ -408,8 +408,8 @@ export class AgentChat extends Symbiote {
             paramsChanged = true;
           }
           let checked = paramValue ? 'checked' : '';
-          let iconColor = paramValue ? '#aaa' : '#555';
-          let textColor = paramValue ? '#aaa' : '#666';
+          let iconColor = paramValue ? 'var(--sn-text-dim)' : 'var(--sn-text-dim)';
+          let textColor = paramValue ? 'var(--sn-text-dim)' : 'var(--sn-text-dim)';
           
           return `<label class="composer-footer-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:8px; opacity:0.9;">
             <input type="checkbox" class="composer-footer-checkbox" data-param="${escapeHtml(p.id)}" ${checked} style="display:none;">
@@ -523,7 +523,7 @@ export class AgentChat extends Symbiote {
         let label = msg.done ? 'Worked for' : 'Thinking for';
         let timeStr = formatElapsed(msg.elapsed || 0);
         if (msg.done) {
-          summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;color:hsl(140,40%,50%)">check_circle</span>${label} ${timeStr}`;
+          summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;color:var(--sn-success-color)">check_circle</span>${label} ${timeStr}`;
         } else {
           let statusHtml = msg.status ? `<span class="thinking-status">${escapeHtml(msg.status)}</span>` : '';
           summary.innerHTML = `<span class="material-symbols-outlined spin-icon" style="font-size:16px">pending</span>${label} ${timeStr}${statusHtml}`;
@@ -928,7 +928,7 @@ export class AgentChat extends Symbiote {
               ? (status === 'done' ? 'check_circle' : 'error')
               : 'pending';
             let spin = isDone ? '' : 'spin-icon';
-            let iconColor = status === 'done' ? 'color:hsl(140,50%,45%)' : status === 'error' ? 'color:hsl(0,55%,50%)' : '';
+            let iconColor = status === 'done' ? 'color:var(--sn-success-color)' : status === 'error' ? 'color:var(--sn-danger-color)' : '';
             headerEl.querySelector('.material-symbols-outlined').className = `material-symbols-outlined ${spin}`;
             headerEl.querySelector('.material-symbols-outlined').textContent = icon;
             if (iconColor) headerEl.querySelector('.material-symbols-outlined').setAttribute('style', iconColor);
