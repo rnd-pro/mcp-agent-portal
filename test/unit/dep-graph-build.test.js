@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  createForceLayoutPayload,
+  findForceNodeGroup,
   getDrillableFiles,
+  getForceLayoutOptions,
   getGraphCacheKey,
   getOrBuildGraph,
 } from '../../web/panels/dep-graph-build.js';
@@ -100,4 +103,75 @@ test('getDrillableFiles returns files from symbols', () => {
   ]);
 
   assert.deepEqual(getDrillableFiles(symbolMap), new Set(['src/a.js', 'src/b.js']));
+});
+
+test('findForceNodeGroup returns containing group name', () => {
+  const groups = {
+    src: ['node-a', 'node-b'],
+    test: ['node-c'],
+  };
+
+  assert.equal(findForceNodeGroup(groups, 'node-b'), 'src');
+  assert.equal(findForceNodeGroup(groups, 'missing'), null);
+});
+
+test('getForceLayoutOptions preserves small and large graph thresholds', () => {
+  assert.deepEqual(getForceLayoutOptions(50), {
+    chargeStrength: -150,
+    linkDistance: 150,
+  });
+
+  assert.deepEqual(getForceLayoutOptions(501, { continuous: true }), {
+    chargeStrength: -300,
+    linkDistance: 100,
+    nodeWidth: 260,
+    nodeHeight: 40,
+    mode: 'continuous',
+    brownian: 0,
+  });
+});
+
+test('createForceLayoutPayload maps editor data to worker payload', () => {
+  const nodes = [
+    { id: 'node-a', params: { calculatedWidth: 320, calculatedHeight: 80 } },
+    { id: 'node-b', params: { calculatedWidth: 280, calculatedHeight: 70 } },
+  ];
+  const connections = [
+    { id: 'conn-a', from: 'node-a', to: 'node-b' },
+  ];
+  const positions = {
+    'node-a': { x: 10, y: 20 },
+  };
+  const groups = {
+    src: ['node-a'],
+  };
+  const nodeSizes = {
+    'node-b': { w: 340, h: 90 },
+  };
+
+  assert.deepEqual(createForceLayoutPayload({
+    nodes,
+    connections,
+    positions,
+    groups,
+    nodeSizes,
+    continuous: true,
+  }), {
+    nodes: [
+      { id: 'node-a', x: 10, y: 20, group: 'src', w: 320, h: 80 },
+      { id: 'node-b', x: 0, y: 0, group: null, w: 340, h: 90 },
+    ],
+    edges: [
+      { from: 'node-a', to: 'node-b' },
+    ],
+    groups,
+    options: {
+      chargeStrength: -150,
+      linkDistance: 150,
+      nodeWidth: 260,
+      nodeHeight: 40,
+      mode: 'continuous',
+      brownian: 0,
+    },
+  });
 });

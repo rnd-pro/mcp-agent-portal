@@ -34,7 +34,7 @@ import { persistUiValue, readUiValue } from '../common/ui-state.js';
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
-import { getDrillableFiles, getGraphCacheKey, getOrBuildGraph } from './dep-graph-build.js';
+import { createForceLayoutPayload, getDrillableFiles, getGraphCacheKey, getOrBuildGraph } from './dep-graph-build.js';
 import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
@@ -761,15 +761,13 @@ export class DepGraph extends Symbiote {
 
       const editorNodes = [...editor.getNodes()];
       const editorConns = [...editor.getConnections()];
-      const forceNodes = editorNodes.map(n => ({
-        id: n.id,
-        x: positions[n.id]?.x ?? 0,
-        y: positions[n.id]?.y ?? 0,
-        group: groups ? Object.entries(groups).find(([, ids]) => ids.includes(n.id))?.[0] : null,
-        w: n.params?.calculatedWidth || 260,
-        h: n.params?.calculatedHeight || 60,
-      }));
-      const forceEdges = editorConns.map(c => ({ from: c.from, to: c.to }));
+      const forcePayload = createForceLayoutPayload({
+        nodes: editorNodes,
+        connections: editorConns,
+        positions,
+        groups,
+        continuous: true,
+      });
 
       // Live tick updates so user sees nodes moving rather than a freeze
       this._forceLayout.onTick = (tickPositions) => {
@@ -851,17 +849,10 @@ export class DepGraph extends Symbiote {
 
       this._setProgress(85, 'Simulating layout…', `${editorNodes.length} nodes · ${editorConns.length} edges`);
       this._forceLayout.start({
-        nodes: forceNodes,
-        edges: forceEdges,
-        groups: groups || {},
-        options: {
-          chargeStrength: nodeCount > 500 ? -300 : -150,
-          linkDistance: nodeCount > 500 ? 100 : 150,
-          nodeWidth: 260,
-          nodeHeight: 40,
-          mode: 'continuous',
-          brownian: 0,
-        },
+        nodes: forcePayload.nodes,
+        edges: forcePayload.edges,
+        groups: forcePayload.groups,
+        options: forcePayload.options,
       });
 
       // Hook drag events to pin/unpin nodes in force simulation
@@ -1114,19 +1105,13 @@ export class DepGraph extends Symbiote {
             this._forceLayout = new ForceLayout(workerUrl);
           }
 
-          const forceNodes = editorNodes.map(n => ({
-            id: n.id,
-            x: correctedPositions[n.id]?.x ?? 0,
-            y: correctedPositions[n.id]?.y ?? 0,
-            group: groups ? Object.entries(groups).find(([, ids]) => ids.includes(n.id))?.[0] : null,
-            w: nodeSizes[n.id]?.w || n.params?.calculatedWidth || 260,
-            h: nodeSizes[n.id]?.h || n.params?.calculatedHeight || 60,
-          }));
-
-          const forceEdges = editorConns.map(c => ({
-            from: c.from,
-            to: c.to,
-          }));
+          const forcePayload = createForceLayoutPayload({
+            nodes: editorNodes,
+            connections: editorConns,
+            positions: correctedPositions,
+            groups,
+            nodeSizes,
+          });
 
           // onTick: provide live visual feedback so user sees nodes spreading, not a freeze.
           this._forceLayout.onTick = (tickPositions) => {
@@ -1184,17 +1169,14 @@ export class DepGraph extends Symbiote {
           };
 
           this._forceLayout.start({
-            nodes: forceNodes,
-            edges: forceEdges,
-            groups: groups || {},
-            options: {
-              chargeStrength: totalNodes > 500 ? -300 : -150,
-              linkDistance: totalNodes > 500 ? 100 : 150,
-            },
+            nodes: forcePayload.nodes,
+            edges: forcePayload.edges,
+            groups: forcePayload.groups,
+            options: forcePayload.options,
           });
 
           // BUG-FIX: Do NOT write correctedPositions to canvas here.
-          // The circular seed has already been applied to forceNodes above.
+          // The circular seed has already been applied to forcePayload.nodes above.
           // Writing it now would overwrite the first worker tick with stale random positions.
           return;
         } // end if (editorNodes.length >= 50)
