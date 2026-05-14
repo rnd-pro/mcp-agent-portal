@@ -4,7 +4,7 @@
  * Parses `.agent-portal/agents/*.md` files with YAML frontmatter and resolves skill composition.
  * 
  * Frontmatter schema:
- *   name, description, role, icon, color, models[], rotation,
+ *   name, description, role, icon, color, resource_group, provider, model, models[], rotation,
  *   skills[], policy, visibleAgents[], max_concurrent, timeout
  * 
  * Skill resolution:
@@ -168,6 +168,9 @@ export function parseAgent(filePath, skillsDir) {
     role: meta.role || 'executor',
     icon: meta.icon || 'smart_toy',
     color: meta.color || '#666',
+    resourceGroup: meta.resource_group || meta.resourceGroup || meta.group || null,
+    provider: meta.provider || null,
+    model: meta.model || null,
     models: Array.isArray(meta.models) ? meta.models : [],
     rotation: meta.rotation || 'on_error',
     skills: skillNames,
@@ -201,7 +204,7 @@ export function loadAgents(agentsDir, skillsDir) {
 /**
  * Get agent metadata suitable for UI display (icon, color, description).
  * @param {Map<string, object>} agents
- * @returns {object[]} array of { slug, icon, color, description, role }
+ * @returns {object[]} array of { slug, icon, color, description, role, resourceGroup }
  */
 export function getAgentCatalog(agents) {
   let catalog = [];
@@ -212,6 +215,7 @@ export function getAgentCatalog(agents) {
       color: agent.color,
       description: agent.description,
       role: agent.role,
+      resourceGroup: agent.resourceGroup,
     });
   }
   return catalog;

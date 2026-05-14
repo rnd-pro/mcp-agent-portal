@@ -126,6 +126,31 @@ Optionally create `~/.gemini/agent-portal.json` to customize child servers and a
 }
 ```
 
+### Claude Gateway
+
+Agent Portal can expose an Anthropic-compatible gateway for Claude Code at `/anthropic`. This lets Claude Code run against OpenAI-compatible backends such as DeepSeek V4 while keeping Claude Code's local tools in Claude Code.
+
+```json
+{
+  "anthropicGateway": {
+    "enabled": true,
+    "authToken": "local-token",
+    "defaultModel": "deepseek-v4-flash",
+    "plannerModel": "deepseek-v4-pro",
+    "providers": {
+      "deepseek": {
+        "type": "openai-compatible",
+        "baseUrl": "https://api.deepseek.com",
+        "apiKeyEnv": "DEEPSEEK_API_KEY",
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
+      }
+    }
+  }
+}
+```
+
+Then set `DEEPSEEK_API_KEY`. When this gateway is enabled, Agent Pool's `provider: "claude"` runner injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` automatically for spawned Claude Code workers.
+
 ### Operating Modes
 
 ```bash

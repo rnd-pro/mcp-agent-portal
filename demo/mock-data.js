@@ -47,8 +47,8 @@ export const instances = [
     pid: 41220,
     color: '#ea4335',
     agents: 0,
-    projectName: '1sim-app',
-    projectPath: '/home/dev/1sim-app',
+    projectName: 'symbiote-app',
+    projectPath: '/home/dev/symbiote-app',
   },
   {
     name: 'remote-client',
@@ -4384,7 +4384,7 @@ const TOOL_NAMES = [
   'get_skeleton', 'compact', 'navigate', 'analyze', 'delegate_task',
   'consult_peer', 'search_context', 'get_ai_context', 'list_skills',
 ];
-const PROJECT_NAMES = ['mcp-agent-portal', 'symbiote-video', '1sim-app', 'ml-pipeline', 'docs-portal', 'trading-engine'];
+const PROJECT_NAMES = ['mcp-agent-portal', 'symbiote-video', 'symbiote-app', 'ml-pipeline', 'docs-portal', 'trading-engine'];
 const PROJECT_PREFIXES = ['/pg', '/ap', '/cx', '/bx', '/tx', '/rc'];
 
 export function generateEvent(idx) {

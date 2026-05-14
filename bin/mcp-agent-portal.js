@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { spawn, execSync } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import os from 'os';
 import http from 'http';
 import WebSocket from 'ws';
@@ -20,20 +20,66 @@ let [, , command, ...args] = process.argv;
 
 function getBackendPort() {
   const servicesPath = resolve(os.homedir() || os.tmpdir(), '.local-gateway', 'services.json');
-  if (!existsSync(servicesPath)) return null;
+  const cwd = resolve(process.cwd());
+
+  function isAlive(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function livePort(entry) {
+    if (entry?.port && isAlive(entry.pid)) return entry.port;
+    return null;
+  }
+
   try {
-    const services = JSON.parse(readFileSync(servicesPath, 'utf8'));
-    const portal = services['portal.local'];
-    if (portal && portal.port) {
-      try {
-        process.kill(portal.pid, 0);
-        return portal.port;
-      } catch {
-        return null;
+    if (existsSync(servicesPath)) {
+      const services = JSON.parse(readFileSync(servicesPath, 'utf8'));
+      const portal = services['portal.local'];
+      const directPort = livePort(portal);
+      if (directPort) return directPort;
+
+      const routes = Object.values(portal?.routes || {});
+      const currentRoute = routes.find(route => resolve(route.projectPath || '') === cwd);
+      const routePort = livePort(currentRoute);
+      if (routePort) return routePort;
+
+      for (const route of routes) {
+        const port = livePort(route);
+        if (port) return port;
       }
     }
   } catch {
     // ignore parse errors
+  }
+
+  const backendsDir = resolve(os.homedir() || os.tmpdir(), '.local-gateway', 'backends');
+  try {
+    if (!existsSync(backendsDir)) return null;
+    const backends = readdirSync(backendsDir)
+      .filter(file => file.startsWith('portal-') && file.endsWith('.json'))
+      .map(file => {
+        try {
+          return JSON.parse(readFileSync(resolve(backendsDir, file), 'utf8'));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .filter(entry => livePort(entry));
+
+    const currentBackend = backends.find(entry => resolve(entry.project || '') === cwd);
+    if (currentBackend) return currentBackend.port;
+
+    backends.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+    return backends[0]?.port || null;
+  } catch {
+    // ignore discovery errors
   }
   return null;
 }
@@ -491,7 +537,7 @@ Commands:`);
 Options for 'run':
   --sync                 Wait for task completion (stream output)
   --model <name>         Model to use
-  --provider <name>      Provider to use (gemini, opencode, pool, mock)
+  --provider <name>      Provider to use (gemini, codex, opencode)
   --cwd <path>           Working directory (default: current)
 
 Web Dashboard:

@@ -12,6 +12,7 @@ import { logTrajectory } from '../mlops/flywheel.js';
 import { findInRegistry } from '../server/marketplace-registry.js';
 import { ChatWsServer } from './chat-ws-server.js';
 import { TaskRouter } from './task-router.js';
+import { MCPMultiplexer } from './mcp-multiplexer.js';
 
 let pkgJson;
 try {
@@ -182,25 +183,39 @@ export class MCPProxyManager {
     this._initializedServers = new Set();
   }
 
+  _buildWorkspaceRoots() {
+    let sg = getStateGraph();
+    let projects = sg.getProjectHistory();
+    let roots = [];
+    let seen = new Set();
+
+    let addRoot = (rootPath, name) => {
+      if (!rootPath || rootPath === '/') return;
+      let resolved = path.resolve(rootPath);
+      if (seen.has(resolved)) return;
+      seen.add(resolved);
+      roots.push({ uri: `file://${resolved}`, name: name || path.basename(resolved) || 'portal' });
+    };
+
+    // The child project-graph uses the first root as its workspace boundary.
+    // For per-project backends, that must be the backend project root, not the
+    // most recently opened project from the global dashboard history.
+    addRoot(this.projectRoot, path.basename(this.projectRoot) || 'portal');
+
+    for (let p of projects) {
+      addRoot(p.path, p.prefix || p.name || (p.path ? path.basename(p.path) : null));
+    }
+
+    return roots.length > 0 ? roots : [{ uri: `file://${this.projectRoot}`, name: 'portal' }];
+  }
+
   /**
    * Send initialize with roots from StateGraph to child server(s).
    * This is only needed in web-only mode where no IDE sends initialize.
    * @param {string} [serverName] - If provided, initialize only this server. Otherwise all.
    */
   _sendSyntheticInitialize(serverName) {
-    let sg = getStateGraph();
-    let projects = sg.getProjectHistory();
-    let validProjects = projects.filter(p => p.path && p.path !== '/' && p.name);
-    let roots;
-    
-    if (validProjects.length === 0) {
-      // Fallback: use the portal's own project root
-      roots = [{ uri: `file://${this.projectRoot}`, name: 'portal' }];
-    } else {
-      // First project becomes workspace root (project-graph uses first root as boundary).
-      // All valid project paths are listed so roots/list responses are complete.
-      roots = validProjects.map(p => ({ uri: `file://${p.path}`, name: p.prefix || p.path.split('/').pop() }));
-    }
+    let roots = this._buildWorkspaceRoots();
 
     let initMsg = {
       jsonrpc: '2.0',
@@ -249,12 +264,7 @@ export class MCPProxyManager {
   _installRootsHandler() {
     let rootsHandler = (sName, msg) => {
       if (msg.method === 'roots/list' && msg.id !== undefined) {
-        let sg = getStateGraph();
-        let projects = sg.getProjectHistory();
-        let validProjects = projects.filter(p => p.path && p.path !== '/' && p.name);
-        let roots = validProjects.length > 0
-          ? validProjects.map(p => ({ uri: `file://${p.path}`, name: p.prefix || p.path.split('/').pop() }))
-          : [{ uri: `file://${this.projectRoot}`, name: 'portal' }];
+        let roots = this._buildWorkspaceRoots();
         this.sendToChild(sName, {
           jsonrpc: '2.0',
           id: msg.id,
@@ -722,8 +732,7 @@ export class MCPProxyManager {
 
   handleIdeWs(req, socket, head) {
     let wss = new WebSocketServer({ noServer: true });
-    wss.handleUpgrade(req, socket, head, async (ws) => {
-      const { MCPMultiplexer } = await import('./mcp-multiplexer.js');
+    wss.handleUpgrade(req, socket, head, (ws) => {
       let multiplexer = new MCPMultiplexer(this, ws);
       multiplexer.listen();
       // Project registration happens in multiplexer on initialize (from IDE roots)

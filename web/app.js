@@ -1,4 +1,5 @@
 // @ctx .context/web/app.ctx
+import "./common/base-path.js";
 import { Layout as e, LayoutTree as t, applyTheme as n, CARBON as o, registerGlobalParam, setDefaultPanel, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node";
 import { panelTypes, getSections, getSectionsForScope, getLayout, hasSection } from "./router-registry.js";
 import { followController } from "./follow-controller.js";
@@ -187,6 +188,29 @@ let _currentSection = '';
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
+function collectPanelTypes(node, panels = []) {
+  if (!node) return panels;
+  let type = node.type || node.nodeType;
+  if (type === 'panel') {
+    panels.push({ panelType: node.panelType, global: !!node.global });
+  }
+  if (node.first) collectPanelTypes(node.first, panels);
+  if (node.second) collectPanelTypes(node.second, panels);
+  if (node.children) node.children.forEach(child => collectPanelTypes(child, panels));
+  return panels;
+}
+
+function primaryPanelType(node) {
+  return collectPanelTypes(node).find(panel => !panel.global)?.panelType || null;
+}
+
+function layoutMatchesSection(sectionId, layoutTree, fallbackTree = getLayout(sectionId)) {
+  if (!layoutTree) return false;
+  let expectedPrimary = primaryPanelType(fallbackTree);
+  if (!expectedPrimary) return true;
+  return collectPanelTypes(layoutTree).some(panel => !panel.global && panel.panelType === expectedPrimary);
+}
+
 /**
  * Pre-calculate subPanels for a section based on its layout tree.
  * This ensures the sidebar correctly shows expand chevrons for sections with multiple panels
@@ -194,11 +218,9 @@ let _currentProjectId = undefined;
  */
 function getSubPanelsForSection(sectionId, projectId) {
   let storageKey = `pg-layout-v4-${projectId || 'global'}-${sectionId}`;
+  let fallback = getLayout(sectionId);
   let tree = readLayout(storageKey);
-  if (!tree) {
-    let fallback = getLayout(sectionId);
-    if (fallback) tree = fallback;
-  }
+  if (!layoutMatchesSection(sectionId, tree, fallback)) tree = fallback;
   
   let panels = [];
   function walk(node) {
@@ -315,16 +337,17 @@ function handleRoute() {
     let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
     layout.$['@storage-key'] = storageKey;
 
+    let fallback = getLayout(section);
     let saved = readLayout(storageKey);
+    if (!layoutMatchesSection(section, saved, fallback)) saved = null;
+
     if (saved) {
       try {
         layout.setLayout(saved);
       } catch (err) {
-        let fallback = getLayout(section);
         if (fallback) layout.setLayout(fallback);
       }
     } else {
-      let fallback = getLayout(section);
       if (fallback) layout.setLayout(fallback);
     }
 

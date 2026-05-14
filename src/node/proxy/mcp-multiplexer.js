@@ -106,6 +106,7 @@ export class MCPMultiplexer {
     this.requestMap = new Map();
     this.nextInternalId = 1;
     this.toolIndex = new ToolIndex();
+    this._indexPromise = null;
     
     this.childMessageHandler = (serverName, msg) => {
       this.handleChildMessage(serverName, msg);
@@ -120,14 +121,14 @@ export class MCPMultiplexer {
       console.error(`🔄 [multiplexer] Server ${action}: "${serverName}" — rebuilding tool index`);
       // Wait for new server to initialize before indexing
       setTimeout(async () => {
-        await this._rebuildIndex();
+        await this._ensureIndex(true);
         this.notifyToolsChanged();
       }, action === 'add' ? 3000 : 100);
     };
 
     // Build tool index after servers are initialized, then notify IDE so it gets the dynamic hints
     setTimeout(async () => {
-      await this._rebuildIndex();
+      await this._ensureIndex(true);
       this.notifyToolsChanged();
     }, 3000);
 
@@ -174,6 +175,16 @@ export class MCPMultiplexer {
     } catch (err) {
       console.error('🟡 [multiplexer] Failed to load tool tags:', err.message);
     }
+  }
+
+  async _ensureIndex(force = false) {
+    if (!force && this.toolIndex.isReady) return;
+    if (!this._indexPromise) {
+      this._indexPromise = this._rebuildIndex().finally(() => {
+        this._indexPromise = null;
+      });
+    }
+    await this._indexPromise;
   }
 
   sendToIde(msg) {
@@ -324,6 +335,7 @@ export class MCPMultiplexer {
 
     try {
       if (toolName === 'discover_tools') {
+        await this._ensureIndex();
         let result = this.toolIndex.search(args);
         this.sendToIde({
           jsonrpc: '2.0',
@@ -336,6 +348,7 @@ export class MCPMultiplexer {
       }
 
       if (toolName === 'get_portal_status') {
+        await this._ensureIndex();
         let status = {
           servers: this.toolIndex.getServers(),
           health: this.proxyManager.getHealthStatus(),
@@ -436,8 +449,12 @@ export class MCPMultiplexer {
 
         let entry = this.toolIndex.get(realToolName);
         if (!entry) {
+          await this._ensureIndex();
+          entry = this.toolIndex.get(realToolName);
+        }
+        if (!entry) {
           // Try rebuild and check again
-          await this._rebuildIndex();
+          await this._ensureIndex(true);
           entry = this.toolIndex.get(realToolName);
         }
 

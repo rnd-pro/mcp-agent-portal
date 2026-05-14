@@ -9,6 +9,7 @@ import { createRoutes, dispatch } from './api-routes.js';
 import { createProjectRoutes } from './api-routes-projects.js';
 import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
+import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
@@ -139,6 +140,7 @@ export function startWebServer(projectRoot) {
   let routes = createRoutes({ proxyManager, projectRoot });
   let projectRoutes = createProjectRoutes();
   let allRoutes = { ...routes, ...projectRoutes };
+  let anthropicGatewayHandler = createAnthropicGatewayHandler();
 
   // ── MCP HTTP Gateway ──────────────────────────────────
   // Spawned sub-agents connect here instead of launching isolated stdio MCP.
@@ -170,7 +172,7 @@ export function startWebServer(projectRoot) {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, DELETE',
-        'Access-Control-Allow-Headers': 'Content-Type, Accept, Mcp-Session-Id',
+        'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, X-Api-Key, Anthropic-Version, Mcp-Session-Id',
         'Access-Control-Expose-Headers': 'Mcp-Session-Id',
       });
       res.end();
@@ -180,6 +182,13 @@ export function startWebServer(projectRoot) {
     // MCP Streamable HTTP endpoint
     if (url.pathname === '/mcp' || url.pathname === '/mcp/message') {
       getMcpHandler()(req, res);
+      return;
+    }
+
+    // Anthropic-compatible LLM gateway for Claude Code:
+    // set ANTHROPIC_BASE_URL=http://<portal>/anthropic
+    if (url.pathname.startsWith('/anthropic/')) {
+      anthropicGatewayHandler(req, res);
       return;
     }
 

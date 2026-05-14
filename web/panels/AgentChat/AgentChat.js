@@ -577,6 +577,7 @@ export class AgentChat extends Symbiote {
 
   async _sendMessage() {
     console.log('[AgentChat] _sendMessage called!', new Error().stack);
+    this._syncComposerParamsFromDom();
     let chatId = this._loadedChatId || dashState.activeChatId;
 
     // Auto-create chat on first message (quick-start flow)
@@ -609,26 +610,13 @@ export class AgentChat extends Symbiote {
     if (!prompt) return;
 
     // Sync any default/unsaved params from the UI dropdowns
-    if (this.ref.composer) {
-      let selects = this.ref.composer.querySelectorAll('.composer-footer-select');
-      let paramsObj = { ...this.$.chatParams };
-      let hasChanges = false;
-      for (let select of selects) {
-        let id = select.dataset.param;
-        // Don't sync empty values like '-- Model --'
-        if (select.value && select.value !== '' && paramsObj[id] !== select.value) {
-          paramsObj[id] = select.value;
-          hasChanges = true;
-        }
-      }
-      if (hasChanges) {
-        this.$.chatParams = paramsObj;
-        fetch('/api/chats/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: chatId, ...paramsObj })
-        });
-      }
+    let changedParams = this._syncComposerParamsFromDom();
+    if (changedParams && chatId) {
+      fetch('/api/chats/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: chatId, ...this.$.chatParams })
+      });
     }
 
     // Prepend context if present
@@ -723,6 +711,24 @@ export class AgentChat extends Symbiote {
     }
     this._setSending(false);
     if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+  }
+
+  _syncComposerParamsFromDom() {
+    if (!this.ref.composer) return false;
+    let selects = this.ref.composer.querySelectorAll('.composer-footer-select');
+    let paramsObj = { ...this.$.chatParams };
+    let hasChanges = false;
+    for (let select of selects) {
+      let id = select.dataset.param;
+      if (select.value && select.value !== '' && paramsObj[id] !== select.value) {
+        paramsObj[id] = select.value;
+        hasChanges = true;
+      }
+    }
+    if (hasChanges) {
+      this.$.chatParams = paramsObj;
+    }
+    return hasChanges;
   }
 
   async _loadChat(chatId) {

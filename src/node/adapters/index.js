@@ -1,5 +1,6 @@
 import { createGeminiAdapter } from './gemini.js';
 import { createClaudeAdapter } from './claude.js';
+import { createCodexAdapter } from './codex.js';
 import { getStateGraph } from '../state-graph.js';
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
@@ -8,6 +9,7 @@ import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
 let ADAPTERS = {
   gemini: createGeminiAdapter,
   claude: createClaudeAdapter,
+  codex: createCodexAdapter,
 };
 
 /**
@@ -28,6 +30,7 @@ export function resolveAdapter(type) {
 const DEFAULT_MODELS = {
   gemini: ['default', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
   claude: ['default', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
+  codex: ['default'],
   opencode: ['default'],
 };
 
@@ -189,6 +192,12 @@ function buildAdapterMetadata() {
       name: 'Claude CLI',
       parameters: [
         { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('claude') }
+      ]
+    },
+    codex: {
+      name: 'Codex CLI',
+      parameters: [
+        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('codex') }
       ]
     },
     opencode: {

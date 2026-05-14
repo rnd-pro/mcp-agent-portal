@@ -7,7 +7,7 @@ import os from 'node:os';
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-groups-test-${Date.now()}`);
 
 describe('groups.js', () => {
-  let createGroup, listGroups, getGroup, deleteGroup, getGroupNextModel;
+  let createGroup, listGroups, getGroup, deleteGroup, getGroupNextModel, getGroupNextProfile;
 
   before(async () => {
     const mod = await import('../../packages/agent-pool-mcp/src/tools/groups.js');
@@ -16,6 +16,7 @@ describe('groups.js', () => {
     getGroup = mod.getGroup;
     deleteGroup = mod.deleteGroup;
     getGroupNextModel = mod.getGroupNextModel;
+    getGroupNextProfile = mod.getGroupNextProfile;
 
     if (!fs.existsSync(TEST_CWD)) {
       fs.mkdirSync(TEST_CWD, { recursive: true });
@@ -68,9 +69,31 @@ describe('groups.js', () => {
     assert.strictEqual(state['test-group'].currentIndex, 1);
   });
 
+  it('getGroupNextProfile resolves provider/model profiles', () => {
+    createGroup(TEST_CWD, {
+      name: 'profile-group',
+      rotation_mode: 'round_robin',
+      profiles: [
+        { provider: 'codex', model: 'default' },
+        { provider: 'opencode', model: 'openrouter/test-model' },
+      ],
+    });
+
+    assert.deepStrictEqual(getGroupNextProfile(TEST_CWD, 'profile-group'), {
+      provider: 'codex',
+      model: 'default',
+      profile: { provider: 'codex', model: 'default' },
+    });
+    assert.deepStrictEqual(getGroupNextProfile(TEST_CWD, 'profile-group'), {
+      provider: 'opencode',
+      model: 'openrouter/test-model',
+      profile: { provider: 'opencode', model: 'openrouter/test-model' },
+    });
+  });
+
   it('listGroups and getGroup basic CRUD', () => {
     const list = listGroups(TEST_CWD);
-    assert.strictEqual(list.length, 2); // test-group, error-group
+    assert.strictEqual(list.length, 3); // test-group, error-group, profile-group
     
     assert.ok(list.find(g => g.name === 'test-group'));
   });
@@ -83,6 +106,6 @@ describe('groups.js', () => {
     assert.strictEqual(group, null);
     
     const list = listGroups(TEST_CWD);
-    assert.strictEqual(list.length, 1);
+    assert.strictEqual(list.length, 2);
   });
 });

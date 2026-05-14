@@ -59,7 +59,7 @@ export function startTelegramGateway(proxyManager) {
         arguments: {
           prompt,
           sessionId,
-          runner: 'gemini',
+          provider: 'codex',
         }
       });
 

@@ -143,11 +143,11 @@ Multiple CLI agents run **in parallel** via the `agent-pool-mcp` package. The po
 ┌───────────────────────────────────────────────────────┐
 │                AGENT POOL (parallel)                  │
 │                                                       │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐ │
-│  │ Gemini#1 │ │ Gemini#2 │ │ Claude#1 │ │OpenCode │ │
-│  │ codegen  │ │ refactor │ │ review   │ │ research│ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬────┘ │
-│       └──────┬─────┴──────┬─────┴──────┬──────┘     │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐ ┌────────┐ │
+│  │ Gemini#1 │ │ Gemini#2 │ │ Claude#1 │ │OpenCode │ │ Codex  │ │
+│  │ codegen  │ │ refactor │ │ review   │ │ research│ │ agent  │ │
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬────┘ └───┬────┘ │
+│       └──────┬─────┴──────┬─────┴──────┬──────┬──────┘ │
 │              ▼            ▼            ▼             │
 │  ┌─────────────────────────────────────────────────┐ │
 │  │  MCP Tool Router — shared across all agents     │ │
@@ -160,8 +160,8 @@ Multiple CLI agents run **in parallel** via the `agent-pool-mcp` package. The po
 
 > [!NOTE]
 > The portal features two execution paths for CLI agents:
-> 1. **Direct Adapters (`src/node/adapters/`)**: Native adapters for Gemini and Claude that run directly within the portal process. Fallback execution path.
-> 2. **Pool Orchestrator (`agent-pool-mcp`)**: Primary execution path. All providers (Gemini, Claude, OpenCode, OpenRouter) are natively implemented inside the `agent-pool-mcp` server. The `AgentChat` UI delegates via `adapter: "pool"`.
+> 1. **Direct Adapters (`src/node/adapters/`)**: Native adapters for Gemini, Claude, and Codex that run directly within the portal process. Fallback execution path.
+> 2. **Pool Orchestrator (`agent-pool-mcp`)**: Primary execution path. All providers (Gemini, Claude, Codex, OpenCode, OpenRouter) are natively implemented inside the `agent-pool-mcp` server. The `AgentChat` UI delegates via `adapter: "pool"`.
 
 ## Three Operating Modes
 
@@ -402,6 +402,7 @@ mcp-agent-portal/
 │   │   ├── base.js                   # BaseAdapter interface
 │   │   ├── gemini.js                 # Gemini CLI adapter (stream-json)
 │   │   ├── claude.js                 # Claude Code CLI adapter (stream-json)
+│   │   ├── codex.js                  # OpenAI Codex CLI adapter (exec --json)
 │   │   ├── opencode.js               # OpenCode/Crush adapter
 │   │   └── pool.js                   # AdapterPool (acquire/release)
 │   ├── gateways/

@@ -3,7 +3,6 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
@@ -168,13 +167,13 @@ export function startStdioProxy(port, buffered = []) {
   const MAX_RETRIES = 5;
   let retries = 0;
   let connected = false;
-  let queue = [...buffered];
+  let queue = [];
   let ws = null;
   let wsBuffer = Buffer.alloc(0);
+  let stdinBuffer = Buffer.concat(buffered.map(chunk => Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+  let outputMode = null;
   // Once connected successfully at least once, don't retry on close (intentional shutdown)
   let everConnected = false;
-
-  const rl = createInterface({ input: process.stdin, terminal: false });
 
   function maskAndFrame(str) {
     const data = Buffer.from(str, 'utf8');
@@ -224,15 +223,66 @@ export function startStdioProxy(port, buffered = []) {
     };
   }
 
-  rl.on('line', line => {
-    if (connected && ws) {
-      try { ws.write(maskAndFrame(line)); } catch (e) { console.warn('[portal] Proxy write failed:', e.message); }
-    } else {
-      queue.push(line);
+  function writeToClient(data) {
+    if (outputMode === 'line') {
+      process.stdout.write(data.endsWith('\n') ? data : `${data}\n`);
+      return;
     }
+    const body = Buffer.from(data, 'utf8');
+    process.stdout.write(`Content-Length: ${body.length}\r\n\r\n`);
+    process.stdout.write(body);
+  }
+
+  function handleClientMessage(message) {
+    if (connected && ws) {
+      try { ws.write(maskAndFrame(message)); } catch (e) { console.warn('[portal] Proxy write failed:', e.message); }
+    } else {
+      queue.push(message);
+    }
+  }
+
+  function parseStdinBuffer() {
+    while (stdinBuffer.length > 0) {
+      const asText = stdinBuffer.toString('utf8');
+      if (/^Content-Length:/i.test(asText)) {
+        const headerEnd = asText.indexOf('\r\n\r\n');
+        if (headerEnd === -1) return;
+        const header = asText.slice(0, headerEnd);
+        const match = header.match(/Content-Length:\s*(\d+)/i);
+        if (!match) {
+          console.error('[portal] Invalid MCP frame header');
+          process.exit(1);
+        }
+        const length = Number(match[1]);
+        const bodyStart = Buffer.byteLength(asText.slice(0, headerEnd + 4), 'utf8');
+        if (stdinBuffer.length < bodyStart + length) return;
+        outputMode = 'framed';
+        const message = stdinBuffer.slice(bodyStart, bodyStart + length).toString('utf8');
+        stdinBuffer = stdinBuffer.slice(bodyStart + length);
+        if (message.trim()) handleClientMessage(message);
+        continue;
+      }
+
+      const newline = stdinBuffer.indexOf('\n');
+      if (newline === -1) {
+        if ('Content-Length:'.toLowerCase().startsWith(asText.toLowerCase())) return;
+        return;
+      }
+      outputMode ||= 'line';
+      const line = stdinBuffer.slice(0, newline).toString('utf8').replace(/\r$/, '');
+      stdinBuffer = stdinBuffer.slice(newline + 1);
+      if (line.trim()) handleClientMessage(line);
+    }
+  }
+
+  process.stdin.on('data', chunk => {
+    stdinBuffer = Buffer.concat([stdinBuffer, chunk]);
+    parseStdinBuffer();
   });
 
-  rl.on('close', () => {
+  parseStdinBuffer();
+
+  process.stdin.on('end', () => {
     if (ws) ws.end();
     process.exit(0);
   });
@@ -279,7 +329,7 @@ export function startStdioProxy(port, buffered = []) {
         wsBuffer = wsBuffer.slice(frame.totalLen);
         
         if (frame.opcode === 1) { // text
-          process.stdout.write(frame.data + '\n');
+          writeToClient(frame.data);
         } else if (frame.opcode === 8) { // close
           process.exit(0);
         } else if (frame.opcode === 9) { // ping

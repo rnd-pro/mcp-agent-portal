@@ -83,4 +83,29 @@ describe('Provider Config Injector', () => {
     cleanupTmpConfig(safeDir);
     assert.ok(fs.existsSync(safeDir), 'Safe dir should NOT be removed due to missing "hub-" marker');
   });
+
+  it('T5: getClaudeGatewayEnv returns Anthropic env when gateway is enabled', async () => {
+    let oldConfigPath = process.env.PORTAL_CONFIG_PATH;
+    let oldToken = process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
+    let configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'portal-config-')), 'agent-portal.json');
+    tmpDirsToCleanup.push(path.dirname(configPath));
+
+    process.env.PORTAL_CONFIG_PATH = configPath;
+    process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = 'env-token';
+    fs.writeFileSync(configPath, JSON.stringify({ anthropicGateway: { enabled: true } }));
+
+    try {
+      let { getClaudeGatewayEnv } = await import('../../packages/agent-pool-mcp/src/runner/provider-config.js');
+      let env = getClaudeGatewayEnv('http://localhost:1234/mcp');
+
+      assert.equal(env.ANTHROPIC_BASE_URL, 'http://localhost:1234/anthropic');
+      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'env-token');
+      assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
+    } finally {
+      if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+      else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
+      if (oldToken === undefined) delete process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
+      else process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = oldToken;
+    }
+  });
 });

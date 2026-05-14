@@ -10,6 +10,9 @@ describe('adapters-registry', () => {
     
     let claude = resolveAdapter('claude');
     assert.equal(typeof claude, 'function', 'claude should resolve to factory function');
+
+    let codex = resolveAdapter('codex');
+    assert.equal(typeof codex, 'function', 'codex should resolve to factory function');
   });
 
   it('resolveAdapter throws for unknown type with valid options', async () => {
@@ -33,9 +36,10 @@ describe('adapters-registry', () => {
     assert.ok(Array.isArray(types), 'should return array of types');
     assert.ok(types.includes('gemini'), 'should include gemini');
     assert.ok(types.includes('claude'), 'should include claude');
+    assert.ok(types.includes('codex'), 'should include codex');
     assert.ok(types.includes('opencode'), 'should include opencode (metadata only)');
     assert.ok(types.includes('pool'), 'should include pool');
     assert.ok(metadata, 'should return metadata');
-    assert.equal(types.length, 4, 'should have exactly 4 adapter types in metadata');
+    assert.equal(types.length, 5, 'should have exactly 5 adapter types in metadata');
   });
 });
