@@ -7,6 +7,7 @@ import { registerService } from './local-gateway.js';
 import { MCPProxyManager } from '../proxy/mcp-proxy.js';
 import { createRoutes, dispatch } from './api-routes.js';
 import { createProjectRoutes } from './api-routes-projects.js';
+import { createRuntimeRoutes } from './api-routes-runtime.js';
 import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
@@ -139,7 +140,8 @@ export function startWebServer(projectRoot) {
   proxyManager.initStateSync();
   let routes = createRoutes({ proxyManager, projectRoot });
   let projectRoutes = createProjectRoutes();
-  let allRoutes = { ...routes, ...projectRoutes };
+  let runtimeRoutes = createRuntimeRoutes({ proxyManager, projectRoot });
+  let allRoutes = { ...routes, ...projectRoutes, ...runtimeRoutes };
   let anthropicGatewayHandler = createAnthropicGatewayHandler();
 
   // ── MCP HTTP Gateway ──────────────────────────────────

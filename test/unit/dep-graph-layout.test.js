@@ -28,6 +28,25 @@ describe('dep-graph-layout', () => {
     });
   });
 
+  it('buildFlatGroups keeps directory groups for files outside semantic clusters', () => {
+    const dirFiles = new Map([
+      ['web/', ['web/app.js']],
+      ['src/', ['src/a.js', 'src/b.js']],
+    ]);
+    const fileMap = new Map([
+      ['web/app.js', 'node-web'],
+      ['src/a.js', 'node-src-a'],
+      ['src/b.js', 'node-src-b'],
+    ]);
+
+    assert.deepEqual(buildFlatGroups(dirFiles, fileMap, {
+      clusters: [{ id: 'web-dashboard', label: 'Web Dashboard', paths: ['web/'] }],
+    }), {
+      'cluster:web-dashboard': ['node-web'],
+      'src/': ['node-src-a', 'node-src-b'],
+    });
+  });
+
   it('computeInitialGraphPositions returns a position for every flat node', () => {
     const editor = editorWithNodes(['node-a', 'node-b', 'node-c']);
     const positions = computeInitialGraphPositions({

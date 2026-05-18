@@ -1,0 +1,1344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cell Sphere Playground</title>
+  <style>
+    :root {
+      --bg: #ddd;
+      --surface: #eeeeee;
+      --surface-2: #d0d0d0;
+      --text: #252525;
+      --muted: #666;
+      --line: #bdbdbd;
+      --accent: #4b91c9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #stage.dragging {
+      cursor: grabbing;
+    }
+
+    .topbar {
+      position: fixed;
+      z-index: 4;
+      left: 16px;
+      right: 16px;
+      top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .topbar[hidden] {
+      display: none;
+    }
+
+    .menu-toggle {
+      position: fixed;
+      z-index: 4;
+      top: 14px;
+      right: 16px;
+      display: none;
+      height: 30px;
+      align-items: center;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      pointer-events: auto;
+    }
+
+    .menu-toggle[visible] {
+      display: inline-flex;
+    }
+
+    .title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .title span {
+      color: var(--muted);
+      font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .toolbar {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      pointer-events: auto;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px;
+    }
+
+    .toolbar .close-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      padding: 0;
+      border-radius: 5px;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--muted);
+    }
+
+    .toolbar .close-spacer {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+    }
+
+    button,
+    label {
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      white-space: nowrap;
+    }
+
+    button {
+      min-width: 32px;
+      justify-content: center;
+      padding: 0 9px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    button[aria-pressed="true"] {
+      color: var(--text);
+      background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+    }
+
+    label {
+      padding: 0 8px;
+      border-left: 1px solid var(--line);
+      border-radius: 0;
+    }
+
+    input[type="range"] {
+      width: 82px;
+      accent-color: var(--accent);
+    }
+
+    select,
+    input[type="text"] {
+      height: 22px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+    }
+
+    select {
+      max-width: 86px;
+    }
+
+    input[type="text"] {
+      width: 74px;
+      padding: 0 6px;
+    }
+
+    input[type="color"] {
+      width: 26px;
+      height: 22px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    input[type="checkbox"] {
+      accent-color: var(--accent);
+    }
+
+    .hud {
+      position: fixed;
+      z-index: 4;
+      left: 16px;
+      bottom: 14px;
+      display: grid;
+      grid-template-columns: repeat(4, auto);
+      gap: 8px;
+      color: var(--muted);
+      font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      pointer-events: none;
+    }
+
+    .hud span {
+      padding: 5px 7px;
+      border-radius: 5px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .title {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .title span {
+        display: none;
+      }
+
+      .toolbar {
+        width: 100%;
+        overflow-x: auto;
+        justify-content: flex-start;
+      }
+
+      .hud {
+        grid-template-columns: repeat(2, auto);
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage" aria-label="Conway cellular automaton mapped onto a rotating sphere"></canvas>
+  <button id="showMenuBtn" class="menu-toggle" type="button" title="Show controls" visible>menu</button>
+
+  <header class="topbar" hidden>
+    <div class="title">
+      <h1>Cell Sphere Playground</h1>
+      <span>B3/S23 · 14px cells · canvas texture</span>
+    </div>
+    <nav class="toolbar" aria-label="Sphere controls">
+      <button id="pauseBtn" type="button" aria-pressed="false" title="Pause or resume animation">pause</button>
+      <button id="seedBtn" type="button" title="Reseed cells">seed</button>
+      <button id="burstBtn" type="button" title="Inject a local burst">burst</button>
+      <button id="copyBtn" type="button" title="Copy current settings as JSON">copy</button>
+      <button id="hideMenuBtn" class="close-btn" type="button" aria-label="Hide controls" title="Hide controls">×</button>
+      <span class="close-spacer" aria-hidden="true"></span>
+      <label title="Automaton speed">
+        speed
+        <input id="speedRange" type="range" min="20" max="180" value="75">
+      </label>
+      <label title="Sphere rotation speed">
+        spin
+        <input id="spinRange" type="range" min="0" max="100" value="1">
+      </label>
+      <label title="Camera field of view angle">
+        fov
+        <input id="fovRange" type="range" min="18" max="70" value="42">
+      </label>
+      <label title="Sphere mesh type: UV grid or more even triangle polygons">
+        geo
+        <select id="sphereGeoSelect">
+          <option value="uv" selected>uv</option>
+          <option value="even">even</option>
+        </select>
+      </label>
+      <label title="Sphere polygon detail level">
+        polys
+        <input id="sphereDetailRange" type="range" min="0" max="6" step="1" value="6">
+      </label>
+      <label title="Limit mouse drag to horizontal rotation">
+        lock y
+        <input id="lockYInput" type="checkbox" checked>
+      </label>
+      <label title="Discrete number of dot columns around the sphere">
+        density
+        <input id="densityRange" type="range" min="48" max="192" step="4" value="140">
+      </label>
+      <label title="Canvas texture resolution: 1=576px, 2=1152px, 3=1728px, 4=2304px">
+        texture
+        <input id="textureQualityRange" type="range" min="1" max="4" step="1" value="4">
+      </label>
+      <label title="Initial live-cell percentage used by seed">
+        live %
+        <input id="liveRange" type="range" min="2" max="42" value="8">
+      </label>
+      <label title="Inject a burst when the automaton stagnates">
+        auto
+        <input id="autoKickInput" type="checkbox" checked>
+      </label>
+      <label title="Stagnation sensitivity">
+        kick %
+        <input id="kickRange" type="range" min="1" max="10" value="2">
+      </label>
+      <label title="Dot brightness and contrast">
+        alpha
+        <input id="alphaRange" type="range" min="2" max="70" value="31">
+      </label>
+      <label title="Minimum dot radius for inactive cells">
+        min
+        <input id="minSizeRange" type="range" min="0" max="6" value="0">
+      </label>
+      <label title="Maximum dot radius for live cells">
+        max
+        <input id="sizeRange" type="range" min="3" max="10" value="5">
+      </label>
+      <label title="Dead-cell fade speed">
+        fade
+        <input id="fadeRange" type="range" min="1" max="24" value="2">
+      </label>
+      <label title="Rendered cell shape">
+        shape
+        <select id="shapeSelect">
+          <option value="circle">circle</option>
+          <option value="square">square</option>
+          <option value="triangle">triangle</option>
+          <option value="random">random</option>
+          <option value="text" selected>text</option>
+        </select>
+      </label>
+      <label title="Characters used by text shape">
+        glyphs
+        <input id="glyphInput" type="text" value="RND" spellcheck="false">
+      </label>
+      <label title="How text shape chooses characters">
+        glyph
+        <select id="glyphModeSelect">
+          <option value="sequence" selected>seq</option>
+          <option value="random">random</option>
+        </select>
+      </label>
+      <label title="Show live-neighbor counts instead of the selected shape">
+        counts
+        <input id="countModeInput" type="checkbox">
+      </label>
+      <label title="Enable depth of field centered on the sphere">
+        dof
+        <input id="dofInput" type="checkbox" checked>
+      </label>
+      <label title="Focus offset from front face through center to back face">
+        focus
+        <input id="dofFocusRange" type="range" min="-100" max="100" value="-100">
+      </label>
+      <label title="BokehPass aperture">
+        aperture
+        <input id="dofApertureRange" type="range" min="0" max="100" value="100">
+      </label>
+      <label title="Maximum bokeh blur radius">
+        blur
+        <input id="dofBlurRange" type="range" min="0" max="100" value="100">
+      </label>
+      <label title="Brightness compensation for DOF">
+        light
+        <input id="lightRange" type="range" min="60" max="160" value="122">
+      </label>
+      <label title="Depth-of-field blur quality">
+        quality
+        <input id="dofQualityRange" type="range" min="1" max="4" step="1" value="4">
+      </label>
+      <label title="Dot color">
+        dot
+        <input id="dotColor" type="color" value="#4a4a4a">
+      </label>
+      <label title="Smoothly recolor cells that stay unchanged for a while">
+        stale
+        <input id="staleInput" type="checkbox" checked>
+      </label>
+      <label title="Speed of stale color transition">
+        stale sp
+        <input id="staleSpeedRange" type="range" min="1" max="30" value="30">
+      </label>
+      <label title="Color for unchanged cells">
+        stale col
+        <input id="staleColor" type="color" value="#ff0066">
+      </label>
+      <label title="Use transparent background inside the sphere texture">
+        sphere bg
+        <input id="transparentSphereInput" type="checkbox">
+      </label>
+      <label title="Render the back side of the sphere through transparent areas">
+        back side
+        <input id="backSideInput" type="checkbox">
+      </label>
+    </nav>
+  </header>
+
+  <div class="hud" aria-live="polite">
+    <span id="gridReadout">grid</span>
+    <span id="liveReadout">live</span>
+    <span id="stepReadout">step 0</span>
+    <span id="fpsReadout">fps</span>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+    import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+    import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
+
+    const RULE_B = [3];
+    const RULE_S = [2, 3];
+    const BASE_TEXTURE_WIDTH = 576;
+    const BG_COLOR = "#dddddd";
+    const PALETTE_SIZE = 32;
+    const STALE_BLEND_STEPS = 16;
+    const STALE_AGE_STEPS = 18;
+    const GEOMETRY_SHAPES = ["circle", "square", "triangle"];
+    const SPHERE_RADIUS = 0.95;
+    const UV_WIDTH_SEGMENTS = [8, 12, 16, 24, 48, 96, 160];
+    const UV_HEIGHT_SEGMENTS = [4, 6, 8, 12, 24, 48, 96];
+    const EVEN_DETAIL_LEVELS = [0, 0, 1, 2, 3, 4, 5];
+
+    let stepMs = 75;
+    let textureQuality = 4;
+    let textureWidth = BASE_TEXTURE_WIDTH * textureQuality;
+    let textureHeight = textureWidth / 2;
+    let cellSize = 12;
+    let radiusScale = 1;
+    let pointDensity = 140;
+    let liveChance = 0.08;
+    let minRadius = 0;
+    let maxRadius = 5;
+    let fadeRate = 0.02;
+    let baseAlpha = 0.08;
+    let alphaRange = 0.31;
+    let dotColor = [74, 74, 74];
+    let cellShape = "text";
+    let glyphChars = "RND";
+    let glyphList = ["R", "N", "D"];
+    let glyphMode = "sequence";
+    let countMode = false;
+    let glyphCache = new Map();
+    let staleEnabled = true;
+    let staleSpeed = 0.3;
+    let staleColor = [255, 0, 102];
+    let staleBlendPalette = [];
+    let transparentSphere = false;
+    let backSideVisible = false;
+    let sphereGeometryMode = "uv";
+    let sphereDetail = 5;
+    let stagnantCount = 0;
+    let kickThreshold = 0.02;
+    let paused = false;
+    let cols = 0;
+    let rows = 0;
+    let grid = new Uint8Array(0);
+    let radii = new Float32Array(0);
+    let geometryShapeIds = new Uint8Array(0);
+    let stableAges = new Uint16Array(0);
+    let staleMixes = new Float32Array(0);
+    let accumulator = 0;
+    let lastTime = performance.now();
+    let needsTextureDraw = true;
+    let stepCount = 0;
+    let liveCount = 0;
+    let fpsAcc = 0;
+    let fpsFrames = 0;
+    let fpsLast = performance.now();
+    let targetRotX = -0.08;
+    let targetRotY = 0;
+    let isDragging = false;
+    let lastPointerX = 0;
+    let lastPointerY = 0;
+    const spherePoint = new THREE.Vector3();
+    const cameraForward = new THREE.Vector3();
+    const cameraToSphere = new THREE.Vector3();
+    const sphereWorldPosition = new THREE.Vector3();
+
+    const stage = document.querySelector("#stage");
+    const topbar = document.querySelector(".topbar");
+    const showMenuBtn = document.querySelector("#showMenuBtn");
+    const pauseBtn = document.querySelector("#pauseBtn");
+    const seedBtn = document.querySelector("#seedBtn");
+    const burstBtn = document.querySelector("#burstBtn");
+    const copyBtn = document.querySelector("#copyBtn");
+    const hideMenuBtn = document.querySelector("#hideMenuBtn");
+    const speedRange = document.querySelector("#speedRange");
+    const spinRange = document.querySelector("#spinRange");
+    const fovRange = document.querySelector("#fovRange");
+    const sphereGeoSelect = document.querySelector("#sphereGeoSelect");
+    const sphereDetailRange = document.querySelector("#sphereDetailRange");
+    const lockYInput = document.querySelector("#lockYInput");
+    const densityRange = document.querySelector("#densityRange");
+    const textureQualityRange = document.querySelector("#textureQualityRange");
+    const liveRange = document.querySelector("#liveRange");
+    const autoKickInput = document.querySelector("#autoKickInput");
+    const kickRange = document.querySelector("#kickRange");
+    const alphaRangeInput = document.querySelector("#alphaRange");
+    const minSizeRange = document.querySelector("#minSizeRange");
+    const sizeRange = document.querySelector("#sizeRange");
+    const fadeRange = document.querySelector("#fadeRange");
+    const shapeSelect = document.querySelector("#shapeSelect");
+    const glyphInput = document.querySelector("#glyphInput");
+    const glyphModeSelect = document.querySelector("#glyphModeSelect");
+    const countModeInput = document.querySelector("#countModeInput");
+    const dofInput = document.querySelector("#dofInput");
+    const dofFocusRange = document.querySelector("#dofFocusRange");
+    const dofApertureRange = document.querySelector("#dofApertureRange");
+    const dofBlurRange = document.querySelector("#dofBlurRange");
+    const lightRange = document.querySelector("#lightRange");
+    const dofQualityRange = document.querySelector("#dofQualityRange");
+    const dotColorInput = document.querySelector("#dotColor");
+    const staleInput = document.querySelector("#staleInput");
+    const staleSpeedRange = document.querySelector("#staleSpeedRange");
+    const staleColorInput = document.querySelector("#staleColor");
+    const transparentSphereInput = document.querySelector("#transparentSphereInput");
+    const backSideInput = document.querySelector("#backSideInput");
+    const gridReadout = document.querySelector("#gridReadout");
+    const liveReadout = document.querySelector("#liveReadout");
+    const stepReadout = document.querySelector("#stepReadout");
+    const fpsReadout = document.querySelector("#fpsReadout");
+
+    let textureCanvas = document.createElement("canvas");
+    let textureContextAlpha = transparentSphere;
+    let textureCtx = textureCanvas.getContext("2d", { alpha: textureContextAlpha });
+    let palette = buildPalette();
+    staleBlendPalette = buildStaleBlendPalette();
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas: stage,
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance",
+    });
+    renderer.setClearColor(BG_COLOR, 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    camera.position.set(0, 0, 6.8);
+
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    const bokehPass = new BokehPass(scene, camera, {
+      focus: camera.position.z,
+      aperture: 0.00012,
+      maxblur: 0.008,
+    });
+    composer.addPass(renderPass);
+    composer.addPass(bokehPass);
+
+    let cellTexture = createCellTexture();
+
+    const sphere = new THREE.Mesh(
+      createSphereGeometry(),
+      new THREE.MeshBasicMaterial({
+        map: cellTexture,
+        transparent: transparentSphere,
+      })
+    );
+    sphere.position.set(0, 0, 0);
+    sphere.rotation.x = targetRotX;
+    scene.add(sphere);
+
+    function syncLight() {
+      let light = Number(lightRange.value) / 100;
+      sphere.material.color.setRGB(light, light, light);
+    }
+
+    function syncCameraAngle() {
+      camera.fov = Number(fovRange.value);
+      camera.updateProjectionMatrix();
+    }
+
+    function syncSphereGeometry() {
+      sphereGeometryMode = sphereGeoSelect.value;
+      sphereDetail = Number(sphereDetailRange.value);
+      let oldGeometry = sphere.geometry;
+      sphere.geometry = createSphereGeometry();
+      oldGeometry.dispose();
+    }
+
+    function createSphereGeometry() {
+      if (sphereGeometryMode === "even") {
+        return new THREE.IcosahedronGeometry(SPHERE_RADIUS, EVEN_DETAIL_LEVELS[sphereDetail]);
+      }
+
+      return new THREE.SphereGeometry(
+        SPHERE_RADIUS,
+        UV_WIDTH_SEGMENTS[sphereDetail],
+        UV_HEIGHT_SEGMENTS[sphereDetail]
+      );
+    }
+
+    window.cellSphereDebug = { camera, sphere, textureCanvas };
+
+    function syncTextureCanvasAlpha() {
+      if (textureContextAlpha === transparentSphere) return;
+
+      let width = textureCanvas.width;
+      let height = textureCanvas.height;
+      textureCanvas = document.createElement("canvas");
+      textureCanvas.width = width;
+      textureCanvas.height = height;
+      textureContextAlpha = transparentSphere;
+      textureCtx = textureCanvas.getContext("2d", { alpha: textureContextAlpha });
+      window.cellSphereDebug.textureCanvas = textureCanvas;
+      rebuildCellTexture();
+      needsTextureDraw = true;
+    }
+
+    function createCellTexture() {
+      let tex = new THREE.CanvasTexture(textureCanvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.magFilter = THREE.LinearFilter;
+      syncTextureFiltering(tex);
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      return tex;
+    }
+
+    function syncTextureFiltering(tex = cellTexture) {
+      if (!tex) return;
+      tex.generateMipmaps = !transparentSphere;
+      tex.minFilter = transparentSphere ? THREE.LinearFilter : THREE.LinearMipmapLinearFilter;
+      tex.needsUpdate = true;
+    }
+
+    function rebuildCellTexture() {
+      let oldTexture = cellTexture;
+      cellTexture = createCellTexture();
+      sphere.material.map = cellTexture;
+      sphere.material.needsUpdate = true;
+      if (oldTexture) oldTexture.dispose();
+    }
+
+    function buildPalette(color = dotColor) {
+      let br = parseInt(BG_COLOR.slice(1, 3), 16) || 0;
+      let bg = parseInt(BG_COLOR.slice(3, 5), 16) || 0;
+      let bb = parseInt(BG_COLOR.slice(5, 7), 16) || 0;
+      let result = [];
+
+      for (let i = 0; i < PALETTE_SIZE; i++) {
+        let t = i / (PALETTE_SIZE - 1);
+        let alpha = baseAlpha + t * alphaRange;
+        let r = Math.round(br * (1 - alpha) + color[0] * alpha);
+        let g = Math.round(bg * (1 - alpha) + color[1] * alpha);
+        let b = Math.round(bb * (1 - alpha) + color[2] * alpha);
+        result.push(`rgb(${r} ${g} ${b})`);
+      }
+      return result;
+    }
+
+    function buildStaleBlendPalette() {
+      let base = buildPalette(dotColor);
+      let stale = buildPalette(staleColor);
+      let result = [];
+
+      for (let step = 0; step <= STALE_BLEND_STEPS; step++) {
+        let amount = step / STALE_BLEND_STEPS;
+        result.push(base.map((color, index) => mixCssColor(color, stale[index], amount)));
+      }
+
+      return result;
+    }
+
+    function mixCssColor(from, to, amount) {
+      let a = from.match(/\d+/g).map(Number);
+      let b = to.match(/\d+/g).map(Number);
+      let r = Math.round(a[0] * (1 - amount) + b[0] * amount);
+      let g = Math.round(a[1] * (1 - amount) + b[1] * amount);
+      let blue = Math.round(a[2] * (1 - amount) + b[2] * amount);
+      return `rgb(${r} ${g} ${blue})`;
+    }
+
+    function hexToRgb(hex) {
+      let clean = hex.replace("#", "");
+      return [
+        parseInt(clean.slice(0, 2), 16) || 0,
+        parseInt(clean.slice(2, 4), 16) || 0,
+        parseInt(clean.slice(4, 6), 16) || 0,
+      ];
+    }
+
+    function syncVisualSettings() {
+      pointDensity = Number(densityRange.value);
+      textureQuality = Number(textureQualityRange.value);
+      textureWidth = BASE_TEXTURE_WIDTH * textureQuality;
+      textureHeight = textureWidth / 2;
+      cellSize = textureWidth / pointDensity;
+      radiusScale = cellSize / 12;
+      liveChance = Number(liveRange.value) / 100;
+      kickThreshold = Number(kickRange.value) / 100;
+      alphaRange = Number(alphaRangeInput.value) / 100;
+      minRadius = Number(minSizeRange.value);
+      maxRadius = Number(sizeRange.value);
+      if (maxRadius <= minRadius) {
+        maxRadius = minRadius + 1;
+        sizeRange.value = String(maxRadius);
+      }
+      fadeRate = Number(fadeRange.value) / 100;
+      dotColor = hexToRgb(dotColorInput.value);
+      cellShape = shapeSelect.value;
+      glyphChars = glyphInput.value || "01";
+      glyphList = Array.from(glyphChars);
+      glyphMode = glyphModeSelect.value;
+      countMode = countModeInput.checked;
+      staleEnabled = staleInput.checked;
+      staleSpeed = Number(staleSpeedRange.value) / 100;
+      staleColor = hexToRgb(staleColorInput.value);
+      transparentSphere = transparentSphereInput.checked;
+      backSideVisible = backSideInput.checked;
+      syncTextureCanvasAlpha();
+      sphere.material.side = backSideVisible ? THREE.DoubleSide : THREE.FrontSide;
+      sphere.material.transparent = transparentSphere;
+      sphere.material.depthWrite = !transparentSphere;
+      syncTextureFiltering();
+      palette = buildPalette();
+      staleBlendPalette = buildStaleBlendPalette();
+      sphere.material.needsUpdate = true;
+      glyphCache.clear();
+      needsTextureDraw = true;
+    }
+
+    function syncDensitySetting() {
+      syncVisualSettings();
+      configureTextureGrid();
+    }
+
+    function syncTextureQualitySetting() {
+      syncVisualSettings();
+      configureTextureGrid();
+      accumulator = 0;
+      lastTime = performance.now();
+      needsTextureDraw = true;
+    }
+
+    function syncLiveSetting() {
+      syncVisualSettings();
+      seedRandom();
+      needsTextureDraw = true;
+    }
+
+    function configureTextureGrid() {
+      const width = textureWidth;
+      const height = textureHeight;
+      let textureSizeChanged = textureCanvas.width !== width || textureCanvas.height !== height;
+      textureCanvas.width = width;
+      textureCanvas.height = height;
+      cols = pointDensity;
+      rows = Math.round(height / cellSize);
+      grid = new Uint8Array(cols * rows);
+      radii = new Float32Array(cols * rows);
+      geometryShapeIds = new Uint8Array(cols * rows);
+      stableAges = new Uint16Array(cols * rows);
+      staleMixes = new Float32Array(cols * rows);
+      radii.fill(minRadius);
+      seedRandom();
+      needsTextureDraw = true;
+      if (textureSizeChanged) rebuildCellTexture();
+      gridReadout.textContent = `${cols}x${rows}`;
+    }
+
+    function seedRandom() {
+      liveCount = 0;
+      for (let i = 0; i < grid.length; i++) {
+        grid[i] = Math.random() < liveChance ? 1 : 0;
+        assignRandomGeometryShape(i);
+        radii[i] = grid[i] ? maxRadius : minRadius;
+        stableAges[i] = 0;
+        staleMixes[i] = 0;
+        liveCount += grid[i];
+      }
+      stepCount = 0;
+      stagnantCount = 0;
+      updateHud();
+    }
+
+    function injectBurst() {
+      let regionW = Math.max(5, (cols * 0.16) | 0);
+      let regionH = Math.max(5, (rows * 0.24) | 0);
+      let startX = (Math.random() * (cols - regionW)) | 0;
+      let startY = (Math.random() * (rows - regionH)) | 0;
+      for (let y = startY; y < startY + regionH; y++) {
+        for (let x = startX; x < startX + regionW; x++) {
+          if (Math.random() < Math.min(0.75, liveChance * 2.2)) {
+            let idx = y * cols + x;
+            if (!grid[idx]) assignRandomGeometryShape(idx);
+            grid[idx] = 1;
+            radii[idx] = maxRadius;
+            stableAges[idx] = 0;
+            staleMixes[idx] = 0;
+          }
+        }
+      }
+    }
+
+    function injectNudge() {
+      const patterns = [
+        [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]],
+        [[0, 1], [2, 1], [1, 2], [2, 2], [1, 3]],
+        [[1, 0], [2, 0], [0, 1], [1, 1], [1, 2]],
+      ];
+      let pattern = patterns[(Math.random() * patterns.length) | 0];
+      let copies = liveCount < grid.length * 0.012 ? 2 : 1;
+      let topPadding = 3;
+      let usableRows = Math.max(1, rows - topPadding * 2 - 4);
+
+      for (let i = 0; i < copies; i++) {
+        let startX = (Math.random() * cols) | 0;
+        let startY = topPadding + ((Math.random() * usableRows) | 0);
+
+        for (let [dx, dy] of pattern) {
+          let x = (startX + dx) % cols;
+          let y = Math.min(rows - 1, startY + dy);
+          let idx = y * cols + x;
+          if (!grid[idx]) {
+            liveCount++;
+            assignRandomGeometryShape(idx);
+          }
+          grid[idx] = 1;
+          radii[idx] = Math.max(radii[idx], minRadius + (maxRadius - minRadius) * 0.65);
+          stableAges[idx] = 0;
+          staleMixes[idx] = 0;
+        }
+      }
+    }
+
+    function automatonStep() {
+      const next = new Uint8Array(grid.length);
+      let nextLive = 0;
+      let changed = 0;
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let neighbors = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              let nx = (x + dx + cols) % cols;
+              let ny = Math.max(0, Math.min(rows - 1, y + dy));
+              neighbors += grid[ny * cols + nx];
+            }
+          }
+
+          let idx = y * cols + x;
+          let alive = grid[idx];
+          next[idx] = alive ? Number(RULE_S.includes(neighbors)) : Number(RULE_B.includes(neighbors));
+          nextLive += next[idx];
+          if (next[idx] !== alive) {
+            changed++;
+            assignRandomGeometryShape(idx);
+            stableAges[idx] = 0;
+          } else {
+            stableAges[idx] = Math.min(65535, stableAges[idx] + 1);
+          }
+        }
+      }
+
+      grid = next;
+      liveCount = nextLive;
+      stepCount++;
+
+      if (!autoKickInput.checked) return;
+
+      if (changed < grid.length * kickThreshold) {
+        stagnantCount++;
+      } else {
+        stagnantCount = 0;
+      }
+
+      if (stagnantCount >= 5 || nextLive < grid.length * 0.025) {
+        injectNudge();
+        stagnantCount = 0;
+      }
+    }
+
+    function drawTexture() {
+      if (transparentSphere) {
+        textureCtx.clearRect(0, 0, textureCanvas.width, textureCanvas.height);
+      } else {
+        textureCtx.fillStyle = BG_COLOR;
+        textureCtx.fillRect(0, 0, textureCanvas.width, textureCanvas.height);
+      }
+
+      let maxIdx = PALETTE_SIZE - 1;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let idx = y * cols + x;
+          let targetR = grid[idx] ? maxRadius : minRadius;
+          let currentR = radii[idx];
+          radii[idx] = grid[idx]
+            ? currentR + (targetR - currentR) * 0.2
+            : currentR + (targetR - currentR) * fadeRate;
+
+          let radius = radii[idx];
+          let drawRadius = radius * radiusScale;
+          let t = (radius - minRadius) / Math.max(1, maxRadius - minRadius);
+          t = Math.max(0, Math.min(1, t));
+          let paletteIndex = (t * maxIdx + 0.5) | 0;
+          let targetStaleMix = staleEnabled && grid[idx] && stableAges[idx] >= STALE_AGE_STEPS ? 1 : 0;
+          staleMixes[idx] += (targetStaleMix - staleMixes[idx]) * staleSpeed;
+          let staleStep = Math.max(0, Math.min(STALE_BLEND_STEPS, Math.round(staleMixes[idx] * STALE_BLEND_STEPS)));
+
+          let dofAlpha = getTextureDofAlpha(x, y);
+          textureCtx.fillStyle = staleBlendPalette[staleStep][paletteIndex];
+          drawWrappedMark(x * cellSize, y * cellSize, drawRadius, idx, x, y, dofAlpha);
+        }
+      }
+    }
+
+    function drawWrappedMark(cx, cy, radius, idx, gridX, gridY, alpha) {
+      drawMark(cx, cy, radius, idx, gridX, gridY, alpha);
+
+      if (cx - radius < 0) {
+        drawMark(cx + textureCanvas.width, cy, radius, idx, gridX, gridY, alpha);
+      } else if (cx + radius > textureCanvas.width) {
+        drawMark(cx - textureCanvas.width, cy, radius, idx, gridX, gridY, alpha);
+      }
+    }
+
+    function drawMark(cx, cy, radius, idx, gridX, gridY, alpha) {
+      let previousAlpha = textureCtx.globalAlpha;
+      textureCtx.globalAlpha = previousAlpha * alpha;
+
+      if (countMode) {
+        drawNeighborCount(cx, cy, gridX, gridY);
+        textureCtx.globalAlpha = previousAlpha;
+        return;
+      }
+
+      let shape = cellShape === "random" ? getRandomGeometryShape(idx) : cellShape;
+
+      if (shape === "square") {
+        let side = radius * 1.8;
+        textureCtx.fillRect(cx - side / 2, cy - side / 2, side, side);
+        textureCtx.globalAlpha = previousAlpha;
+        return;
+      }
+
+      if (shape === "triangle") {
+        let h = radius * 2.1;
+        textureCtx.beginPath();
+        textureCtx.moveTo(cx, cy - h * 0.58);
+        textureCtx.lineTo(cx - h * 0.55, cy + h * 0.42);
+        textureCtx.lineTo(cx + h * 0.55, cy + h * 0.42);
+        textureCtx.closePath();
+        textureCtx.fill();
+        textureCtx.globalAlpha = previousAlpha;
+        return;
+      }
+
+      if (shape === "text") {
+        drawGlyph(cx, cy, radius, idx);
+        textureCtx.globalAlpha = previousAlpha;
+        return;
+      }
+
+      textureCtx.beginPath();
+      textureCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+      textureCtx.fill();
+      textureCtx.globalAlpha = previousAlpha;
+    }
+
+    function getTextureDofAlpha(x, y) {
+      if (!usesTextureDof()) return 1;
+
+      let u = (x + 0.5) / cols;
+      let v = (y + 0.5) / rows;
+      let phi = u * Math.PI * 2;
+      let theta = v * Math.PI;
+      let sinTheta = Math.sin(theta);
+
+      // Match THREE.SphereGeometry UV parameterization so texture-space DOF
+      // follows the actual front/back of the rendered mesh.
+      spherePoint.set(
+        -Math.cos(phi) * sinTheta,
+        Math.cos(theta),
+        Math.sin(phi) * sinTheta
+      );
+      spherePoint.applyEuler(sphere.rotation);
+
+      let focusOffset = Number(dofFocusRange.value) / 100;
+      let blur = Number(dofBlurRange.value) / 100;
+      let aperture = Number(dofApertureRange.value) / 100;
+      let focusZ = -focusOffset;
+      let distance = Math.abs(spherePoint.z - focusZ);
+      let softness = Math.max(0.08, 0.25 - aperture * 0.12);
+      let strength = blur * (0.35 + aperture * 0.65);
+      return Math.max(0.08, 1 - Math.max(0, distance - softness) * strength);
+    }
+
+    function usesTextureDof() {
+      return dofInput.checked && transparentSphere && backSideVisible;
+    }
+
+    function getRandomGeometryShape(idx) {
+      return GEOMETRY_SHAPES[geometryShapeIds[idx]];
+    }
+
+    function assignRandomGeometryShape(idx) {
+      geometryShapeIds[idx] = (Math.random() * GEOMETRY_SHAPES.length) | 0;
+    }
+
+    function drawGlyph(cx, cy, radius, idx) {
+      if (radius <= minRadius + 0.15) return;
+      let glyphIndex = glyphMode === "random"
+        ? hashCell(idx) % glyphList.length
+        : idx % glyphList.length;
+      let fontSize = Math.max(5, Math.round(radius * 2.35));
+      let color = textureCtx.fillStyle;
+      let glyph = getGlyphSprite(glyphList[glyphIndex], fontSize, color);
+      textureCtx.drawImage(glyph.canvas, cx - glyph.size / 2, cy - glyph.size / 2);
+    }
+
+    function getGlyphSprite(char, fontSize, color) {
+      let key = `${char}|${fontSize}|${color}`;
+      let cached = glyphCache.get(key);
+      if (cached) return cached;
+
+      let size = Math.ceil(fontSize * 1.7);
+      let canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      let ctx = canvas.getContext("2d");
+      ctx.fillStyle = color;
+      ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(char, size / 2, size / 2);
+
+      cached = { canvas, size };
+      glyphCache.set(key, cached);
+      return cached;
+    }
+
+    function drawNeighborCount(cx, cy, gridX, gridY) {
+      let count = countNeighbors(gridX, gridY);
+      if (count === 0) return;
+      textureCtx.save();
+      textureCtx.fillStyle = palette[Math.min(PALETTE_SIZE - 1, Math.max(0, Math.round((count / 8) * (PALETTE_SIZE - 1))))];
+      textureCtx.font = `${Math.max(6, cellSize * 0.58)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      textureCtx.textAlign = "center";
+      textureCtx.textBaseline = "middle";
+      textureCtx.fillText(String(count), cx, cy);
+      textureCtx.restore();
+    }
+
+    function hashCell(idx) {
+      let n = Math.imul(idx + stepCount, 374761393);
+      n = Math.imul(n ^ (n >>> 13), 1274126177);
+      return (n ^ (n >>> 16)) >>> 0;
+    }
+
+    function countNeighbors(x, y) {
+      let neighbors = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          let nx = (x + dx + cols) % cols;
+          let ny = Math.max(0, Math.min(rows - 1, y + dy));
+          neighbors += grid[ny * cols + nx];
+        }
+      }
+      return neighbors;
+    }
+
+    function resize() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      renderer.setSize(width, height, true);
+      camera.aspect = width / height;
+      camera.position.z = camera.aspect < 0.85 ? 7.2 : 6.6;
+      camera.lookAt(sphere.position);
+      camera.updateProjectionMatrix();
+      composer.setSize(width, height);
+    }
+
+    function updateHud() {
+      liveReadout.textContent = `live ${liveCount}`;
+      stepReadout.textContent = `step ${stepCount}`;
+    }
+
+    function animate(time) {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(time - lastTime, 100);
+      lastTime = time;
+
+      let didStep = false;
+      if (!paused) {
+        accumulator += dt;
+        while (accumulator >= stepMs) {
+          automatonStep();
+          accumulator -= stepMs;
+          didStep = true;
+        }
+      }
+      if ((didStep || needsTextureDraw) && !usesTextureDof()) {
+        drawTexture();
+        cellTexture.needsUpdate = true;
+        needsTextureDraw = false;
+      }
+
+      let spin = Number(spinRange.value) / 1000;
+      if (!isDragging) {
+        targetRotY += spin;
+      }
+      sphere.rotation.x += (targetRotX - sphere.rotation.x) * 0.22;
+      sphere.rotation.y += (targetRotY - sphere.rotation.y) * 0.22;
+      if (usesTextureDof()) {
+        drawTexture();
+        cellTexture.needsUpdate = true;
+        needsTextureDraw = false;
+      }
+      renderScene();
+
+      fpsFrames++;
+      fpsAcc += dt;
+      if (time - fpsLast > 500) {
+        fpsReadout.textContent = `fps ${Math.round((fpsFrames * 1000) / fpsAcc)}`;
+        fpsFrames = 0;
+        fpsAcc = 0;
+        fpsLast = time;
+        updateHud();
+      }
+    }
+
+    function renderScene() {
+      if (!dofInput.checked || usesTextureDof()) {
+        renderer.setRenderTarget(null);
+        renderer.render(scene, camera);
+        return;
+      }
+
+      let focusOffset = Number(dofFocusRange.value) / 100;
+      let aperture = Number(dofApertureRange.value) / 100;
+      let blur = Number(dofBlurRange.value) / 100;
+      let quality = Number(dofQualityRange.value);
+      bokehPass.uniforms.focus.value = getSphereFocusDistance(focusOffset);
+      bokehPass.uniforms.aperture.value = aperture * (0.006 + quality * 0.007);
+      bokehPass.uniforms.maxblur.value = blur * (0.006 + quality * 0.009);
+      composer.render();
+    }
+
+    function getSphereFocusDistance(focusOffset) {
+      camera.updateMatrixWorld();
+      sphere.updateMatrixWorld();
+      camera.getWorldDirection(cameraForward);
+      sphere.getWorldPosition(sphereWorldPosition);
+      cameraToSphere.subVectors(sphereWorldPosition, camera.position);
+      let centerDepth = cameraToSphere.dot(cameraForward);
+      let sphereRadius = SPHERE_RADIUS * sphere.scale.x;
+      return Math.max(camera.near, centerDepth + focusOffset * sphereRadius);
+    }
+
+    pauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "play" : "pause";
+      pauseBtn.setAttribute("aria-pressed", String(paused));
+    });
+
+    seedBtn.addEventListener("click", () => {
+      seedRandom();
+      drawTexture();
+      cellTexture.needsUpdate = true;
+    });
+
+    burstBtn.addEventListener("click", () => {
+      injectBurst();
+      drawTexture();
+      cellTexture.needsUpdate = true;
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      let settings = {
+        speed: Number(speedRange.value),
+        spin: Number(spinRange.value),
+        fov: Number(fovRange.value),
+        sphereGeometry: sphereGeoSelect.value,
+        sphereDetail: Number(sphereDetailRange.value),
+        density: Number(densityRange.value),
+        textureQuality: Number(textureQualityRange.value),
+        textureWidth,
+        textureHeight,
+        livePercent: Number(liveRange.value),
+        autoKick: autoKickInput.checked,
+        kickPercent: Number(kickRange.value),
+        alpha: Number(alphaRangeInput.value),
+        minRadius: Number(minSizeRange.value),
+        maxRadius: Number(sizeRange.value),
+        fade: Number(fadeRange.value),
+        shape: shapeSelect.value,
+        glyphs: glyphInput.value,
+        glyphMode: glyphModeSelect.value,
+        counts: countModeInput.checked,
+        dof: dofInput.checked,
+        dofFocus: Number(dofFocusRange.value),
+        dofAperture: Number(dofApertureRange.value),
+        dofBlur: Number(dofBlurRange.value),
+        light: Number(lightRange.value),
+        dofQuality: Number(dofQualityRange.value),
+        dotColor: dotColorInput.value,
+        stale: staleInput.checked,
+        staleSpeed: Number(staleSpeedRange.value),
+        staleColor: staleColorInput.value,
+        transparentSphere: transparentSphereInput.checked,
+        backSide: backSideInput.checked,
+      };
+      let text = JSON.stringify(settings, null, 2);
+
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (err) {
+        let ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+
+      copyBtn.textContent = "copied";
+      setTimeout(() => {
+        copyBtn.textContent = "copy";
+      }, 900);
+    });
+
+    speedRange.addEventListener("input", () => {
+      stepMs = Number(speedRange.value);
+    });
+
+    fovRange.addEventListener("input", syncCameraAngle);
+    sphereGeoSelect.addEventListener("change", syncSphereGeometry);
+    sphereDetailRange.addEventListener("input", syncSphereGeometry);
+
+    hideMenuBtn.addEventListener("click", () => {
+      topbar.hidden = true;
+      showMenuBtn.setAttribute("visible", "");
+    });
+
+    showMenuBtn.addEventListener("click", () => {
+      topbar.hidden = false;
+      showMenuBtn.removeAttribute("visible");
+    });
+
+    densityRange.addEventListener("input", syncDensitySetting);
+    textureQualityRange.addEventListener("input", syncTextureQualitySetting);
+    liveRange.addEventListener("input", syncLiveSetting);
+    kickRange.addEventListener("input", syncVisualSettings);
+    alphaRangeInput.addEventListener("input", syncVisualSettings);
+    minSizeRange.addEventListener("input", syncVisualSettings);
+    sizeRange.addEventListener("input", syncVisualSettings);
+    fadeRange.addEventListener("input", syncVisualSettings);
+    shapeSelect.addEventListener("change", syncVisualSettings);
+    glyphInput.addEventListener("input", syncVisualSettings);
+    glyphModeSelect.addEventListener("change", syncVisualSettings);
+    countModeInput.addEventListener("change", syncVisualSettings);
+    lightRange.addEventListener("input", syncLight);
+    dotColorInput.addEventListener("input", syncVisualSettings);
+    staleInput.addEventListener("change", syncVisualSettings);
+    staleSpeedRange.addEventListener("input", syncVisualSettings);
+    staleColorInput.addEventListener("input", syncVisualSettings);
+    transparentSphereInput.addEventListener("change", syncVisualSettings);
+    backSideInput.addEventListener("change", syncVisualSettings);
+
+    window.addEventListener("resize", resize);
+    stage.addEventListener("pointerdown", (event) => {
+      isDragging = true;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      stage.classList.add("dragging");
+      stage.setPointerCapture(event.pointerId);
+    });
+
+    stage.addEventListener("pointermove", (event) => {
+      if (!isDragging) return;
+      let dx = event.clientX - lastPointerX;
+      let dy = event.clientY - lastPointerY;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      targetRotY += dx * 0.006;
+      if (!lockYInput.checked) {
+        targetRotX = Math.max(-1.15, Math.min(1.15, targetRotX + dy * 0.004));
+      }
+    });
+
+    stage.addEventListener("pointerup", (event) => {
+      isDragging = false;
+      stage.classList.remove("dragging");
+      if (stage.hasPointerCapture(event.pointerId)) {
+        stage.releasePointerCapture(event.pointerId);
+      }
+    });
+
+    stage.addEventListener("pointercancel", () => {
+      isDragging = false;
+      stage.classList.remove("dragging");
+    });
+
+    stage.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      let zoomFactor = Math.exp(event.deltaY * 0.001);
+      camera.position.z = Math.max(1.4, Math.min(24, camera.position.z * zoomFactor));
+      camera.lookAt(sphere.position);
+    }, { passive: false });
+
+    syncVisualSettings();
+    configureTextureGrid();
+    syncLight();
+    syncCameraAngle();
+    resize();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

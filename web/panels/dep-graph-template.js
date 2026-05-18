@@ -5,12 +5,34 @@ export default `
       FIT
     </button>
     <div class="pcb-toolbar-sep"></div>
-    <button class="pcb-btn label-mode-btn pcb-structured-only" data-mode="always" data-active title="Always show labels">LBL:ALW</button>
-    <button class="pcb-btn label-mode-btn pcb-structured-only" data-mode="hover" title="Hover labels">LBL:HOV</button>
-    <button class="pcb-btn label-mode-btn pcb-structured-only" data-mode="focus" title="Focus labels">LBL:FOC</button>
+    <button
+      class="pcb-btn label-mode-btn pcb-structured-only"
+      data-mode="always"
+      data-active
+      title="Always show labels"
+    >LBL:ALW</button>
+    <button
+      class="pcb-btn label-mode-btn pcb-structured-only"
+      data-mode="hover"
+      title="Hover labels"
+    >LBL:HOV</button>
+    <button
+      class="pcb-btn label-mode-btn pcb-structured-only"
+      data-mode="focus"
+      title="Focus labels"
+    >LBL:FOC</button>
     <div class="pcb-toolbar-sep pcb-structured-only"></div>
-    <button class="pcb-btn pcb-layer-btn pcb-structured-only" data-layer="zones" data-active title="Toggle directory zones">ZONES</button>
-    <button class="pcb-btn pcb-layer-btn pcb-structured-only" data-layer="vias" data-active title="Toggle via markers">VIAS</button>
+    <button
+      class="pcb-btn pcb-layer-btn pcb-structured-only"
+      data-layer="zones"
+      data-active
+      title="Toggle directory zones"
+    >ZONES</button>
+    <button
+      class="pcb-btn pcb-layer-btn pcb-structured-only"
+      data-layer="vias"
+      title="Toggle via markers"
+    >VIAS</button>
     <div class="pcb-toolbar-sep"></div>
     <button class="pcb-btn" data-action="view-mode" title="Toggle view: Flat <-> Structured">
       <span class="material-symbols-outlined">account_tree</span>
@@ -20,7 +42,43 @@ export default `
       <span class="material-symbols-outlined">route</span>
       PCB
     </button>
+    <button class="pcb-btn" data-action="graph-metadata" title="Edit graph metadata">
+      <span class="material-symbols-outlined">edit_note</span>
+      META
+    </button>
+    <button class="pcb-btn pcb-flat-only" data-action="cluster-legend" title="Show semantic color legend" hidden>
+      <span class="material-symbols-outlined">palette</span>
+      COLORS
+    </button>
   </div>
+  <div class="pcb-clusters" aria-label="Semantic color legend" hidden></div>
+  <dialog class="pcb-metadata-dialog" aria-labelledby="graph-metadata-title">
+    <form method="dialog">
+      <header>
+        <h3 id="graph-metadata-title">Graph Metadata</h3>
+        <button class="pcb-icon-btn" value="cancel" type="submit" title="Close" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </header>
+      <textarea spellcheck="false" aria-label="Graph metadata JSON" autocomplete="off"></textarea>
+      <footer>
+        <span class="pcb-metadata-status" role="status" aria-live="polite"></span>
+        <button class="pcb-btn" value="cancel" type="submit" data-action="close-graph-metadata">
+          Cancel
+        </button>
+        <button
+          class="pcb-btn"
+          data-action="save-graph-metadata"
+          value="save"
+          type="button"
+          aria-label="Save graph metadata"
+        >
+          <span class="material-symbols-outlined">save</span>
+          Save
+        </button>
+      </footer>
+    </form>
+  </dialog>
   <loading-overlay ref="loader"></loading-overlay>
   <node-canvas connection-engine="canvas"></node-canvas>
   <pg-canvas-graph></pg-canvas-graph>

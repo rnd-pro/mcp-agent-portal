@@ -16,6 +16,27 @@ let scriptPath = resolve(__dirname, '../index.js');
 
 let [, , command, ...args] = process.argv;
 
+const ESC = '\x1b[';
+const c = {
+  reset: `${ESC}0m`,
+  bold: `${ESC}1m`,
+  dim: `${ESC}2m`,
+  cyan: `${ESC}36m`,
+  cyanBright: `${ESC}96m`,
+  white: `${ESC}37m`,
+  gray: `${ESC}90m`,
+};
+
+function printLogo() {
+  console.log(`
+${c.cyanBright}${c.bold}   ___                     __     ___           __        __${c.reset}
+${c.cyanBright}${c.bold}  / _ | ___ ____ ___  ___ / /_   / _ \\___  ____/ /____ _  / /${c.reset}
+${c.white}${c.bold} / __ |/ _ \`/ -_) _ \\/ -_) __/  / ___/ _ \\/ __/ __/ _ \`/ / / ${c.reset}
+${c.white}${c.bold}/_/ |_|\\_, /\\__/_//_/\\__/\\__/  /_/   \\___/_/  \\__/\\_,_/ /_/  ${c.reset}
+${c.gray}      /___/  Unified MCP aggregator + AI agent runtime${c.reset}
+`);
+}
+
 // ── Port Discovery ──────────────────────────────────────────────────
 
 function getBackendPort() {
@@ -104,6 +125,55 @@ function parseFlags(argsArr) {
   return { flags, positional };
 }
 
+function parseRunArgs(argsArr) {
+  let flags = {};
+  let promptParts = [];
+  let promptStarted = false;
+  let knownValueFlags = new Set(['model', 'provider', 'cwd', 'timeout']);
+
+  for (let i = 0; i < argsArr.length; i++) {
+    let arg = argsArr[i];
+
+    if (arg === '--' && !promptStarted) {
+      promptParts = argsArr.slice(i + 1);
+      break;
+    }
+
+    let isKnownFlag = arg.startsWith('--') && (arg === '--sync' || knownValueFlags.has(arg.slice(2)));
+    if (isKnownFlag && (!promptStarted || i === argsArr.length - 1 || argsArr[i + 1]?.startsWith('--'))) {
+      let key = arg.slice(2);
+      if (knownValueFlags.has(key) && i + 1 < argsArr.length && !argsArr[i + 1].startsWith('--')) {
+        flags[key] = argsArr[++i];
+      } else {
+        flags[key] = true;
+      }
+      continue;
+    }
+
+    if (isKnownFlag && promptStarted) {
+      let key = arg.slice(2);
+      if (knownValueFlags.has(key)) {
+        flags[key] = argsArr[++i];
+      } else {
+        flags[key] = true;
+      }
+      continue;
+    }
+
+    promptStarted = true;
+    promptParts.push(arg);
+  }
+
+  return { flags, prompt: promptParts.join(' ') };
+}
+
+function extractTextResult(res) {
+  let text = res?.content
+    ?.find((item) => item.type === 'text' && item.text && !item.text.startsWith('__EVENTS__:') && !item.text.startsWith('__RESULT_JSON__:'))
+    ?.text;
+  return text || '';
+}
+
 async function apiRequest(path, method = 'GET', body = null) {
   let port = getBackendPort();
   if (!port) {
@@ -170,11 +240,29 @@ async function mcpCall(toolName, argsObj = {}) {
 
   return new Promise((resolve, reject) => {
     let ws = new WebSocket(`ws://127.0.0.1:${port}/mcp-ws`);
-    
+
+    let settled = false;
+    let fallbackTimer = null;
+
+    function cleanup() {
+      clearTimeout(timeout);
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+    }
+
+    function finish(fn, value) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      ws.close();
+      fn(value);
+    }
+
     // Auto-timeout after 30s
     let timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error('MCP Call Timeout'));
+      finish(reject, new Error('MCP Call Timeout'));
     }, 30000);
 
     let initId = 'init-' + Math.random().toString(36).slice(2);
@@ -222,29 +310,30 @@ async function mcpCall(toolName, argsObj = {}) {
 
           // 3. Wait for multiplexer to rebuild index (it emits tools/list_changed after ~3s)
           // If we don't receive it in 3.5s, send anyway
-          setTimeout(sendToolCall, 3500);
+          fallbackTimer = setTimeout(sendToolCall, 3500);
 
         } else if (msg.method === 'notifications/tools/list_changed') {
           // Got the rebuilt index notification, safe to send tool call now!
+          if (fallbackTimer) {
+            clearTimeout(fallbackTimer);
+            fallbackTimer = null;
+          }
           sendToolCall();
         } else if (msg.id === callId) {
           // 4. Handle result
-          clearTimeout(timeout);
-          ws.close();
           if (msg.error) {
-            reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+            finish(reject, new Error(msg.error.message || JSON.stringify(msg.error)));
           } else {
-            resolve(msg.result);
+            finish(resolve, msg.result);
           }
         }
-      } catch (err) {
+      } catch {
         // ignore parse errors or notifications
       }
     });
 
     ws.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
+      finish(reject, err);
     });
   });
 }
@@ -287,7 +376,8 @@ let CLI = {
         let status = await apiRequest('/api/server-status');
         let instances = await apiRequest('/api/instances');
 
-        console.log(`\n  ⬡ mcp-agent-portal v${pkg.version}`);
+        printLogo();
+        console.log(`  ${c.bold}mcp-agent-portal${c.reset} ${c.dim}v${pkg.version}${c.reset}`);
         console.log(`  Uptime:   ${status.uptime}s`);
         console.log(`  Agents:   ${status.agents}`);
         console.log(`  Servers:`);
@@ -295,6 +385,32 @@ let CLI = {
           console.log(`    - ${inst.name.padEnd(20)} [pid: ${inst.pid}, port: ${inst.port}]`);
         }
         console.log(`\n  Web UI:   http://portal.local/\n`);
+      } catch (err) {
+        console.error(err.message);
+        process.exit(1);
+      }
+    },
+  },
+
+  restart: {
+    desc: 'Restart the running portal backend',
+    async handler() {
+      try {
+        let res = await apiRequest('/api/restart', 'POST', {});
+        console.log(res.message || 'Restarting portal backend...');
+      } catch (err) {
+        console.error(err.message);
+        process.exit(1);
+      }
+    },
+  },
+
+  stop: {
+    desc: 'Stop the running portal backend',
+    async handler() {
+      try {
+        await apiRequest('/api/stop', 'POST', {});
+        console.log('Stopping portal backend...');
       } catch (err) {
         console.error(err.message);
         process.exit(1);
@@ -431,9 +547,8 @@ let CLI = {
   run: {
     desc: 'Run a task and stream output (usage: run "prompt" [--sync] [--model <m>] [--provider <p>] [--cwd <path>])',
     async handler() {
-      let { flags, positional } = parseFlags(args);
-      let prompt = positional.join(' ');
-      
+      let { flags, prompt } = parseRunArgs(args);
+
       if (!prompt) {
         console.error('Usage: mcp-agent-portal run "prompt text"');
         process.exit(1);
@@ -464,7 +579,7 @@ let CLI = {
 
       let currentTask = null;
 
-      ws.on('message', (data) => {
+      ws.on('message', async (data) => {
         try {
           let msg = JSON.parse(data.toString());
           if (msg.method === 'chat.delegated') {
@@ -486,7 +601,12 @@ let CLI = {
               console.error(`\n> ❌  Error: ${p.data.message}`);
             }
           } else if (msg.method === 'chat.done') {
-            console.log(`\n[Task Completed: ${currentTask}]\nResult: ${msg.params.text || ""}`);
+            let text = msg.params.text || '';
+            if (!text && currentTask) {
+              let result = await mcpCall('get_task_result', { taskId: currentTask });
+              text = extractTextResult(result);
+            }
+            console.log(`\n[Task Completed: ${currentTask}]\nResult: ${text}`);
             process.exit(0);
           } else if (msg.method === 'chat.error') {
             console.error(`\n[Task Failed: ${msg.params.error}]`);
@@ -520,8 +640,8 @@ let CLI = {
 };
 
 function printHelp() {
-  console.log(`
-mcp-agent-portal v${pkg.version} — Unified MCP aggregator + AI agent runtime
+  printLogo();
+  console.log(`${c.bold}mcp-agent-portal${c.reset} ${c.dim}v${pkg.version}${c.reset}
 
 Usage:
   npx mcp-agent-portal                  Start MCP server and UI (daemon spawner)

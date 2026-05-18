@@ -28,7 +28,8 @@ import {
   ForceLayout,
   PCB_DARK,
 } from 'symbiote-node';
-import { api, state, events, emit } from '../app.js';
+import { api, state, events, emit, resolveProjectPath } from '../app.js';
+import { emit as dashEmit } from '../dashboard-state.js';
 import { persistUiValue, readUiValue } from '../common/ui-state.js';
 
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
@@ -39,6 +40,7 @@ import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
 import { buildFlatGroups, computeInitialGraphPositions } from './dep-graph-layout.js';
+import { normalizeProjectGraphMetadata } from '../services/project-graph-metadata.js';
 import {
   getNextPathStyle,
   renderPathStyleButton,
@@ -79,6 +81,9 @@ export class DepGraph extends Symbiote {
   _lodManager = null;
   /** @type {boolean} Guard against duplicate graph builds */
   _graphBuilt = false;
+  _projectGraphMetadata = normalizeProjectGraphMetadata();
+  _pendingClusterId = null;
+  _clusterLegendOpen = false;
 
   /**
    * Update the PCB preloader overlay
@@ -119,6 +124,7 @@ export class DepGraph extends Symbiote {
     this._pgCanvasGraph.addEventListener('path-changed', (e) => {
       if (this._viewMode === 'flat' && this._initialViewRestored) {
         const path = e.detail.path;
+        if (path.startsWith('cluster:')) return;
         const { params } = parseGraphHash();
         history.replaceState(null, '', buildFlatPathHash(path, params));
       }
@@ -129,14 +135,20 @@ export class DepGraph extends Symbiote {
       // Update URL with focus= so it's bookmarkable
       this._updateHashParam('focus', path);
       emit('file-selected', { path, source: 'canvas' });
+      dashEmit('graph-context-selected', { type: 'file', path, source: 'dep-graph' });
     });
 
     this._pgCanvasGraph.addEventListener('group-selected', (e) => {
       const path = e.detail.path;
-      // Update URL with focus= so group selection is also bookmarkable in flat mode
+      if (path.startsWith('cluster:')) {
+        this._emitClusterContext(path.slice('cluster:'.length));
+        return;
+      }
+      // Update URL with focus= so real directory selection is bookmarkable in flat mode.
       this._updateHashParam('focus', path);
       // Sync: highlight directory in the tree sidebar (add trailing / for dir convention)
       emit('file-selected', { path: path + '/', source: 'canvas' });
+      dashEmit('graph-context-selected', { type: 'file', path: path + '/', source: 'dep-graph' });
     });
 
     // Deselect in flat mode: clear focus= when clicking empty space
@@ -145,6 +157,11 @@ export class DepGraph extends Symbiote {
       if (window.location.hash.includes('focus=')) {
         this._updateHashParam('focus', null);
       }
+    });
+
+    this._pgCanvasGraph.addEventListener('layout-snapshot', (e) => {
+      if (this._viewMode !== 'flat') return;
+      this._persistGraphLayoutSnapshot(e.detail);
     });
     
     // Flat mode init: fitView early after a few ticks (not waiting for full convergence)
@@ -186,13 +203,14 @@ export class DepGraph extends Symbiote {
     this._viewMode = resolveInitialViewMode(urlParams);
     const viewModeBtn = this.querySelector('[data-action="view-mode"]');
     renderViewModeButton(viewModeBtn, this._viewMode);
-    this._updateStructuredOnlyVisibility(this._viewMode);
+    this._updateModeVisibility(this._viewMode);
     
     this._setMode = (newMode) => {
       if (this._viewMode === newMode) return;
       this._viewMode = newMode;
       renderViewModeButton(viewModeBtn, this._viewMode);
-      this._updateStructuredOnlyVisibility(this._viewMode);
+      this._updateModeVisibility(this._viewMode);
+      this._renderClusterPanel();
 
       // Persist mode in URL hash
       this._updateHashParam('mode', this._viewMode === 'flat' ? 'flat' : 'tree');
@@ -218,6 +236,26 @@ export class DepGraph extends Symbiote {
       this._setMode(wantFlat ? 'flat' : 'structured');
     });
 
+    this.querySelector('[data-action="graph-metadata"]')?.addEventListener('click', () => {
+      this._openGraphMetadataEditor();
+    });
+    this.querySelector('[data-action="cluster-legend"]')?.addEventListener('click', () => {
+      this._clusterLegendOpen = !this._clusterLegendOpen;
+      this._renderClusterPanel();
+    });
+    this.querySelector('[data-action="save-graph-metadata"]')?.addEventListener('click', () => {
+      this._saveGraphMetadataFromEditor();
+    });
+    events.addEventListener('graph-story-beat-selected', (e) => {
+      this._applyStoryBeat(e.detail);
+    });
+    this.querySelector('.pcb-metadata-dialog')?.addEventListener('close', () => {
+      this._setMetadataSaving(false);
+    });
+    this.querySelector('.pcb-metadata-dialog')?.addEventListener('cancel', (e) => {
+      if (e.currentTarget?.hasAttribute('data-saving')) e.preventDefault();
+    });
+
     // Connection Path Style toggling
     const pathStyleBtn = this.querySelector('[data-action="path-style"]');
     if (pathStyleBtn) {
@@ -238,6 +276,7 @@ export class DepGraph extends Symbiote {
 
     // Apply PCB theme
     applyTheme(this._canvas, PCB_DARK);
+    this._loadProjectGraphMetadata();
 
     // Setup ResizeObserver to gracefully handle "Layout preserved" (display: none) hidden panels.
     // Prevents building graphs while they have 0 width/height, dodging layout thrashing & 50,000+ DOM mutations
@@ -464,18 +503,238 @@ export class DepGraph extends Symbiote {
   }
 
   /**
-   * Show/hide toolbar buttons that only apply in structured mode.
+   * Show/hide toolbar buttons that only apply in one graph mode.
    * @param {string} mode - 'flat' or 'structured'
    */
-  _updateStructuredOnlyVisibility(mode) {
-    const hide = mode === 'flat';
+  _updateModeVisibility(mode) {
+    const hideStructuredOnly = mode === 'flat';
     this.querySelectorAll('.pcb-structured-only').forEach(el => {
-      el.style.display = hide ? 'none' : '';
+      el.style.display = hideStructuredOnly ? 'none' : '';
     });
+    const hideFlatOnly = mode !== 'flat';
+    this.querySelectorAll('.pcb-flat-only').forEach(el => {
+      el.style.display = hideFlatOnly ? 'none' : '';
+    });
+  }
+
+  async _loadProjectGraphMetadata() {
+    try {
+      let res = await fetch(this._getProjectGraphMetadataUrl());
+      if (!res.ok) throw new Error(`metadata load failed: ${res.status}`);
+      let data = await res.json();
+      this._projectGraphMetadata = normalizeProjectGraphMetadata(data.metadata || {});
+      this._pgCanvasGraph?.setProjectGraphMetadata?.(this._projectGraphMetadata);
+      this._renderClusterPanel();
+      if (state.skeleton && this._graphBuilt && this._projectGraphMetadata.clusters.length > 0) {
+        this._rebuildWithGraphMetadata();
+      }
+    } catch (err) {
+      console.warn(`Project graph metadata unavailable: ${err.message}`);
+      this._projectGraphMetadata = normalizeProjectGraphMetadata();
+      this._renderClusterPanel();
+    }
+  }
+
+  _renderClusterPanel() {
+    let panel = this.querySelector('.pcb-clusters');
+    let toggle = this.querySelector('[data-action="cluster-legend"]');
+    if (!panel) return;
+    let clusters = this._projectGraphMetadata?.clusters || [];
+    let hasFlatLegend = clusters.length > 0 && this._viewMode === 'flat';
+    if (toggle) {
+      toggle.hidden = !hasFlatLegend;
+      toggle.toggleAttribute('data-active', hasFlatLegend && this._clusterLegendOpen);
+      toggle.setAttribute(
+        'title',
+        this._clusterLegendOpen ? 'Hide semantic color legend' : 'Show semantic color legend',
+      );
+    }
+    if (!hasFlatLegend || !this._clusterLegendOpen) {
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
+
+    let escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+    panel.hidden = false;
+    panel.innerHTML = clusters.map((cluster) => {
+      let pathCount = cluster.paths.length;
+      let label = escapeHtml(cluster.label);
+      let title = escapeHtml(cluster.description || `${cluster.label}: ${pathCount} paths`);
+      return `
+      <div class="pcb-cluster-row" title="${title}">
+        <span class="pcb-cluster-swatch" style="background:${escapeHtml(cluster.color)}"></span>
+        <span class="pcb-cluster-label">${label}</span>
+      </div>
+    `;
+    }).join('');
+  }
+
+  _openSemanticCluster(clusterId, emitContext = true) {
+    if (!clusterId) return;
+    if (emitContext) this._emitClusterContext(clusterId);
+    if (this._viewMode !== 'flat') {
+      this._pendingClusterId = clusterId;
+      this._setMode('flat');
+      return;
+    }
+    this._pendingClusterId = null;
+    this._focusSemanticCluster(clusterId);
+  }
+
+  _focusSemanticCluster(clusterId) {
+    let nodeId = `cluster:${clusterId}`;
+    this._pgCanvasGraph?.focusSemanticCluster?.(nodeId);
+  }
+
+  _emitClusterContext(clusterId) {
+    let cluster = this._projectGraphMetadata?.clusters?.find((item) => item.id === clusterId);
+    if (!cluster) return;
+    dashEmit('graph-context-selected', {
+      type: 'graph-cluster',
+      clusterId: cluster.id,
+      label: cluster.label,
+      description: cluster.description,
+      paths: cluster.paths,
+      source: 'dep-graph',
+    });
+  }
+
+  _applyStoryBeat(beat) {
+    if (!beat) return;
+    if (beat.clusterId) {
+      this._openSemanticCluster(beat.clusterId, false);
+      return;
+    }
+    if (beat.focusPath) {
+      this._updateHashParam('focus', beat.focusPath);
+      emit('file-selected', { path: beat.focusPath, source: 'graph-flows' });
+      dashEmit('graph-context-selected', { type: 'file', path: beat.focusPath, source: 'graph-flows' });
+    }
   }
 
   _updateHashParam(key, value) {
     updateHashParam(key, value);
+  }
+
+  _getGraphLayoutStorageKey(groupId = parseGraphHash().path || '') {
+    const params = getGraphUrlParams();
+    const projectId = params.get('project') || state.activeProjectId || 'global';
+    const mode = this._viewMode === 'flat' ? 'flat' : 'tree';
+    return `pg-graph-layout-v1-${projectId}-${mode}-${encodeURIComponent(groupId || 'root')}`;
+  }
+
+  _getGraphLayoutStatePath(storageKey) {
+    return `ui/graphLayouts/${encodeURIComponent(storageKey)}`;
+  }
+
+  _readGraphLayoutSnapshot(groupId = parseGraphHash().path || '') {
+    const storageKey = this._getGraphLayoutStorageKey(groupId);
+    const snapshot = readUiValue(this._getGraphLayoutStatePath(storageKey), storageKey, null);
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    if ((snapshot.groupId || '') !== (groupId || '')) return null;
+    return snapshot;
+  }
+
+  _persistGraphLayoutSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return;
+    const groupId = snapshot.groupId || '';
+    const positions = snapshot.positions && typeof snapshot.positions === 'object' ? snapshot.positions : null;
+    if (!positions || Object.keys(positions).length === 0) return;
+    const storageKey = this._getGraphLayoutStorageKey(groupId);
+    persistUiValue(this._getGraphLayoutStatePath(storageKey), snapshot, storageKey);
+  }
+
+  _getProjectGraphMetadataUrl() {
+    let qs = new URLSearchParams({ projectPath: resolveProjectPath('.') });
+    return `/api/project-graph-metadata?${qs.toString()}`;
+  }
+
+  _setMetadataStatus(text, isError = false, isSuccess = false) {
+    let status = this.querySelector('.pcb-metadata-status');
+    if (!status) return;
+    status.textContent = text || '';
+    status.toggleAttribute('data-error', Boolean(isError));
+    status.toggleAttribute('data-success', Boolean(isSuccess) && !isError);
+  }
+
+  _setMetadataSaving(isSaving) {
+    let dialog = this.querySelector('.pcb-metadata-dialog');
+    if (!dialog) return;
+    dialog.toggleAttribute('data-saving', Boolean(isSaving));
+    this.querySelectorAll(
+      '[data-action="save-graph-metadata"], [data-action="close-graph-metadata"], .pcb-icon-btn',
+    ).forEach((button) => {
+      button.disabled = Boolean(isSaving);
+    });
+  }
+
+  _openGraphMetadataEditor() {
+    let dialog = this.querySelector('.pcb-metadata-dialog');
+    let textarea = dialog?.querySelector('textarea');
+    if (!dialog || !textarea) return;
+    textarea.value = JSON.stringify(this._projectGraphMetadata || normalizeProjectGraphMetadata(), null, 2);
+    this._setMetadataStatus('');
+    this._setMetadataSaving(false);
+    dialog.showModal();
+    requestAnimationFrame(() => textarea.focus());
+  }
+
+  _rebuildWithGraphMetadata() {
+    this._pgCanvasGraph?.setProjectGraphMetadata?.(this._projectGraphMetadata);
+    this._renderClusterPanel();
+    if (!state.skeleton || !this._graphBuilt) return;
+    this._graphBuilt = false;
+    this._showLoader();
+    this._buildGraph(state.skeleton);
+  }
+
+  async _saveGraphMetadataFromEditor() {
+    let dialog = this.querySelector('.pcb-metadata-dialog');
+    let textarea = dialog?.querySelector('textarea');
+    if (!dialog || !textarea || dialog.hasAttribute('data-saving')) return;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(textarea.value);
+    } catch (err) {
+      this._setMetadataStatus(`Invalid JSON: ${err.message}`, true);
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      this._setMetadataStatus('Invalid metadata: expected a JSON object.', true);
+      return;
+    }
+
+    this._setMetadataStatus('Saving...');
+    this._setMetadataSaving(true);
+    try {
+      let res = await fetch('/api/project-graph-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectPath: resolveProjectPath('.'), metadata: parsed }),
+      });
+      let text = await res.text();
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (parseErr) {
+          if (res.ok) throw new Error(`Save failed: invalid server response: ${parseErr.message}`);
+        }
+      }
+      if (!res.ok) throw new Error(data.error || `Save failed: ${res.status}`);
+      this._projectGraphMetadata = normalizeProjectGraphMetadata(data.metadata || parsed);
+      this._rebuildWithGraphMetadata();
+      this._setMetadataStatus('Saved.', false, true);
+      dialog.close();
+    } catch (err) {
+      this._setMetadataStatus(err.message, true);
+    } finally {
+      this._setMetadataSaving(false);
+    }
   }
 
   /**
@@ -664,10 +923,16 @@ export class DepGraph extends Symbiote {
         this._pgCanvasGraph.addEventListener('layout-tick', hideCanvasLoader);
         this._pgCanvasGraph.addEventListener('layout-done', hideCanvasLoader);
         
-        this._pgCanvasGraph.setSkeleton(skeleton);
+        this._pgCanvasGraph.setProjectGraphMetadata?.(this._projectGraphMetadata);
+        this._pgCanvasGraph.setLayoutSnapshot?.(this._readGraphLayoutSnapshot());
+        this._pgCanvasGraph.setSkeleton(skeleton, this._projectGraphMetadata);
         
         // Restore path from URL
         this._pgCanvasGraph.setPath(parseGraphHash().path);
+        if (this._pendingClusterId) {
+          this._focusSemanticCluster(this._pendingClusterId);
+          this._pendingClusterId = null;
+        }
       } else {
         this._hideLoader();
       }
@@ -728,7 +993,7 @@ export class DepGraph extends Symbiote {
     this._canvas.setPathStyle(urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb'));
 
     // Groups for layout clustering (flat mode only — structured has fewer top-level nodes)
-    const groups = !isStructured ? buildFlatGroups(dirFiles, fileMap) : {};
+    const groups = !isStructured ? buildFlatGroups(dirFiles, fileMap, this._projectGraphMetadata) : {};
 
     // --- Layout strategy depends on mode ---
     const positions = computeInitialGraphPositions({

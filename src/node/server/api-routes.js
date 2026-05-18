@@ -12,11 +12,34 @@ import { getFlywheelStats } from '../mlops/flywheel.js';
 import { lintFile } from './lint-service.js';
 import { listAdapterTypes, discoverOpenCodeModels, getCLIModels, getAgentList, setPortalRoot } from '../adapters/index.js';
 import { REGISTRY, getRegistryByCategory, findInRegistry } from './marketplace-registry.js';
+import { validateProjectGraphMetadata } from '../../iso/project-graph-metadata.js';
 import { spawn } from 'node:child_process';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function getProjectGraphMetadataPath(root) {
+  return path.join(path.resolve(root), '.portal', 'project-graph.json');
+}
+
+function resolveProjectGraphMetadataRoot(projectRoot, requestedRoot) {
+  let baseRoot = path.resolve(projectRoot);
+  let root = !requestedRoot || requestedRoot === '.' ? baseRoot : path.resolve(requestedRoot);
+  if (root !== baseRoot) {
+    throw new Error('Invalid project graph metadata path: projectPath must match the portal project root');
+  }
+  return baseRoot;
+}
+
+async function writeJsonAtomic(filePath, data) {
+  let dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
+  let tmpPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  await fs.writeFile(tmpPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  await fs.rename(tmpPath, filePath);
+}
 
 /**
  * Parse JSON body from request.
@@ -67,6 +90,49 @@ export function createRoutes(ctx) {
         agents: proxyManager.servers.size,
         pid: process.pid,
       }));
+    },
+
+    'GET /api/project-graph-metadata': async (req, res) => {
+      try {
+        let url = new URL(req.url, 'http://localhost');
+        let requestedRoot = resolveProjectGraphMetadataRoot(
+          projectRoot,
+          url.searchParams.get('projectPath') || url.searchParams.get('path'),
+        );
+        let sidecarPath = getProjectGraphMetadataPath(requestedRoot);
+        let text;
+        try {
+          text = await fs.readFile(sidecarPath, 'utf8');
+        } catch (err) {
+          if (err.code === 'ENOENT') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, found: false, path: sidecarPath, metadata: { version: 1 } }));
+            return;
+          }
+          throw err;
+        }
+        let metadata = validateProjectGraphMetadata(JSON.parse(text));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, found: true, path: sidecarPath, metadata }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    },
+
+    'POST /api/project-graph-metadata': async (req, res) => {
+      try {
+        let body = await parseBody(req, 2 * 1024 * 1024);
+        let requestedRoot = resolveProjectGraphMetadataRoot(projectRoot, body.projectPath || body.path);
+        let metadata = validateProjectGraphMetadata(body.metadata || body);
+        let sidecarPath = getProjectGraphMetadataPath(requestedRoot);
+        await writeJsonAtomic(sidecarPath, metadata);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, path: sidecarPath, metadata }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
     },
 
     'GET /api/server-status': (req, res) => {

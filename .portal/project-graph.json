@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "clusters": [
+    {
+      "id": "web-dashboard",
+      "label": "Web Dashboard",
+      "color": "#7cc7ff",
+      "description": "Browser UI, panels, components, routing, and shared client services.",
+      "paths": [
+        "web/"
+      ]
+    },
+    {
+      "id": "portal-backend",
+      "label": "Portal Backend",
+      "color": "#8fd6a5",
+      "description": "HTTP API, backend lifecycle, gateways, adapters, and persistent state.",
+      "paths": [
+        "src/node/"
+      ]
+    },
+    {
+      "id": "project-graph-mcp",
+      "label": "Project Graph MCP",
+      "color": "#f2c66d",
+      "description": "Codebase graph analysis server consumed by the portal graph panel.",
+      "paths": [
+        "packages/project-graph-mcp/"
+      ]
+    },
+    {
+      "id": "agent-pool-mcp",
+      "label": "Agent Pool MCP",
+      "color": "#f08f8f",
+      "description": "Agent orchestration, task execution, workflows, and file tracking.",
+      "paths": [
+        "packages/agent-pool-mcp/"
+      ]
+    },
+    {
+      "id": "symbiote-node",
+      "label": "Symbiote Node",
+      "color": "#b79cff",
+      "description": "Canvas, graph, workflow, and UI primitives used by Agent Portal.",
+      "paths": [
+        "packages/symbiote-node/"
+      ]
+    },
+    {
+      "id": "tests",
+      "label": "Tests",
+      "color": "#67d4d1",
+      "description": "Unit and integration coverage for portal behavior.",
+      "paths": [
+        "test/"
+      ]
+    }
+  ],
+  "nodeDescriptions": {},
+  "stories": [
+    {
+      "id": "graph-metadata-flow",
+      "label": "Graph Metadata Flow",
+      "description": "How the portal reads sidecar metadata and turns it into semantic graph context.",
+      "beats": [
+        {
+          "id": "sidecar-source",
+          "label": "Sidecar Source",
+          "narrative": "The project-level .portal sidecar stores semantic clusters, stories, and graph UI metadata outside the .agent-portal submodule.",
+          "clusterId": "portal-backend",
+          "focusPath": "src/node/server/api-routes.js",
+          "nodes": [
+            ".portal/project-graph.json",
+            "src/node/server/api-routes.js"
+          ]
+        },
+        {
+          "id": "graph-rendering",
+          "label": "Graph Rendering",
+          "narrative": "The dep graph loads normalized metadata and applies semantic clusters in the flat graph renderer.",
+          "clusterId": "web-dashboard",
+          "focusPath": "web/panels/dep-graph.js",
+          "nodes": [
+            "web/panels/dep-graph.js",
+            "web/components/canvas-graph.js",
+            "web/services/project-graph-metadata.js"
+          ]
+        },
+        {
+          "id": "chat-context",
+          "label": "Chat Context",
+          "narrative": "Graph selections become structured attached context chips so agents know the current cluster or story beat.",
+          "clusterId": "web-dashboard",
+          "focusPath": "web/panels/AgentChat/AgentChat.js",
+          "nodes": [
+            "web/panels/AgentChat/AgentChat.js",
+            "web/services/chat-context.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mcp-routing-flow",
+      "label": "MCP Routing Flow",
+      "description": "How portal UI calls reach project-graph MCP through the backend gateway.",
+      "beats": [
+        {
+          "id": "browser-api-map",
+          "label": "Browser API Map",
+          "narrative": "Client-side API helpers translate UI requests into MCP tool names and arguments.",
+          "clusterId": "web-dashboard",
+          "focusPath": "web/app.js",
+          "nodes": [
+            "web/app.js"
+          ]
+        },
+        {
+          "id": "backend-gateway",
+          "label": "Backend Gateway",
+          "narrative": "The backend route layer validates requests and proxies MCP calls through the singleton server.",
+          "clusterId": "portal-backend",
+          "focusPath": "src/node/server/api-routes.js",
+          "nodes": [
+            "src/node/server/api-routes.js",
+            "src/node/proxy/mcp-proxy.js"
+          ]
+        },
+        {
+          "id": "project-graph-tool",
+          "label": "Project Graph Tool",
+          "narrative": "project-graph-mcp serves compact graph analysis and now validates graph metadata sidecars.",
+          "clusterId": "project-graph-mcp",
+          "focusPath": "packages/project-graph-mcp/src/mcp/graph-metadata.js",
+          "nodes": [
+            "packages/project-graph-mcp/src/mcp/graph-metadata.js",
+            "packages/project-graph-mcp/src/mcp/mcp-server.js"
+          ]
+        }
+      ]
+    }
+  ],
+  "layoutPins": {},
+  "hiddenNodes": [],
+  "focusPresets": []
+}

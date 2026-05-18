@@ -9,13 +9,12 @@ import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
 import { escapeHtml, formatElapsed, formatMarkdown } from '../../utils/markdown-formatter.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
+import {
+  formatAttachedContextBlock,
+  mergeAttachedContext,
+  removeAttachedContext,
+} from '../../services/chat-context.js';
 import { ChatSidebar } from '../../components/ChatSidebar/ChatSidebar.js';
-
-/** Extract display name from a full path (file or directory). */
-function shortName(fullPath) {
-  let clean = fullPath.endsWith('/') ? fullPath.slice(0, -1) : fullPath;
-  return (clean.split('/').pop() || fullPath) + (fullPath.endsWith('/') ? '/' : '');
-}
 
 /**
  * AgentChat — single layout panel with integrated chat-nav sidebar.
@@ -115,15 +114,12 @@ export class AgentChat extends Symbiote {
     onAttachClick: async () => {
       let path = await uiPrompt('Enter file or folder path to attach:');
       if (path && path.trim()) {
-        let pathStr = path.trim();
-        this.$.attachedContext = [...this.$.attachedContext, { path: pathStr, name: shortName(pathStr) }];
+        this._attachContext({ type: 'file', path: path.trim(), source: 'manual' });
       }
     },
 
     onRemoveContext: (e) => {
-      let path = e.currentTarget.dataset.path;
-      let ctx = this.$.attachedContext.filter(c => c.path !== path);
-      this.$.attachedContext = ctx;
+      this.$.attachedContext = removeAttachedContext(this.$.attachedContext, e.currentTarget.dataset.key);
     },
 
     onDragOver: (e) => {
@@ -141,12 +137,7 @@ export class AgentChat extends Symbiote {
 
       let path = e.dataTransfer.getData('text/plain');
       if (path && path.trim()) {
-        // Prevent duplicates
-        let pathStr = path.trim();
-        let ctx = this.$.attachedContext || [];
-        if (!ctx.find(c => c.path === pathStr)) {
-          this.$.attachedContext = [...ctx, { path: pathStr, name: shortName(pathStr) }];
-        }
+        this._attachContext({ type: 'file', path: path.trim(), source: 'drop' });
       }
     },
   };
@@ -167,10 +158,7 @@ export class AgentChat extends Symbiote {
       onAttachFile: (newVal, path) => {
         this.$.inputVal = newVal;
         this.ref.chatInput.value = newVal;
-        let ctx = this.$.attachedContext || [];
-        if (!ctx.find(c => c.path === path)) {
-          this.$.attachedContext = [...ctx, { path, name: shortName(path) }];
-        }
+        this._attachContext({ type: 'file', path, source: 'autocomplete' });
       },
       onInsertWorkflow: (newVal) => {
         this.$.inputVal = newVal;
@@ -210,6 +198,9 @@ export class AgentChat extends Symbiote {
     dashEvents.addEventListener('active-chat-changed', (e) => {
       console.log('[AgentChat] active-chat-changed received:', e.detail);
       this._loadChat(e.detail?.id);
+    });
+    dashEvents.addEventListener('graph-context-selected', (e) => {
+      this._attachContext(e.detail);
     });
 
     // Self-register with router: react to ?chat= URL param changes
@@ -251,6 +242,10 @@ export class AgentChat extends Symbiote {
     this.$.inputPlaceholder = disabled 
       ? 'Select a model to start...' 
       : 'Ask anything, @ to mention, / for workflows';
+  }
+
+  _attachContext(item) {
+    this.$.attachedContext = mergeAttachedContext(this.$.attachedContext || [], item);
   }
 
   /**
@@ -619,9 +614,8 @@ export class AgentChat extends Symbiote {
       });
     }
 
-    // Prepend context if present
-    if (this.$.attachedContext && this.$.attachedContext.length > 0) {
-      let contextText = '[Attached Context]:\n' + this.$.attachedContext.map(c => `- ${c.path}`).join('\n') + '\n\n';
+    let contextText = formatAttachedContextBlock(this.$.attachedContext || []);
+    if (contextText) {
       prompt = contextText + prompt;
     }
 

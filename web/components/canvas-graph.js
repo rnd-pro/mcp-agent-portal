@@ -1,4 +1,9 @@
 import Symbiote from '@symbiotejs/symbiote';
+import {
+  findClusterForPath,
+  normalizeProjectGraphMetadata,
+  parseHexColor,
+} from '../services/project-graph-metadata.js';
 
 const INIT_NODE_COUNT = 40;
 const EDGE_RATIO = 1.2;
@@ -42,6 +47,10 @@ const TYPE_COLORS = {
   asset:    [150, 230, 230],   // Mint/Cyan (SVG/PNG)
   group:    [230, 180, 110],   // Golden pastel orange
 };
+
+function getNodeColor(node) {
+  return parseHexColor(node.color) || TYPE_COLORS[node.type] || TYPE_COLORS.data;
+}
 
 const MENU_ITEMS = [
   { action: 'drill', label: 'Enter Group', path: 'M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z' },
@@ -127,6 +136,8 @@ export class CanvasGraph extends Symbiote {
     this._prevDragDeltaX = 0;  // Previous frame's focus drag delta X
     this._prevDragDeltaY = 0;  // Previous frame's focus drag delta Y
     this._skeleton = null;     // Skeleton data reference for metadata
+    this._projectGraphMetadata = null;
+    this._layoutSnapshot = null;
 
     // Info panel state (typewriter HUD to the right of active node)
     this._infoPanel = {
@@ -330,9 +341,60 @@ export class CanvasGraph extends Symbiote {
     this._wakeLoop();
   }
 
+  focusSemanticCluster(nodeId) {
+    const node = this.graphDB?.nodes.get(nodeId);
+    if (!node?.isSemanticCluster) return;
+    if (this.currentGroupId) {
+      this.loadLevel(null);
+    }
+    this.pulseNode(nodeId, 1800);
+    requestAnimationFrame(() => {
+      this.flyToNode(nodeId, { zoom: 1.1 });
+    });
+  }
+
+  setLayoutSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+      this._layoutSnapshot = null;
+      return;
+    }
+    this._layoutSnapshot = {
+      positions: snapshot.positions && typeof snapshot.positions === 'object' ? snapshot.positions : {},
+      viewport: snapshot.viewport && typeof snapshot.viewport === 'object' ? snapshot.viewport : null,
+    };
+  }
+
+  getLayoutSnapshot() {
+    const positions = {};
+    for (const [id, pos] of this.nodePositions.entries()) {
+      if (!this.graphDB?.nodes?.has(id)) continue;
+      if (!Number.isFinite(pos?.x) || !Number.isFinite(pos?.y)) continue;
+      positions[id] = { x: Math.round(pos.x * 100) / 100, y: Math.round(pos.y * 100) / 100 };
+    }
+    return {
+      version: 1,
+      groupId: this.currentGroupId || '',
+      viewport: {
+        panX: Math.round(this.panX * 100) / 100,
+        panY: Math.round(this.panY * 100) / 100,
+        zoom: Math.round(this.zoom * 1000) / 1000,
+      },
+      positions,
+    };
+  }
+
+  _emitLayoutSnapshot() {
+    this.dispatchEvent(new CustomEvent('layout-snapshot', { detail: this.getLayoutSnapshot() }));
+  }
+
   setPath(pathStr) {
     if (!pathStr) {
       if (this.currentGroupId) this.loadLevel(null);
+      return;
+    }
+
+    if (pathStr.startsWith('cluster:')) {
+      this.focusSemanticCluster(pathStr);
       return;
     }
     
@@ -392,8 +454,13 @@ export class CanvasGraph extends Symbiote {
   }
 
   // ─── SKELETON PARSER ───
-  setSkeleton(skeleton) {
+  setProjectGraphMetadata(metadata) {
+    this._projectGraphMetadata = normalizeProjectGraphMetadata(metadata);
+  }
+
+  setSkeleton(skeleton, metadata = this._projectGraphMetadata) {
     this._skeleton = skeleton;
+    this._projectGraphMetadata = normalizeProjectGraphMetadata(metadata);
     this.graphDB = { nodes: new Map(), edges: [], rootNodes: [] };
     const N = skeleton.n || {};
     const X = skeleton.X || {};
@@ -416,14 +483,49 @@ export class CanvasGraph extends Symbiote {
       for (const name of names) allFiles.add(dir === './' ? name : dir + name);
     }
 
-    // 2. Build directory hierarchy from file paths
+    const semanticAssignments = new Map();
+    const semanticClusterFiles = new Map();
+    for (const file of allFiles) {
+      const cluster = findClusterForPath(file, this._projectGraphMetadata);
+      if (!cluster) continue;
+      const clusterId = `cluster:${cluster.id}`;
+      semanticAssignments.set(file, cluster);
+      if (!semanticClusterFiles.has(clusterId)) {
+        semanticClusterFiles.set(clusterId, { cluster, files: [] });
+      }
+      semanticClusterFiles.get(clusterId).files.push(file);
+    }
+
+    // 2. Build directory hierarchy from file paths. Files claimed by a semantic
+    // cluster move under that cluster, so their directories are not duplicated at root.
     const dirs = new Set();
     for (const file of allFiles) {
+      if (semanticAssignments.has(file)) continue;
       const parts = file.split('/');
       for (let i = 1; i < parts.length; i++) {
         dirs.add(parts.slice(0, i).join('/'));
       }
     }
+
+    for (const [clusterId, { cluster, files }] of semanticClusterFiles.entries()) {
+      if (files.length === 0) continue;
+      const node = {
+        id: clusterId,
+        label: cluster.label,
+        w: 180,
+        h: 48,
+        type: 'group',
+        color: cluster.color,
+        description: cluster.description,
+        isGroup: true,
+        isSemanticCluster: true,
+        parentId: null,
+        children: [],
+      };
+      this.graphDB.nodes.set(clusterId, node);
+      this.graphDB.rootNodes.push(clusterId);
+    }
+
     // Create directory group nodes
     for (const dir of [...dirs].sort()) {
       const parentDir = dir.includes('/') ? dir.substring(0, dir.lastIndexOf('/')) : null;
@@ -444,7 +546,9 @@ export class CanvasGraph extends Symbiote {
     // 3. Create file nodes
     for (const file of allFiles) {
       const parentId = this._dirOf(file).replace(/\/$/, '') || null;
-      const actualParent = parentId && this.graphDB.nodes.has(parentId) ? parentId : null;
+      const cluster = semanticAssignments.get(file);
+      const clusterParent = cluster ? `cluster:${cluster.id}` : null;
+      const actualParent = clusterParent || (parentId && this.graphDB.nodes.has(parentId) ? parentId : null);
       const type = this._classifyFile(file, classFiles);
       const label = file.split('/').pop();
       const node = { id: file, label, w: 160, h: 40, type, isGroup: false, parentId: actualParent, children: [] };
@@ -554,6 +658,12 @@ export class CanvasGraph extends Symbiote {
   }
 
   loadLevel(groupId = null) {
+    const requestedGroup = groupId ? this.graphDB.nodes.get(groupId) : null;
+    if (requestedGroup?.isSemanticCluster) {
+      this.focusSemanticCluster(groupId);
+      return;
+    }
+
     this._wakeLoop();  // View changed — resume rendering
     this.activeNode = null;
     this.dragNode = null;
@@ -680,6 +790,7 @@ export class CanvasGraph extends Symbiote {
       if (type === 'done' && e.data.positions) {
         for (const [id, pos] of Object.entries(e.data.positions)) this.nodePositions.set(id, pos);
         this.dispatchEvent(new CustomEvent('layout-done'));
+        this._emitLayoutSnapshot();
       }
     };
 
@@ -704,7 +815,11 @@ export class CanvasGraph extends Symbiote {
     this.worker.postMessage({
       type: 'init',
       nodes: this.nodes.map(n => {
-        const pos = this.smoothPositions.get(n.id);
+        const restoredPos = this._layoutSnapshot?.positions?.[n.id];
+        const pos = this.smoothPositions.get(n.id) || this.nodePositions.get(n.id) || restoredPos;
+        if (restoredPos && !this.nodePositions.has(n.id)) {
+          this.nodePositions.set(n.id, { x: restoredPos.x, y: restoredPos.y });
+        }
         let finalW = n.w, finalH = n.h;
         if (this.renderMode === 'dots') {
           const conns = this.adjMap.get(n.id)?.size || 0;
@@ -727,6 +842,15 @@ export class CanvasGraph extends Symbiote {
     }});
 
     this.smoothPositions.clear();
+    const viewport = this._layoutSnapshot?.viewport;
+    if (viewport && Number.isFinite(viewport.panX) && Number.isFinite(viewport.panY) && Number.isFinite(viewport.zoom)) {
+      this.panX = viewport.panX;
+      this.panY = viewport.panY;
+      this.zoom = viewport.zoom;
+      this._targetPanX = null;
+      this._targetPanY = null;
+      this._targetZoom = viewport.zoom;
+    }
     this.paused = false;
   }
 
@@ -1015,14 +1139,14 @@ export class CanvasGraph extends Symbiote {
         } else if (this.dragNode || this.activeNode) {
           const fromOpacity = this.layerAnim[fromDepth].opacity;
           const toOpacity = this.layerAnim[toDepth].opacity;
-          const fromTC = TYPE_COLORS[nodeFrom?.type] || TYPE_COLORS.data;
-          const toTC = TYPE_COLORS[nodeTo?.type] || TYPE_COLORS.data;
+          const fromTC = getNodeColor(nodeFrom || {});
+          const toTC = getNodeColor(nodeTo || {});
           const grad = currentCtx.createLinearGradient(from.x, from.y, to.x, to.y);
           grad.addColorStop(0, this.blendBg(fromTC[0], fromTC[1], fromTC[2], fromOpacity * 0.7));
           grad.addColorStop(1, this.blendBg(toTC[0], toTC[1], toTC[2], toOpacity * 0.7));
           fillStyle = grad;
         } else {
-          const fromTC = TYPE_COLORS[nodeFrom?.type] || TYPE_COLORS.data;
+          const fromTC = getNodeColor(nodeFrom || {});
           fillStyle = this.blendBg(fromTC[0], fromTC[1], fromTC[2], 0.35);
         }
         
@@ -1048,7 +1172,7 @@ export class CanvasGraph extends Symbiote {
         const pos = this.getSmooth(node.id);
         if (!pos) continue;
         const isActive = this.activeNode && this.activeNode.id === node.id;
-        const tc = TYPE_COLORS[node.type] || TYPE_COLORS.data;
+        const tc = getNodeColor(node);
         const conns = this.adjMap.get(node.id)?.size || 0;
         const hubScale = 1 + Math.min(conns, 8) * 0.1;
         
@@ -1196,7 +1320,7 @@ export class CanvasGraph extends Symbiote {
           mainCtx.setTransform(dpr * this.zoom, 0, 0, dpr * this.zoom, dpr * this.panX, dpr * this.panY);
         }
         
-        const tc = TYPE_COLORS[this.activeNode.type] || TYPE_COLORS.data;
+        const tc = getNodeColor(this.activeNode);
         for (let i = 0; i < MENU_ITEMS.length; i++) {
           const item = MENU_ITEMS[i];
           const angle = (i / MENU_ITEMS.length) * Math.PI * 2 - Math.PI / 2;
@@ -1393,7 +1517,7 @@ export class CanvasGraph extends Symbiote {
     // The offset from node center to the vertical midpoint of the panel
     ip.totalExtentY = (panelH + 16) / 2 - padY;
 
-    const tc = TYPE_COLORS[this.activeNode?.type] || TYPE_COLORS.data;
+    const tc = getNodeColor(this.activeNode || {});
     const cornerR = 6;
 
     ctx.save();
@@ -1508,7 +1632,7 @@ export class CanvasGraph extends Symbiote {
             if (dx * dx + dy * dy < itemR * itemR * 2) {
               const action = MENU_ITEMS[i].action;
               if (action === 'drill') {
-                if (this.activeNode.isGroup) this.loadLevel(this.activeNode.id);
+                if (this.activeNode.isGroup && !this.activeNode.isSemanticCluster) this.loadLevel(this.activeNode.id);
               } else {
                 // Dispatch prod action
                 this.dispatchEvent(new CustomEvent('toolbar-action', {
@@ -1616,7 +1740,11 @@ export class CanvasGraph extends Symbiote {
             const now = Date.now();
             if (now - this.lastClickTime < 300 && this.lastClickNode === node.id) {
               // Double click on group
-              this.loadLevel(node.id);
+              if (node.isSemanticCluster) {
+                this.focusSemanticCluster(node.id);
+              } else {
+                this.loadLevel(node.id);
+              }
             } else {
               // Single click on group
               this.dispatchEvent(new CustomEvent('group-selected', { detail: { path: node.id } }));
@@ -1644,6 +1772,7 @@ export class CanvasGraph extends Symbiote {
           this.dispatchEvent(new CustomEvent('file-selected', { detail: { path: draggedNode.id } }));
         }
       }
+      if (draggedNode) this._emitLayoutSnapshot();
       this._nodeActivatedOnDown = false;
       this._dragStartX = 0;
       this._dragStartY = 0;

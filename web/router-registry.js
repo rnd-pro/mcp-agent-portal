@@ -13,8 +13,10 @@ export const panelTypes = {
   'code-viewer':  { title: 'Code',          icon: 'code',          component: 'pg-code-viewer' },
   'ctx-panel':    { title: 'Documentation', icon: 'description',   component: 'pg-ctx-panel' },
   'dep-graph':    { title: 'Dependencies',  icon: 'account_tree',  component: 'pg-dep-graph' },
+  'graph-flows':  { title: 'Flows',         icon: 'movie',         component: 'pg-graph-flows' },
   'health':       { title: 'Health',        icon: 'analytics',     component: 'pg-health-panel' },
   'monitor':      { title: 'Live Monitor',  icon: 'monitor_heart', component: 'pg-ops-panel' },
+  'runtime-control': { title: 'Runtime',    icon: 'memory',        component: 'pg-runtime-control' },
   'settings':     { title: 'Settings',      icon: 'settings',      component: 'pg-settings-panel' },
   'project-list': { title: 'Servers',       icon: 'dashboard',     component: 'pg-project-list' },
   'action-board': { title: 'Action Board',  icon: 'monitor_heart', component: 'pg-action-board' },
@@ -171,7 +173,10 @@ registerSection('graph', {
   icon: 'developer_board', label: 'Graph', order: 40, scope: 'project',
   layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createPanel('file-tree'),
-    LayoutTree.createPanel('dep-graph'), 0.18), false)
+    LayoutTree.createSplit('horizontal',
+      LayoutTree.createPanel('dep-graph'),
+      LayoutTree.createPanel('graph-flows'), 0.78
+    ), 0.18), false)
 });
 
 registerSection('follow', {
@@ -197,6 +202,11 @@ registerSection('monitor', {
   layout: withChat(() => LayoutTree.createPanel('monitor'), false)
 });
 
+registerSection('runtime', {
+  icon: 'memory', label: 'Runtime', order: 75, scope: 'both',
+  layout: withChat(() => LayoutTree.createPanel('runtime-control'), false)
+});
+
 registerSection('settings', {
   icon: 'settings', label: 'Settings', order: 100, scope: 'both',
   layout: withChat(() => LayoutTree.createPanel('settings'), false)
@@ -207,5 +217,3 @@ registerSection('agent-chat', {
   // Do not wrap the standalone chat in withChat, as it IS the chat.
   layout: () => LayoutTree.createPanel('agent-chat')
 });
-
-
