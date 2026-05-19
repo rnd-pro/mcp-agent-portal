@@ -3,6 +3,16 @@ export default /*css*/ `
   display: block;
 }
 
+.topo-header {
+  flex-direction: column;
+}
+
+.topo-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .node-table {
   width: 100%;
   border-collapse: collapse;

@@ -4,8 +4,8 @@ export default `
     <div class="ui-title-large"><span class="material-symbols-outlined">forum</span> Peer Review & Consensus</div>
   </div>
   
-  <div class="ui-split-container" style="padding: 20px; gap: 20px;">
-    <div style="flex: 1; display: flex; flex-direction: column; overflow-y: auto;">
+  <div class="ui-split-container pr-split">
+    <div class="pr-col">
       <div class="ui-card">
         <h3 class="ui-card-title">Initiate Consultation</h3>
         
@@ -24,20 +24,20 @@ export default `
       
       <div class="ui-card">
         <h3 class="ui-card-title">Iteration History (Previous Rounds)</h3>
-        <textarea id="pr-history" class="ui-field" placeholder="Any previous feedback you want the peer to consider..." style="min-height: 100px; width: 100%; background: var(--sn-color-bg, #1a1a1a); border: 1px solid var(--sn-color-border, #404040); color: var(--sn-color-text, #e5e7eb); padding: 8px 12px; border-radius: 4px; font-family: inherit; font-size: 14px; resize: vertical;"></textarea>
+        <textarea id="pr-history" class="ui-field pr-history" placeholder="Any previous feedback you want the peer to consider..."></textarea>
       </div>
     </div>
     
-    <div style="flex: 1; display: flex; flex-direction: column;">
-      <div class="ui-card" style="height: 100%; display: flex; flex-direction: column; margin-bottom: 0;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
-          <h3 class="ui-card-title" style="margin:0;">Peer Feedback</h3>
+    <div class="pr-col-right">
+      <div class="ui-card pr-card-full">
+        <div class="pr-feedback-header">
+          <h3 class="ui-card-title">Peer Feedback</h3>
           <button class="ui-btn-icon" ref="refreshBtn" title="Refresh task status"><span class="material-symbols-outlined">refresh</span></button>
         </div>
         
         <div id="pr-status-banner" class="ui-banner" hidden></div>
         
-        <div id="pr-feedback" style="flex:1; background: rgba(0,0,0,0.2); padding: 16px; border-radius: 6px; font-size: 14px; line-height: 1.6; border: 1px solid var(--sn-color-border, #404040); white-space: pre-wrap; overflow-y: auto;">
+        <div id="pr-feedback" class="pr-feedback-body">
           <div class="ui-empty-state">Submit a proposal to start peer review</div>
         </div>
       </div>

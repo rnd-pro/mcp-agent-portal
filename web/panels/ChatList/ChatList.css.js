@@ -3,6 +3,32 @@ export default /*css*/ `
   display: block;
 }
 
+.cl-sidebar {
+  width: 100%;
+  border-right: none;
+}
+
+.cl-sidebar-icon {
+  font-size: 16px;
+}
+
+.cl-title {
+  flex: none;
+}
+
+.cl-new-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+}
+
+.cl-new-btn-icon {
+  font-size: 14px;
+}
+
+.cl-items {
+  padding: 4px 0;
+}
+
 .filter-bar {
   display: flex;
   gap: 4px;

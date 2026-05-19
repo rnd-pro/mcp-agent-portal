@@ -1,12 +1,12 @@
 import { html } from '@symbiotejs/symbiote';
 
 export default html`
-<div class="ui-sidebar" style="width:100%; border-right:none;">
+<div class="ui-sidebar cl-sidebar">
   <div class="ui-sidebar-header">
-    <span class="material-symbols-outlined" style="font-size:16px">forum</span>
-    <span class="ui-title" style="flex:none">Chats</span>
-    <button class="ui-btn" style="margin-left:auto; padding: 4px 10px;" ref="newChatBtn">
-      <span class="material-symbols-outlined" style="font-size:14px">add</span>
+    <span class="material-symbols-outlined cl-sidebar-icon">forum</span>
+    <span class="ui-title cl-title">Chats</span>
+    <button class="ui-btn cl-new-btn" ref="newChatBtn">
+      <span class="material-symbols-outlined cl-new-btn-icon">add</span>
       New
     </button>
   </div>
@@ -15,6 +15,6 @@ export default html`
     <button class="filter-btn" data-filter="project">By Project</button>
     <button class="filter-btn" data-filter="active">Active</button>
   </div>
-  <div class="ui-sidebar-content" style="padding: 4px 0" ref="chatItems" ${{ itemize: 'chatItems', 'item-tag': 'cl-chat-item' }}></div>
+  <div class="ui-sidebar-content cl-items" ref="chatItems" ${{ itemize: 'chatItems', 'item-tag': 'cl-chat-item' }}></div>
 </div>
 `;
