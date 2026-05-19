@@ -19,7 +19,7 @@ try {
   let pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../package.json');
   pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 } catch (e) {
-  console.error("Failed to load package.json for version:", e);
+  console.error("🔴 Failed to load package.json for version:", e);
   pkgJson = { version: 'unknown' };
 }
 const SERVER_VERSION = `${pkgJson.version}+${Date.now()}`;
@@ -651,7 +651,7 @@ export class MCPProxyManager {
             sg.commit(msg.params.ops, msg.params?.source || 'browser');
           }
         } catch (err) {
-          console.error('[StateWS] message error:', err.message);
+          console.error('🔴 [StateWS] message error:', err.message);
         }
       });
     });
@@ -682,7 +682,7 @@ export class MCPProxyManager {
           // Backpressure: disconnect slow clients
           client._pendingMessages = (client._pendingMessages || 0) + 1;
           if (client._pendingMessages > MAX_WS_QUEUE) {
-            console.warn('[StateWS] Backpressure: disconnecting slow client');
+            console.warn('🟡 [StateWS] Backpressure: disconnecting slow client');
             client.close(4001, 'Too slow');
             this._stateClients.delete(client);
             continue;

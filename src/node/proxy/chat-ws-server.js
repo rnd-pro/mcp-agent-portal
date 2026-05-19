@@ -229,7 +229,7 @@ export class ChatWsServer {
           name: 'cancel_task',
           arguments: { task_id: taskId }
         });
-      } catch (e) { console.error('Failed to cancel task:', e); }
+      } catch (e) { console.error('🔴 Failed to cancel task:', e); }
     }
   }
 

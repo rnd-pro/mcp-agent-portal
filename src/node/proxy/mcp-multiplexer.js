@@ -607,7 +607,7 @@ export class MCPMultiplexer {
             realArgs.chat_id = chat.id;
             this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
           } catch (e) {
-            console.error(`[MCP Multiplexer] failed to auto-create chat for delegate_task:`, e.message);
+            console.error(`🔴 [MCP Multiplexer] failed to auto-create chat for delegate_task:`, e.message);
           }
         }
 

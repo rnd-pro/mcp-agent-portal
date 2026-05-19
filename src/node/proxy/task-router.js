@@ -55,7 +55,7 @@ export class TaskRouter {
         }], 'task-event');
       } catch (err) {
         // Non-critical: event caching failure shouldn't break routing
-        console.warn(`[TaskNotify] Event cache failed for ${taskId}:`, err.message);
+        console.warn(`🟡 [TaskNotify] Event cache failed for ${taskId}:`, err.message);
       }
     }
 
@@ -68,11 +68,11 @@ export class TaskRouter {
 
       if (type === 'done' || type === 'error' || type === 'cancelled') {
         setTimeout(() => {
-          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
+          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`🟡 [TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
       try { sg.commit(ops, `agent-pool:${type}`); } catch (err) {
-        console.error(`[TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
+        console.error(`🔴 [TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
       }
     }
 
