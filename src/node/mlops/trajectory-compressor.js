@@ -46,6 +46,7 @@ function compressTrajectoryBlock(block, outcome, skillCreated) {
   };
 }
 
+/** Compress and archive old trajectory logs. */
 export async function compressTrajectories() {
   if (!fs.existsSync(FLYWHEEL_PATH)) {
     console.log('[TrajectoryCompressor] No flywheel dataset found.');

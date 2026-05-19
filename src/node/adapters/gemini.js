@@ -41,6 +41,10 @@ function extractGeminiBlocks(events) {
   return blocks;
 }
 
+/**
+ * @param {object} config
+ * @returns {object} Gemini adapter instance
+ */
 export function createGeminiAdapter(config = {}) {
   let busy = false;
   let childProc = null;

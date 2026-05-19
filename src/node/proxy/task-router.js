@@ -1,6 +1,7 @@
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
 
+/** Routes task notifications from child servers to WebSocket subscribers. */
 export class TaskRouter {
   /**
    * @param {object} mcpProxy - Reference to the main proxy manager

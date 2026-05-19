@@ -1,6 +1,7 @@
 // @ctx adapters-pool.ctx
 import { resolveAdapter } from './index.js';
 
+/** Pool of LLM adapters resolved by provider name. */
 export class AdapterPool {
   /**
    * @param {object} config - parsed adapters config { gemini: {enabled: true}, ... }

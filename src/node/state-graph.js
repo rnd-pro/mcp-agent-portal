@@ -143,6 +143,7 @@ function _applyOp(state, op) {
 //  StateGraph Engine
 // ═════════════════════════════════════════════════════════
 
+/** Versioned state graph with JSON Patch commit log and snapshot support. */
 export class StateGraph extends EventEmitter {
   /**
    * @param {object} [opts]

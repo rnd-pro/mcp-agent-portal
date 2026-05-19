@@ -24,6 +24,7 @@ export async function init(portalAPI, config) {
   console.log(`✅ [GitHubPlugin] Initialized for ${config.repo}.`);
 }
 
+/** Cleanup plugin resources. */
 export async function destroy() {
   token = null;
   owner = null;

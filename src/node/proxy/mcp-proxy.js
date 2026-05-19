@@ -50,6 +50,7 @@ function createWatchdog(onTimeout, inactivityMs = 30000) {
   return watchdog;
 }
 
+/** Manages spawning, lifecycle, and communication with child MCP servers. */
 export class MCPProxyManager {
   /** @type {Set<import('ws').WebSocket>} */
   #stateClients = new Set();

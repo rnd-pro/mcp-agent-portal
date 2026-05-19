@@ -3,6 +3,7 @@ import path from 'node:path';
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
 
+/** WebSocket server for chat-based agent interactions. */
 export class ChatWsServer {
   /**
    * @param {object} mcpProxy - Reference to the main proxy manager

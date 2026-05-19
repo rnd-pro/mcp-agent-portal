@@ -5,6 +5,7 @@
  * Auto-refreshes when servers are added/removed.
  */
 
+/** Builds and maintains an index of tools across all child MCP servers. */
 export class ToolIndex {
   constructor() {
     /** @type {Map<string, { tool: object, server: string }>} name → entry */

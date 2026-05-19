@@ -19,6 +19,7 @@ export async function init(portalAPI, config) {
   console.log('✅ [SlackPlugin] Initialized with webhook.');
 }
 
+/** Cleanup plugin resources. */
 export async function destroy() {
   webhookUrl = null;
   channel = null;

@@ -247,6 +247,7 @@ function buildAdapterMetadata() {
   };
 }
 
+/** @returns {string[]} Available adapter type names. */
 export function listAdapterTypes() {
   let metadata = buildAdapterMetadata();
   let types = Object.keys(metadata);

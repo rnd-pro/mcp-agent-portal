@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Loads and manages portal plugins (Telegram, Slack, GitHub). */
 export class PluginLoader {
   /**
    * @param {object} config - Parsed config containing { plugins: { telegram: {enabled: true}, ... } }

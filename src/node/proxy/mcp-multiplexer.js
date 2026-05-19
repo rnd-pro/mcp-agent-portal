@@ -210,6 +210,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
   };
 }
 
+/** Multiplexes IDE WebSocket connections to multiple child MCP servers. */
 export class MCPMultiplexer {
   constructor(proxyManager, ws = null) {
     this.proxyManager = proxyManager;

@@ -4,6 +4,10 @@ import { Telegraf } from 'telegraf';
 let bot;
 let alertChatId;
 
+/**
+ * @param {object} portalAPI
+ * @param {object} config
+ */
 export async function init(portalAPI, config) {
   if (!config.token) {
     console.error(`🔴 [TelegramPlugin] Missing bot token in configuration.`);
@@ -72,6 +76,7 @@ export async function init(portalAPI, config) {
   console.log('✅ [TelegramPlugin] Bot launched and listening.');
 }
 
+/** Cleanup plugin resources. */
 export async function destroy() {
   if (bot) {
     try {
