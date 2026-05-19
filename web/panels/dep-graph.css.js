@@ -17,6 +17,11 @@ export default `
     height: 100%;
   }
 
+  pg-dep-graph node-canvas[hidden],
+  pg-dep-graph pg-canvas-graph[hidden] {
+    display: none;
+  }
+
   /* Toolbar */
   .pcb-toolbar {
     position: absolute;

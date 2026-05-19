@@ -4,9 +4,10 @@ import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
 import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
 import '../../common/CellBg/CellBg.js';
+import './ChatMessageItem.js';
 import { uiPrompt } from '../../common/ui-dialogs.js';
 import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
-import { escapeHtml, formatElapsed, formatMarkdown } from '../../utils/markdown-formatter.js';
+import { escapeHtml, formatElapsed } from '../../utils/markdown-formatter.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import {
@@ -31,6 +32,7 @@ export class AgentChat extends Symbiote {
   static isoMode = true;
   init$ = {
     messages: [],
+    messageItems: [],
     inputVal: '',
     chatName: 'Select a chat',
     chatAdapter: '',
@@ -96,6 +98,9 @@ export class AgentChat extends Symbiote {
       if (id === 'provider') {
         delete updatedParams.model;
       }
+      if (id === 'agent') {
+        updatedParams.approval_mode = this._getAgentDefaultApprovalMode(val);
+      }
 
       this.$.chatParams = updatedParams;
 
@@ -103,6 +108,7 @@ export class AgentChat extends Symbiote {
       if (chatId) {
         let saveData = { id: chatId, [id]: val };
         if (id === 'provider') saveData.model = null;
+        if (id === 'agent') saveData.approval_mode = updatedParams.approval_mode;
         fetch('/api/chats/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -122,6 +128,10 @@ export class AgentChat extends Symbiote {
       this.$.attachedContext = removeAttachedContext(this.$.attachedContext, e.currentTarget.dataset.key);
     },
 
+    onScrollToBottom: () => {
+      this._scrollMessagesToBottom({ smooth: true });
+    },
+
     onDragOver: (e) => {
       e.preventDefault();
       e.currentTarget.classList.add('drag-over');
@@ -138,6 +148,26 @@ export class AgentChat extends Symbiote {
       let path = e.dataTransfer.getData('text/plain');
       if (path && path.trim()) {
         this._attachContext({ type: 'file', path: path.trim(), source: 'drop' });
+      }
+    },
+
+    onMessageItemClick: (e) => {
+      let copyBtn = e.target.closest('.work-copy-btn');
+      if (copyBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        this._copyMessageText(copyBtn.dataset.copyText || '', copyBtn);
+        return;
+      }
+
+      let card = e.target.closest('.delegation-card');
+      if (card) {
+        let chatId = card.dataset.chatId;
+        if (chatId) {
+          dashState.activeChatId = chatId;
+          setGlobalParam('chat', chatId);
+          dashEmit('active-chat-changed', { id: chatId });
+        }
       }
     },
   };
@@ -165,6 +195,8 @@ export class AgentChat extends Symbiote {
         this.ref.chatInput.value = newVal;
       }
     });
+
+    this.ref.chatMessages?.addEventListener('scroll', () => this._updateScrollBottomButton(), { passive: true });
 
     this._wsClient = new ChatWsClient({
       getMessages: () => this.$.messages,
@@ -347,12 +379,15 @@ export class AgentChat extends Symbiote {
     if (paramsToMap.length > 0) {
       let paramsChanged = false;
       let htmlStr = paramsToMap.map(p => {
+        let priorityClass = this._composerParamPriorityClass(p.id);
         if (p.type === 'select' && Array.isArray(p.options)) {
           let paramValue = currentParams[p.id];
           if (!paramValue && p.options.length > 0) {
             if (p.id === 'agent') {
               let orch = p.options.find(o => (typeof o === 'string' ? o : o.val) === 'orchestrator');
               paramValue = orch ? (typeof orch === 'string' ? orch : orch.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
+            } else if (p.id === 'approval_mode') {
+              paramValue = this._getAgentDefaultApprovalMode(currentParams.agent);
             } else if (p.id === 'model') {
               let defMap = { 'gemini': 'gemini-3.1-pro-preview', 'opencode': 'DeepSeek: DeepSeek V4 Pro' };
               let currentCtx = adapter === 'pool' ? currentParams.provider : adapter;
@@ -393,8 +428,10 @@ export class AgentChat extends Symbiote {
           }
 
           let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
+          let currentOption = p.options.find(opt => (typeof opt === 'string' ? opt : opt.val) === paramValue);
+          let currentLabel = typeof currentOption === 'string' ? currentOption : currentOption?.text || p.label;
           
-          return `<span class="composer-footer-btn"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" ${disabledAttr}>${optionsHtml}</select></span>`;
+          return `<span class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(p.label)}: ${escapeHtml(currentLabel)}"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" aria-label="${escapeHtml(p.label)}" ${disabledAttr}>${optionsHtml}</select></span>`;
         } else if (p.type === 'boolean') {
           let paramValue = currentParams[p.id];
           if (paramValue === undefined) {
@@ -406,10 +443,10 @@ export class AgentChat extends Symbiote {
           let iconColor = paramValue ? 'var(--sn-text-dim)' : 'var(--sn-text-dim)';
           let textColor = paramValue ? 'var(--sn-text-dim)' : 'var(--sn-text-dim)';
           
-          return `<label class="composer-footer-btn" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:8px; opacity:0.9;">
-            <input type="checkbox" class="composer-footer-checkbox" data-param="${escapeHtml(p.id)}" ${checked} style="display:none;">
-            <span class="material-symbols-outlined" style="font-size:20px; color:${iconColor};">${paramValue ? 'toggle_on' : 'toggle_off'}</span>
-            <span style="color:${textColor}; font-weight:500;">${escapeHtml(p.label)}</span>
+          return `<label class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(p.label)}">
+            <input type="checkbox" class="composer-footer-checkbox" data-param="${escapeHtml(p.id)}" ${checked} hidden>
+            <span class="material-symbols-outlined composer-toggle-icon" style="color:${iconColor};">${paramValue ? 'toggle_on' : 'toggle_off'}</span>
+            <span class="composer-footer-label" style="color:${textColor}; font-weight:500;">${escapeHtml(p.label)}</span>
           </label>`;
         }
         return '';
@@ -423,6 +460,24 @@ export class AgentChat extends Symbiote {
       this.$.composerFooterHtml = '';
     }
     this._updatingOptions = false;
+  }
+
+  _composerParamPriorityClass(paramId) {
+    switch (paramId) {
+      case 'model': return 'composer-priority-5';
+      case 'agent': return 'composer-priority-4';
+      case 'provider': return 'composer-priority-3';
+      case 'approval_mode': return 'composer-priority-2';
+      case 'chatType': return 'composer-priority-1';
+      default: return 'composer-priority-1';
+    }
+  }
+
+  _getAgentDefaultApprovalMode(agentSlug) {
+    if (!agentSlug || agentSlug === 'none') return 'yolo';
+    let agentParam = this.$.adapterMeta?.pool?.parameters?.find(p => p.id === 'agent');
+    let option = agentParam?.options?.find(opt => (typeof opt === 'string' ? opt : opt.val) === agentSlug);
+    return typeof option === 'object' && option.approvalMode ? option.approvalMode : 'yolo';
   }
 
   _syncChatFromRouter() {
@@ -443,131 +498,181 @@ export class AgentChat extends Symbiote {
 
 
   _renderMessages() {
-    let container = this.querySelector('.chat-messages');
+    let container = this.ref.chatMessages || this.querySelector('.chat-messages');
     if (!container) return;
     
     // Check if user has scrolled up
     let isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 10;
-    
-    container.innerHTML = '';
 
     let messages = this.$.messages || [];
-    for (let msg of messages) {
-      let div = document.createElement('div');
-      div.className = `message ${msg.role}`;
-      if (msg.streaming) div.classList.add('streaming');
+    let items = [];
+    let lastAgentItem = null;
+    let streamingBoards = [];
 
-      if (msg.role === 'tool') {
-        // Tool call card
-        let details = document.createElement('details');
-        details.className = 'tool-card';
-        if (msg.streaming) details.setAttribute('open', ''); // Auto-open while running
+    for (let i = 0; i < messages.length; i++) {
+      let msg = messages[i];
 
-        let summary = document.createElement('summary');
-        summary.className = 'tool-header';
-        
-        let icon = msg.streaming ? 'build_circle' : 'build';
-        let spinClass = msg.streaming ? 'spin-icon' : '';
-        summary.innerHTML = `<span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> ${escapeHtml(msg.name || 'tool')}`;
-        details.appendChild(summary);
-
-        if (msg.input) {
-          let inputBlock = document.createElement('div');
-          inputBlock.className = 'tool-section';
-          inputBlock.innerHTML = `<div class="tool-label">Input</div><pre class="tool-code">${escapeHtml(typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input, null, 2))}</pre>`;
-          details.appendChild(inputBlock);
+      if (msg.role === 'thinking' && msg.done) {
+        let copyText = this._findPreviousAgentText(messages, i);
+        if (lastAgentItem) {
+          lastAgentItem.workSummaryHtml = this._buildWorkSummaryHtml(msg, copyText);
+          continue;
         }
-
-        if (msg.result) {
-          let resultBlock = document.createElement('div');
-          resultBlock.className = 'tool-section';
-          let resultText = typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result, null, 2);
-          // Truncate long results
-          let truncated = resultText.length > 500 ? resultText.slice(0, 500) + '\n...' : resultText;
-          resultBlock.innerHTML = `<div class="tool-label">Result</div><pre class="tool-code">${escapeHtml(truncated)}</pre>`;
-          details.appendChild(resultBlock);
-        } else if (msg.streaming) {
-          let waitBlock = document.createElement('div');
-          waitBlock.className = 'tool-section tool-waiting';
-          waitBlock.innerHTML = `<em>Running...</em>`;
-          details.appendChild(waitBlock);
-        }
-
-        div.appendChild(details);
-      } else if (msg.role === 'board') {
-        // Delegation board — inline sub-agent task cards
-        let board = document.createElement('div');
-        board.className = 'delegation-board';
-        let taskIds = msg.taskIds || [];
-        for (let taskId of taskIds) {
-          let card = this._renderDelegationCard(taskId, msg.streaming);
-          board.appendChild(card);
-        }
-        div.appendChild(board);
-        // Start polling for task status updates while streaming
-        if (msg.streaming && taskIds.length > 0) {
-          this._startDelegationPolling(taskIds, board);
-        }
-      } else if (msg.role === 'thinking') {
-        // "Thinking for Xs" / "Worked for Xm" collapsible
-        let details = document.createElement('details');
-        details.className = msg.done ? 'work-summary' : 'thinking-block';
-        if (!msg.done) details.setAttribute('open', '');
-
-        let summary = document.createElement('summary');
-        let label = msg.done ? 'Worked for' : 'Thinking for';
-        let timeStr = formatElapsed(msg.elapsed || 0);
-        if (msg.done) {
-          summary.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;color:var(--sn-success-color)">check_circle</span>${label} ${timeStr}`;
-        } else {
-          let statusHtml = msg.status ? `<span class="thinking-status">${escapeHtml(msg.status)}</span>` : '';
-          summary.innerHTML = `<span class="material-symbols-outlined spin-icon" style="font-size:16px">pending</span>${label} ${timeStr}${statusHtml}`;
-        }
-        details.appendChild(summary);
-
-        if (msg.done && msg.meta) {
-          let body = document.createElement('div');
-          body.className = 'work-body';
-          let items = [];
-          if (msg.meta.mode) {
-            let iconName = msg.meta.mode === 'yolo' ? 'bolt' : 'settings';
-            items.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${escapeHtml(msg.meta.mode)}</span>`);
-          }
-          if (msg.meta.exitCode != null) {
-            let cls = msg.meta.exitCode === 0 ? 'meta-ok' : 'meta-err';
-            items.push(`<span class="meta-chip ${cls}">exit ${msg.meta.exitCode}</span>`);
-          }
-          if (msg.meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtml(msg.meta.sessionId)}">${escapeHtml(msg.meta.sessionId.substring(0, 16))}\u2026</span>`);
-          if (msg.meta.tools) items.push(`<span class="meta-chip">${msg.meta.tools} tool call${msg.meta.tools > 1 ? 's' : ''}</span>`);
-          if (msg.meta.tokens != null) items.push(`<span class="meta-chip meta-info">${msg.meta.tokens} tks</span>`);
-          if (msg.meta.cost != null) items.push(`<span class="meta-chip meta-info">$${msg.meta.cost.toFixed(4)}</span>`);
-          if (msg.meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtml(msg.meta.errors)}</span>`);
-          body.innerHTML = items.join('');
-          details.appendChild(body);
-        }
-
-        div.appendChild(details);
-      } else {
-        // Regular text message
-        let content = document.createElement('div');
-        content.className = 'msg-content';
-        content.innerHTML = formatMarkdown(msg.text);
-        if (msg.streaming) {
-          let cursor = document.createElement('span');
-          cursor.className = 'streaming-cursor';
-          content.appendChild(cursor);
-        }
-        div.appendChild(content);
       }
 
-      container.appendChild(div);
+      let item = this._toMessageItem(msg);
+      if (msg.role === 'thinking' && msg.done) {
+        item.copyText = this._findPreviousAgentText(messages, i);
+      }
+      items.push(item);
+
+      if (msg.role === 'agent') lastAgentItem = item;
+      if (msg.role === 'board' && msg.streaming && msg.taskIds?.length) {
+        streamingBoards.push([...msg.taskIds]);
+      }
     }
 
+    this.$.messageItems = items;
+
     requestAnimationFrame(() => {
-      if (isAtBottom) {
-        container.scrollTop = container.scrollHeight;
+      for (let taskIds of streamingBoards) {
+        let firstCard = container.querySelector(`[data-task-id="${this._cssEscape(taskIds[0])}"]`);
+        let board = firstCard?.closest('.delegation-board');
+        if (board) this._startDelegationPolling(taskIds, board);
       }
+      if (isAtBottom) {
+        this._scrollMessagesToBottom();
+      }
+      this._updateScrollBottomButton();
     });
+  }
+
+  _toMessageItem(msg) {
+    return {
+      type: msg.type || msg.role,
+      role: msg.role,
+      text: msg.text || msg.content || '',
+      isStreaming: !!msg.streaming,
+      name: msg.name || '',
+      input: msg.input || null,
+      result: msg.result || null,
+      done: !!msg.done,
+      elapsedText: formatElapsed(msg.elapsed || 0),
+      status: msg.status || '',
+      metaHtml: this._buildWorkMetaHtml(msg.meta),
+      taskIds: msg.taskIds || [],
+      workSummaryHtml: '',
+      copyText: '',
+    };
+  }
+
+  _cssEscape(value) {
+    let str = String(value || '');
+    return globalThis.CSS?.escape ? CSS.escape(str) : str.replace(/["\\]/g, '\\$&');
+  }
+
+  _buildWorkSummaryHtml(msg, copyText) {
+    let metaHtml = this._buildWorkMetaHtml(msg.meta);
+    let bodyHtml = metaHtml ? `<div class="work-body">${metaHtml}</div>` : '';
+    let copyBtn = copyText
+      ? `<button class="work-copy-btn" type="button" title="Copy response" data-copy-text="${escapeHtml(copyText)}"><span class="material-symbols-outlined">content_copy</span></button>`
+      : '';
+    return `<div class="work-summary-wrap"><details class="work-summary"><summary><span class="material-symbols-outlined" style="font-size:16px;color:var(--sn-success-color)">check_circle</span>Worked for ${escapeHtml(formatElapsed(msg.elapsed || 0))}</summary>${bodyHtml}</details>${copyBtn}</div>`;
+  }
+
+  _buildWorkMetaHtml(meta) {
+    if (!meta) return '';
+    let items = [];
+    if (meta.mode) {
+      let iconName = meta.mode === 'yolo' ? 'bolt' : 'settings';
+      items.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${escapeHtml(meta.mode)}</span>`);
+    }
+    if (meta.exitCode != null) {
+      let cls = meta.exitCode === 0 ? 'meta-ok' : 'meta-err';
+      items.push(`<span class="meta-chip ${cls}">exit ${meta.exitCode}</span>`);
+    }
+    if (meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtml(meta.sessionId)}">${escapeHtml(meta.sessionId.substring(0, 16))}...</span>`);
+    if (meta.tools) items.push(`<span class="meta-chip">${meta.tools} tool call${meta.tools > 1 ? 's' : ''}</span>`);
+    if (meta.tokens != null) items.push(`<span class="meta-chip meta-info">${meta.tokens} tks</span>`);
+    if (meta.cost != null) items.push(`<span class="meta-chip meta-info">$${meta.cost.toFixed(4)}</span>`);
+    if (meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtml(meta.errors)}</span>`);
+    return items.join('');
+  }
+
+  _findPreviousAgentText(messages, fromIndex) {
+    for (let i = fromIndex - 1; i >= 0; i--) {
+      let msg = messages[i];
+      if (msg?.role === 'agent' && typeof msg.text === 'string' && msg.text.trim()) return msg.text;
+      if (msg?.role === 'user') break;
+    }
+    return '';
+  }
+
+  async _copyMessageText(text, btn) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        this._copyTextFallback(text);
+      }
+      this._flashCopyButton(btn, 'check');
+    } catch {
+      if (this._copyTextFallback(text)) {
+        this._flashCopyButton(btn, 'check');
+      } else {
+        this._flashCopyButton(btn, 'error');
+      }
+    }
+  }
+
+  _copyTextFallback(text) {
+    let ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+
+  _flashCopyButton(btn, iconName) {
+    if (!btn) return;
+    let icon = btn.querySelector('.material-symbols-outlined');
+    let original = icon?.textContent || 'content_copy';
+    btn.classList.add(iconName === 'check' ? 'copied' : 'copy-error');
+    if (icon) icon.textContent = iconName;
+    setTimeout(() => {
+      btn.classList.remove('copied', 'copy-error');
+      if (icon) icon.textContent = original;
+    }, 1200);
+  }
+
+  _scrollMessagesToBottom({ smooth = false } = {}) {
+    let container = this.ref.chatMessages || this.querySelector('.chat-messages');
+    if (!container) return;
+    if (smooth && typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
+    this._updateScrollBottomButton();
+  }
+
+  _updateScrollBottomButton() {
+    let container = this.ref.chatMessages || this.querySelector('.chat-messages');
+    let btn = this.ref.scrollBottomBtn;
+    if (!container || !btn) return;
+    let hasOverflow = container.scrollHeight > container.clientHeight + 12;
+    let isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 32;
+    btn.classList.toggle('visible', hasOverflow && !isAtBottom);
   }
 
   async _sendMessage() {
@@ -797,47 +902,6 @@ export class AgentChat extends Symbiote {
       console.error('[AgentChat] Catch error:', err);
       this.$.messages = [{ role: 'system', text: `Load error: ${err.message}` }];
     }
-  }
-
-  /**
-   * Render a single delegation card for a sub-agent task.
-   * @param {string} taskId
-   * @param {boolean} isStreaming
-   * @returns {HTMLElement}
-   */
-  _renderDelegationCard(taskId, isStreaming) {
-    let card = document.createElement('div');
-    card.className = 'delegation-card';
-    card.dataset.taskId = taskId;
-    card.dataset.status = isStreaming ? 'running' : 'idle';
-
-    let header = document.createElement('div');
-    header.className = 'delegation-card-header';
-    let statusIcon = isStreaming ? 'pending' : 'schedule';
-    let spinClass = isStreaming ? 'spin-icon' : '';
-    header.innerHTML = `<span class="material-symbols-outlined ${spinClass}">${statusIcon}</span><span class="card-title">${escapeHtml(taskId.substring(0, 8))}…</span>`;
-    card.appendChild(header);
-
-    let statusRow = document.createElement('div');
-    statusRow.className = 'delegation-card-status';
-    statusRow.textContent = isStreaming ? 'Running…' : 'Queued';
-    card.appendChild(statusRow);
-
-    let eventsRow = document.createElement('div');
-    eventsRow.className = 'delegation-card-events';
-    card.appendChild(eventsRow);
-
-    // Click-to-navigate — resolve chatId and open that chat
-    card.addEventListener('click', () => {
-      let chatId = card.dataset.chatId;
-      if (chatId) {
-        dashState.activeChatId = chatId;
-        setGlobalParam('chat', chatId);
-        dashEmit('active-chat-changed', { id: chatId });
-      }
-    });
-
-    return card;
   }
 
   /**

@@ -6,6 +6,10 @@ export default /*css*/ `
   font-family: var(--font-main);
 }
 
+:host([hidden]) {
+  display: none;
+}
+
 .board-header {
   display: flex;
   align-items: center;

@@ -28,7 +28,9 @@ export const panelTypes = {
   'active-tasks': { title: 'Active Tasks',  icon: 'memory',        component: 'pg-active-tasks' },
   'pipeline-mgr': { title: 'Pipelines',     icon: 'schema',        component: 'pg-pipeline-mgr' },
   'group-mgr':    { title: 'Group Manager', icon: 'groups',        component: 'pg-group-manager' },
-  'skill-mgr':    { title: 'Skills Manager',icon: 'school',        component: 'pg-skill-manager' },
+  'agent-portal-tree': { title: '.agent-portal', icon: 'folder',    component: 'pg-agent-portal-tree' },
+  'skill-mgr':    { title: 'Markdown Editor',icon: 'edit_note',     component: 'pg-skill-manager' },
+  'skill-meta':   { title: 'Metadata',      icon: 'tune',          component: 'pg-skill-metadata' },
   'peer-review':  { title: 'Peer Review',   icon: 'forum',         component: 'pg-peer-review' },
   'workflow-exp': { title: 'Workflows',     icon: 'account_tree',  component: 'pg-workflow-explorer' },
 };
@@ -110,13 +112,13 @@ function withChat(layoutFn, isExpanded = false) {
 // ── Core Sections ───────────────────────────────────────────────
 
 registerSection('dashboard', {
-  icon: 'dashboard', label: 'Dashboard', order: 10, scope: 'home',
-  layout: withChat(() => {
-    return LayoutTree.createSplit('horizontal',
-      LayoutTree.createPanel('project-list'),
-      LayoutTree.createPanel('action-board'), 0.35
-    );
-  }, true)
+  icon: 'dashboard', label: 'Servers', order: 10, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('project-list'), true)
+});
+
+registerSection('action-board', {
+  icon: 'monitor_heart', label: 'Action Board', order: 20, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('action-board'), false)
 });
 
 registerSection('marketplace', {
@@ -135,25 +137,39 @@ registerSection('tool-explorer', {
 });
 
 registerSection('orchestration', {
-  icon: 'account_tree', label: 'Orchestration', order: 29, scope: 'home',
-  layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createSplit('vertical',
-      LayoutTree.createPanel('active-tasks'),
-      LayoutTree.createPanel('group-mgr'), 0.5
-    ),
-    LayoutTree.createSplit('vertical',
-      LayoutTree.createPanel('workflow-exp'),
-      LayoutTree.createPanel('pipeline-mgr'), 0.5
-    ), 0.4
-  ), false)
+  icon: 'memory', label: 'Active Tasks', order: 29, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('active-tasks'), false)
+});
+
+registerSection('workflows', {
+  icon: 'account_tree', label: 'Workflows', order: 29.1, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('workflow-exp'), false)
+});
+
+registerSection('pipelines', {
+  icon: 'schema', label: 'Pipelines', order: 29.2, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('pipeline-mgr'), false)
+});
+
+registerSection('resource-groups', {
+  icon: 'view_kanban', label: 'Resource Groups', order: 29.5, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('group-mgr'), false)
 });
 
 registerSection('skills', {
-  icon: 'school', label: 'Skills & Policies', order: 30, scope: 'home',
+  icon: 'school', label: 'Skills', order: 30, scope: 'home',
   layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('skill-mgr'),
-    LayoutTree.createPanel('peer-review'), 0.6
+    LayoutTree.createPanel('agent-portal-tree'),
+    LayoutTree.createSplit('horizontal',
+      LayoutTree.createPanel('skill-mgr'),
+      LayoutTree.createPanel('skill-meta'), 0.68
+    ), 0.24
   ), false)
+});
+
+registerSection('peer-review', {
+  icon: 'forum', label: 'Peer Review', order: 31, scope: 'home',
+  layout: withChat(() => LayoutTree.createPanel('peer-review'), false)
 });
 
 registerSection('explorer', {

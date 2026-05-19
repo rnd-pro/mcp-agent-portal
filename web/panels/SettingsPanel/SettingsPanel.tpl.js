@@ -32,6 +32,57 @@ export default`
   </div>
 </div>
 
+<div class="ui-card-title">Claude Gateway</div>
+<div class="ui-card pg-gateway" ref="gatewayCard">
+  <div class="pg-gateway-head">
+    <label class="pg-gateway-toggle">
+      <input type="checkbox" ref="gatewayEnabledInput">
+      <span>Enable Gateway</span>
+    </label>
+    <button class="ui-btn" ref="gatewayTestBtn">Test</button>
+  </div>
+  <div class="pg-gateway-grid">
+    <label>
+      <span>Provider</span>
+      <select ref="gatewayProviderInput">
+        <option value="deepseek">DeepSeek</option>
+      </select>
+    </label>
+    <label>
+      <span>Type</span>
+      <select ref="gatewayProviderTypeInput">
+        <option value="anthropic-compatible">Anthropic compatible</option>
+        <option value="openai-compatible">OpenAI compatible</option>
+      </select>
+    </label>
+    <label>
+      <span>Base URL</span>
+      <input type="url" ref="gatewayBaseUrlInput" placeholder="https://api.deepseek.com/anthropic">
+    </label>
+    <label>
+      <span>API Key Env</span>
+      <input type="text" ref="gatewayApiKeyEnvInput" placeholder="DEEPSEEK_API_KEY">
+    </label>
+    <label>
+      <span>Default Model</span>
+      <input type="text" ref="gatewayDefaultModelInput" list="gatewayModelHints" placeholder="deepseek-v4-flash">
+    </label>
+    <label>
+      <span>Planner Model</span>
+      <input type="text" ref="gatewayPlannerModelInput" list="gatewayModelHints" placeholder="deepseek-v4-pro">
+    </label>
+    <label class="pg-gateway-wide">
+      <span>Auth Token</span>
+      <input type="password" ref="gatewayAuthTokenInput" placeholder="Optional gateway bearer token">
+    </label>
+  </div>
+  <datalist id="gatewayModelHints">
+    <option value="deepseek-v4-flash"></option>
+    <option value="deepseek-v4-pro"></option>
+  </datalist>
+  <div class="pg-gateway-status" ref="gatewayStatus">Only the environment variable name is saved for provider API keys.</div>
+</div>
+
 <div class="ui-card-title">Provider Models</div>
 <div class="ui-card" ref="modelsCard">
   <div class="pm-provider-tabs" ref="providerTabs"></div>

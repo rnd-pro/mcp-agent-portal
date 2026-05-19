@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import cssShared from '../../common/ui-shared.css.js';
 import cssLocal from './RuntimeControl.css.js';
 import template from './RuntimeControl.tpl.js';
+import './InstanceItem.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -64,17 +65,10 @@ function summaryCard(label, value, note = '') {
   `;
 }
 
-function metric(label, value) {
-  return `
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">${escapeHtml(label)}</div>
-      <div class="rtc-metric-value" title="${escapeHtml(value)}">${escapeHtml(value)}</div>
-    </div>
-  `;
-}
-
 export class RuntimeControl extends Symbiote {
-  init$ = {};
+  init$ = {
+    instances: [],
+  };
   _refreshTimer = null;
 
   initCallback() {
@@ -137,45 +131,42 @@ export class RuntimeControl extends Symbiote {
 
   _renderInstances(instances, hasInstances) {
     let activeInstances = instances.filter(isActiveInstance);
-    let container = this.ref.instanceList;
-    container.innerHTML = '';
+    this.$.instances = [];
+    this.ref.instanceEmpty.hidden = true;
+    this.ref.instanceEmpty.textContent = '';
 
     if (!hasInstances) {
-      container.innerHTML = '<div class="ui-empty-state rtc-empty">Instances endpoint is unavailable.</div>';
+      this._setInstancesEmpty('Instances endpoint is unavailable.');
       return;
     }
 
     if (!instances.length) {
-      container.innerHTML = '<div class="ui-empty-state rtc-empty">No instances reported by the runtime.</div>';
+      this._setInstancesEmpty('No instances reported by the runtime.');
       return;
     }
 
     if (!activeInstances.length) {
-      container.innerHTML = '<div class="ui-empty-state rtc-empty">No active instances.</div>';
+      this._setInstancesEmpty('No active instances.');
       return;
     }
 
-    for (let instance of activeInstances) {
-      let item = document.createElement('div');
-      item.className = 'rtc-instance';
-      item.innerHTML = `
-        <div class="rtc-instance-head">
-          <div class="rtc-instance-name" title="${escapeHtml(instance.name || 'unknown')}">${escapeHtml(instance.name || 'unknown')}</div>
-          <div class="rtc-status"><span class="rtc-status-dot"></span>Active</div>
-        </div>
-        <div class="rtc-metrics">
-          ${metric('PID', instance.pid ?? '-')}
-          ${metric('Port', instance.port ?? '-')}
-          ${metric('Agents', instance.agents ?? 0)}
-          ${metric('Uptime', formatStartedAt(instance.startedAt))}
-          ${metric('Project', instance.project || instance.projectPath || '-')}
-          ${metric('Command', instance.command || '-')}
-          ${metric('Prefix', instance.prefix || '-')}
-          ${metric('Location', this._instanceLocation(instance))}
-        </div>
-      `;
-      container.appendChild(item);
-    }
+    this.$.instances = activeInstances.map((instance) => ({
+      name: instance.name || 'unknown',
+      status: instance.status || 'Active',
+      pid: instance.pid ?? '-',
+      port: instance.port ?? '-',
+      agents: instance.agents ?? 0,
+      uptime: formatStartedAt(instance.startedAt),
+      project: instance.project || instance.projectPath || '-',
+      command: instance.command || '-',
+      prefix: instance.prefix || '-',
+      location: this._instanceLocation(instance),
+    }));
+  }
+
+  _setInstancesEmpty(message) {
+    this.ref.instanceEmpty.hidden = false;
+    this.ref.instanceEmpty.textContent = message;
   }
 
   _instanceLocation(instance) {

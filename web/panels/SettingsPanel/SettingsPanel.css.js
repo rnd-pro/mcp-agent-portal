@@ -41,6 +41,102 @@ export default`
   50% { opacity: 0.4; }
 }
 
+/* Claude Gateway */
+.pg-gateway {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pg-gateway-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-gateway-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sn-text);
+}
+
+.pg-gateway-toggle input {
+  margin: 0;
+}
+
+.pg-gateway-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 8px 12px;
+}
+
+.pg-gateway-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--sn-text-dim);
+}
+
+.pg-gateway-grid input,
+.pg-gateway-grid select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--sn-border);
+  border-radius: 4px;
+  background: var(--sn-bg-level-1);
+  color: var(--sn-text-main);
+  font: 12px var(--sn-font-mono, monospace);
+}
+
+.pg-gateway-wide {
+  grid-column: 1 / -1;
+}
+
+.pg-gateway-status {
+  min-height: 16px;
+  font-size: 11px;
+  color: var(--sn-text-dim);
+}
+
+.pm-model-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.pm-model-suggestions span {
+  color: var(--sn-text-dim);
+  font-size: 11px;
+}
+
+.pm-suggest-model {
+  border: 1px solid var(--sn-node-border);
+  border-radius: 12px;
+  background: var(--sn-node-bg);
+  color: var(--sn-text);
+  cursor: pointer;
+  font: 11px var(--sn-font-mono, monospace);
+  padding: 3px 9px;
+}
+
+.pm-suggest-model:hover {
+  border-color: var(--sn-node-selected);
+}
+
+@media (max-width: 620px) {
+  .pg-gateway-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Provider Models Section */
 .pm-provider-tabs {
   display: flex;

@@ -14,9 +14,25 @@ function _fmtTime(s) {
   return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
 
+const DEFAULT_GATEWAY = {
+  enabled: false,
+  authToken: '',
+  defaultModel: 'deepseek-v4-flash',
+  plannerModel: 'deepseek-v4-pro',
+  providers: {
+    deepseek: {
+      type: 'anthropic-compatible',
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      apiKeyEnv: 'DEEPSEEK_API_KEY',
+      models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    },
+  },
+};
+
 export class SettingsPanel extends Symbiote {
   init$ = {};
   _statusInterval = null;
+  _settings = {};
 
   renderCallback() {
     this._initProviderModels();
@@ -24,6 +40,7 @@ export class SettingsPanel extends Symbiote {
     this.ref.restartBtn.onclick = () => this.restartServer();
     this.ref.stopBtn.onclick = () => this.stopServer();
     this.ref.saveSettingsBtn.onclick = () => this.saveSettings();
+    this.ref.gatewayTestBtn.onclick = () => this.testGateway();
     this.fetchInfo();
     this.fetchSettings();
     this._startStatusPolling();
@@ -38,6 +55,8 @@ export class SettingsPanel extends Symbiote {
       if (r.telegramChatId) {
         this.ref.telegramChatIdInput.value = r.telegramChatId;
       }
+      this._settings = r || {};
+      this._applyGatewaySettings(r.anthropicGateway || {});
     } catch (e) {
       console.error('Failed to fetch settings:', e);
     }
@@ -47,11 +66,13 @@ export class SettingsPanel extends Symbiote {
     try {
       let telegramToken = this.ref.telegramTokenInput.value.trim();
       let telegramChatId = this.ref.telegramChatIdInput.value.trim();
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ telegramToken, telegramChatId })
+      let anthropicGateway = this._readGatewaySettings();
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramToken, telegramChatId, anthropicGateway })
       });
+      this._settings = { ...this._settings, telegramToken, telegramChatId, anthropicGateway };
       let btn = this.ref.saveSettingsBtn;
       btn.textContent = "Saved! Please click Restart.";
       btn.className = "ui-btn primary";
@@ -60,6 +81,80 @@ export class SettingsPanel extends Symbiote {
       }, 4000);
     } catch (e) {
       console.error('Failed to save settings:', e);
+    }
+  }
+
+  _applyGatewaySettings(raw) {
+    let gateway = {
+      ...DEFAULT_GATEWAY,
+      ...raw,
+      providers: {
+        ...DEFAULT_GATEWAY.providers,
+        ...(raw.providers || {}),
+      },
+    };
+    let providerId = gateway.providers.deepseek ? 'deepseek' : Object.keys(gateway.providers)[0] || 'deepseek';
+    let provider = {
+      ...DEFAULT_GATEWAY.providers.deepseek,
+      ...(gateway.providers[providerId] || {}),
+    };
+
+    this.ref.gatewayEnabledInput.checked = gateway.enabled === true;
+    this.ref.gatewayProviderInput.value = providerId;
+    this.ref.gatewayProviderTypeInput.value = provider.type || 'openai-compatible';
+    this.ref.gatewayBaseUrlInput.value = provider.baseUrl || '';
+    this.ref.gatewayApiKeyEnvInput.value = provider.apiKeyEnv || '';
+    this.ref.gatewayDefaultModelInput.value = gateway.defaultModel || '';
+    this.ref.gatewayPlannerModelInput.value = gateway.plannerModel || '';
+    this.ref.gatewayAuthTokenInput.value = gateway.authToken || '';
+  }
+
+  _readGatewaySettings() {
+    let providerId = this.ref.gatewayProviderInput.value || 'deepseek';
+    let defaultModel = this.ref.gatewayDefaultModelInput.value.trim() || DEFAULT_GATEWAY.defaultModel;
+    let plannerModel = this.ref.gatewayPlannerModelInput.value.trim() || DEFAULT_GATEWAY.plannerModel;
+    return {
+      enabled: this.ref.gatewayEnabledInput.checked,
+      authToken: this.ref.gatewayAuthTokenInput.value.trim(),
+      defaultModel,
+      plannerModel,
+      providers: {
+        [providerId]: {
+          type: this.ref.gatewayProviderTypeInput.value || 'openai-compatible',
+          baseUrl: this.ref.gatewayBaseUrlInput.value.trim() || DEFAULT_GATEWAY.providers.deepseek.baseUrl,
+          apiKeyEnv: this.ref.gatewayApiKeyEnvInput.value.trim() || DEFAULT_GATEWAY.providers.deepseek.apiKeyEnv,
+          models: Array.from(new Set([defaultModel, plannerModel, ...DEFAULT_GATEWAY.providers.deepseek.models])),
+        },
+      },
+    };
+  }
+
+  async testGateway() {
+    let t = this.ref.gatewayStatus;
+    let gateway = this._readGatewaySettings();
+    if (!gateway.enabled) {
+      t.textContent = 'Enable and save the gateway before testing.';
+      t.style.color = 'var(--sn-warning-color)';
+      return;
+    }
+    t.textContent = 'Testing gateway...';
+    t.style.color = 'var(--sn-text-dim)';
+    let headers = gateway.authToken ? { Authorization: `Bearer ${gateway.authToken}` } : {};
+    try {
+      let [healthRes, modelsRes] = await Promise.all([
+        fetch('/anthropic/health', { headers }),
+        fetch('/anthropic/v1/models', { headers }),
+      ]);
+      if (!healthRes.ok) throw new Error(`health ${healthRes.status}`);
+      if (!modelsRes.ok) throw new Error(`models ${modelsRes.status}`);
+      let health = await healthRes.json();
+      let models = await modelsRes.json();
+      let count = Array.isArray(models.data) ? models.data.length : 0;
+      t.textContent = `OK: ${health.defaultModel || gateway.defaultModel}; ${count} model${count === 1 ? '' : 's'}`;
+      t.style.color = 'var(--sn-success-color)';
+    } catch (e) {
+      t.textContent = `Test failed: ${e.message}`;
+      t.style.color = 'var(--sn-danger-color)';
     }
   }
 
@@ -228,23 +323,37 @@ export class SettingsPanel extends Symbiote {
 
   _renderModelList() {
     let models = this._userModels[this._activeProvider] || [];
+    let gatewaySuggestions = this._activeProvider === 'claude' && this._settings?.anthropicGateway?.enabled
+      ? `<div class="pm-model-suggestions">
+           <span>Gateway models:</span>
+           ${DEFAULT_GATEWAY.providers.deepseek.models.map(m => `deepseek/${m}`).map(m => `<button class="pm-suggest-model" data-m="${m}">${m}</button>`).join('')}
+         </div>`
+      : '';
     if (models.length === 0) {
-      this.ref.modelList.innerHTML = `<div class="ui-empty-state" style="padding:4px">No custom models. Showing defaults.</div>`;
+      this.ref.modelList.innerHTML = `${gatewaySuggestions}<div class="ui-empty-state" style="padding:4px">No custom models. Showing defaults.</div>`;
     } else {
-      this.ref.modelList.innerHTML = models.map(m => 
+      this.ref.modelList.innerHTML = gatewaySuggestions + models.map(m =>
         `<div class="pm-model-chip">
            ${m} <span class="remove" data-m="${m}">×</span>
          </div>`
       ).join('');
-      
-      this.ref.modelList.querySelectorAll('.remove').forEach(btn => {
-        btn.onclick = () => {
-          this._userModels[this._activeProvider] = models.filter(x => x !== btn.dataset.m);
-          this._renderModelList();
-          if (this._activeProvider === 'opencode') this._renderDirectory();
-        };
-      });
     }
+    this.ref.modelList.querySelectorAll('.pm-suggest-model').forEach(btn => {
+      btn.onclick = () => {
+        if (!this._userModels[this._activeProvider]) this._userModels[this._activeProvider] = [];
+        if (!this._userModels[this._activeProvider].includes(btn.dataset.m)) {
+          this._userModels[this._activeProvider].push(btn.dataset.m);
+        }
+        this._renderModelList();
+      };
+    });
+    this.ref.modelList.querySelectorAll('.remove').forEach(btn => {
+      btn.onclick = () => {
+        this._userModels[this._activeProvider] = models.filter(x => x !== btn.dataset.m);
+        this._renderModelList();
+        if (this._activeProvider === 'opencode') this._renderDirectory();
+      };
+    });
   }
 
   _filterQuery = '';

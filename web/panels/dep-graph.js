@@ -509,11 +509,11 @@ export class DepGraph extends Symbiote {
   _updateModeVisibility(mode) {
     const hideStructuredOnly = mode === 'flat';
     this.querySelectorAll('.pcb-structured-only').forEach(el => {
-      el.style.display = hideStructuredOnly ? 'none' : '';
+      el.hidden = hideStructuredOnly;
     });
     const hideFlatOnly = mode !== 'flat';
     this.querySelectorAll('.pcb-flat-only').forEach(el => {
-      el.style.display = hideFlatOnly ? 'none' : '';
+      el.hidden = hideFlatOnly;
     });
   }
 
@@ -910,9 +910,9 @@ export class DepGraph extends Symbiote {
     const isStructured = this._viewMode === 'structured';
 
     if (!isStructured) {
-      if (this._canvas) this._canvas.style.display = 'none';
+      if (this._canvas) this._canvas.hidden = true;
       if (this._pgCanvasGraph) {
-        this._pgCanvasGraph.style.display = 'block';
+        this._pgCanvasGraph.hidden = false;
         
         // Listen to canvas-graph for first tick or done to hide loader
         const hideCanvasLoader = () => {
@@ -940,8 +940,8 @@ export class DepGraph extends Symbiote {
       return;
     }
 
-    if (this._pgCanvasGraph) this._pgCanvasGraph.style.display = 'none';
-    if (this._canvas) this._canvas.style.display = '';
+    if (this._pgCanvasGraph) this._pgCanvasGraph.hidden = true;
+    if (this._canvas) this._canvas.hidden = false;
 
     // Cache key: reuse previously built graph for same skeleton+mode
     const cacheKey = getGraphCacheKey(isStructured);

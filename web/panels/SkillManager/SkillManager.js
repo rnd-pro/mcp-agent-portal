@@ -1,200 +1,268 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { mcpCall } from '../../common/mcp-call.js';
-import template from './SkillManager.tpl.js';
-import { uiConfirm } from '../../common/ui-dialogs.js';
-import css from '../../common/ui-shared.css.js';
+import { events } from '../../app.js';
+import '../../components/CodeBlock/CodeBlock.js';
+import './SkillMetadata.js';
+
+const EDITABLE_EXTS = new Set(['.md', '.markdown', '.json', '.js', '.yml', '.yaml', '.txt']);
+
+function extensionOf(path) {
+  let match = String(path || '').match(/(\.[^.\\/]+)$/);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function portalRelativePath(path) {
+  return String(path || '').replace(/^\.agent-portal\/?/, '');
+}
+
+function isMarkdown(path) {
+  return /\.(md|markdown)$/i.test(path || '');
+}
+
+function activeProjectId() {
+  let query = String(location.hash || '').split('?')[1] || '';
+  return new URLSearchParams(query).get('project') || null;
+}
+
+function withActiveProject(url) {
+  let projectId = activeProjectId();
+  if (!projectId) return url;
+  let separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}project=${encodeURIComponent(projectId)}`;
+}
 
 export class SkillManager extends Symbiote {
   init$ = {
-    skills: [],
-    selectedSkillName: null,
-    selectedSkillTier: null
+    filename: 'Select a file',
+    statusText: '',
+    dirty: false,
+    hasFile: false,
+    editMode: false,
+    modeLabel: 'edit',
+    onSave: () => this.saveCurrentFile(),
+    onToggleEdit: () => this.setEditMode(!this.$.editMode)
   };
 
   initCallback() {
-    this.ref.refreshBtn.onclick = () => this.loadSkills();
-    this.ref.newBtn.onclick = () => this.showCreateForm();
-    
-    this.loadSkills();
-  }
-
-  _mcpCall(toolName, args = {}) {
-    return mcpCall('agent-pool', toolName, args);
-  }
-
-  async loadSkills() {
-    try {
-      this.ref.projectList.innerHTML = '<div class="ui-empty-state">Loading...</div>';
-      this.ref.globalList.innerHTML = '';
-      this.ref.builtinList.innerHTML = '';
-      
-      let data = await this._mcpCall('list_skills', { json: true });
-      if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch(e){ data = []; }
-      }
-      
-      this.$.skills = Array.isArray(data) ? data : [];
-      this.renderSidebar();
-    } catch (err) {
-      console.error('Failed to load skills:', err);
-      this.ref.projectList.innerHTML = `<div class="ui-empty-state" style="color:#f87171">Error: ${err.message}</div>`;
-    }
-  }
-
-  renderSidebar() {
-    let pList = this.ref.projectList;
-    let gList = this.ref.globalList;
-    let bList = this.ref.builtinList;
-    
-    pList.innerHTML = '';
-    gList.innerHTML = '';
-    bList.innerHTML = '';
-    
-    let skills = this.$.skills;
-    if (!skills || skills.length === 0) {
-      pList.innerHTML = '<div class="ui-empty-state">No skills found</div>';
-      return;
-    }
-    
-    let pCount = 0, gCount = 0, bCount = 0;
-    
-    skills.forEach(s => {
-      let item = document.createElement('div');
-      item.className = 'ui-item' + (this.$.selectedSkillName === s.name && this.$.selectedSkillTier === s.tier ? ' active' : '');
-      item.innerHTML = `
-        <div class="ui-item-title">${s.name}</div>
-        <div class="ui-item-desc" title="${s.description.replace(/"/g, '&quot;')}">${s.description}</div>
-      `;
-      item.onclick = () => {
-        this.$.selectedSkillName = s.name;
-        this.$.selectedSkillTier = s.tier;
-        this.renderSidebar();
-        this.showSkillDetails(s);
-      };
-      
-      if (s.tier === 'project') { pList.appendChild(item); pCount++; }
-      else if (s.tier === 'global') { gList.appendChild(item); gCount++; }
-      else { bList.appendChild(item); bCount++; }
+    events.addEventListener('file-selected', event => {
+      let path = event.detail.path || '';
+      if (path.startsWith('.agent-portal/')) this.loadFile(path);
     });
-    
-    if (pCount === 0) pList.innerHTML = '<div class="ui-empty-state">None</div>';
-    if (gCount === 0) gList.innerHTML = '<div class="ui-empty-state">None</div>';
-    if (bCount === 0) bList.innerHTML = '<div class="ui-empty-state">None</div>';
+    this.ref.editor.addEventListener('input', () => {
+      this.setDirty(true);
+      this.syncPreview();
+      this.dispatchMetadata();
+    });
+    this.ref.preview.addEventListener('click', () => {
+      if (this._currentPath && !this.ref.editor.disabled) this.setEditMode(true);
+    });
   }
 
-  showSkillDetails(skill) {
-    let main = this.ref.mainContent;
-    
-    let isBuiltin = skill.tier === 'built-in';
-    let isProject = skill.tier === 'project';
-    
-    main.innerHTML = `
-      <div class="ui-details">
-        <div class="ui-details-header">
-          <div>
-            <h2 class="ui-details-title">${skill.name} <span class="ui-badge ${skill.tier === 'project' ? 'success' : skill.tier === 'global' ? 'info' : 'warning'}">${skill.tier}</span></h2>
-            <div class="ui-details-desc">${skill.description}</div>
-            <div style="font-size:11px;color:#6b7280;margin-top:8px;font-family:monospace;">${skill.filePath}</div>
-          </div>
-          <div style="display:flex;gap:8px;">
-            ${isBuiltin || !isProject ? `<button class="ui-btn primary" id="install-btn"><span class="material-symbols-outlined" style="font-size:18px">download</span> Install to Project</button>` : ''}
-            ${!isBuiltin ? `<button class="ui-btn danger" id="del-btn"><span class="material-symbols-outlined" style="font-size:18px">delete</span></button>` : ''}
-          </div>
-        </div>
-        
-        <div class="ui-card">
-          <h3 class="ui-card-title">Preview (Code Viewer)</h3>
-          <div style="background: rgba(0,0,0,0.2); padding: 16px; border-radius: 6px; font-size: 14px; line-height: 1.6; border: 1px solid var(--sn-color-border, #404040); white-space: pre-wrap;">Use the Explorer Code Viewer to read or edit this markdown file directly. Agent-pool automatically reloads skills on every run.</div>
-        </div>
-      </div>
-    `;
-    
-    let installBtn = main.querySelector('#install-btn');
-    if (installBtn) {
-      installBtn.onclick = async () => {
-        try {
-          await this._mcpCall('install_skill', { skill_name: skill.name });
-          alert(`Skill ${skill.name} installed to project tier!`);
-          this.loadSkills();
-        } catch (err) {
-          alert('Failed to install skill: ' + err.message);
-        }
-      };
-    }
-    
-    let delBtn = main.querySelector('#del-btn');
-    if (delBtn) {
-      delBtn.onclick = async () => {
-        if (!(await uiConfirm(`Are you sure you want to delete ${skill.name} from the ${skill.tier} tier?`))) return;
-        try {
-          await this._mcpCall('delete_skill', { skill_name: skill.name, scope: skill.tier });
-          this.$.selectedSkillName = null;
-          this.loadSkills();
-          main.innerHTML = '<div class="ui-empty-state">Skill deleted</div>';
-        } catch (err) {
-          alert('Failed to delete skill: ' + err.message);
-        }
-      };
+  async fetchJson(url, options) {
+    let res = await fetch(url, options);
+    let data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async loadFile(path) {
+    if (this.$.dirty && !confirm('Current file has unsaved changes. Open another file?')) return;
+    this._currentPath = path;
+    this.$.filename = path;
+    this.$.hasFile = false;
+    this.$.statusText = 'Loading...';
+    try {
+      let data = await this.fetchJson(withActiveProject(`/api/agent-portal/file?path=${encodeURIComponent(portalRelativePath(path))}`));
+      this.ref.editor.value = data.content || '';
+      this.ref.editor.disabled = !EDITABLE_EXTS.has(extensionOf(path));
+      this.syncPreview();
+      this.setEditMode(!isMarkdown(path));
+      this.$.hasFile = true;
+      this.setDirty(false);
+      this.dispatchMetadata();
+    } catch (err) {
+      this.ref.editor.value = `Error: ${err.message}`;
+      this.ref.editor.disabled = true;
+      this.$.hasFile = true;
+      this.$.statusText = 'Error';
     }
   }
 
-  showCreateForm() {
-    this.$.selectedSkillName = null;
-    this.$.selectedSkillTier = null;
-    this.renderSidebar();
-    
-    this.ref.mainContent.innerHTML = `
-      <div class="ui-details">
-        <h2 class="ui-details-title">Create New Skill</h2>
-        
-        <div class="ui-card">
-          <div class="ui-field">
-            <label>Skill Name * (kebab-case)</label>
-            <input type="text" id="s-name" placeholder="e.g. data-analyst">
-          </div>
-          <div class="ui-field">
-            <label>Description *</label>
-            <input type="text" id="s-desc" placeholder="What does this skill do?">
-          </div>
-          <div class="ui-field">
-            <label>Scope / Tier</label>
-            <input type="text" value="Project (.agent-portal/skills)" disabled>
-          </div>
-          <div class="ui-field">
-            <label>Instructions (Markdown) *</label>
-            <textarea id="s-inst" placeholder="You are a data analyst..."></textarea>
-          </div>
-          <button class="ui-btn primary" id="save-btn">Create Skill</button>
-        </div>
-      </div>
-    `;
-    
-    this.ref.mainContent.querySelector('#save-btn').onclick = async () => {
-      let name = this.ref.mainContent.querySelector('#s-name').value;
-      let desc = this.ref.mainContent.querySelector('#s-desc').value;
-      let scope = 'project';
-      let inst = this.ref.mainContent.querySelector('#s-inst').value;
-      
-      if (!name || !desc || !inst) return alert('Name, description, and instructions are required');
-      
-      try {
-        await this._mcpCall('create_skill', {
-          skill_name: name,
-          description: desc,
-          instructions: inst,
-          scope
-        });
-        this.loadSkills();
-        alert('Skill created!');
-      } catch (err) {
-        alert('Failed to create skill: ' + err.message);
+  setDirty(dirty) {
+    this.$.dirty = dirty;
+    this.$.statusText = dirty ? 'Modified' : '';
+    this.dispatchMetadata();
+  }
+
+  setEditMode(editMode) {
+    this.$.editMode = !!editMode;
+    this.$.modeLabel = this.$.editMode ? 'view' : 'edit';
+    this.toggleAttribute('mode-edit', this.$.editMode);
+    if (this.$.editMode) {
+      requestAnimationFrame(() => this.ref.editor.focus());
+    } else {
+      this.syncPreview();
+    }
+  }
+
+  syncPreview() {
+    let preview = this.ref.preview;
+    if (!preview) return;
+    let path = this._currentPath || '';
+    let markdown = isMarkdown(path);
+    preview.setBasePath(path);
+    preview.$.lang = markdown ? 'md' : 'plain';
+    preview.$.code = this.ref.editor.value || '';
+  }
+
+  dispatchMetadata() {
+    if (!this._currentPath) return;
+    events.dispatchEvent(new CustomEvent('agent-portal-file-loaded', {
+      detail: {
+        path: this._currentPath,
+        content: this.ref.editor.value,
+        editable: !this.ref.editor.disabled
       }
-    };
+    }));
+  }
+
+  applyContent(content) {
+    this.ref.editor.value = content;
+    this.syncPreview();
+    this.setDirty(true);
+  }
+
+  async saveCurrentFile() {
+    if (!this._currentPath || this.ref.editor.disabled) return;
+    this.$.statusText = 'Saving...';
+    try {
+      await this.fetchJson(withActiveProject('/api/agent-portal/file'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId(),
+          path: portalRelativePath(this._currentPath),
+          content: this.ref.editor.value
+        })
+      });
+      this.setDirty(false);
+      if (isMarkdown(this._currentPath)) this.setEditMode(false);
+      this.$.statusText = 'Saved';
+      setTimeout(() => {
+        if (!this.$.dirty) this.$.statusText = '';
+      }, 1200);
+    } catch (err) {
+      this.$.statusText = `Error: ${err.message}`;
+    }
   }
 }
 
-SkillManager.template = template;
-SkillManager.rootStyles = css;
+SkillManager.template = `
+  <div class="pg-code-header">
+    <span class="pg-code-filename" bind="textContent: filename"></span>
+    <div class="pg-code-controls">
+      <span class="pg-code-stats" bind="textContent: statusText"></span>
+      <button class="pg-mode-toggle" bind="onclick: onToggleEdit; hidden: !hasFile" title="Toggle edit mode">
+        <span class="material-symbols-outlined" style="font-size:14px">edit_note</span>
+        <span class="pg-mode-label" bind="textContent: modeLabel"></span>
+      </button>
+      <button class="pg-mode-toggle" bind="onclick: onSave; disabled: !dirty" title="Save">
+        <span class="material-symbols-outlined" style="font-size:14px">save</span>
+        <span class="pg-mode-label">save</span>
+      </button>
+    </div>
+  </div>
+  <code-block ref="preview"></code-block>
+  <textarea class="pg-markdown-editor" ref="editor" spellcheck="false" disabled></textarea>
+`;
+
+SkillManager.rootStyles = `
+  pg-skill-manager {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+  pg-skill-manager .pg-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    border-bottom: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+    background: var(--sn-node-header-bg, hsl(37, 25%, 93%));
+    gap: 8px;
+  }
+  pg-skill-manager .pg-code-filename {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  pg-skill-manager .pg-code-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  pg-skill-manager .pg-code-stats {
+    font-size: 10px;
+    color: var(--sn-cat-server, hsl(210, 45%, 45%));
+    white-space: nowrap;
+  }
+  pg-skill-manager .pg-mode-toggle {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+    border-radius: 4px;
+    background: var(--sn-bg, hsl(37, 30%, 91%));
+    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    font-family: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  pg-skill-manager .pg-mode-toggle:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  pg-skill-manager .pg-mode-toggle[hidden] {
+    display: none;
+  }
+  pg-skill-manager code-block {
+    flex: 1;
+    min-height: 0;
+    cursor: text;
+  }
+  pg-skill-manager .pg-markdown-editor {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    border: 0;
+    outline: 0;
+    resize: none;
+    padding: 14px 16px;
+    background: var(--sn-bg, hsl(37, 30%, 96%));
+    color: var(--sn-text, hsl(30, 15%, 18%));
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    tab-size: 2;
+  }
+  pg-skill-manager[mode-edit] code-block {
+    display: none;
+  }
+  pg-skill-manager[mode-edit] .pg-markdown-editor {
+    display: block;
+  }
+`;
+
 SkillManager.reg('pg-skill-manager');
 
 export default SkillManager;

@@ -35,7 +35,7 @@ export default `
           <button class="ui-btn-icon" ref="refreshBtn" title="Refresh task status"><span class="material-symbols-outlined">refresh</span></button>
         </div>
         
-        <div id="pr-status-banner" class="ui-banner" style="display:none;"></div>
+        <div id="pr-status-banner" class="ui-banner" hidden></div>
         
         <div id="pr-feedback" style="flex:1; background: rgba(0,0,0,0.2); padding: 16px; border-radius: 6px; font-size: 14px; line-height: 1.6; border: 1px solid var(--sn-color-border, #404040); white-space: pre-wrap; overflow-y: auto;">
           <div class="ui-empty-state">Submit a proposal to start peer review</div>

@@ -1,13 +1,34 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './PipelineManager.tpl.js';
-import css from '../../common/ui-shared.css.js';
+import cssShared from '../../common/ui-shared.css.js';
+import css from './PipelineManager.css.js';
+import './PipelineItem.js';
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 
 export class PipelineManager extends Symbiote {
   init$ = {
     pipelines: [],
-    selectedPipelineId: null
+    selectedPipelineId: null,
+    onPipelineSelect: (e) => {
+      let pipelineId = e.currentTarget.dataset.pipelineId;
+      let pipeline = this._pipelines.find((item) => item.name === pipelineId);
+      if (!pipeline) return;
+      this.$.selectedPipelineId = pipeline.name;
+      this.renderSidebar();
+      this.showPipelineDetails(pipeline);
+    },
   };
+
+  _pipelines = [];
 
   initCallback() {
     this.ref.refreshBtn.onclick = () => this.loadPipelines();
@@ -22,80 +43,73 @@ export class PipelineManager extends Symbiote {
 
   async loadPipelines() {
     try {
-      this.ref.pipelineList.innerHTML = '<div class="ui-empty-state">Loading...</div>';
+      this.$.pipelines = [];
+      this._setPipelineState('Loading...');
       
       let data = await this._mcpCall('list_pipelines', { json: true });
       if (typeof data === 'string') {
         try { data = JSON.parse(data); } catch(e){ data = []; }
       }
       
-      this.$.pipelines = Array.isArray(data) ? data : [];
+      this._pipelines = Array.isArray(data) ? data : [];
       this.renderSidebar();
     } catch (err) {
       console.error('Failed to load pipelines:', err);
-      this.ref.pipelineList.innerHTML = `<div class="ui-empty-state" style="color:#f87171">Error: ${err.message}</div>`;
+      this.$.pipelines = [];
+      this._setPipelineState(`Error: ${err.message}`, true);
     }
   }
 
   renderSidebar() {
-    let list = this.ref.pipelineList;
-    list.innerHTML = '';
+    this.ref.pipelineState.hidden = true;
     
-    let pipelines = this.$.pipelines;
+    let pipelines = this._pipelines;
     if (!pipelines || pipelines.length === 0) {
-      list.innerHTML = '<div class="ui-empty-state">No pipelines found</div>';
+      this.$.pipelines = [];
+      this._setPipelineState('No pipelines found');
       return;
     }
     
-    pipelines.forEach(p => {
-      let item = document.createElement('div');
-      item.className = 'ui-item' + (this.$.selectedPipelineId === p.name ? ' active' : '');
-      item.innerHTML = `<div class="ui-item-title">${p.name}</div>`;
-      item.onclick = () => {
-        this.$.selectedPipelineId = p.name;
-        this.renderSidebar();
-        this.showPipelineDetails(p);
-      };
-      list.appendChild(item);
-    });
+    this.$.pipelines = pipelines.map((pipeline) => ({
+      name: pipeline.name,
+      itemClass: 'ui-item' + (this.$.selectedPipelineId === pipeline.name ? ' active' : ''),
+    }));
   }
 
   showPipelineDetails(pipeline) {
     let main = this.ref.mainContent;
-    main.innerHTML = '';
-    
-    let container = document.createElement('div');
-    container.className = 'ui-details';
     
     let stepsHtml = pipeline.steps.map(s => `
       <div class="ui-card">
         <div class="ui-card-title" style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
-          ${s.name}
-          ${s.trigger ? `<span class="ui-badge warning">⚡ ${s.trigger}</span>` : ''}
+          ${escapeHtml(s.name)}
+          ${s.trigger ? `<span class="ui-badge warning">⚡ ${escapeHtml(s.trigger)}</span>` : ''}
         </div>
-        <div style="font-family:monospace; margin-bottom:12px; white-space:pre-wrap;">${(s.prompt || '').replace(/</g, '&lt;')}</div>
+        <div style="font-family:monospace; margin-bottom:12px; white-space:pre-wrap;">${escapeHtml(s.prompt || '')}</div>
         <div style="display:flex; gap:8px;">
-          ${s.skill ? `<span class="ui-badge info">Skill: ${s.skill}</span>` : ''}
-          ${s.timeout ? `<span class="ui-badge">Timeout: ${s.timeout}s</span>` : ''}
-          ${s.max_bounces ? `<span class="ui-badge">Max Bounces: ${s.max_bounces}</span>` : ''}
+          ${s.skill ? `<span class="ui-badge info">Skill: ${escapeHtml(s.skill)}</span>` : ''}
+          ${s.timeout ? `<span class="ui-badge">Timeout: ${escapeHtml(s.timeout)}s</span>` : ''}
+          ${s.max_bounces ? `<span class="ui-badge">Max Bounces: ${escapeHtml(s.max_bounces)}</span>` : ''}
         </div>
       </div>
     `).join('');
     
-    container.innerHTML = `
+    main.innerHTML = `
+      <div class="ui-details">
       <div class="ui-details-header">
         <div>
-          <h2 class="ui-details-title">${pipeline.name}</h2>
-          <div class="ui-details-desc">Steps: ${pipeline.steps.length} | On Error: ${pipeline.on_error || 'stop'}</div>
+          <h2 class="ui-details-title">${escapeHtml(pipeline.name)}</h2>
+          <div class="ui-details-desc">Steps: ${pipeline.steps.length} | On Error: ${escapeHtml(pipeline.on_error || 'stop')}</div>
         </div>
         <button class="ui-btn primary" id="run-btn"><span class="material-symbols-outlined">play_arrow</span> Run Pipeline</button>
       </div>
       <div>
         ${stepsHtml}
       </div>
+      </div>
     `;
     
-    container.querySelector('#run-btn').onclick = async () => {
+    main.querySelector('#run-btn').onclick = async () => {
       try {
         await this._mcpCall('run_pipeline', { pipeline_id: pipeline.name });
         alert(`Pipeline ${pipeline.name} started successfully!`);
@@ -103,8 +117,6 @@ export class PipelineManager extends Symbiote {
         alert('Failed to start pipeline: ' + err.message);
       }
     };
-    
-    main.appendChild(container);
   }
 
   showCreateForm() {
@@ -118,10 +130,16 @@ export class PipelineManager extends Symbiote {
       </div>
     `;
   }
+
+  _setPipelineState(message, isError = false) {
+    this.ref.pipelineState.hidden = false;
+    this.ref.pipelineState.textContent = message;
+    this.ref.pipelineState.style.color = isError ? '#f87171' : '';
+  }
 }
 
 PipelineManager.template = template;
-PipelineManager.rootStyles = css;
+PipelineManager.rootStyles = cssShared + css;
 PipelineManager.reg('pg-pipeline-mgr');
 
 export default PipelineManager;

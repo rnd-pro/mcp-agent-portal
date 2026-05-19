@@ -1,18 +1,45 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './GroupManager.tpl.js';
-import css from '../../common/ui-shared.css.js';
+import cssShared from '../../common/ui-shared.css.js';
+import cssLocal from './GroupManager.css.js';
+
+const PROVIDERS = ['codex', 'claude', 'opencode', 'gemini'];
+const DEFAULT_MODELS = {
+  codex: ['default'],
+  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro'],
+  opencode: ['default'],
+  gemini: ['default'],
+};
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
+function cloneGroup(group) {
+  return {
+    ...group,
+    profiles: Array.isArray(group.profiles) ? group.profiles.map(p => ({ ...p })) : [],
+  };
+}
 
 export class GroupManager extends Symbiote {
   init$ = {
     groups: [],
-    selectedGroupName: null
   };
+
+  _modelsByProvider = {};
+  _dragProfile = null;
 
   initCallback() {
     this.ref.refreshBtn.onclick = () => this.loadGroups();
     this.ref.newBtn.onclick = () => this.showCreateForm();
-    
     this.loadGroups();
   }
 
@@ -20,164 +47,268 @@ export class GroupManager extends Symbiote {
     return mcpCall('agent-pool', toolName, args);
   }
 
-  async loadGroups() {
+  async loadGroups({ retry = true } = {}) {
     try {
-      this.ref.groupList.innerHTML = '<div class="ui-empty-state">Loading...</div>';
-      
-      let data = await this._mcpCall('list_groups', { json: true });
-      if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch { data = []; }
+      this.ref.board.innerHTML = '<div class="ui-empty-state">Loading groups...</div>';
+      let [groups, modelsInfo] = await Promise.all([
+        this._mcpCall('list_groups', { json: true }),
+        fetch('/api/settings/models').then(res => res.json()).catch(() => ({ userModels: {} })),
+      ]);
+      if (typeof groups === 'string') {
+        try { groups = JSON.parse(groups); } catch { groups = []; }
       }
-      
-      this.$.groups = Array.isArray(data) ? data : [];
-      this.renderSidebar();
+      this._modelsByProvider = modelsInfo.userModels || {};
+      this.$.groups = Array.isArray(groups) ? groups.map(cloneGroup) : [];
+      if (retry && this.$.groups.length === 0) {
+        setTimeout(() => this.loadGroups({ retry: false }), 1000);
+      }
+      this.renderBoard();
     } catch (err) {
       console.error('Failed to load groups:', err);
-      this.ref.groupList.innerHTML = `<div class="ui-empty-state" style="color:#f87171">Error: ${err.message}</div>`;
+      this.ref.board.innerHTML = `<div class="ui-empty-state" style="color:var(--sn-danger-color)">Error: ${esc(err.message)}</div>`;
     }
   }
 
-  renderSidebar() {
-    let list = this.ref.groupList;
-    list.innerHTML = '';
-    
-    let groups = this.$.groups;
-    if (!groups || groups.length === 0) {
-      list.innerHTML = '<div class="ui-empty-state">No groups found</div>';
+  _modelsFor(provider) {
+    return Array.from(new Set([
+      ...(DEFAULT_MODELS[provider] || ['default']),
+      ...(this._modelsByProvider[provider] || []),
+    ]));
+  }
+
+  renderBoard() {
+    let groups = this.$.groups || [];
+    if (groups.length === 0) {
+      this.ref.board.innerHTML = '<div class="ui-empty-state">No groups found</div>';
       return;
     }
-    
-    groups.forEach(g => {
-      let item = document.createElement('div');
-      item.className = 'ui-item' + (this.$.selectedGroupName === g.name ? ' active' : '');
-      item.innerHTML = `<span class="ui-item-title">${g.name}</span> <span class="ui-item-desc">${g.max_agents ? g.max_agents + ' max' : ''}</span>`;
-      item.onclick = () => {
-        this.$.selectedGroupName = g.name;
-        this.renderSidebar();
-        this.showGroupDetails(g);
+
+    this.ref.board.innerHTML = groups.map(group => this._renderColumn(group)).join('');
+    this._bindBoard();
+  }
+
+  _renderColumn(group) {
+    let profiles = group.profiles?.length
+      ? group.profiles
+      : [{ provider: group.provider || 'codex', model: group.model || 'default', inherited: true }];
+    let rotation = group.rotation_mode || 'error_fallback';
+    let provider = group.provider || 'codex';
+    let models = this._modelsFor(provider);
+
+    return `
+      <section class="gm-column" data-group="${esc(group.name)}">
+        <header class="gm-column-head">
+          <div>
+            <h2>${esc(group.name)}</h2>
+            <div class="gm-meta">
+              <span>${esc(group.model_tier || 'resource group')}</span>
+              ${group.max_agents ? `<span>${esc(group.max_agents)} max</span>` : ''}
+              ${group.policy ? `<span>${esc(group.policy)}</span>` : ''}
+            </div>
+          </div>
+          <button class="ui-btn-icon gm-column-save" title="Save group" data-group="${esc(group.name)}">
+            <span class="material-symbols-outlined">save</span>
+          </button>
+        </header>
+
+        <div class="gm-column-config">
+          <label>
+            <span>Rotation</span>
+            <select data-field="rotation_mode" data-group="${esc(group.name)}">
+              <option value="error_fallback" ${rotation === 'error_fallback' ? 'selected' : ''}>fallback on error</option>
+              <option value="round_robin" ${rotation === 'round_robin' ? 'selected' : ''}>task round robin</option>
+            </select>
+          </label>
+          <label>
+            <span>Max</span>
+            <input data-field="max_agents" data-group="${esc(group.name)}" type="number" min="1" value="${esc(group.max_agents || '')}" placeholder="unlimited">
+          </label>
+        </div>
+
+        <div class="gm-profile-list" data-drop-group="${esc(group.name)}">
+          ${profiles.map((profile, index) => this._renderProfile(group, profile, index)).join('')}
+        </div>
+
+        <div class="gm-add-profile">
+          <select data-add-provider="${esc(group.name)}">
+            ${PROVIDERS.map(p => `<option value="${p}" ${p === provider ? 'selected' : ''}>${p}</option>`).join('')}
+          </select>
+          <select data-add-model="${esc(group.name)}">
+            ${models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
+          </select>
+          <button class="ui-btn-icon" title="Add profile" data-add-profile="${esc(group.name)}">
+            <span class="material-symbols-outlined">add</span>
+          </button>
+        </div>
+      </section>
+    `;
+  }
+
+  _renderProfile(group, profile, index) {
+    let provider = profile.provider || group.provider || 'codex';
+    let model = profile.model || group.model || 'default';
+    return `
+      <article class="gm-profile ${profile.inherited ? 'inherited' : ''}" draggable="true" data-group="${esc(group.name)}" data-index="${index}">
+        <div class="gm-profile-icon">
+          <span class="material-symbols-outlined">${provider === 'claude' ? 'hub' : provider === 'opencode' ? 'route' : provider === 'gemini' ? 'auto_awesome' : 'terminal'}</span>
+        </div>
+        <div class="gm-profile-main">
+          <div class="gm-profile-provider">${esc(provider)}</div>
+          <div class="gm-profile-model" title="${esc(model)}">${esc(model)}</div>
+        </div>
+        ${profile.inherited ? '' : `
+          <button class="ui-btn-icon gm-profile-remove" title="Remove profile" data-remove-group="${esc(group.name)}" data-remove-index="${index}">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        `}
+      </article>
+    `;
+  }
+
+  _bindBoard() {
+    this.ref.board.querySelectorAll('[data-field]').forEach(el => {
+      el.onchange = () => {
+        let group = this._findGroup(el.dataset.group);
+        if (!group) return;
+        let value = el.type === 'number' ? (el.value ? Number(el.value) : null) : el.value;
+        group[el.dataset.field] = value;
       };
-      list.appendChild(item);
+    });
+
+    this.ref.board.querySelectorAll('[data-add-provider]').forEach(providerEl => {
+      providerEl.onchange = () => {
+        let modelEl = this.ref.board.querySelector(`[data-add-model="${CSS.escape(providerEl.dataset.addProvider)}"]`);
+        if (!modelEl) return;
+        modelEl.innerHTML = this._modelsFor(providerEl.value).map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+      };
+    });
+
+    this.ref.board.querySelectorAll('[data-add-profile]').forEach(btn => {
+      btn.onclick = () => this._addProfile(btn.dataset.addProfile);
+    });
+
+    this.ref.board.querySelectorAll('[data-remove-group]').forEach(btn => {
+      btn.onclick = () => this._removeProfile(btn.dataset.removeGroup, Number(btn.dataset.removeIndex));
+    });
+
+    this.ref.board.querySelectorAll('.gm-column-save').forEach(btn => {
+      btn.onclick = () => this._saveGroupByName(btn.dataset.group);
+    });
+
+    this.ref.board.querySelectorAll('.gm-profile').forEach(card => {
+      card.ondragstart = (event) => {
+        this._dragProfile = { groupName: card.dataset.group, index: Number(card.dataset.index) };
+        event.dataTransfer.effectAllowed = 'move';
+      };
+      card.ondragend = () => {
+        this._dragProfile = null;
+        this.ref.board.querySelectorAll('.gm-profile-list.drag-over').forEach(el => el.classList.remove('drag-over'));
+      };
+    });
+
+    this.ref.board.querySelectorAll('.gm-profile-list').forEach(list => {
+      list.ondragover = (event) => {
+        event.preventDefault();
+        list.classList.add('drag-over');
+      };
+      list.ondragleave = () => list.classList.remove('drag-over');
+      list.ondrop = async (event) => {
+        event.preventDefault();
+        list.classList.remove('drag-over');
+        await this._moveProfile(list.dataset.dropGroup);
+      };
     });
   }
 
-  showGroupDetails(group) {
-    let main = this.ref.mainContent;
-    
-    main.innerHTML = `
-      <div class="ui-details">
-        <h2 class="ui-details-title">${group.name}</h2>
-        
-        <div class="ui-card">
-          <h3 class="ui-card-title">Configuration</h3>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-            <div class="ui-field">
-              <label>Default Runner</label>
-              <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">${group.runner || 'Inherit'}</div>
-            </div>
-            <div class="ui-field">
-              <label>Default Skill</label>
-              <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">${group.skill || 'None'}</div>
-            </div>
-            <div class="ui-field">
-              <label>Default Policy</label>
-              <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">${group.policy || 'None'}</div>
-            </div>
-            <div class="ui-field">
-              <label>Max Agents</label>
-              <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:4px;">${group.max_agents || 'Unlimited'}</div>
-            </div>
-          </div>
-        </div>
-        
-        <div class="ui-card">
-          <h3 class="ui-card-title">Launch Swarm (delegate_to_group)</h3>
-          <div class="ui-field">
-            <label>Prompt</label>
-            <textarea id="swarm-prompt" placeholder="What should the swarm do? E.g. 'Analyze these 5 files...'"></textarea>
-          </div>
-          <div class="ui-field">
-            <label>Count (Number of agents)</label>
-            <input type="number" id="swarm-count" value="1" min="1" max="50">
-          </div>
-          <button class="ui-btn primary" id="launch-btn"><span class="material-symbols-outlined">rocket_launch</span> Launch</button>
-        </div>
-      </div>
-    `;
-    
-    main.querySelector('#launch-btn').onclick = async () => {
-      let prompt = main.querySelector('#swarm-prompt').value;
-      let count = parseInt(main.querySelector('#swarm-count').value, 10);
-      if (!prompt) return alert('Prompt is required');
-      
-      try {
-        await this._mcpCall('delegate_task', {
-          prompt,
-          group: group.name,
-          count
-        });
-        alert(`Successfully launched ${count} agents in group ${group.name}`);
-      } catch (err) {
-        alert('Failed to launch swarm: ' + err.message);
-      }
-    };
+  _findGroup(name) {
+    return (this.$.groups || []).find(group => group.name === name);
+  }
+
+  _normalProfiles(group) {
+    return Array.isArray(group.profiles) ? group.profiles.filter(p => !p.inherited) : [];
+  }
+
+  _addProfile(groupName) {
+    let group = this._findGroup(groupName);
+    if (!group) return;
+    let providerEl = this.ref.board.querySelector(`[data-add-provider="${CSS.escape(groupName)}"]`);
+    let modelEl = this.ref.board.querySelector(`[data-add-model="${CSS.escape(groupName)}"]`);
+    group.profiles = this._normalProfiles(group);
+    group.profiles.push({ provider: providerEl?.value || group.provider || 'codex', model: modelEl?.value || 'default' });
+    this.renderBoard();
+  }
+
+  _removeProfile(groupName, index) {
+    let group = this._findGroup(groupName);
+    if (!group) return;
+    group.profiles = this._normalProfiles(group);
+    group.profiles.splice(index, 1);
+    this.renderBoard();
+  }
+
+  async _moveProfile(targetGroupName) {
+    if (!this._dragProfile) return;
+    let source = this._findGroup(this._dragProfile.groupName);
+    let target = this._findGroup(targetGroupName);
+    if (!source || !target) return;
+    let sourceProfiles = this._normalProfiles(source);
+    let profile = sourceProfiles[this._dragProfile.index];
+    if (!profile) return;
+    sourceProfiles.splice(this._dragProfile.index, 1);
+    source.profiles = sourceProfiles;
+    target.profiles = this._normalProfiles(target);
+    target.profiles.push({ provider: profile.provider, model: profile.model });
+    this.renderBoard();
+    await Promise.all([this._saveGroup(source), this._saveGroup(target)]);
+  }
+
+  async _saveGroupByName(groupName) {
+    let group = this._findGroup(groupName);
+    if (!group) return;
+    await this._saveGroup(group);
+  }
+
+  async _saveGroup(group) {
+    let profiles = this._normalProfiles(group);
+    let first = profiles[0] || null;
+    await this._mcpCall('create_group', {
+      name: group.name,
+      provider: first?.provider || group.provider || 'codex',
+      model: first?.model || group.model || null,
+      profiles,
+      runner: group.runner || undefined,
+      skill: group.skill || undefined,
+      policy: group.policy || undefined,
+      max_agents: group.max_agents || undefined,
+      include_dirs: group.include_dirs || undefined,
+      fallback_profiles: group.fallback_profiles || undefined,
+      rotation_mode: group.rotation_mode || 'error_fallback',
+      model_tier: group.model_tier || undefined,
+    });
+    this._flashStatus(`${group.name} saved`);
   }
 
   showCreateForm() {
-    this.$.selectedGroupName = null;
-    this.renderSidebar();
-    
-    this.ref.mainContent.innerHTML = `
-      <div class="ui-details">
-        <h2 class="ui-details-title">Create New Group</h2>
-        
-        <div class="ui-card">
-          <div class="ui-field">
-            <label>Group Name *</label>
-            <input type="text" id="g-name" placeholder="e.g. frontend-team">
-          </div>
-          <div class="ui-field">
-            <label>Runner</label>
-            <input type="text" id="g-runner" placeholder="local">
-          </div>
-          <div class="ui-field">
-            <label>Skill</label>
-            <input type="text" id="g-skill" placeholder="code-reviewer">
-          </div>
-          <div class="ui-field">
-            <label>Max Agents</label>
-            <input type="number" id="g-max" placeholder="e.g. 5">
-          </div>
-          <button class="ui-btn primary" id="save-btn">Create Group</button>
-        </div>
-      </div>
-    `;
-    
-    this.ref.mainContent.querySelector('#save-btn').onclick = async () => {
-      let name = this.ref.mainContent.querySelector('#g-name').value;
-      let runner = this.ref.mainContent.querySelector('#g-runner').value;
-      let skill = this.ref.mainContent.querySelector('#g-skill').value;
-      let maxAgents = this.ref.mainContent.querySelector('#g-max').value;
-      
-      if (!name) return alert('Name is required');
-      
-      try {
-        await this._mcpCall('create_group', {
-          name,
-          runner: runner || undefined,
-          skill: skill || undefined,
-          max_agents: maxAgents ? parseInt(maxAgents, 10) : undefined
-        });
-        this.loadGroups();
-        alert('Group created!');
-      } catch (err) {
-        alert('Failed to create group: ' + err.message);
-      }
-    };
+    let name = window.prompt('Group name');
+    if (!name) return;
+    this._mcpCall('create_group', {
+      name,
+      provider: 'codex',
+      model: 'default',
+      profiles: [{ provider: 'codex', model: 'default' }],
+      rotation_mode: 'error_fallback',
+    }).then(() => this.loadGroups()).catch(err => window.alert(`Failed to create group: ${err.message}`));
+  }
+
+  _flashStatus(message) {
+    this.ref.status.textContent = message;
+    clearTimeout(this._statusTimer);
+    this._statusTimer = setTimeout(() => { this.ref.status.textContent = ''; }, 2500);
   }
 }
 
 GroupManager.template = template;
-GroupManager.rootStyles = css;
+GroupManager.rootStyles = cssShared + cssLocal;
 GroupManager.reg('pg-group-manager');
 
 export default GroupManager;

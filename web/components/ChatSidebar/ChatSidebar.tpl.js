@@ -13,5 +13,6 @@ export default html`
     </button>
   </div>
   <div class="chat-items" itemize="chats" item-tag="chat-sidebar-item"></div>
+  <div class="chat-nav-resize-handle" ${{ onpointerdown: 'onResizeStart' }}></div>
 </div>
 `;

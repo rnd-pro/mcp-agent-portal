@@ -10,11 +10,22 @@ export default html`
       </button>
     </div>
     <div class="ui-sidebar-content">
-      <div class="ui-list" ref="workflowList"></div>
+      <div class="ui-list" ref="workflowList" ${{ itemize: 'workflows', 'item-tag': 'we-workflow-item' }}></div>
+      <div class="ui-empty-state" ${{ hidden: '!workflowListEmptyText' }}>{{workflowListEmptyText}}</div>
     </div>
   </div>
-  <div class="ui-main" ref="mainContent">
-    <div class="ui-empty-state">Select a workflow to view details</div>
+  <div class="ui-main">
+    <div class="ui-empty-state" ${{ hidden: 'hasSelectedWorkflow' }}>{{mainEmptyText}}</div>
+    <div class="ui-details" ${{ hidden: '!hasSelectedWorkflow' }}>
+      <div class="ui-details-header">
+        <div>
+          <h2 class="ui-details-title">{{selectedWorkflowName}}</h2>
+          <div class="ui-details-desc">Workflow Diagram & Steps</div>
+        </div>
+      </div>
+      <div class="ui-empty-state" ${{ hidden: 'hasSteps' }}>No steps defined for this workflow</div>
+      <div ref="stepsList" ${{ itemize: 'steps', 'item-tag': 'we-workflow-step' }}></div>
+    </div>
   </div>
 </div>
 `;

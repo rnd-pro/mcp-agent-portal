@@ -7,7 +7,10 @@ export default html`
   <div class="chat-view" ref="chatView">
     <cell-bg ref="cellBg"></cell-bg>
 
-    <div class="chat-messages" ref="chatMessages" style="position: relative; z-index: 1;"></div>
+    <div ref="chatMessages" class="chat-messages" style="position: relative; z-index: 1;" ${{ itemize: 'messageItems', 'item-tag': 'chat-message-item' }}></div>
+    <button class="scroll-bottom-btn" ref="scrollBottomBtn" title="Scroll to bottom" ${{ onclick: 'onScrollToBottom' }}>
+      <span class="material-symbols-outlined">arrow_downward</span>
+    </button>
 
     <div class="chat-composer" ref="composer" ${{ ondragover: 'onDragOver', ondragleave: 'onDragLeave', ondrop: 'onDrop' }}>
       <div class="chat-context-bar" itemize="attachedContext">

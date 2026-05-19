@@ -3,7 +3,8 @@ import {
   findClusterForPath,
   normalizeProjectGraphMetadata,
   parseHexColor,
-} from '../services/project-graph-metadata.js';
+} from '../../services/project-graph-metadata.js';
+import css from './CanvasGraph.css.js';
 
 const INIT_NODE_COUNT = 40;
 const EDGE_RATIO = 1.2;
@@ -150,6 +151,9 @@ export class CanvasGraph extends Symbiote {
       _centeredForNode: null,  // Track which node we've centered for
     };
     
+    this.breadcrumb = document.createElement('graph-breadcrumb');
+    this.appendChild(this.breadcrumb);
+
     this.canvas = document.createElement('canvas');
     this.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d');
@@ -191,9 +195,9 @@ export class CanvasGraph extends Symbiote {
     
     this._wakeLoop();
     
-    // Bind existing graph-breadcrumb from symbiote-node
-    if (this.ref.breadcrumb) {
-      this.ref.breadcrumb.onNavigate((levelStr) => {
+    // Bind graph-breadcrumb from symbiote-node
+    if (this.breadcrumb?.onNavigate) {
+      this.breadcrumb.onNavigate((levelStr) => {
         // levelStr is the path string we passed into 'level' property
         this.setPath(levelStr || null);
       });
@@ -683,7 +687,7 @@ export class CanvasGraph extends Symbiote {
     
     if (!groupId) {
       this.currentGroupId = null;
-      if (this.ref.breadcrumb) this.ref.breadcrumb.setPath([]);
+      if (this.breadcrumb?.setPath) this.breadcrumb.setPath([]);
     } else {
       const group = this.graphDB.nodes.get(groupId);
       if (group) {
@@ -697,7 +701,7 @@ export class CanvasGraph extends Symbiote {
         group.h = dynamicSize;
 
         // Render existing symbiote-node breadcrumbs
-        if (this.ref.breadcrumb) {
+        if (this.breadcrumb?.setPath) {
           const parts = groupId.split('/');
           const pathArr = [{ label: 'Root', level: '' }];
           let acc = '';
@@ -706,13 +710,13 @@ export class CanvasGraph extends Symbiote {
             acc += (acc ? '/' : '') + parts[i];
             pathArr.push({ label: parts[i], level: acc });
           }
-          this.ref.breadcrumb.setPath(pathArr);
+          this.breadcrumb.setPath(pathArr);
         }
 
       } else {
         // Fallback to root if group not found
         this.currentGroupId = null;
-        if (this.ref.breadcrumb) this.ref.breadcrumb.setPath([]);
+        if (this.breadcrumb?.setPath) this.breadcrumb.setPath([]);
       }
     }
     
@@ -1805,30 +1809,5 @@ export class CanvasGraph extends Symbiote {
   }
 }
 
-CanvasGraph.template = /*html*/`
-<style>
-  :host {
-    display: block;
-    position: relative;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background: #0f172a;
-  }
-  pg-canvas-graph > canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: block;
-    outline: none;
-    user-select: none;
-    cursor: default;
-  }
-  pg-canvas-graph > canvas.grabbing { cursor: grabbing; }
-</style>
-<graph-breadcrumb ref="breadcrumb" style="position: absolute; top: 16px; left: 16px; z-index: 10;"></graph-breadcrumb>
-`;
-
+CanvasGraph.rootStyles = css;
 CanvasGraph.reg('pg-canvas-graph');

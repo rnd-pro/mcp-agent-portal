@@ -75,11 +75,15 @@ export class ChatSidebarItem extends Symbiote {
 
 ChatSidebarItem.template = html`
 <div class="chat-item" ${{ onclick: 'onItemClick' }}>
-  <span class="material-symbols-outlined chat-icon" ${{ textContent: 'icon', style: 'iconStyle' }}></span>
+  <span class="chat-item-icon-slot">
+    <span class="material-symbols-outlined chat-icon chat-item-icon" ${{ textContent: 'icon', style: 'iconStyle' }}></span>
+    <button class="chat-item-delete" title="Delete" ${{ onclick: 'onDelete' }}>
+      <span class="material-symbols-outlined">delete</span>
+    </button>
+  </span>
   <span class="chat-item-label" ${{ textContent: 'cleanName' }}></span>
   <span class="chat-status-container" ${{ innerHTML: 'statusHtml' }}></span>
   <span class="chat-item-adapter" ${{ textContent: 'adapter' }}></span>
-  <button class="chat-item-delete" title="Delete" ${{ onclick: 'onDelete' }}>×</button>
   <span class="material-symbols-outlined chat-expand-icon" ${{ onclick: 'onExpandToggle' }}>chevron_right</span>
 </div>
 <div class="chat-sub-items" itemize="subChats" item-tag="chat-sidebar-sub-item"></div>
@@ -136,11 +140,15 @@ export class ChatSidebarSubItem extends Symbiote {
 
 ChatSidebarSubItem.template = html`
 <div class="chat-item-child" ${{ onclick: 'onItemClick' }}>
-  <span class="material-symbols-outlined chat-icon" ${{ textContent: 'icon', style: 'iconStyle' }}></span>
+  <span class="chat-item-icon-slot">
+    <span class="material-symbols-outlined chat-icon chat-item-icon" ${{ textContent: 'icon', style: 'iconStyle' }}></span>
+    <button class="chat-item-delete" title="Delete" ${{ onclick: 'onDelete' }}>
+      <span class="material-symbols-outlined">delete</span>
+    </button>
+  </span>
   <span class="chat-item-label" ${{ textContent: 'cleanName' }}></span>
   <span class="chat-item-type" ${{ textContent: 'agentType' }}></span>
   <span class="chat-status-container" ${{ innerHTML: 'statusHtml' }}></span>
-  <button class="chat-item-delete" title="Delete" ${{ onclick: 'onDelete' }}>×</button>
 </div>
 `;
 

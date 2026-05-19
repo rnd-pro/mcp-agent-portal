@@ -3,17 +3,17 @@ import "./common/base-path.js";
 import { Layout as e, LayoutTree as t, applyTheme as n, CARBON as o, registerGlobalParam, setDefaultPanel, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node";
 import { panelTypes, getSections, getSectionsForScope, getLayout, hasSection } from "./router-registry.js";
 import { followController } from "./follow-controller.js";
-import "./components/follow-ribbon.js";
+import "./components/FollowRibbon/FollowRibbon.js";
 import { state as a, subscribe as s, onEvent as i, call as r, connect as c } from "./state.js";
-import "./panels/file-tree.js";
-import "./panels/code-viewer.js";
-import "./panels/ctx-panel.js";
+import "./panels/FileTree/FileTree.js";
+import "./panels/CodeViewer/CodeViewer.js";
+import "./panels/CtxPanel/CtxPanel.js";
 import "./panels/dep-graph.js";
 import "./panels/GraphFlows/GraphFlows.js";
-import "./panels/health-panel.js";
-import "./panels/ops-panel.js";
-import "./components/quick-open.js";
-import "./components/canvas-graph.js";
+import "./panels/HealthPanel/HealthPanel.js";
+import "./panels/OpsPanel/OpsPanel.js";
+import "./components/QuickOpen/QuickOpen.js";
+import "./components/CanvasGraph/CanvasGraph.js";
 import "./panels/ActiveContext/ActiveContext.js";
 
 // Dashboard panels
@@ -29,7 +29,9 @@ import "./panels/ActiveTasks/ActiveTasks.js";
 import "./panels/PipelineManager/PipelineManager.js";
 import "./panels/WorkflowExplorer/WorkflowExplorer.js";
 import "./panels/GroupManager/GroupManager.js";
+import "./panels/SkillManager/AgentPortalTree.js";
 import "./panels/SkillManager/SkillManager.js";
+import "./panels/SkillManager/SkillMetadata.js";
 import "./panels/PeerReview/PeerReview.js";
 import "./components/ProjectTabs/ProjectTabs.js";
 import { state as dashState, events as dashEvents, emit as dashEmit } from "./dashboard-state.js";
@@ -206,8 +208,34 @@ function primaryPanelType(node) {
   return collectPanelTypes(node).find(panel => !panel.global)?.panelType || null;
 }
 
+const sectionLayoutMigrations = {
+  dashboard: {
+    disallowedPanelTypes: new Set(['action-board'])
+  },
+  orchestration: {
+    disallowedPanelTypes: new Set(['group-mgr', 'workflow-exp', 'pipeline-mgr'])
+  },
+  skills: {
+    disallowedPanelTypes: new Set(['peer-review']),
+    requiredPanelTypes: new Set(['agent-portal-tree', 'skill-meta'])
+  }
+};
+
 function layoutMatchesSection(sectionId, layoutTree, fallbackTree = getLayout(sectionId)) {
   if (!layoutTree) return false;
+  let migration = sectionLayoutMigrations[sectionId];
+  if (migration?.disallowedPanelTypes) {
+    let hasDisallowedPanel = collectPanelTypes(layoutTree).some(panel => {
+      return migration.disallowedPanelTypes.has(panel.panelType);
+    });
+    if (hasDisallowedPanel) return false;
+  }
+  if (migration?.requiredPanelTypes) {
+    let panelTypes = new Set(collectPanelTypes(layoutTree).map(panel => panel.panelType));
+    for (let panelType of migration.requiredPanelTypes) {
+      if (!panelTypes.has(panelType)) return false;
+    }
+  }
   let expectedPrimary = primaryPanelType(fallbackTree);
   if (!expectedPrimary) return true;
   return collectPanelTypes(layoutTree).some(panel => !panel.global && panel.panelType === expectedPrimary);

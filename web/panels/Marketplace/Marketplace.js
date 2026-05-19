@@ -1,9 +1,11 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { mcpCall } from '../../common/mcp-call.js';
 import template from './Marketplace.tpl.js';
 import { uiConfirm } from '../../common/ui-dialogs.js';
 import cssLocal from './Marketplace.css.js';
 import cssShared from '../../common/ui-shared.css.js';
+import './McpServerCard.js';
+import './McpCatalogSection.js';
+import './ContextCard.js';
 
 /**
  * MCP Marketplace — curated catalog with categories, hot install/remove,
@@ -33,6 +35,25 @@ class Marketplace extends Symbiote {
 
   init$ = {
     serverCount: 0,
+    installedItems: [],
+    catalogSections: [],
+    contextItems: [],
+    onServerAction: (e) => {
+      let host = this._getItemHost(e, 'mp-server-card');
+      if (!host) return;
+      let btn = this._getEventButton(e);
+      if (host.$.action === 'remove') {
+        this._removeServer(host.$.name, host, btn);
+      } else {
+        this._installFromCatalog(host.$.name, btn, host);
+      }
+    },
+    onContextInstall: (e) => {
+      let host = this._getItemHost(e, 'mp-context-card');
+      let btn = this._getEventButton(e);
+      if (!host || !btn) return;
+      this._installContextItem(host.$.description, btn.dataset.dest, btn, host);
+    },
   };
 
   initCallback() {
@@ -76,9 +97,13 @@ class Marketplace extends Symbiote {
   _setupSearch() {
     this.ref.searchInput.oninput = () => {
       let q = this.ref.searchInput.value.toLowerCase();
-      let cards = this.shadowRoot.querySelectorAll('.ui-card');
+      let cards = [
+        ...this.shadowRoot.querySelectorAll('mp-server-card, mp-context-card'),
+        ...[...this.shadowRoot.querySelectorAll('mp-catalog-section')]
+          .flatMap(section => [...(section.shadowRoot?.querySelectorAll('mp-server-card') || [])]),
+      ];
       for (let card of cards) {
-        let text = card.textContent.toLowerCase();
+        let text = (card.shadowRoot?.textContent || card.textContent).toLowerCase();
         card.hidden = !text.includes(q);
       }
     };
@@ -104,60 +129,54 @@ class Marketplace extends Symbiote {
       this._renderCatalog();
     } catch (err) {
       console.error('[ERROR] [marketplace] Failed to load:', err);
+      this.$.installedItems = [];
       this.ref.installedGrid.innerHTML = `<div class="ui-empty-state">Failed to load MCP servers</div>`;
     }
   }
 
-  _createCard(key, server, actionHtml) {
+  _getSourceHost(source) {
+    if (!source) return '';
+    try {
+      return new URL(source).hostname;
+    } catch {
+      return '';
+    }
+  }
+
+  _toServerItem(key, server, isInstalled) {
     let icon = ICON_MAP[key] || 'bolt';
     let desc = server.description || `${server.command} ${(server.args || []).join(' ')}`;
     let gradient = CATEGORY_META[server.category]?.gradient || 'linear-gradient(135deg, #6b7280, #4b5563)';
 
-    let card = document.createElement('div');
-    card.className = 'ui-card';
-    card.innerHTML = `
-      <div class="mp-card-header">
-        <div class="mp-card-icon" style="background:${gradient}"><span class="material-symbols-outlined">${icon}</span></div>
-        <div>
-          <div class="ui-card-title" style="margin-bottom:0">${key}</div>
-          ${server.source ? `<div class="mp-card-source">${new URL(server.source).hostname}</div>` : ''}
-        </div>
-      </div>
-      <div class="mp-card-desc">${desc}</div>
-      ${server.envHint ? `<div class="mp-card-env">Requires: ${server.envHint.join(', ')}</div>` : ''}
-      <div class="mp-card-footer">
-        ${actionHtml}
-      </div>
-    `;
-    return card;
+    return {
+      name: key,
+      description: desc,
+      icon,
+      gradient,
+      sourceHost: this._getSourceHost(server.source),
+      envHint: server.envHint ? `Requires: ${server.envHint.join(', ')}` : '',
+      status: isInstalled ? 'Running' : 'Available',
+      action: isInstalled ? 'remove' : 'install',
+      actionLabel: isInstalled ? 'Remove' : 'Install',
+      isInstalled: isInstalled ? 'true' : 'false',
+    };
   }
 
   _renderInstalled(servers) {
-    let grid = this.ref.installedGrid;
-    grid.innerHTML = '';
-
     if (!servers.length) {
+      this.$.installedItems = [];
+      let grid = this.ref.installedGrid;
       grid.innerHTML = `<div class="ui-empty-state"><span class="material-symbols-outlined" style="margin-right:8px">inventory_2</span><span>No MCP servers installed</span></div>`;
       return;
     }
 
-    for (let server of servers) {
-      let actionHtml = `
-        <div class="mp-card-status">
-          <span class="mp-status-dot" data-active="true"></span> Running
-        </div>
-        <button class="mp-card-toggle" data-action="remove">Remove</button>
-      `;
-      let card = this._createCard(server.name, server, actionHtml);
-      card.querySelector('.mp-card-toggle').onclick = () => this._removeServer(server.name, card);
-      grid.appendChild(card);
-    }
+    this.ref.installedGrid.innerHTML = '';
+    this.$.installedItems = servers.map(server => this._toServerItem(server.name, server, true));
   }
 
   _renderCatalog() {
-    let container = this.ref.catalogContent;
-    container.innerHTML = '';
     let order = ['rnd-pro', 'official', 'google', 'community'];
+    let sections = [];
 
     for (let catKey of order) {
       let servers = this._categories[catKey];
@@ -168,37 +187,32 @@ class Marketplace extends Symbiote {
       if (!available.length) continue;
 
       let meta = CATEGORY_META[catKey] || { label: catKey, icon: 'inventory_2' };
-
-      let section = document.createElement('div');
-      section.className = 'mp-category';
-      section.innerHTML = `
-        <div class="mp-category-header">
-           <span class="mp-category-label"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">${meta.icon}</span>${meta.label}</span>
-          <span class="mp-category-badge mp-badge-${catKey}">${available.length}</span>
-        </div>
-      `;
-
-      let grid = document.createElement('div');
-      grid.className = 'mp-category-grid';
-
-      for (let server of available) {
-        let actionHtml = `
-          <div class="mp-card-status">
-            <span class="mp-status-dot" data-active="false"></span> Available
-          </div>
-          <button class="mp-card-toggle" data-action="install">Install</button>
-        `;
-        let card = this._createCard(server.name, server, actionHtml);
-        card.querySelector('.mp-card-toggle').onclick = (e) => this._installFromCatalog(server.name, e.target, card);
-        grid.appendChild(card);
-      }
-
-      section.appendChild(grid);
-      container.appendChild(section);
+      sections.push({
+        categoryLabel: meta.label,
+        categoryIcon: meta.icon,
+        badgeClass: `mp-category-badge mp-badge-${catKey}`,
+        count: available.length,
+        catalogItems: available.map(server => this._toServerItem(server.name, server, false)),
+      });
     }
+
+    this.ref.catalogContent.innerHTML = '';
+    this.$.catalogSections = sections;
+  }
+
+  _getEventButton(e) {
+    return e.target?.closest?.('button') || e.composedPath?.().find(el => el?.tagName === 'BUTTON');
+  }
+
+  _getItemHost(e, tagName) {
+    let lowerTag = tagName.toLowerCase();
+    return e.composedPath?.().find(el => el?.tagName?.toLowerCase() === lowerTag)
+      || e.target?.closest?.(lowerTag)
+      || e.target?.getRootNode?.().host;
   }
 
   async _installFromCatalog(name, btn, card) {
+    if (!btn) return;
     btn.disabled = true;
     btn.textContent = 'Installing...';
     try {
@@ -224,9 +238,10 @@ class Marketplace extends Symbiote {
     }
   }
 
-  async _removeServer(name, card) {
+  async _removeServer(name, card, btn = null) {
     if (!(await uiConfirm(`Remove "${name}"? The server will be stopped immediately.`))) return;
-    let btn = card.querySelector('.mp-card-toggle');
+    btn ||= card.shadowRoot?.querySelector('.mp-card-toggle');
+    if (!btn) return;
     btn.disabled = true;
     btn.textContent = 'Removing...';
     try {
@@ -241,7 +256,13 @@ class Marketplace extends Symbiote {
       card.style.transform = 'scale(0.95)';
       card.style.opacity = '0';
       card.style.transition = 'all 0.3s';
-      setTimeout(() => card.remove(), 300);
+      setTimeout(() => {
+        card.remove();
+        this.$.installedItems = this.$.installedItems.filter(item => item.name !== name);
+        if (!this.$.installedItems.length) {
+          this._renderInstalled([]);
+        }
+      }, 300);
       this._installedNames.delete(name);
       this.$.serverCount = this._installedNames.size;
       // Re-render catalog to show it as available again
@@ -310,63 +331,42 @@ class Marketplace extends Symbiote {
     }
   }
   async loadOpenMemory() {
+    this.$.contextItems = [];
     this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">Open Memory marketplace is not connected. Use project skills and workflows from .agent-portal.</div>';
   }
 
   _renderContextItems(paths) {
-    this.ref.contextGrid.innerHTML = '';
-    
     if (!paths || paths.length === 0) {
+      this.$.contextItems = [];
       this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">No context items found in open memory</div>';
       return;
     }
 
-    for (let p of paths) {
+    this.ref.contextGrid.innerHTML = '';
+    this.$.contextItems = paths.map((p) => {
       // e.g. "rules/core-workflow.md"
       let parts = p.split('/');
       let category = parts.length > 1 ? parts[0] : 'general';
       let filename = parts.pop();
       let icon = category === 'rules' ? 'description' : category === 'workflows' ? 'sync' : category === 'templates' ? 'insert_drive_file' : 'lightbulb';
-      
-      let card = document.createElement('div');
-      card.className = 'ui-card';
-      card.innerHTML = `
-        <div class="mp-card-header">
-          <div class="mp-card-title">
-            <span class="mp-card-icon" style="width:auto;height:auto;"><span class="material-symbols-outlined" style="font-size:16px">${icon}</span></span>
-            <span style="word-break:break-all">${filename}</span>
-          </div>
-          <span class="ui-badge info">${category}</span>
-        </div>
-        <div class="mp-card-desc" style="font-family:monospace; font-size:11px; margin-bottom:12px;">${p}</div>
-        <div class="mp-card-actions" style="display:flex; gap:8px;">
-          <button class="ui-btn" style="flex:1" data-path="${p}" data-dest="project">
-            <span class="material-symbols-outlined" style="font-size:16px;">download</span> Project
-          </button>
-          <button class="ui-btn primary" style="flex:1" data-path="${p}" data-dest="team">
-            <span class="material-symbols-outlined" style="font-size:16px;">group</span> Team
-          </button>
-        </div>
-        <div class="mp-form-status" style="margin-top:8px; font-size:11px;"></div>
-      `;
-      
-      let btns = card.querySelectorAll('button');
-      let statusDiv = card.querySelector('.mp-form-status');
-      
-      for (let btn of btns) {
-        btn.onclick = () => this._installContextItem(btn.dataset.path, btn.dataset.dest, btn, statusDiv);
-      }
-      
-      this.ref.contextGrid.appendChild(card);
-    }
+
+      return {
+        title: filename,
+        description: p,
+        type: category,
+        icon,
+        status: '',
+        isError: false,
+      };
+    });
   }
 
-  async _installContextItem(itemPath, destination, btn, statusDiv) {
+  async _installContextItem(itemPath, destination, btn, card) {
     let originalHtml = btn.innerHTML;
     btn.innerHTML = `<span class="mp-spinner"></span>`;
     btn.disabled = true;
-    statusDiv.textContent = '';
-    statusDiv.style.color = 'inherit';
+    card.$.status = '';
+    card.$.isError = false;
     
     try {
       // If destination is project, we need the active project's path.
@@ -383,8 +383,8 @@ class Marketplace extends Symbiote {
       
     } catch (err) {
       console.error(err);
-      statusDiv.textContent = `Error: ${err.message}`;
-      statusDiv.style.color = '#ef4444';
+      card.$.status = `Error: ${err.message}`;
+      card.$.isError = true;
     } finally {
       btn.innerHTML = originalHtml;
       btn.disabled = false;

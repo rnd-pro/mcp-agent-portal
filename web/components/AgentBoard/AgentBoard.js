@@ -165,7 +165,7 @@ export class AgentBoard extends Symbiote {
     
     // Auto-hide board if no tasks exist
     let total = queued.length + running.length + done.length + error.length;
-    this.style.display = total === 0 ? 'none' : 'block';
+    this.hidden = total === 0;
   }
 }
 

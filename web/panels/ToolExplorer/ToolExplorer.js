@@ -2,10 +2,20 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import template from './ToolExplorer.tpl.js';
 import cssLocal from './ToolExplorer.css.js';
 import cssShared from '../../common/ui-shared.css.js';
+import './ToolServerItem.js';
+import './ToolCard.js';
 
 class ToolExplorer extends Symbiote {
   init$ = {
     selectedServerName: 'None',
+    servers: [],
+    tools: [],
+    serversEmptyText: '',
+    toolsEmptyText: 'Select a server to view tools',
+    onServerSelect: (e) => {
+      let serverItem = e.currentTarget.getRootNode().host;
+      this.selectServer(serverItem.$.name);
+    },
   };
 
   initCallback() {
@@ -18,34 +28,43 @@ class ToolExplorer extends Symbiote {
       if (!res.ok) throw new Error('Failed to fetch instances');
       let servers = await res.json();
       
-      this.ref.serverList.innerHTML = '';
-      
       let runningServers = servers.filter(s => s.pid);
       
       if (!runningServers.length) {
-        this.ref.serverList.innerHTML = `<div class="ui-empty-state">No running servers</div>`;
+        this.$.servers = [];
+        this.$.serversEmptyText = 'No running servers';
         return;
       }
       
-      for (let server of runningServers) {
-        let el = document.createElement('div');
-        el.className = 'ui-item';
-        el.innerHTML = `<div class="ui-item-title" style="display:flex;align-items:center;gap:6px"><span class="material-symbols-outlined" style="font-size:16px">api</span> ${server.name}</div>`;
-        el.onclick = () => {
-          this.ref.serverList.querySelectorAll('.ui-item').forEach(e => e.classList.remove('active'));
-          el.classList.add('active');
-          this.selectServer(server.name);
-        };
-        this.ref.serverList.appendChild(el);
-      }
+      this.$.serversEmptyText = '';
+      this._renderServers(runningServers);
     } catch (err) {
       console.error('[ERROR] [tool-explorer] Failed to load servers:', err);
+      this.$.servers = [];
+      this.$.serversEmptyText = `Failed to load servers: ${err.message}`;
     }
+  }
+
+  _renderServers(servers) {
+    this.$.servers = servers.map((server) => {
+      let toolCount = server.toolCount ?? server.tool_count ?? server.tools?.length;
+      let hasToolCount = toolCount !== undefined && toolCount !== null && toolCount !== '';
+      return {
+        name: server.name,
+        toolCountText: hasToolCount ? `${toolCount} tools` : '',
+        isActive: this.$.selectedServerName === server.name,
+      };
+    });
   }
 
   async selectServer(name) {
     this.$.selectedServerName = name;
-    this.ref.toolsGrid.innerHTML = `<div class="ui-empty-state">Loading tools...</div>`;
+    this.$.servers = this.$.servers.map((server) => ({
+      ...server,
+      isActive: server.name === name,
+    }));
+    this.$.tools = [];
+    this.$.toolsEmptyText = 'Loading tools...';
     
     try {
       let res = await fetch('/api/mcp-call', {
@@ -56,37 +75,26 @@ class ToolExplorer extends Symbiote {
       if (!res.ok) throw new Error('Request failed');
       let result = await res.json();
       
-      this.renderTools(result.tools || []);
+      this._renderTools(result.tools || []);
     } catch (err) {
-      this.ref.toolsGrid.innerHTML = `<div class="ui-empty-state">Failed to load tools: ${err.message}</div>`;
+      this.$.tools = [];
+      this.$.toolsEmptyText = `Failed to load tools: ${err.message}`;
     }
   }
 
-  renderTools(tools) {
-    let grid = this.ref.toolsGrid;
-    grid.innerHTML = '';
-    
+  _renderTools(tools) {
     if (!tools.length) {
-      grid.innerHTML = `<div class="ui-empty-state">No tools found for this server</div>`;
+      this.$.tools = [];
+      this.$.toolsEmptyText = 'No tools found for this server';
       return;
     }
     
-    for (let tool of tools) {
-      let card = document.createElement('div');
-      card.className = 'ui-card';
-      
-      let schemaJson = JSON.stringify(tool.inputSchema || {}, null, 2);
-      
-      card.innerHTML = `
-        <div class="te-tool-name">${tool.name}</div>
-        <div class="te-tool-desc">${tool.description || 'No description provided.'}</div>
-        <div>
-          <div class="te-schema-title">Input Schema</div>
-          <div class="te-schema-block">${schemaJson}</div>
-        </div>
-      `;
-      grid.appendChild(card);
-    }
+    this.$.toolsEmptyText = '';
+    this.$.tools = tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description || 'No description provided.',
+      schemaJson: JSON.stringify(tool.inputSchema || {}, null, 2),
+    }));
   }
 }
 

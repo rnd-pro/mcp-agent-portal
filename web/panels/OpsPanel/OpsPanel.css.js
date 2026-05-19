@@ -1,50 +1,4 @@
-// @ctx .context/web/panels/live-monitor.ctx
-import Symbiote from "@symbiotejs/symbiote";
-import { events as globalEvents } from "../app.js";
-
-import "../components/event-feed/CodeWidget.js";
-import "../components/event-feed/MiniGraphWidget.js";
-import "../components/event-feed/ListWidget.js";
-import "../components/event-feed/EventWidget.js";
-
-export class OpsPanel extends Symbiote {
-  init$ = {
-    eventCount: "0",
-    eventsList: []
-  };
-
-  _events = [];
-
-  initCallback() {
-    globalEvents.addEventListener("tool-event", (e) => this._addEvent(e.detail));
-  }
-
-  _addEvent(event) {
-    this._events.unshift(event);
-    if (this._events.length > 100) {
-      this._events.pop(); // Keep max 100 for performance
-    }
-    
-    this.$.eventCount = String(this._events.length);
-    
-    // Update the itemize list reactively
-    this.$.eventsList = this._events.map(ev => ({
-      eventData: JSON.stringify(ev)
-    }));
-  }
-}
-
-OpsPanel.template = `
-  <div class="pg-mon-header">
-    <span>Events: </span><span bind="textContent: eventCount"></span>
-  </div>
-  <div class="pg-mon-body">
-    <div \${{ itemize: 'eventsList', 'item-tag': 'pg-event-widget' }}></div>
-    <div class="pg-placeholder" \${{ hidden: 'eventCount' }}>Waiting for tool calls...</div>
-  </div>
-`;
-
-OpsPanel.rootStyles = `
+export default `
   pg-ops-panel { display:flex; flex-direction:column; height:100%; overflow:hidden; font-size:12px; font-family:var(--sn-font, Georgia, serif); }
   .pg-mon-header { padding:6px 12px; border-bottom:1px solid var(--sn-node-border); background:var(--sn-node-header-bg); font-size:11px; color:var(--sn-text-dim); flex-shrink: 0; }
   .pg-mon-body { flex:1; overflow-y:auto; padding:8px; display: flex; flex-direction: column; gap: 8px; }
@@ -72,5 +26,3 @@ OpsPanel.rootStyles = `
   .pg-placeholder { color:var(--sn-text-dim); text-align:center; padding:30px; font-style:italic; }
   @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
 `;
-
-OpsPanel.reg("pg-ops-panel");

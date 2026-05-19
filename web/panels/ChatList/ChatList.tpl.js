@@ -1,4 +1,6 @@
-export default /*html*/ `
+import { html } from '@symbiotejs/symbiote';
+
+export default html`
 <div class="ui-sidebar" style="width:100%; border-right:none;">
   <div class="ui-sidebar-header">
     <span class="material-symbols-outlined" style="font-size:16px">forum</span>
@@ -13,6 +15,6 @@ export default /*html*/ `
     <button class="filter-btn" data-filter="project">By Project</button>
     <button class="filter-btn" data-filter="active">Active</button>
   </div>
-  <div class="ui-sidebar-content" style="padding: 4px 0" ref="chatItems"></div>
+  <div class="ui-sidebar-content" style="padding: 4px 0" ref="chatItems" ${{ itemize: 'chatItems', 'item-tag': 'cl-chat-item' }}></div>
 </div>
 `;

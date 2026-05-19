@@ -67,6 +67,7 @@ export function setGraphLayerVisible(canvas, layer, visible) {
     const frames = canvas.querySelectorAll('graph-frame');
     for (const frame of frames) {
       frame.style.display = visible ? '' : 'none';
+      frame.hidden = !visible;
     }
   } else if (layer === 'vias') {
     if (visible) {

@@ -5,10 +5,37 @@ import cssLocal from './ChatList.css.js';
 import cssShared from '../../common/ui-shared.css.js';
 import tpl from './ChatList.tpl.js';
 import { uiConfirm } from '../../common/ui-dialogs.js';
+import './ChatItem.js';
 
 export class ChatList extends Symbiote {
   init$ = {
     filter: 'all',
+    chatItems: [],
+    onChatSelect: (e) => {
+      if (e.target.closest?.('.chat-delete')) return;
+      let host = this._getChatHost(e);
+      if (!host?.$.id || dashState.activeChatId === host.$.id) return;
+      dashState.activeChatId = host.$.id;
+      setGlobalParam('chat', host.$.id);
+      dashEmit('active-chat-changed', { id: host.$.id });
+    },
+    onChatDelete: async (e) => {
+      e.stopPropagation();
+      let host = this._getChatHost(e);
+      if (!host?.$.id) return;
+      if (!(await uiConfirm(`Delete "${host.$.name}"?`))) return;
+      await fetch('/api/chats/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: host.$.id }),
+      });
+      if (dashState.activeChatId === host.$.id) {
+        dashState.activeChatId = null;
+        setGlobalParam('chat', null);
+        dashEmit('active-chat-changed', { id: null });
+      }
+      this._fetchChats();
+    },
   };
 
   renderCallback() {
@@ -98,13 +125,19 @@ export class ChatList extends Symbiote {
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
+  _getChatHost(e) {
+    return e.composedPath?.().find(el => el?.tagName?.toLowerCase() === 'cl-chat-item')
+      || e.target?.closest?.('cl-chat-item')
+      || e.target?.getRootNode?.().host;
+  }
+
   _renderItems() {
     let container = this.ref.chatItems;
-    container.innerHTML = '';
 
     let chats = this._getFilteredChats();
 
     if (chats.length === 0) {
+      this.$.chatItems = [];
       container.innerHTML = `
         <div class="ui-empty-state">
           <span class="material-symbols-outlined" style="font-size:32px;display:block;margin-bottom:8px;opacity:0.3">chat_bubble_outline</span>
@@ -114,6 +147,8 @@ export class ChatList extends Symbiote {
       return;
     }
 
+    container.innerHTML = '';
+    let items = [];
     let chatsById = new Map();
     let childrenByParentId = new Map();
     for (let chat of chats) {
@@ -126,55 +161,23 @@ export class ChatList extends Symbiote {
     }
 
     let renderChatNode = (chat, depth) => {
-      let div = document.createElement('div');
-      div.className = 'ui-item';
-      if (depth > 0) div.classList.add('chat-item-nested');
-      if (chat.id === dashState.activeChatId) div.classList.add('active');
-
       let projectName = '';
       if (chat.projectId) {
         let proj = (dashState.projectHistory || []).find(p => p.id === chat.projectId);
         projectName = proj?.name || '';
       }
 
-      div.innerHTML = `
-        <div class="chat-item-top">
-          ${projectName && depth === 0 ? `<span class="chat-project-badge">${projectName}</span>` : ''}
-          <span class="chat-name">${chat.name}</span>
-          <span class="chat-adapter">${chat.adapter}</span>
-          <button class="chat-delete" title="Delete">×</button>
-        </div>
-        ${chat.lastMessage ? `<div class="chat-preview">${chat.lastMessage}</div>` : ''}
-        <div class="chat-meta">
-          <span>${chat.messageCount || 0} msgs</span>
-          <span>${this._formatTime(chat.updatedAt)}</span>
-        </div>
-      `;
-
-      div.addEventListener('click', (e) => {
-        if (e.target.closest('.chat-delete')) return;
-        dashState.activeChatId = chat.id;
-        setGlobalParam('chat', chat.id);
-        dashEmit('active-chat-changed', { id: chat.id });
+      items.push({
+        id: chat.id,
+        name: chat.name,
+        project: projectName && depth === 0 ? projectName : '',
+        adapter: chat.adapter,
+        status: `${chat.messageCount || 0} msgs`,
+        time: this._formatTime(chat.updatedAt),
+        lastMessage: chat.lastMessage || '',
+        depth,
+        isActive: chat.id === dashState.activeChatId,
       });
-
-      div.querySelector('.chat-delete').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!(await uiConfirm(`Delete "${chat.name}"?`))) return;
-        await fetch('/api/chats/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: chat.id }),
-        });
-        if (dashState.activeChatId === chat.id) {
-          dashState.activeChatId = null;
-          setGlobalParam('chat', null);
-          dashEmit('active-chat-changed', { id: null });
-        }
-        this._fetchChats();
-      });
-
-      container.appendChild(div);
 
       let children = childrenByParentId.get(chat.id) || [];
       // Children are already sorted by updatedAt from _getFilteredChats, but we can ensure stability
@@ -190,6 +193,8 @@ export class ChatList extends Symbiote {
         renderChatNode(chat, 0);
       }
     }
+
+    this.$.chatItems = items;
   }
 }
 

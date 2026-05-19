@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './ActiveContext.tpl.js';
+import css from './ActiveContext.css.js';
 import { events } from '../../dashboard-state.js';
 
 export class ActiveContext extends Symbiote {
@@ -69,11 +70,7 @@ export class ActiveContext extends Symbiote {
 }
 
 ActiveContext.template = template;
-ActiveContext.rootStyles = `
-  :host { display: block; height: 100%; background: var(--sn-panel-bg); }
-  .ui-btn-icon { background:transparent; border:none; color:var(--sn-text-dim); cursor:pointer; border-radius:4px; }
-  .ui-btn-icon:hover { background:var(--sn-node-hover); color:var(--sn-text); }
-`;
+ActiveContext.rootStyles = css;
 ActiveContext.reg('pg-active-context');
 
 export default ActiveContext;

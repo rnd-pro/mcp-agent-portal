@@ -6,15 +6,38 @@ import { stateSync } from '../../state-sync.js';
 import { persistUiValue, readUiValue } from '../../common/ui-state.js';
 import './ChatSidebarItem.js';
 
+const STORAGE_COLLAPSED_PATH = 'ui/preferences/chatNavCollapsed';
+const STORAGE_COLLAPSED_KEY = 'pg-chat-sidebar-collapsed';
+const STORAGE_WIDTH_PATH = 'ui/preferences/chatNavWidth';
+const STORAGE_WIDTH_KEY = 'pg-chat-sidebar-width';
+const DEFAULT_NAV_WIDTH = 200;
+const MIN_NAV_WIDTH = 120;
+const MAX_NAV_WIDTH = 420;
+const COLLAPSED_NAV_WIDTH = 48;
+const COLLAPSE_DRAG_THRESHOLD = 72;
+const AUTO_COLLAPSE_WIDTH = 560;
+const AUTO_UNCOLLAPSE_WIDTH = 660;
+
+function clampWidth(width) {
+  return Math.max(MIN_NAV_WIDTH, Math.min(MAX_NAV_WIDTH, Math.round(width)));
+}
+
 export class ChatSidebar extends Symbiote {
   static isoMode = true;
 
   init$ = {
     navCollapsed: true,
+    navWidth: DEFAULT_NAV_WIDTH,
     chats: [],
     
     onToggleNav: () => {
+      this._autoCollapsed = false;
       this.$.navCollapsed = !this.$.navCollapsed;
+      if (!this.$.navCollapsed) this._applyNavWidth();
+    },
+
+    onResizeStart: (e) => {
+      this._startResize(e);
     },
     
     onNewChat: async () => {
@@ -92,7 +115,8 @@ export class ChatSidebar extends Symbiote {
   }
 
   initCallback() {
-    this.$.navCollapsed = readUiValue('ui/preferences/chatNavCollapsed', 'pg-chat-sidebar-collapsed', false) === true;
+    this.$.navWidth = clampWidth(Number(readUiValue(STORAGE_WIDTH_PATH, STORAGE_WIDTH_KEY, DEFAULT_NAV_WIDTH)) || DEFAULT_NAV_WIDTH);
+    this.$.navCollapsed = readUiValue(STORAGE_COLLAPSED_PATH, STORAGE_COLLAPSED_KEY, false) === true;
 
     // On cold load, dashState.chats may already be populated by app.js init.
     // Render immediately if available, then also async-fetch as backup.
@@ -105,15 +129,31 @@ export class ChatSidebar extends Symbiote {
     dashEvents.addEventListener('active-chat-changed', () => this._renderNavItems());
     
     this.sub('navCollapsed', (val) => {
-      persistUiValue('ui/preferences/chatNavCollapsed', Boolean(val), 'pg-chat-sidebar-collapsed');
       let nav = this.querySelector('.chat-nav');
       if (nav) nav.toggleAttribute('collapsed', val);
+      this.toggleAttribute('collapsed', val);
+      if (!this._skipPersistCollapsed) {
+        persistUiValue(STORAGE_COLLAPSED_PATH, Boolean(val), STORAGE_COLLAPSED_KEY);
+      }
+      this._applyNavWidth();
+    });
+
+    this.sub('navWidth', (val) => {
+      this._applyNavWidth();
+      if (!this._skipPersistWidth) {
+        persistUiValue(STORAGE_WIDTH_PATH, clampWidth(Number(val) || DEFAULT_NAV_WIDTH), STORAGE_WIDTH_KEY);
+      }
     });
 
     this._unsubUi = stateSync.on('ui', (ui) => {
       let collapsed = ui?.preferences?.chatNavCollapsed;
       if (collapsed !== undefined && collapsed !== this.$.navCollapsed) {
         this.$.navCollapsed = Boolean(collapsed);
+      }
+      let width = ui?.preferences?.chatNavWidth;
+      if (width !== undefined) {
+        let nextWidth = clampWidth(Number(width) || DEFAULT_NAV_WIDTH);
+        if (nextWidth !== this.$.navWidth) this.$.navWidth = nextWidth;
       }
     });
 
@@ -124,11 +164,109 @@ export class ChatSidebar extends Symbiote {
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
       this._renderNavItems();
     });
+
+    this._resizeObserver = new ResizeObserver(() => this._syncCollapseForAvailableWidth());
+    let shell = this.closest('.chat-shell') || this.parentElement;
+    if (shell) this._resizeObserver.observe(shell);
+    queueMicrotask(() => {
+      this._applyNavWidth();
+      this._syncCollapseForAvailableWidth();
+    });
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this._unsubChats) this._unsubChats();
+    if (this._unsubUi) this._unsubUi();
+    this._resizeObserver?.disconnect();
+  }
+
+  _setCollapsed(collapsed, { persist = true, auto = false } = {}) {
+    this._skipPersistCollapsed = !persist;
+    this._autoCollapsed = auto;
+    this.$.navCollapsed = Boolean(collapsed);
+    this._skipPersistCollapsed = false;
+  }
+
+  _setWidth(width, { persist = true } = {}) {
+    this._skipPersistWidth = !persist;
+    this.$.navWidth = clampWidth(width);
+    this._skipPersistWidth = false;
+  }
+
+  _applyNavWidth() {
+    let width = this.$.navCollapsed ? COLLAPSED_NAV_WIDTH : clampWidth(this.$.navWidth);
+    this.style.setProperty('--chat-nav-width', `${width}px`);
+    let nav = this.querySelector('.chat-nav');
+    if (nav) nav.toggleAttribute('collapsed', this.$.navCollapsed);
+    this.toggleAttribute('collapsed', this.$.navCollapsed);
+  }
+
+  _syncCollapseForAvailableWidth() {
+    if (this._isResizing) return;
+    let shell = this.closest('.chat-shell') || this.parentElement;
+    if (!shell) return;
+    let width = shell.getBoundingClientRect().width;
+    if (width <= AUTO_COLLAPSE_WIDTH && !this.$.navCollapsed) {
+      this._setCollapsed(true, { persist: false, auto: true });
+    } else if (width >= AUTO_UNCOLLAPSE_WIDTH && this.$.navCollapsed && this._autoCollapsed) {
+      this._setCollapsed(false, { persist: false, auto: false });
+    }
+  }
+
+  _startResize(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    let nav = this.querySelector('.chat-nav');
+    let handle = this.querySelector('.chat-nav-resize-handle');
+    if (!nav) return;
+
+    let startX = e.clientX;
+    let startWidth = this.$.navCollapsed ? COLLAPSED_NAV_WIDTH : nav.getBoundingClientRect().width;
+    let wasCollapsed = this.$.navCollapsed;
+    this._isResizing = true;
+    this.setAttribute('resizing', '');
+    handle?.classList.add('dragging');
+    nav.setAttribute('resizing', '');
+
+    let onMove = (moveEvent) => {
+      let rawWidth = startWidth + (moveEvent.clientX - startX);
+      if (wasCollapsed && rawWidth > COLLAPSE_DRAG_THRESHOLD) {
+        this._setCollapsed(false, { persist: false, auto: false });
+        wasCollapsed = false;
+        startX = moveEvent.clientX;
+        startWidth = MIN_NAV_WIDTH;
+        this._setWidth(startWidth, { persist: false });
+        return;
+      }
+
+      if (!wasCollapsed && rawWidth < COLLAPSE_DRAG_THRESHOLD) {
+        this._setCollapsed(true, { persist: false, auto: false });
+        return;
+      }
+
+      if (!this.$.navCollapsed) {
+        this._setWidth(rawWidth, { persist: false });
+      }
+    };
+
+    let onUp = () => {
+      handle?.classList.remove('dragging');
+      nav.removeAttribute('resizing');
+      this.removeAttribute('resizing');
+      this._isResizing = false;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      this._autoCollapsed = false;
+      persistUiValue(STORAGE_COLLAPSED_PATH, Boolean(this.$.navCollapsed), STORAGE_COLLAPSED_KEY);
+      if (!this.$.navCollapsed) {
+        persistUiValue(STORAGE_WIDTH_PATH, clampWidth(this.$.navWidth), STORAGE_WIDTH_KEY);
+      }
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
   }
 
   async _fetchChats() {

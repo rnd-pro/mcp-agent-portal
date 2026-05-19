@@ -28,11 +28,11 @@ export default html`
 
   <div class="mp-scrollable">
     <div class="mp-tab-content" ref="installedTab">
-      <div class="mp-grid" ref="installedGrid"></div>
+      <div class="mp-grid" ref="installedGrid" ${{ itemize: 'installedItems', 'item-tag': 'mp-server-card' }}></div>
     </div>
 
     <div class="mp-tab-content" ref="catalogTab" hidden>
-      <div ref="catalogContent"></div>
+      <div ref="catalogContent" ${{ itemize: 'catalogSections', 'item-tag': 'mp-catalog-section' }}></div>
     </div>
 
     <div class="mp-tab-content" ref="customTab" hidden>
@@ -78,7 +78,7 @@ export default html`
     </p>
   </div>
   <div class="mp-scrollable" style="padding:16px;">
-    <div class="mp-grid" ref="contextGrid"></div>
+    <div class="mp-grid" ref="contextGrid" ${{ itemize: 'contextItems', 'item-tag': 'mp-context-card' }}></div>
   </div>
 </div>
 `;

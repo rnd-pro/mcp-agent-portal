@@ -1,4 +1,6 @@
-export default `
+import { html } from '@symbiotejs/symbiote';
+
+export default html`
 <div class="ui-split-container">
   <div class="ui-sidebar">
     <div class="ui-sidebar-header">
@@ -6,8 +8,9 @@ export default `
       <button class="ui-btn-icon" title="New Pipeline" ref="newBtn"><span class="material-symbols-outlined">add</span></button>
       <button class="ui-btn-icon" title="Refresh" ref="refreshBtn"><span class="material-symbols-outlined">refresh</span></button>
     </div>
-    <div class="ui-sidebar-content" ref="pipelineList">
-      <div class="ui-empty-state">Loading...</div>
+    <div class="ui-sidebar-content">
+      <div class="ui-empty-state" ref="pipelineState">Loading...</div>
+      <div ref="pipelineList" ${{ itemize: 'pipelines', 'item-tag': 'pm-pipeline-item' }}></div>
     </div>
   </div>
   <div class="ui-main" ref="mainContent">
