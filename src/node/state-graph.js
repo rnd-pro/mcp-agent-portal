@@ -648,7 +648,7 @@ export class StateGraph extends EventEmitter {
 
   /**
    * Create a new chat.
-   * @param {{ projectId?: string, name?: string, adapter?: string, model?: string }} opts
+   * @param {{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, agent?: string, agent_slug?: string, approval_mode?: string, chatType?: string }} opts
    * @param {string} [source]
    * @returns {{ id: string }}
    */
@@ -662,7 +662,11 @@ export class StateGraph extends EventEmitter {
       projectId: opts.projectId || null,
       parentChatId: opts.parentChatId || null,
       adapter: opts.adapter || 'pool',
+      agent: opts.agent || opts.agent_slug || null,
+      provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'gemini' ? 'gemini-3.1-pro-preview' : opts.adapter === 'opencode' ? 'DeepSeek: DeepSeek V4 Pro' : null),
+      approval_mode: opts.approval_mode || null,
+      chatType: opts.chatType || null,
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
       messageCount: 0,
@@ -679,7 +683,11 @@ export class StateGraph extends EventEmitter {
       parentChatId: opts.parentChatId || null,
       name: opts.name || 'New Chat',
       adapter: opts.adapter || 'pool',
+      agent: opts.agent || opts.agent_slug || null,
+      provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'gemini' ? 'gemini-3.1-pro-preview' : opts.adapter === 'opencode' ? 'DeepSeek: DeepSeek V4 Pro' : null),
+      approval_mode: opts.approval_mode || null,
+      chatType: opts.chatType || null,
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
       messages: [],
@@ -765,6 +773,10 @@ export class StateGraph extends EventEmitter {
     chat.sessionId = sessionId;
     chat.updatedAt = Date.now();
     fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
+      sessionId,
+      updatedAt: chat.updatedAt,
+    }}], 'chat');
   }
 
   // Set or clear pending task ID.

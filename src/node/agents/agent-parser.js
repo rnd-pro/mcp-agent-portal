@@ -5,7 +5,7 @@
  * 
  * Frontmatter schema:
  *   name, description, role, icon, color, resource_group, provider, model, models[], rotation,
- *   skills[], policy, visibleAgents[], max_concurrent, timeout
+ *   skills[], policy, approval_mode, visibleAgents[], max_concurrent, timeout
  * 
  * Skill resolution:
  *   - `skills: [X, Y]` → content prepended BEFORE agent body
@@ -13,6 +13,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
+import { parseMarkdownFrontmatter } from '../../../packages/agent-pool-mcp/src/tools/frontmatter.js';
 
 /**
  * Parse YAML-like frontmatter from markdown. Handles simple key-value and arrays.
@@ -20,59 +21,8 @@ import { join, basename } from 'path';
  * @returns {{ meta: object, body: string }}
  */
 function parseFrontmatter(raw) {
-  let match = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!match) return { meta: {}, body: raw.trim() };
-
-  let yamlBlock = match[1];
-  let body = match[2].trim();
-  let meta = {};
-  let currentKey = null;
-  let isArray = false;
-
-  for (let line of yamlBlock.split('\n')) {
-    let trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    // Array item
-    if (trimmed.startsWith('- ') && currentKey && isArray) {
-      meta[currentKey].push(trimmed.slice(2).trim());
-      continue;
-    }
-
-    // Key: value
-    let kvMatch = trimmed.match(/^(\w+):\s*(.*)$/);
-    if (kvMatch) {
-      let key = kvMatch[1];
-      let val = kvMatch[2].trim();
-      
-      if (val === '') {
-        // Start of array block
-        meta[key] = [];
-        currentKey = key;
-        isArray = true;
-      } else if (val.startsWith('[') && val.endsWith(']')) {
-        // Inline array: [a, b, c]
-        meta[key] = val.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
-        currentKey = key;
-        isArray = false;
-      } else {
-        // Scalar value
-        if (val === 'true') val = true;
-        else if (val === 'false') val = false;
-        else if (/^\d+$/.test(val)) val = parseInt(val, 10);
-        else if (/^\d+\.\d+$/.test(val)) val = parseFloat(val);
-        // Strip quotes
-        else if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        }
-        meta[key] = val;
-        currentKey = key;
-        isArray = false;
-      }
-    }
-  }
-
-  return { meta, body };
+  let parsed = parseMarkdownFrontmatter(raw);
+  return parsed ? { meta: parsed.meta, body: parsed.body } : { meta: {}, body: raw.trim() };
 }
 
 import { statSync } from 'fs';
@@ -148,6 +98,15 @@ function resolveSkills(body, skillNames, skillsDir) {
   return parts.join('\n\n---\n\n');
 }
 
+function approvalModeFromMeta(meta) {
+  let explicit = meta.approval_mode || meta.approvalMode || meta.access_mode || meta.accessMode;
+  if (explicit) return explicit;
+  if (meta.policy === 'read-only') return 'plan';
+  if (meta.policy === 'admin') return 'yolo';
+  if (meta.policy === 'read-write') return 'auto_edit';
+  return null;
+}
+
 /**
  * Parse a single agent file.
  * @param {string} filePath - absolute path to agent .md file
@@ -175,6 +134,7 @@ export function parseAgent(filePath, skillsDir) {
     rotation: meta.rotation || 'on_error',
     skills: skillNames,
     policy: meta.policy || 'read-write',
+    approvalMode: approvalModeFromMeta(meta),
     visibleAgents: Array.isArray(meta.visibleAgents) ? meta.visibleAgents : [],
     maxConcurrent: meta.max_concurrent || 1,
     timeout: meta.timeout || 600,
@@ -216,6 +176,7 @@ export function getAgentCatalog(agents) {
       description: agent.description,
       role: agent.role,
       resourceGroup: agent.resourceGroup,
+      approvalMode: agent.approvalMode,
     });
   }
   return catalog;

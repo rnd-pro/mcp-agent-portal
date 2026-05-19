@@ -10,6 +10,7 @@ import { createProjectRoutes } from './api-routes-projects.js';
 import { createRuntimeRoutes } from './api-routes-runtime.js';
 import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
+import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -261,7 +262,7 @@ const TOOL_CACHE_TTL = 10_000; // 10s
  * Returns a flat array of MCP tool definitions.
  */
 async function _collectAllTools(proxyManager) {
-  let allTools = [];
+  let allTools = [...META_TOOLS];
   for (let serverName of proxyManager.servers.keys()) {
     let cached = _toolCache.get(serverName);
     if (cached && Date.now() - cached.ts < TOOL_CACHE_TTL) {
@@ -269,7 +270,7 @@ async function _collectAllTools(proxyManager) {
     }
   }
   // If cache is empty, trigger async refresh and AWAIT IT
-  if (allTools.length === 0) {
+  if (allTools.length === META_TOOLS.length) {
     await _refreshToolCache(proxyManager).catch(() => {});
     
     // Collect tools again after refresh
@@ -303,6 +304,10 @@ async function _refreshToolCache(proxyManager) {
  * Route a tool call to the correct child MCP server.
  */
 async function _routeToolCall(proxyManager, toolName, args) {
+  if (META_TOOLS.some(t => t.name === toolName)) {
+    return _routePortalToolCall(proxyManager, toolName, args);
+  }
+
   let isDelegate = toolName === 'delegate_task' || toolName === 'delegate_task_readonly' ||
                    toolName === 'mcp_agent-portal_delegate_task' || toolName === 'mcp_agent-portal_delegate_task_readonly';
   if (isDelegate && args.parent_chat_id && !args.chat_id) {
@@ -313,6 +318,10 @@ async function _routeToolCall(proxyManager, toolName, args) {
       let chat = sg.createChat({
         name: (args.prompt || '').substring(0, 40) + ((args.prompt || '').length > 40 ? '...' : ''),
         adapter: 'pool',
+        agent: args.agent_slug || null,
+        provider: args.provider || null,
+        model: args.model || null,
+        approval_mode: args.approval_mode || null,
         parentChatId: args.parent_chat_id,
         projectId: parentMeta ? parentMeta.projectId : null
       }, 'mcp');
@@ -347,6 +356,104 @@ async function _routeToolCall(proxyManager, toolName, args) {
   }
 
   return { content: [{ type: 'text', text: `Unknown tool: ${toolName}` }], isError: true };
+}
+
+async function _routePortalToolCall(proxyManager, toolName, args = {}) {
+  if (toolName === 'discover_tools') {
+    let tools = await _collectChildTools(proxyManager);
+    let query = (args.query || '').toLowerCase();
+    let serverFilter = (args.server || '').toLowerCase();
+    let results = [];
+    for (let { tool, server } of tools) {
+      let text = `${tool.name} ${tool.description || ''}`.toLowerCase();
+      if (query && !text.includes(query)) continue;
+      if (serverFilter && !server.toLowerCase().includes(serverFilter)) continue;
+      results.push({ name: tool.name, description: tool.description || '', server });
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ tools: results, total: tools.length }, null, 2) }] };
+  }
+
+  if (toolName === 'call_tool') {
+    let realToolName = args.name;
+    if (!realToolName) {
+      return { content: [{ type: 'text', text: 'Missing "name" argument — specify which tool to call' }], isError: true };
+    }
+    return _routeToolCall(proxyManager, realToolName, args.arguments || {});
+  }
+
+  if (toolName === 'get_portal_status') {
+    let tools = await _collectChildTools(proxyManager);
+    let servers = [...proxyManager.servers.keys()];
+    return {
+      content: [{ type: 'text', text: JSON.stringify({
+        servers: servers.map(name => ({ name })),
+        health: proxyManager.getHealthStatus(),
+        totalTools: tools.length,
+        mode: process.env.PORTAL_MODE || 'standalone',
+      }, null, 2) }],
+    };
+  }
+
+  if (toolName === 'create_chat') {
+    let { getStateGraph } = await import('../state-graph.js');
+    let sg = getStateGraph();
+    let projectId = args.projectId || null;
+    if (!projectId && args.parentChatId) {
+      let parentMeta = sg.get(`chats/${args.parentChatId}`);
+      if (parentMeta) projectId = parentMeta.projectId || null;
+    }
+    let chat = sg.createChat({
+      name: args.name,
+      adapter: args.adapter || 'pool',
+      agent: args.agent || args.agent_slug || null,
+      provider: args.provider || null,
+      model: args.model || null,
+      approval_mode: args.approval_mode || null,
+      chatType: args.chatType || null,
+      parentChatId: args.parentChatId || null,
+      projectId,
+      agentIcon: args.agentIcon || null,
+      agentColor: args.agentColor || null,
+    }, 'mcp');
+    proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+    return { content: [{ type: 'text', text: `Chat created. ID: ${chat.id}` }] };
+  }
+
+  if (toolName === 'send_chat_message') {
+    let { getStateGraph } = await import('../state-graph.js');
+    let sg = getStateGraph();
+    sg.appendChatMessage(args.chatId, {
+      role: args.role || 'agent',
+      text: args.text,
+    });
+    proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: args.chatId } });
+    return { content: [{ type: 'text', text: 'Message sent successfully.' }] };
+  }
+
+  if (toolName === 'resume_chat') {
+    return resumeChatTool(proxyManager, args);
+  }
+
+  if (toolName === 'remember') {
+    let { remember } = await import('../memory-store.js');
+    return { content: [{ type: 'text', text: remember(args.key, args.value) }] };
+  }
+
+  if (toolName === 'recall') {
+    let { recall } = await import('../memory-store.js');
+    return { content: [{ type: 'text', text: JSON.stringify(recall(args.query), null, 2) }] };
+  }
+
+  return { content: [{ type: 'text', text: `Unknown portal tool: ${toolName}` }], isError: true };
+}
+
+async function _collectChildTools(proxyManager) {
+  await _refreshToolCache(proxyManager);
+  let tools = [];
+  for (let [server, cached] of _toolCache) {
+    for (let tool of cached.tools) tools.push({ tool, server });
+  }
+  return tools;
 }
 
 /**
