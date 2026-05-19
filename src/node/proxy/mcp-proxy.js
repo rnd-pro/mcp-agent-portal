@@ -51,6 +51,12 @@ function createWatchdog(onTimeout, inactivityMs = 30000) {
 }
 
 export class MCPProxyManager {
+  /** @type {Set<import('ws').WebSocket>} */
+  #stateClients = new Set();
+  #initializedServers = new Set();
+  #healthInterval = null;
+  #healthFailures = new Map();
+
   constructor(projectRoot = process.cwd()) {
     this.projectRoot = projectRoot;
     /** @type {Map<string, object>} */
@@ -62,8 +68,6 @@ export class MCPProxyManager {
     this.nextRequestId = 1;
     /** @type {Map<string, { resolve: Function, reject: Function, watchdog?: object }>} */
     this.pendingRequests = new Map();
-    /** @type {Set<import('ws').WebSocket>} state sync WS clients */
-    this._stateClients = new Set();
     this.adapterPool = new AdapterPool({});
     this.pluginLoader = new PluginLoader({}, { adapterPool: this.adapterPool, mcpProxy: this, broadcast: (msg) => this.broadcastMonitor(msg) });
     /** @type {Function|null} Called when servers are added/removed */
@@ -147,7 +151,7 @@ export class MCPProxyManager {
     }
     
     if (configUpdated) {
-      this._persistConfig();
+      this.#persistConfig();
     }
   }
 
@@ -177,13 +181,13 @@ export class MCPProxyManager {
     this.startHealthCheck();
 
     // Set up persistent roots/list handler for all child servers
-    this._installRootsHandler();
+    this.#installRootsHandler();
 
     // Track which servers have been initialized
-    this._initializedServers = new Set();
+    this.#initializedServers = new Set();
   }
 
-  _buildWorkspaceRoots() {
+  #buildWorkspaceRoots() {
     let sg = getStateGraph();
     let projects = sg.getProjectHistory();
     let roots = [];
@@ -214,8 +218,8 @@ export class MCPProxyManager {
    * This is only needed in web-only mode where no IDE sends initialize.
    * @param {string} [serverName] - If provided, initialize only this server. Otherwise all.
    */
-  _sendSyntheticInitialize(serverName) {
-    let roots = this._buildWorkspaceRoots();
+  #sendSyntheticInitialize(serverName) {
+    let roots = this.#buildWorkspaceRoots();
 
     let initMsg = {
       jsonrpc: '2.0',
@@ -261,10 +265,10 @@ export class MCPProxyManager {
    * Install a persistent handler that responds to roots/list requests from child servers.
    * This is kept alive for the lifetime of the proxy (not just init).
    */
-  _installRootsHandler() {
+  #installRootsHandler() {
     let rootsHandler = (sName, msg) => {
       if (msg.method === 'roots/list' && msg.id !== undefined) {
-        let roots = this._buildWorkspaceRoots();
+        let roots = this.#buildWorkspaceRoots();
         this.sendToChild(sName, {
           jsonrpc: '2.0',
           id: msg.id,
@@ -298,9 +302,9 @@ export class MCPProxyManager {
 
     // Send synthetic initialize shortly after spawning
     setTimeout(() => {
-      if (!this._initializedServers?.has(serverName)) {
-        this._initializedServers?.add(serverName);
-        this._sendSyntheticInitialize(serverName);
+      if (!this.#initializedServers?.has(serverName)) {
+        this.#initializedServers?.add(serverName);
+        this.#sendSyntheticInitialize(serverName);
       }
     }, 500);
 
@@ -536,7 +540,7 @@ export class MCPProxyManager {
     };
     this.servers.set(name, settings);
     this.spawnServer(name);
-    this._persistConfig();
+    this.#persistConfig();
     if (this.onServerChange) this.onServerChange('add', name);
     console.error(`✅ [Marketplace] Installed and started "${name}"`);
   }
@@ -552,7 +556,7 @@ export class MCPProxyManager {
         try { process.kill(-s.process.pid, 'SIGTERM'); } catch (e) {}
       }
       this.servers.delete(name);
-      this._persistConfig();
+      this.#persistConfig();
       if (this.onServerChange) this.onServerChange('remove', name);
       this.broadcastMonitor({ jsonrpc: '2.0', method: 'event', params: { type: 'config_update', tool: name } });
     }
@@ -567,7 +571,7 @@ export class MCPProxyManager {
   }
 
   /** Persist current server list to config file. */
-  _persistConfig() {
+  #persistConfig() {
     try {
       let config = {};
       if (fs.existsSync(CONFIG_PATH)) {
@@ -602,7 +606,7 @@ export class MCPProxyManager {
   handleStateWs(req, socket, head) {
     let wss = new WebSocketServer({ noServer: true });
     wss.handleUpgrade(req, socket, head, (ws) => {
-      this._stateClients.add(ws);
+      this.#stateClients.add(ws);
       ws._pendingMessages = 0;
 
       let sg = getStateGraph();
@@ -640,8 +644,8 @@ export class MCPProxyManager {
         }));
       }
 
-      ws.on('close', () => this._stateClients.delete(ws));
-      ws.on('error', () => this._stateClients.delete(ws));
+      ws.on('close', () => this.#stateClients.delete(ws));
+      ws.on('error', () => this.#stateClients.delete(ws));
 
       // Handle incoming mutations from client
       ws.on('message', (raw) => {
@@ -673,10 +677,10 @@ export class MCPProxyManager {
         method: 'patch',
         params: { v, ops, serverVersion: SERVER_VERSION },
       });
-      for (let client of this._stateClients) {
+      for (let client of this.#stateClients) {
         try {
           if (client.readyState !== 1) {
-            this._stateClients.delete(client);
+            this.#stateClients.delete(client);
             continue;
           }
           // Backpressure: disconnect slow clients
@@ -684,12 +688,12 @@ export class MCPProxyManager {
           if (client._pendingMessages > MAX_WS_QUEUE) {
             console.warn('🟡 [StateWS] Backpressure: disconnecting slow client');
             client.close(4001, 'Too slow');
-            this._stateClients.delete(client);
+            this.#stateClients.delete(client);
             continue;
           }
           client.send(msg, () => { client._pendingMessages--; });
         } catch {
-          this._stateClients.delete(client);
+          this.#stateClients.delete(client);
         }
       }
     });
@@ -838,22 +842,22 @@ export class MCPProxyManager {
    * Pings every 30s, alerts after 3 consecutive failures.
    */
   startHealthCheck() {
-    if (this._healthInterval) return;
-    this._healthFailures = new Map();
-    this._healthInterval = setInterval(() => this._runHealthCheck(), 30000);
+    if (this.#healthInterval) return;
+    this.#healthFailures = new Map();
+    this.#healthInterval = setInterval(() => this.#runHealthCheck(), 30000);
     // First check after 10s (let servers initialize)
-    createWatchdog(() => this._runHealthCheck(), 10000);
+    createWatchdog(() => this.#runHealthCheck(), 10000);
     console.error('💓 [HealthCheck] Started (30s interval)');
   }
 
   stopHealthCheck() {
-    if (this._healthInterval) {
-      clearInterval(this._healthInterval);
-      this._healthInterval = null;
+    if (this.#healthInterval) {
+      clearInterval(this.#healthInterval);
+      this.#healthInterval = null;
     }
   }
 
-  async _runHealthCheck() {
+  async #runHealthCheck() {
     let results = {};
 
     for (let [name, s] of this.servers) {
@@ -866,11 +870,11 @@ export class MCPProxyManager {
         let start = Date.now();
         await this.requestFromChild(name, 'tools/list', {});
         let latency = Date.now() - start;
-        this._healthFailures.set(name, 0);
+        this.#healthFailures.set(name, 0);
         results[name] = { status: 'healthy', latency };
       } catch (err) {
-        let fails = (this._healthFailures.get(name) || 0) + 1;
-        this._healthFailures.set(name, fails);
+        let fails = (this.#healthFailures.get(name) || 0) + 1;
+        this.#healthFailures.set(name, fails);
         results[name] = { status: 'unhealthy', failures: fails, error: err.message };
 
         if (fails === 3) {
@@ -904,7 +908,7 @@ export class MCPProxyManager {
       } else if (!s.process) {
         results[name] = { status: 'stopped' };
       } else {
-        let fails = this._healthFailures?.get(name) || 0;
+        let fails = this.#healthFailures?.get(name) || 0;
         results[name] = { status: fails > 0 ? 'degraded' : 'healthy', failures: fails };
       }
     }
