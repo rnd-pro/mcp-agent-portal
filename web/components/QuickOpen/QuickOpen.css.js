@@ -2,7 +2,7 @@ export default `
   pg-quick-open { position: fixed; inset: 0; z-index: 9999; pointer-events: none; }
   .qo-overlay {
     position: fixed; inset: 0; z-index: 9999;
-    background: rgba(0,0,0,0.5);
+    background: var(--sn-bg-overlay, rgba(0,0,0,0.5));
     display: flex; justify-content: center; padding-top: 15vh;
     pointer-events: all;
     animation: qo-fadein 100ms ease;
@@ -15,7 +15,7 @@ export default `
     background: var(--sn-panel-bg, hsl(228, 14%, 18%));
     border: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
     border-radius: 10px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 20px 60px var(--sn-bg-overlay, rgba(0,0,0,0.5));
     overflow: hidden;
     display: flex;
     flex-direction: column;

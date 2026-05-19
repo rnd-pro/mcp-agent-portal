@@ -121,7 +121,7 @@ export default `
 .mp-badge-rnd-pro { background: linear-gradient(135deg, #a78bfa33, #7c3aed33); color: #a78bfa; }
 .mp-badge-official { background: linear-gradient(135deg, #4a9eff33, #2563eb33); color: #4a9eff; }
 .mp-badge-google { background: linear-gradient(135deg, #34d39933, #05966933); color: #34d399; }
-.mp-badge-community { background: linear-gradient(135deg, #f59e0b33, #d9770633); color: #f59e0b; }
+.mp-badge-community { background: linear-gradient(135deg, #f59e0b33, #d9770633); color: var(--sn-warning-color, #f59e0b); }
 
 .mp-category-grid {
   display: grid;
@@ -146,12 +146,12 @@ export default `
   justify-content: center;
   font-size: 18px;
   flex-shrink: 0;
-  color: #fff;
+  color: var(--sn-text, #fff);
 }
 
 .mp-card-icon .material-symbols-outlined {
   font-size: 20px;
-  color: #fff;
+  color: var(--sn-text, #fff);
 }
 
 .mp-card-source {

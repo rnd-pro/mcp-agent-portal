@@ -46,6 +46,7 @@ export class AgentPortalTree extends Symbiote {
     } catch {}
 
     this.loadTree();
+    events.addEventListener('agent-portal-tree-refresh', () => this.loadTree());
     events.addEventListener('file-selected', (event) => {
       if (event.detail.path?.startsWith('.agent-portal/')) {
         requestAnimationFrame(() => this._highlightFile(event.detail.path));
@@ -81,7 +82,10 @@ export class AgentPortalTree extends Symbiote {
       this._tree = data.tree || [];
       this.renderTree({ scrollActive: true });
     } catch (err) {
-      this.$.treeHTML = `<div class="pg-placeholder">Error: ${esc(err.message)}</div>`;
+      let message = /ENOENT|no such file or directory/.test(err.message)
+        ? 'Team memory is not initialized for this project. Add or sync the .agent-portal submodule to edit agents, skills, and workflows here.'
+        : `Error: ${err.message}`;
+      this.$.treeHTML = `<div class="pg-placeholder">${esc(message)}</div>`;
     }
   }
 

@@ -80,7 +80,7 @@ chat-sidebar-item, chat-sidebar-sub-item {
 .chat-nav-resize-handle:hover,
 .chat-nav-resize-handle.dragging,
 .chat-nav[resizing] .chat-nav-resize-handle {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--sn-node-hover, rgba(255, 255, 255, 0.08));
 }
 
 .chat-nav-header {
@@ -425,7 +425,7 @@ chat-message-item {
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(4px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--sn-shadow-lg, 0 6px 18px rgba(0, 0, 0, 0.28));
   transition: opacity 0.15s ease, transform 0.15s ease, background 0.12s ease, color 0.12s ease;
 }
 
@@ -545,7 +545,7 @@ chat-message-item {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--sn-shadow-sm, 0 1px 4px rgba(0, 0, 0, 0.22));
   transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 
@@ -554,9 +554,9 @@ chat-message-item {
 }
 
 .btn-send:hover {
-  background: color-mix(in srgb, var(--chat-composer-action-bg) 78%, #ffffff 12%);
+  background: color-mix(in srgb, var(--chat-composer-action-bg) 78%, var(--sn-text, #ffffff) 12%);
   color: var(--sn-text, #f0f0f0);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--sn-shadow-md, 0 2px 8px rgba(0, 0, 0, 0.28));
   transform: scale(1.05);
 }
 
@@ -573,12 +573,12 @@ chat-message-item {
 
 .btn-send.btn-stop {
   background: var(--sn-danger-color);
-  color: #ffffff;
+  color: var(--sn-text, #ffffff);
 }
 
 .btn-send.btn-stop:hover {
   background: var(--sn-danger-color);
-  color: #ffffff;
+  color: var(--sn-text, #ffffff);
 }
 
 .btn-send.btn-stop .material-symbols-outlined {
@@ -801,7 +801,7 @@ chat-message-item {
   border-radius: 16px;
   padding: 4px;
   margin-bottom: 6px;
-  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--sn-shadow-xl, 0 -8px 28px rgba(0, 0, 0, 0.32));
   z-index: 10;
   backdrop-filter: blur(8px);
 }
@@ -993,7 +993,7 @@ chat-message-item {
 
 .markdown-mention {
   color: var(--sn-node-selected);
-  background: rgba(100, 181, 246, 0.1);
+  background: var(--sn-accent-bg, rgba(100, 181, 246, 0.1));
   padding: 1px 4px;
   border-radius: 4px;
   font-weight: 500;
@@ -1021,7 +1021,7 @@ h4.md-h { font-size: 14px; }
   margin: 8px 0;
   padding: 8px 16px;
   border-left: 4px solid var(--sn-node-selected);
-  background: rgba(100, 181, 246, 0.05);
+  background: var(--sn-accent-bg-subtle, rgba(100, 181, 246, 0.05));
   border-radius: 0 4px 4px 0;
   font-style: italic;
   color: var(--sn-text-dim);
@@ -1252,8 +1252,8 @@ h4.md-h { font-size: 14px; }
 }
 
 .delegation-card[data-status="running"] {
-  border-color: rgba(120, 180, 255, 0.15);
-  --card-accent: hsl(215, 70%, 55%);
+  border-color: var(--sn-accent-border, rgba(120, 180, 255, 0.15));
+  --card-accent: var(--sn-cat-server, hsl(215, 70%, 55%));
 }
 
 .delegation-card[data-status="running"]::before {
@@ -1266,12 +1266,12 @@ h4.md-h { font-size: 14px; }
 }
 
 .delegation-card[data-status="done"] {
-  border-color: rgba(100, 200, 120, 0.12);
+  border-color: var(--sn-success-border, rgba(100, 200, 120, 0.12));
   --card-accent: var(--sn-success-color);
 }
 
 .delegation-card[data-status="error"] {
-  border-color: rgba(220, 100, 100, 0.12);
+  border-color: var(--sn-danger-border, rgba(220, 100, 100, 0.12));
   --card-accent: var(--sn-danger-color);
 }
 
@@ -1281,7 +1281,7 @@ h4.md-h { font-size: 14px; }
 
 .delegation-card-linked:hover {
   border-color: var(--sn-node-border);
-  box-shadow: 0 0 12px rgba(120, 180, 255, 0.08);
+  box-shadow: var(--sn-accent-glow, 0 0 12px rgba(120, 180, 255, 0.08));
 }
 
 .delegation-card-header {
@@ -1333,17 +1333,17 @@ h4.md-h { font-size: 14px; }
 .delegation-card-event[data-type="tool_result"] {
   color: var(--text-color, var(--sn-text));
   border-color: var(--accent-color, #1976d2);
-  background: rgba(25, 118, 210, 0.1);
+  background: var(--sn-accent-bg, rgba(25, 118, 210, 0.1));
 }
 
 .delegation-card-event[data-status="error"] {
   color: var(--sn-danger-color);
   border-color: var(--sn-danger-color);
-  background: rgba(255, 82, 82, 0.1);
+  background: var(--sn-danger-bg, rgba(255, 82, 82, 0.1));
 }
 
 .delegation-card-event[data-type="message"] {
-  color: hsl(215, 50%, 60%);
+  color: var(--sn-cat-server, hsl(215, 50%, 60%));
   background: hsla(215, 50%, 60%, 0.08);
 }
 
@@ -1360,7 +1360,7 @@ h4.md-h { font-size: 14px; }
 }
 
 .live-status-indicator .material-symbols-outlined {
-  color: hsl(215, 60%, 55%);
+  color: var(--sn-cat-server, hsl(215, 60%, 55%));
 }
 
 @keyframes status-fade-in {

@@ -13,7 +13,7 @@ pg-skill-list-item {
 
 .icon {
   font-size: 16px;
-  color: hsl(30, 80%, 60%);
+  color: var(--sn-warning-color, hsl(30, 80%, 60%));
 }
 
 .skill-text-container {

@@ -5,7 +5,7 @@ export default `
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #0f172a;
+    background: var(--sn-bg, #0f172a);
   }
   pg-canvas-graph > canvas {
     position: absolute;

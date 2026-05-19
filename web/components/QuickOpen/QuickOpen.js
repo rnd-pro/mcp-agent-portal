@@ -10,6 +10,22 @@ export class QuickOpen extends Symbiote {
     query: "",
     resultsHTML: "",
     selectedIdx: 0,
+    onDialogClick: (e) => {
+      e.stopPropagation();
+    },
+    onInput: (e) => {
+      this._onInput(e);
+    },
+    onKeydown: (e) => {
+      this._onKeydown(e);
+    },
+    onResultClick: (e) => {
+      const item = e.target.closest('.qo-item');
+      if (item) {
+        this.$.selectedIdx = +item.dataset.idx;
+        this._onKeydown({key: 'Enter', preventDefault() {}});
+      }
+    },
   };
 
   _results = [];

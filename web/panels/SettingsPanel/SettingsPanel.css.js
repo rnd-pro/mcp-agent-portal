@@ -163,7 +163,7 @@ export default`
 .pm-provider-tab.active {
   background: var(--sn-node-selected);
   border-color: var(--sn-node-selected);
-  color: #fff;
+  color: var(--sn-text, #fff);
 }
 
 .pm-model-list {
@@ -302,7 +302,7 @@ export default`
 }
 
 .pm-col-star.active {
-  color: #ffb300;
+  color: var(--sn-warning-color, #ffb300);
 }
 
 .pm-col-name {

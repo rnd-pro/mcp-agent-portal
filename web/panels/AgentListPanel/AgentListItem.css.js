@@ -25,7 +25,7 @@ pg-agent-list-item[active] .ui-item {
   flex: 1;
 }
 
-.ui-badge.project { color: hsl(140, 40%, 50%); border-color: hsl(140, 40%, 50%); }
-.ui-badge.global { color: hsl(210, 50%, 60%); border-color: hsl(210, 50%, 60%); }
-.ui-badge.built-in { color: hsl(30, 50%, 60%); border-color: hsl(30, 50%, 60%); }
+.ui-badge.project { color: var(--sn-success-color, hsl(140, 40%, 50%)); border-color: var(--sn-success-color, hsl(140, 40%, 50%)); }
+.ui-badge.global { color: var(--sn-cat-server, hsl(210, 50%, 60%)); border-color: var(--sn-cat-server, hsl(210, 50%, 60%)); }
+.ui-badge.built-in { color: var(--sn-warning-color, hsl(30, 50%, 60%)); border-color: var(--sn-warning-color, hsl(30, 50%, 60%)); }
 `;

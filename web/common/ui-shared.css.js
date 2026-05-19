@@ -125,7 +125,7 @@ export default `
 .ui-btn.primary {
   background: var(--sn-node-selected);
   border-color: var(--sn-node-selected);
-  color: #fff;
+  color: var(--sn-text, #fff);
 }
 
 .ui-btn.primary:hover:not(:disabled) {
@@ -139,7 +139,7 @@ export default `
 
 .ui-btn.danger:hover:not(:disabled) {
   background: var(--sn-danger-color);
-  color: #fff;
+  color: var(--sn-text, #fff);
 }
 
 .ui-btn-icon {

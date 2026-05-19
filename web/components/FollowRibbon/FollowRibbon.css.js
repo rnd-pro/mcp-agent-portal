@@ -21,15 +21,15 @@ export default `
     gap: 10px;
     padding: 8px 20px;
     border-radius: 24px;
-    background: rgba(20, 20, 25, 0.85);
+    background: var(--sn-bg-overlay, rgba(20, 20, 25, 0.85));
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(76, 139, 245, 0.25);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 16px rgba(76, 139, 245, 0.1);
+    border: 1px solid var(--sn-cat-server, rgba(76, 139, 245, 0.25));
+    box-shadow: 0 8px 32px var(--sn-bg-overlay, rgba(0, 0, 0, 0.4)), 0 0 16px var(--sn-cat-server, rgba(76, 139, 245, 0.1));
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 12px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--sn-node-hover, rgba(255, 255, 255, 0.9));
     white-space: nowrap;
     max-width: 500px;
   }
@@ -37,7 +37,7 @@ export default `
   .fr-icon {
     font-family: 'Material Symbols Outlined';
     font-size: 16px;
-    color: #4c8bf5;
+    color: var(--sn-cat-server, #4c8bf5);
     animation: fr-pulse 2s ease-in-out infinite;
   }
 
@@ -52,7 +52,7 @@ export default `
     display: inline-block;
     width: 16px;
     text-align: left;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--sn-node-hover, rgba(255, 255, 255, 0.4));
   }
 
   @keyframes fr-pulse {

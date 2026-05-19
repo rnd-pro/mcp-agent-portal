@@ -64,7 +64,7 @@ project-tab-item .material-symbols-outlined {
 
 .tab:hover,
 project-tab-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--sn-node-hover, rgba(255, 255, 255, 0.04));
   color: var(--sn-text, #e0e0e0);
 }
 
@@ -171,7 +171,7 @@ project-tab-item[active] .tab-close {
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--sn-node-hover, rgba(255, 255, 255, 0.2));
   color: var(--sn-text, #e0e0e0);
 }
 
@@ -193,7 +193,7 @@ project-tab-item[active] .tab-close {
 }
 
 .tab-add:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--sn-node-hover, rgba(255, 255, 255, 0.1));
   color: var(--sn-text, #e0e0e0);
 }
 

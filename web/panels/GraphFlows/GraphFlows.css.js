@@ -87,7 +87,7 @@ pg-graph-flows {
 }
 
 .flows-error {
-  color: #f08f8f;
+  color: var(--sn-danger-color, #f08f8f);
 }
 
 .flows-story {
@@ -98,7 +98,7 @@ pg-graph-flows {
   margin-bottom: 6px;
   border: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
   border-radius: 4px;
-  background: rgba(255,255,255,0.03);
+  background: var(--sn-node-hover, rgba(255,255,255,0.03));
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -106,7 +106,7 @@ pg-graph-flows {
 
 .flows-story[data-active] {
   border-color: var(--sn-node-selected, #d4a04a);
-  background: rgba(212,160,74,0.1);
+  background: var(--sn-warning-color, rgba(212,160,74,0.1));
 }
 
 .flows-story-title {
@@ -132,7 +132,7 @@ pg-graph-flows {
 .flows-beat {
   padding: 12px;
   border-top: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
-  background: rgba(0,0,0,0.18);
+  background: var(--sn-bg-overlay, rgba(0,0,0,0.18));
 }
 
 .flows-beat h3 {

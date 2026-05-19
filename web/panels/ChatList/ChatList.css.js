@@ -56,7 +56,7 @@ export default /*css*/ `
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(76, 139, 245, 0.12);
+  background: var(--sn-cat-server, rgba(76, 139, 245, 0.12));
   color: var(--sn-node-selected);
   text-transform: uppercase;
   letter-spacing: 0.3px;

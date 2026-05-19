@@ -16,11 +16,11 @@ export default `
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
-  background: rgba(0,0,0,0.05);
+  background: var(--sn-bg-overlay, rgba(0,0,0,0.05));
   font-weight: 500;
 }
 .step-header:hover {
-  background: rgba(255,255,255,0.05);
+  background: var(--sn-node-hover, rgba(255,255,255,0.05));
 }
 .step-content {
   padding: 16px;
@@ -31,13 +31,13 @@ export default `
   display: block;
 }
 .step-card.expanded .step-header {
-  background: rgba(255,255,255,0.05);
+  background: var(--sn-node-hover, rgba(255,255,255,0.05));
 }
 .node-id {
   font-size: 11px;
   font-family: monospace;
   color: var(--sn-text-dim);
-  background: rgba(0,0,0,0.2);
+  background: var(--sn-bg-overlay, rgba(0,0,0,0.2));
   padding: 2px 6px;
   border-radius: 4px;
 }

@@ -6,11 +6,20 @@ import { events } from '../../dashboard-state.js';
 
 export class ActiveContext extends Symbiote {
   init$ = {
-    files: []
+    files: [],
+    onRefresh: () => {
+      this.loadContext();
+    },
   };
 
   initCallback() {
     this.loadContext();
+
+    // Delegated click handler for untrack buttons
+    this.ref.fileList.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-untrack]');
+      if (btn) this.untrack(btn.dataset.untrack);
+    });
     
     // Auto-refresh when tools are called
     events.addEventListener('global-tool-event', (e) => {
@@ -47,7 +56,7 @@ export class ActiveContext extends Symbiote {
               <div style="font-size:12px; font-weight:500;">${name}</div>
               <div style="font-size:10px; color:var(--sn-text-dim); font-family:monospace;">${f}</div>
             </div>
-            <button class="ui-btn-icon" style="padding:2px;" onclick="this.closest('pg-active-context').untrack('${f}')">
+            <button class="ui-btn-icon" style="padding:2px;" data-untrack="${f}">
               <span class="material-symbols-outlined" style="font-size:14px;">close</span>
             </button>
           </div>

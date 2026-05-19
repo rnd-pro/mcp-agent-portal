@@ -65,7 +65,7 @@ export default `
 
   .pcb-btn[data-active] {
     border-color: var(--sn-node-selected, #d4a04a);
-    background: rgba(212, 160, 74, 0.1);
+    background: var(--sn-warning-bg, rgba(212, 160, 74, 0.1));
   }
 
   .pcb-btn .material-symbols-outlined {
@@ -83,10 +83,10 @@ export default `
     max-height: calc(100% - 112px);
     overflow: hidden auto;
     padding: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    background: rgba(18, 18, 18, 0.9);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.1));
+    min-width: 240px;
+    background: var(--sn-bg-overlay, rgba(18, 18, 18, 0.9));
+    box-shadow: var(--sn-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.2));
   }
 
   .pcb-clusters[hidden] {
@@ -115,14 +115,14 @@ export default `
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.18));
   }
 
   .pcb-metadata-dialog {
     width: min(760px, calc(100vw - 32px));
     height: min(640px, calc(100vh - 32px));
     padding: 0;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.14));
     border-radius: 6px;
     background: var(--sn-bg, #1a1a1a);
     color: var(--sn-text, #e0e0e0);
@@ -131,7 +131,7 @@ export default `
   }
 
   .pcb-metadata-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--sn-bg-overlay, rgba(0, 0, 0, 0.55));
   }
 
   .pcb-metadata-dialog form {
@@ -147,20 +147,20 @@ export default `
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
-    background: rgba(255, 255, 255, 0.035);
+    background: var(--sn-node-hover, rgba(255, 255, 255, 0.035));
     box-sizing: border-box;
   }
 
   .pcb-metadata-dialog header {
     justify-content: space-between;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.08));
     min-width: 0;
   }
 
   .pcb-metadata-dialog footer {
     justify-content: flex-end;
     flex-wrap: wrap;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.08));
     min-width: 0;
   }
 
@@ -183,7 +183,7 @@ export default `
     outline: 0;
     padding: 12px;
     box-sizing: border-box;
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--sn-bg-overlay, rgba(0, 0, 0, 0.28));
     color: var(--sn-text, #e0e0e0);
     font-family: var(--sn-font, 'SF Mono', monospace);
     font-size: 11px;
@@ -196,9 +196,9 @@ export default `
     height: 28px;
     display: grid;
     place-items: center;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.1));
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--sn-node-hover, rgba(255, 255, 255, 0.04));
     color: var(--sn-text, #e0e0e0);
     cursor: pointer;
   }
@@ -245,10 +245,12 @@ export default `
     font-family: var(--sn-font, 'SF Mono', monospace);
     font-size: 10px;
     color: var(--sn-text-dim, #888888);
-    background: rgba(26, 26, 26, 0.9);
+    background: var(--sn-bg-overlay, rgba(26, 26, 26, 0.9));
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.08));
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .pcb-stat-val {
@@ -318,7 +320,7 @@ export default `
   }
   .pcb-pin:hover {
     color: var(--sn-node-selected, #d4a04a) !important;
-    text-shadow: 0 0 4px rgba(212, 160, 74, 0.4);
+    text-shadow: 0 0 4px var(--sn-warning-glow, rgba(212, 160, 74, 0.4));
   }
   .pcb-pin[style*="cursor: pointer"]:hover::after {
     content: '→';
@@ -330,7 +332,7 @@ export default `
   /* Toolbar separator */
   .pcb-toolbar-sep {
     width: 1px;
-    background: rgba(255,255,255,0.1);
+    background: var(--sn-node-hover, rgba(255,255,255,0.1));
     margin: 0 4px;
     align-self: stretch;
   }

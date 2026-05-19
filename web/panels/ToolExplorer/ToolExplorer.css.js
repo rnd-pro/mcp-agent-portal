@@ -29,7 +29,7 @@ export default `
   font-family: var(--sn-font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 11px;
   overflow-x: auto;
-  color: #a8b2d1;
+  color: var(--sn-text-dim, #a8b2d1);
   white-space: pre-wrap;
   border: 1px solid var(--sn-node-border);
 }

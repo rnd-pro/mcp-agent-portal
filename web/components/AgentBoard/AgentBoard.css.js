@@ -101,17 +101,17 @@ export default /*css*/ `
   border-radius: 6px;
   padding: 10px;
   border-left: 3px solid var(--border-color);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 3px var(--sn-bg-overlay, rgba(0,0,0,0.1));
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.status-queued { border-left-color: #9e9e9e; }
-.status-running { border-left-color: #2196f3; }
-.status-done { border-left-color: #4caf50; }
-.status-error { border-left-color: #f44336; }
-.status-cancelled { border-left-color: #ff9800; }
+.status-queued { border-left-color: var(--sn-text-dim, #9e9e9e); }
+.status-running { border-left-color: var(--sn-cat-server, #2196f3); }
+.status-done { border-left-color: var(--sn-success-color, #4caf50); }
+.status-error { border-left-color: var(--sn-danger-color, #f44336); }
+.status-cancelled { border-left-color: var(--sn-warning-color, #ff9800); }
 
 .card-header {
   display: flex;

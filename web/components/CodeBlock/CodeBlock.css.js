@@ -62,14 +62,14 @@ export default `
     padding: 20px;
     justify-content: center;
     align-items: center;
-    background: repeating-conic-gradient(hsl(30, 10%, 88%) 0% 25%, hsl(30, 10%, 94%) 0% 50%) 0 0 / 16px 16px;
+    background: repeating-conic-gradient(var(--sn-warning-color, hsl(30, 10%, 88%)) 0% 25%, var(--sn-warning-color, hsl(30, 10%, 94%)) 0% 50%) 0 0 / 16px 16px;
   }
   code-block .cb-img {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     border-radius: 4px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    box-shadow: 0 2px 12px var(--sn-bg-overlay, rgba(0,0,0,0.12));
   }
   /* In markdown mode: hide code, show md */
   code-block[mode-markdown] .cb-gutter { display: none; }
@@ -133,7 +133,7 @@ export default `
     border-radius: 6px;
     margin: 8px 0;
     border: 1px solid var(--sn-node-border, hsl(35, 18%, 85%));
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 8px var(--sn-bg-overlay, rgba(0,0,0,0.08));
   }
   code-block .md-hr {
     border: none;

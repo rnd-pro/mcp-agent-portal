@@ -30,6 +30,7 @@ import "./panels/PipelineManager/PipelineManager.js";
 import "./panels/WorkflowExplorer/WorkflowExplorer.js";
 import "./panels/GroupManager/GroupManager.js";
 import "./panels/SkillManager/AgentPortalTree.js";
+import "./panels/SkillManager/OpenLibraryTree.js";
 import "./panels/SkillManager/SkillManager.js";
 import "./panels/SkillManager/SkillMetadata.js";
 import "./panels/PeerReview/PeerReview.js";

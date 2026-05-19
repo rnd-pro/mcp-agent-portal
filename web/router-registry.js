@@ -29,6 +29,7 @@ export const panelTypes = {
   'pipeline-mgr': { title: 'Pipelines',     icon: 'schema',        component: 'pg-pipeline-mgr' },
   'group-mgr':    { title: 'Group Manager', icon: 'groups',        component: 'pg-group-manager' },
   'agent-portal-tree': { title: '.agent-portal', icon: 'folder',    component: 'pg-agent-portal-tree' },
+  'agent-portal-library': { title: 'Open Library', icon: 'public',  component: 'pg-agent-portal-library' },
   'skill-mgr':    { title: 'Markdown Editor',icon: 'edit_note',     component: 'pg-skill-manager' },
   'skill-meta':   { title: 'Metadata',      icon: 'tune',          component: 'pg-skill-metadata' },
   'peer-review':  { title: 'Peer Review',   icon: 'forum',         component: 'pg-peer-review' },
@@ -159,7 +160,10 @@ registerSection('resource-groups', {
 registerSection('skills', {
   icon: 'school', label: 'Skills', order: 30, scope: 'home',
   layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('agent-portal-tree'),
+    LayoutTree.createSplit('vertical',
+      LayoutTree.createPanel('agent-portal-tree'),
+      LayoutTree.createPanel('agent-portal-library'), 0.62
+    ),
     LayoutTree.createSplit('horizontal',
       LayoutTree.createPanel('skill-mgr'),
       LayoutTree.createPanel('skill-meta'), 0.68
