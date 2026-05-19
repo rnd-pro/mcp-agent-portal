@@ -38,6 +38,7 @@ export class SkillManager extends Symbiote {
     statusText: '',
     dirty: false,
     hasFile: false,
+    canEdit: false,
     canInstall: false,
     editMode: false,
     modeLabel: 'edit',
@@ -75,6 +76,7 @@ export class SkillManager extends Symbiote {
     this._currentSource = source;
     this.$.filename = path;
     this.$.hasFile = false;
+    this.$.canEdit = false;
     this.$.canInstall = false;
     this.$.statusText = 'Loading...';
     try {
@@ -88,6 +90,7 @@ export class SkillManager extends Symbiote {
       this.syncPreview();
       this.setEditMode(source !== 'open-library' && !isMarkdown(path));
       this.$.hasFile = true;
+      this.$.canEdit = source !== 'open-library' && !this.ref.editor.disabled;
       this.$.canInstall = source === 'open-library';
       this.setDirty(false);
       this.dispatchMetadata();
@@ -95,6 +98,7 @@ export class SkillManager extends Symbiote {
       this.ref.editor.value = `Error: ${err.message}`;
       this.ref.editor.disabled = true;
       this.$.hasFile = true;
+      this.$.canEdit = false;
       this.$.canInstall = false;
       this.$.statusText = 'Error';
     }

@@ -3,7 +3,7 @@ export default `
     <span class="pg-code-filename" bind="textContent: filename"></span>
     <div class="pg-code-controls">
       <span class="pg-code-stats" bind="textContent: statusText"></span>
-      <button class="pg-mode-toggle" bind="onclick: onToggleEdit; hidden: !hasFile" title="Toggle edit mode">
+      <button class="pg-mode-toggle" bind="onclick: onToggleEdit; hidden: !canEdit" title="Toggle edit mode">
         <span class="material-symbols-outlined" style="font-size:14px">edit_note</span>
         <span class="pg-mode-label" bind="textContent: modeLabel"></span>
       </button>
@@ -11,7 +11,7 @@ export default `
         <span class="material-symbols-outlined" style="font-size:14px">download</span>
         <span class="pg-mode-label">install</span>
       </button>
-      <button class="pg-mode-toggle" bind="onclick: onSave; disabled: !dirty" title="Save">
+      <button class="pg-mode-toggle" bind="onclick: onSave; disabled: !dirty; hidden: !canEdit" title="Save">
         <span class="material-symbols-outlined" style="font-size:14px">save</span>
         <span class="pg-mode-label">save</span>
       </button>
