@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { spawn, execSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, unlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import http from 'http';
 import WebSocket from 'ws';
@@ -20,6 +20,11 @@ let pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 let scriptPath = resolve(__dirname, '../index.js');
 
 let [, , command, ...args] = process.argv;
+
+const LOCAL_GATEWAY_ROOT = resolve(os.homedir() || os.tmpdir(), '.local-gateway');
+const SERVICES_PATH = resolve(LOCAL_GATEWAY_ROOT, 'services.json');
+const BACKENDS_DIR = resolve(LOCAL_GATEWAY_ROOT, 'backends');
+const GATEWAY_PID_PATH = resolve(LOCAL_GATEWAY_ROOT, 'gateway.pid');
 
 const ESC = '\x1b[';
 const c = {
@@ -44,28 +49,96 @@ ${c.gray}      /___/  Unified MCP aggregator + AI agent runtime${c.reset}
 
 // ── Port Discovery ──────────────────────────────────────────────────
 
-function getBackendPort() {
-  const servicesPath = resolve(os.homedir() || os.tmpdir(), '.local-gateway', 'services.json');
-  const cwd = resolve(process.cwd());
-
-  function isAlive(pid) {
-    if (!Number.isInteger(pid) || pid <= 0) return false;
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
+function isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  function livePort(entry) {
-    if (entry?.port && isAlive(entry.pid)) return entry.port;
+function readJsonFile(filePath) {
+  try {
+    if (!existsSync(filePath)) return null;
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  } catch {
     return null;
   }
+}
+
+function livePort(entry) {
+  if (entry?.port && isAlive(entry.pid)) return entry.port;
+  return null;
+}
+
+function readServices() {
+  return readJsonFile(SERVICES_PATH) || {};
+}
+
+function listBackendEntries() {
+  try {
+    if (!existsSync(BACKENDS_DIR)) return [];
+    return readdirSync(BACKENDS_DIR)
+      .filter(file => file.startsWith('portal-') && file.endsWith('.json'))
+      .map(file => {
+        let entry = readJsonFile(resolve(BACKENDS_DIR, file));
+        return entry ? { ...entry, file, path: resolve(BACKENDS_DIR, file), alive: isAlive(entry.pid) } : null;
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function listRouteEntries() {
+  let portal = readServices()['portal.local'] || {};
+  return Object.entries(portal.routes || {}).map(([route, entry]) => ({
+    route,
+    ...entry,
+    alive: isAlive(entry?.pid),
+  }));
+}
+
+function resolveProjectRef(projectRef = process.cwd()) {
+  if (!projectRef || projectRef === '.') return resolve(process.cwd());
+  try {
+    return resolve(projectRef);
+  } catch {
+    return projectRef;
+  }
+}
+
+function findWorkspaceBackend(projectRef = process.cwd(), { fallbackLatest = true } = {}) {
+  let ref = resolveProjectRef(projectRef);
+  let backends = listBackendEntries().filter(entry => entry.alive && entry.port);
+  let exact = backends.find(entry => resolve(entry.project || '') === ref);
+  if (exact) return exact;
+
+  let byName = backends.find(entry => entry.name === projectRef || entry.project?.endsWith(`/${projectRef}`));
+  if (byName) return byName;
+
+  let routes = listRouteEntries().filter(entry => entry.alive && entry.port);
+  let routeExact = routes.find(entry => resolve(entry.projectPath || '') === ref);
+  if (routeExact) {
+    return {
+      ...routeExact,
+      project: routeExact.projectPath,
+      name: routeExact.projectName,
+      mcpDirect: `http://127.0.0.1:${routeExact.port}/mcp`,
+    };
+  }
+
+  return fallbackLatest ? backends.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0] || null : null;
+}
+
+function getBackendPort() {
+  const cwd = resolve(process.cwd());
 
   try {
-    if (existsSync(servicesPath)) {
-      const services = JSON.parse(readFileSync(servicesPath, 'utf8'));
+    if (existsSync(SERVICES_PATH)) {
+      const services = readServices();
       const portal = services['portal.local'];
       const directPort = livePort(portal);
       if (directPort) return directPort;
@@ -84,19 +157,8 @@ function getBackendPort() {
     // ignore parse errors
   }
 
-  const backendsDir = resolve(os.homedir() || os.tmpdir(), '.local-gateway', 'backends');
   try {
-    if (!existsSync(backendsDir)) return null;
-    const backends = readdirSync(backendsDir)
-      .filter(file => file.startsWith('portal-') && file.endsWith('.json'))
-      .map(file => {
-        try {
-          return JSON.parse(readFileSync(resolve(backendsDir, file), 'utf8'));
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean)
+    const backends = listBackendEntries()
       .filter(entry => livePort(entry));
 
     const currentBackend = backends.find(entry => resolve(entry.project || '') === cwd);
@@ -239,6 +301,154 @@ function httpJsonRequest(port, path, token = null) {
     req.on('error', reject);
     req.end();
   });
+}
+
+function mcpDirectUrl(entry) {
+  if (!entry?.port) return null;
+  return entry.mcpDirect || `http://127.0.0.1:${entry.port}/mcp`;
+}
+
+function uiUrl(entry) {
+  if (!entry?.port) return null;
+  return entry.webDirect || `http://127.0.0.1:${entry.port}/`;
+}
+
+function cleanupHubState() {
+  let removedBackends = 0;
+  for (let entry of listBackendEntries()) {
+    if (entry.alive) continue;
+    try {
+      unlinkSync(entry.path);
+      removedBackends += 1;
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+
+  let services = readServices();
+  let portal = services['portal.local'];
+  let removedRoutes = 0;
+  if (portal?.routes) {
+    for (let [route, entry] of Object.entries(portal.routes)) {
+      if (isAlive(entry?.pid)) continue;
+      delete portal.routes[route];
+      removedRoutes += 1;
+    }
+    if (removedRoutes > 0) {
+      writeFileSync(SERVICES_PATH, JSON.stringify(services, null, 2));
+    }
+  }
+
+  return { removedBackends, removedRoutes };
+}
+
+function printHubRoutes() {
+  let routes = listRouteEntries();
+  if (routes.length === 0) {
+    console.log('No portal.local routes registered.');
+    return;
+  }
+
+  for (let route of routes) {
+    console.log(`${route.route.padEnd(24)} ${route.alive ? 'alive' : 'dead '} pid=${route.pid || '-'} port=${route.port || '-'} ${route.projectPath || ''}`);
+  }
+}
+
+function printHubStatus(projectRef = process.cwd(), { fallbackLatest = true } = {}) {
+  let gatewayPid = 0;
+  try {
+    let raw = readFileSync(GATEWAY_PID_PATH, 'utf8').trim();
+    gatewayPid = raw.startsWith('{') ? Number(JSON.parse(raw).pid || 0) : Number(raw);
+  } catch {
+    gatewayPid = 0;
+  }
+  let backends = listBackendEntries();
+  let liveBackends = backends.filter(entry => entry.alive);
+  let current = findWorkspaceBackend(projectRef, { fallbackLatest });
+
+  console.log('Portal Hub');
+  console.log(`  Gateway:       ${gatewayPid && isAlive(gatewayPid) ? `alive pid=${gatewayPid}` : 'not detected'}`);
+  console.log(`  State dir:     ${LOCAL_GATEWAY_ROOT}`);
+  console.log(`  Backends:      ${liveBackends.length} live / ${backends.length} registered`);
+  console.log(`  Current UI:    ${current ? uiUrl(current) : '(no live backend)'}`);
+  console.log(`  Current MCP:   ${current ? mcpDirectUrl(current) : '(no live backend)'}`);
+  console.log('');
+  printHubRoutes();
+}
+
+function probeMcpEndpoint(endpoint) {
+  let url = new URL(endpoint);
+  let payload = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 'portal-cli-doctor',
+    method: 'initialize',
+    params: {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'mcp-agent-portal-cli', version: pkg.version },
+    },
+  });
+
+  return new Promise((resolvePromise, reject) => {
+    let req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', chunk => (data += chunk));
+        res.on('end', () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+            return;
+          }
+          try {
+            resolvePromise(JSON.parse(data));
+          } catch {
+            resolvePromise({ raw: data });
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+async function printHubDoctor(projectRef = process.cwd(), { fallbackLatest = true } = {}) {
+  let current = findWorkspaceBackend(projectRef, { fallbackLatest });
+  let deadBackends = listBackendEntries().filter(entry => !entry.alive);
+  let deadRoutes = listRouteEntries().filter(entry => !entry.alive);
+
+  console.log('Portal Hub doctor');
+  console.log(`  Dead backend files: ${deadBackends.length}`);
+  console.log(`  Dead routes:        ${deadRoutes.length}`);
+
+  if (!current) {
+    console.log('  MCP probe:          skipped, no live backend');
+    process.exitCode = 1;
+    return;
+  }
+
+  let endpoint = mcpDirectUrl(current);
+  try {
+    let res = await probeMcpEndpoint(endpoint);
+    console.log(`  MCP endpoint:       ${endpoint}`);
+    console.log(`  MCP initialize:     ${res?.result?.serverInfo?.name || 'ok'}`);
+  } catch (err) {
+    console.log(`  MCP endpoint:       ${endpoint}`);
+    console.log(`  MCP initialize:     failed: ${err.message}`);
+    process.exitCode = 1;
+  }
 }
 
 function parseRunArgs(argsArr) {
@@ -591,6 +801,61 @@ let CLI = {
     },
   },
 
+  hub: {
+    desc: 'Inspect local hub state (usage: hub status|routes|mcp-url|doctor|cleanup)',
+    async handler() {
+      let { flags, positional } = parseFlags(args);
+      let subcmd = positional[0] || 'status';
+      let projectRef = flags.project || process.cwd();
+      let fallbackLatest = !flags.project;
+
+      if (subcmd === 'status') {
+        printHubStatus(projectRef, { fallbackLatest });
+        return;
+      }
+
+      if (subcmd === 'routes') {
+        printHubRoutes();
+        return;
+      }
+
+      if (subcmd === 'mcp-url') {
+        let current = findWorkspaceBackend(projectRef, { fallbackLatest });
+        if (!current) {
+          console.error('No live portal backend found for this project.');
+          process.exit(1);
+        }
+        console.log(mcpDirectUrl(current));
+        return;
+      }
+
+      if (subcmd === 'ui-url') {
+        let current = findWorkspaceBackend(projectRef, { fallbackLatest });
+        if (!current) {
+          console.error('No live portal backend found for this project.');
+          process.exit(1);
+        }
+        console.log(uiUrl(current));
+        return;
+      }
+
+      if (subcmd === 'doctor') {
+        await printHubDoctor(projectRef, { fallbackLatest });
+        return;
+      }
+
+      if (subcmd === 'cleanup') {
+        let res = cleanupHubState();
+        console.log(`Removed ${res.removedBackends} dead backend file(s) and ${res.removedRoutes} dead route(s).`);
+        return;
+      }
+
+      console.error(`Unknown hub command: ${subcmd}`);
+      console.error('Usage: mcp-agent-portal hub status|routes|mcp-url|ui-url|doctor|cleanup');
+      process.exit(1);
+    },
+  },
+
   restart: {
     desc: 'Restart the running portal backend',
     async handler() {
@@ -866,11 +1131,23 @@ Options for 'gateway':
   disable                Disable the gateway
   test                   Probe running /anthropic endpoints or validate config
 
+Options for 'hub':
+  status                 Show local gateway, route, and backend state
+  routes                 List portal.local routes
+  mcp-url [--project <path|name>]
+                         Print direct Streamable HTTP MCP URL
+  ui-url [--project <path|name>]
+                         Print direct web UI URL
+  doctor                 Probe the current MCP endpoint
+  cleanup                Remove dead backend files and stale routes
+
 Web Dashboard:
   http://portal.local/   Available while the server is running
 
 Examples:
   npx mcp-agent-portal run "scan directory" --sync
+  npx mcp-agent-portal hub mcp-url
+  npx mcp-agent-portal hub doctor
   npx mcp-agent-portal gateway enable --provider deepseek
   npx mcp-agent-portal gateway test
   npx mcp-agent-portal tasks
