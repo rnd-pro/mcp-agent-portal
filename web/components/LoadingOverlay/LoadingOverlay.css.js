@@ -1,4 +1,8 @@
 export default /*css*/`
+:host {
+  display: block;
+}
+
   .pcb-loader {
     position: absolute;
     inset: 0;

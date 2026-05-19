@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   follow-ribbon {
     position: fixed;
     bottom: 20px;

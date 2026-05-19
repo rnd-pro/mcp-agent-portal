@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   pg-ops-panel { display:flex; flex-direction:column; height:100%; overflow:hidden; font-size:12px; font-family:var(--sn-font, Georgia, serif); }
   .pg-mon-header { padding:6px 12px; border-bottom:1px solid var(--sn-node-border); background:var(--sn-node-header-bg); font-size:11px; color:var(--sn-text-dim); flex-shrink: 0; }
   .pg-mon-body { flex:1; overflow-y:auto; padding:8px; display: flex; flex-direction: column; gap: 8px; }

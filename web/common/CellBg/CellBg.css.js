@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
 cell-bg {
   display: block;
   position: absolute;

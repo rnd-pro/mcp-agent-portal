@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   pg-ctx-panel {
     display: flex;
     flex-direction: column;

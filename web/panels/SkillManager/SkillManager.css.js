@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   pg-skill-manager {
     display: flex;
     flex-direction: column;

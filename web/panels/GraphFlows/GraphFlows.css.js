@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
 pg-graph-flows {
   display: block;
   height: 100%;

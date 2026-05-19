@@ -1,4 +1,8 @@
 export default /*css*/ `
+:host {
+  display: block;
+}
+
 .filter-bar {
   display: flex;
   gap: 4px;

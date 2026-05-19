@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
 pg-agent-chat {
   display: block;
   height: 100%;

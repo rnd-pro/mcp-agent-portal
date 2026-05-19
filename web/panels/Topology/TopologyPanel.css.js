@@ -1,4 +1,8 @@
 export default /*css*/ `
+:host {
+  display: block;
+}
+
 .node-table {
   width: 100%;
   border-collapse: collapse;

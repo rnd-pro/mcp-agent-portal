@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   pg-file-tree {
     display: flex;
     flex-direction: column;

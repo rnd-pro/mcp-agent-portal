@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
 .te-tools-grid {
   flex: 1;
   overflow-y: auto;

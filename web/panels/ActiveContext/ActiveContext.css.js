@@ -29,7 +29,4 @@ export default `
       padding: 8px;
     }
   }
-
-  .ui-btn-icon { background:transparent; border:none; color:var(--sn-text-dim); cursor:pointer; border-radius:4px; padding:4px; font-size:16px; }
-  .ui-btn-icon:hover { background:var(--sn-node-hover); color:var(--sn-text); }
 `;

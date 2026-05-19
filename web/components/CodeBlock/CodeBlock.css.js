@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   code-block {
     display: block;
     height: 100%;

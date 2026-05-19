@@ -1,5 +1,9 @@
 // CSS for pg-dep-graph. Kept separate so dep-graph.js stays focused on graph behavior.
 export default `
+:host {
+  display: block;
+}
+
   pg-dep-graph {
     display: block;
     height: 100%;

@@ -1,4 +1,8 @@
 export default `
+:host {
+  display: block;
+}
+
   pg-health-panel { display:block; height:100%; overflow-y:auto; padding:16px; font-family:var(--sn-font, Georgia, serif); }
   .pg-health-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:12px; align-content:start; }
   .pg-health-card {
