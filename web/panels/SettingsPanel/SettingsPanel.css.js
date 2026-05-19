@@ -6,6 +6,47 @@ export default`
   padding: 16px;
 }
 
+.stg-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.stg-status {
+  margin-bottom: 16px;
+  font-size: 11px;
+  color: var(--sn-text-dim);
+}
+
+.stg-integrations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stg-label {
+  min-width: 150px;
+}
+
+.stg-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 4px;
+  background: var(--sn-bg);
+  color: var(--sn-text);
+}
+
+.stg-save-btn {
+  margin-left: 8px;
+  align-self: flex-start;
+}
+
+.stg-search-icon {
+  font-size: 16px;
+  color: var(--sn-text-dim);
+}
+
 .pg-stg-metric {
   display: flex;
   justify-content: space-between;

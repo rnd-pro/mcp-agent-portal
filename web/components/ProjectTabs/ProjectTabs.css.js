@@ -200,4 +200,9 @@ project-tab-item[active] .tab-close {
 .tab-filler {
   flex: 1;
 }
+
+.tab-items {
+  display: flex;
+  align-items: stretch;
+}
 `;

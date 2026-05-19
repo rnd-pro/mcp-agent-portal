@@ -2,12 +2,12 @@ import { html } from '@symbiotejs/symbiote';
 
 export default html`
 <div class="ui-header">
-  <div class="ui-title-large" style="display:flex; align-items:center; justify-content:space-between; width:100%">
-    <div style="display:flex; align-items:center;">
+  <div class="ui-title-large mp-title-bar">
+    <div class="mp-title-left">
       <span class="material-symbols-outlined mp-header-icon">storefront</span>
       Marketplace
     </div>
-    <div class="ui-segmented-control" ref="modeToggle" style="font-size:13px; font-weight:normal;">
+    <div class="ui-segmented-control mp-mode-toggle" ref="modeToggle">
       <button class="active" data-mode="servers">MCP Servers</button>
       <button data-mode="context">Skills & Rules</button>
     </div>
@@ -23,7 +23,7 @@ export default html`
 
   <div class="mp-search-bar" ref="searchBar">
     <span class="material-symbols-outlined mp-search-icon">search</span>
-    <input type="text" class="ui-field" style="width:100%" placeholder="Search servers..." ref="searchInput" />
+    <input type="text" class="ui-field mp-search-input" placeholder="Search servers..." ref="searchInput" />
   </div>
 
   <div class="mp-scrollable">
@@ -37,7 +37,7 @@ export default html`
 
     <div class="mp-tab-content" ref="customTab" hidden>
       <div class="mp-custom-form">
-        <div class="ui-card-title" style="margin-bottom:4px; font-size:15px;">Install Custom MCP Server</div>
+        <div class="ui-card-title mp-custom-title">Install Custom MCP Server</div>
         <p class="mp-form-desc">Add any MCP server by specifying its command and arguments.</p>
         
         <div class="ui-field">
@@ -61,7 +61,7 @@ export default html`
         </div>
         
         <button class="ui-btn primary" ref="customInstallBtn">
-          <span class="material-symbols-outlined" style="font-size:18px;">add_circle</span>
+          <span class="material-symbols-outlined mp-install-icon">add_circle</span>
           Install Server
         </button>
         <div class="mp-form-status" ref="customStatus"></div>
@@ -70,14 +70,14 @@ export default html`
   </div>
 </div>
 
-<div class="mp-mode-section" ref="contextSection" hidden style="display:flex; flex-direction:column; height:100%">
-  <div style="padding:16px; border-bottom:1px solid var(--border); background:var(--bg-card);">
-    <p style="margin:0; font-size:13px; color:var(--text-sec); line-height:1.5;">
+<div class="mp-mode-section mp-context-section" ref="contextSection" hidden>
+  <div class="mp-context-header">
+    <p class="mp-context-desc">
       Browse and install universal agent skills and workflows from <b>Open Memory</b> (Layer 1).
       <br/>Installing a skill makes it available to your local project or the entire team.
     </p>
   </div>
-  <div class="mp-scrollable" style="padding:16px;">
+  <div class="mp-scrollable mp-context-body">
     <div class="mp-grid" ref="contextGrid" ${{ itemize: 'contextItems', 'item-tag': 'mp-context-card' }}></div>
   </div>
 </div>

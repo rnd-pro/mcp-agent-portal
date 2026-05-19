@@ -347,4 +347,8 @@ export default `
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+/* Icon Size Utilities */
+.icon-sm { font-size: 14px; }
+.icon-md { font-size: 16px; }
+.icon-lg { font-size: 18px; }
 `

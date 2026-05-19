@@ -262,4 +262,57 @@ export default `
 .mp-form-status.error {
   color: var(--sn-danger-color);
 }
+
+.mp-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.mp-title-left {
+  display: flex;
+  align-items: center;
+}
+
+.mp-mode-toggle {
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.mp-search-input {
+  width: 100%;
+}
+
+.mp-custom-title {
+  margin-bottom: 4px;
+  font-size: 15px;
+}
+
+.mp-install-icon {
+  font-size: 18px;
+}
+
+.mp-context-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.mp-context-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--sn-node-border);
+  background: var(--sn-node-bg);
+}
+
+.mp-context-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--sn-text-dim);
+  line-height: 1.5;
+}
+
+.mp-context-body {
+  padding: 16px;
+}
 `;

@@ -7,7 +7,7 @@ export default html`
   <div class="chat-view" ref="chatView">
     <cell-bg ref="cellBg"></cell-bg>
 
-    <div ref="chatMessages" class="chat-messages" style="position: relative; z-index: 1;" ${{ itemize: 'messageItems', 'item-tag': 'chat-message-item' }}></div>
+    <div ref="chatMessages" class="chat-messages" ${{ itemize: 'messageItems', 'item-tag': 'chat-message-item' }}></div>
     <button class="scroll-bottom-btn" ref="scrollBottomBtn" title="Scroll to bottom" ${{ onclick: 'onScrollToBottom' }}>
       <span class="material-symbols-outlined">arrow_downward</span>
     </button>
@@ -15,7 +15,7 @@ export default html`
     <div class="chat-composer" ref="composer" ${{ ondragover: 'onDragOver', ondragleave: 'onDragLeave', ondrop: 'onDrop' }}>
       <div class="chat-context-bar" itemize="attachedContext">
         <div class="context-chip" title="{{title}}">
-          <span class="material-symbols-outlined" style="font-size:14px">{{icon}}</span>
+          <span class="material-symbols-outlined icon-sm">{{icon}}</span>
           <span class="context-path">{{name}}</span>
           <button class="context-remove" ${{ '@data-key': 'key', onclick: '^onRemoveContext' }}>×</button>
         </div>

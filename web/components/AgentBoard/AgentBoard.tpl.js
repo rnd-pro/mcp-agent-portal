@@ -20,7 +20,7 @@ export default /*html*/ `
           <span class="col-count">{{queuedCount}}</span>
         </div>
         <div class="col-cards" itemize="queuedNodes">
-          <div class="agent-card status-queued" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}} style="cursor: pointer;">
+          <div class="agent-card status-queued" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}}>
             <div class="card-header">
               <span class="agent-slug">{{agentSlug}}</span>
               <span class="material-symbols-outlined">schedule</span>
@@ -40,7 +40,7 @@ export default /*html*/ `
           <span class="col-count">{{runningCount}}</span>
         </div>
         <div class="col-cards" itemize="runningNodes">
-          <div class="agent-card status-running" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}} style="cursor: pointer;">
+          <div class="agent-card status-running" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}}>
             <div class="card-header">
               <span class="agent-slug">{{agentSlug}}</span>
               <span class="material-symbols-outlined spin-icon">autorenew</span>
@@ -60,7 +60,7 @@ export default /*html*/ `
           <span class="col-count">{{doneCount}}</span>
         </div>
         <div class="col-cards" itemize="doneNodes">
-          <div class="agent-card status-done" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}} style="cursor: pointer;">
+          <div class="agent-card status-done" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}}>
             <div class="card-header">
               <span class="agent-slug">{{agentSlug}}</span>
               <span class="material-symbols-outlined">check_circle</span>
@@ -81,7 +81,7 @@ export default /*html*/ `
           <span class="col-count">{{errorCount}}</span>
         </div>
         <div class="col-cards" itemize="errorNodes">
-          <div class="agent-card status-error" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}} style="cursor: pointer;">
+          <div class="agent-card status-error" ${{onclick: 'onCardClick', 'data-chat': 'chatId'}}>
             <div class="card-header">
               <span class="agent-slug">{{agentSlug}}</span>
               <span class="material-symbols-outlined">error</span>

@@ -11,7 +11,7 @@ export default html`
       <div class="ui-empty-state" ${{ hidden: '!serversEmptyText' }}>{{serversEmptyText}}</div>
     </div>
   </div>
-  <div class="ui-main" style="padding:0">
+  <div class="ui-main te-main-nopad">
     <div class="ui-header">
       <div class="ui-title-large">
         <span class="material-symbols-outlined">build</span>

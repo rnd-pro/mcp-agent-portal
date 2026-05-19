@@ -1,11 +1,11 @@
 export default`
 <div class="ui-card-title">Actions</div>
-<div style="display:flex;gap:8px;margin-bottom:16px">
+<div class="stg-actions">
 <button class="ui-btn" ref="refreshBtn">↻ Refresh</button>
 <button class="ui-btn danger" ref="restartBtn">⟳ Restart</button>
 <button class="ui-btn danger" ref="stopBtn">⏹ Stop</button>
 </div>
-<div ref="restartStatus" style="margin-bottom:16px;font-size:11px;color:var(--sn-text-dim)"></div>
+<div ref="restartStatus" class="stg-status"></div>
 
 <div class="ui-card-title">Backend</div>
 <div class="ui-card" ref="backendCard"></div>
@@ -20,15 +20,15 @@ export default`
 </div>
 
 <div class="ui-card-title">Integrations</div>
-<div class="ui-card" ref="integrationsCard" style="display:flex; flex-direction:column; gap:8px;">
+<div class="ui-card stg-integrations" ref="integrationsCard">
   <div class="pg-stg-metric">
-    <span style="min-width: 150px;">Telegram Token</span>
-    <input type="password" ref="telegramTokenInput" placeholder="123456:ABC-DEF..." style="flex:1; padding:4px 8px; border:1px solid var(--sn-border); border-radius:4px; background:var(--sn-bg-level-1); color:var(--sn-text-main);">
+    <span class="stg-label">Telegram Token</span>
+    <input type="password" ref="telegramTokenInput" placeholder="123456:ABC-DEF..." class="stg-input">
   </div>
   <div class="pg-stg-metric">
-    <span style="min-width: 150px;">Authorized Chat ID</span>
-    <input type="text" ref="telegramChatIdInput" placeholder="-100123456789" style="flex:1; padding:4px 8px; border:1px solid var(--sn-border); border-radius:4px; background:var(--sn-bg-level-1); color:var(--sn-text-main);">
-    <button class="ui-btn primary" ref="saveSettingsBtn" style="margin-left: 8px; align-self: flex-start;">Save</button>
+    <span class="stg-label">Authorized Chat ID</span>
+    <input type="text" ref="telegramChatIdInput" placeholder="-100123456789" class="stg-input">
+    <button class="ui-btn primary stg-save-btn" ref="saveSettingsBtn">Save</button>
   </div>
 </div>
 
@@ -112,7 +112,7 @@ export default`
   
   <div class="pm-directory" ref="directoryEl">
     <div class="pm-search">
-      <span class="material-symbols-outlined" style="font-size:16px;color:var(--sn-text-dim)">search</span>
+      <span class="material-symbols-outlined stg-search-icon">search</span>
       <input type="text" ref="searchInput" placeholder="Search models by name or ID...">
     </div>
     <div class="pm-grid-header" ref="sortHeaders">

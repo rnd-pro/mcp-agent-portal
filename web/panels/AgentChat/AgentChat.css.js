@@ -443,6 +443,8 @@ chat-sidebar-item[data-expanded] .chat-sub-items {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative;
+  z-index: 1;
 }
 
 chat-message-item {

@@ -3,6 +3,10 @@ export default `
   display: block;
 }
 
+.te-main-nopad {
+  padding: 0;
+}
+
 .te-tools-grid {
   flex: 1;
   overflow-y: auto;
