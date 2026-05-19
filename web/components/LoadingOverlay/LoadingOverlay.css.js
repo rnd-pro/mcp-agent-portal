@@ -44,7 +44,7 @@ export default /*css*/`
     background: linear-gradient(90deg, #c87533, #d4a04a);
     border-radius: 1px;
     transition: width 0.35s ease-out;
-    box-shadow: 0 0 8px var(--sn-warning-color, rgba(212,160,74,0.5));
+    box-shadow: 0 0 8px rgba(212,160,74,0.5);
   }
   .pcb-loader-sub {
     font-family: var(--sn-font, 'SF Mono', monospace);

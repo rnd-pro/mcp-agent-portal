@@ -25,7 +25,7 @@ export default `
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--sn-cat-server, rgba(76, 139, 245, 0.25));
-    box-shadow: 0 8px 32px var(--sn-bg-overlay, rgba(0, 0, 0, 0.4)), 0 0 16px var(--sn-cat-server, rgba(76, 139, 245, 0.1));
+    box-shadow: 0 8px 32px var(--sn-bg-overlay, rgba(0, 0, 0, 0.4)), 0 0 16px rgba(76, 139, 245, 0.1);
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 12px;
     font-weight: 500;

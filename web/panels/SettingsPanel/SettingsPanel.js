@@ -56,6 +56,7 @@ export class SettingsPanel extends Symbiote {
         this.ref.telegramChatIdInput.value = r.telegramChatId;
       }
       this._settings = r || {};
+      this._applyAgentPortalSettings(r.agentPortal || {});
       this._applyGatewaySettings(r.anthropicGateway || {});
     } catch (e) {
       console.error('Failed to fetch settings:', e);
@@ -66,13 +67,14 @@ export class SettingsPanel extends Symbiote {
     try {
       let telegramToken = this.ref.telegramTokenInput.value.trim();
       let telegramChatId = this.ref.telegramChatIdInput.value.trim();
+      let agentPortal = this._readAgentPortalSettings();
       let anthropicGateway = this._readGatewaySettings();
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramToken, telegramChatId, anthropicGateway })
+        body: JSON.stringify({ telegramToken, telegramChatId, agentPortal, anthropicGateway })
       });
-      this._settings = { ...this._settings, telegramToken, telegramChatId, anthropicGateway };
+      this._settings = { ...this._settings, telegramToken, telegramChatId, agentPortal, anthropicGateway };
       let btn = this.ref.saveSettingsBtn;
       btn.textContent = "Saved! Please click Restart.";
       btn.className = "ui-btn primary";
@@ -82,6 +84,20 @@ export class SettingsPanel extends Symbiote {
     } catch (e) {
       console.error('Failed to save settings:', e);
     }
+  }
+
+  _applyAgentPortalSettings(raw) {
+    this.ref.openLibraryPathInput.value = raw.openLibraryPath || '';
+    this.ref.teamLibraryRepoInput.value = raw.teamLibraryRepo || '';
+    this.ref.teamLibraryBranchInput.value = raw.teamLibraryBranch || 'main';
+  }
+
+  _readAgentPortalSettings() {
+    return {
+      openLibraryPath: this.ref.openLibraryPathInput.value.trim(),
+      teamLibraryRepo: this.ref.teamLibraryRepoInput.value.trim(),
+      teamLibraryBranch: this.ref.teamLibraryBranchInput.value.trim() || 'main',
+    };
   }
 
   _applyGatewaySettings(raw) {

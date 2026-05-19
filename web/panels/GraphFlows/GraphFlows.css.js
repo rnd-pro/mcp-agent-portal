@@ -106,7 +106,7 @@ pg-graph-flows {
 
 .flows-story[data-active] {
   border-color: var(--sn-node-selected, #d4a04a);
-  background: var(--sn-warning-color, rgba(212,160,74,0.1));
+  background: rgba(212,160,74,0.1);
 }
 
 .flows-story-title {

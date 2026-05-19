@@ -24,7 +24,7 @@ export default`
   color: var(--sn-cat-server, #64b5f6);
   padding: 1px 6px;
   border-radius: 8px;
-  background: var(--sn-cat-server, rgba(100, 181, 246, 0.1));
+  background: rgba(100, 181, 246, 0.1);
   border: 1px solid var(--sn-cat-server, rgba(100, 181, 246, 0.15));
   font-family: var(--sn-font-mono, monospace);
   white-space: nowrap;

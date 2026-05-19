@@ -42,10 +42,37 @@ export default`
 }
 
 /* Claude Gateway */
+.pg-library-settings,
 .pg-gateway {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.pg-library-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--sn-text-dim);
+}
+
+.pg-library-settings input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--sn-border);
+  border-radius: 4px;
+  background: var(--sn-bg-level-1);
+  color: var(--sn-text-main);
+  font: 12px var(--sn-font-mono, monospace);
+}
+
+.pg-library-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--sn-text-dim);
 }
 
 .pg-gateway-head {

@@ -32,6 +32,23 @@ export default`
   </div>
 </div>
 
+<div class="ui-card-title">Agent Portal Libraries</div>
+<div class="ui-card pg-library-settings" ref="agentPortalCard">
+  <label>
+    <span>Open Library Path</span>
+    <input type="text" ref="openLibraryPathInput" placeholder="/path/to/public-agent-portal-library">
+  </label>
+  <label>
+    <span>Team Library Repository</span>
+    <input type="url" ref="teamLibraryRepoInput" placeholder="git@github.com:org/private-agent-portal.git">
+  </label>
+  <label>
+    <span>Team Library Branch</span>
+    <input type="text" ref="teamLibraryBranchInput" placeholder="main">
+  </label>
+  <div class="pg-library-note">Public items are installed into the private team library before project use. Secrets and runtime state stay outside .agent-portal.</div>
+</div>
+
 <div class="ui-card-title">Claude Gateway</div>
 <div class="ui-card pg-gateway" ref="gatewayCard">
   <div class="pg-gateway-head">
