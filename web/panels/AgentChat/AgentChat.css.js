@@ -286,6 +286,44 @@ chat-sidebar-sub-item[data-active] > .chat-item-child {
   overflow: visible;
 }
 
+.chat-nav[collapsed] .chat-item::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -48px;
+  bottom: 0;
+  width: 48px;
+}
+
+.chat-nav[collapsed] .chat-item-icon-slot {
+  position: static;
+}
+
+.chat-nav[collapsed] .chat-item:hover .chat-item-icon,
+.chat-nav[collapsed] .chat-item-child:hover .chat-item-icon {
+  opacity: 1;
+}
+
+.chat-nav[collapsed] .chat-item-delete {
+  inset: auto -48px 0 auto;
+  top: 0;
+  width: 48px;
+  height: 100%;
+  background: var(--sn-node-bg);
+  border-radius: 0 4px 4px 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+  z-index: 30;
+  transition: color 0.12s, opacity 0.12s;
+}
+
+.chat-nav[collapsed] .chat-item:hover .chat-item-delete,
+.chat-nav[collapsed] .chat-item:focus-within .chat-item-delete,
+.chat-nav[collapsed] .chat-item-child:hover .chat-item-delete,
+.chat-nav[collapsed] .chat-item-child:focus-within .chat-item-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* ── Chat Hierarchy (delegation tree) ── */
 
 .chat-expand-icon {

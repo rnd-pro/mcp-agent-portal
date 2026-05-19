@@ -135,7 +135,7 @@ function _applyPatch(params) {
     let path = op.path;
     affected.push(path);
     let parts = path.split('/');
-    if (op.op === 'del') {
+    if (op.op === 'delete' || op.op === 'del') {
       // Delete
       let obj = _state;
       for (let i = 0; i < parts.length - 1; i++) {
@@ -143,6 +143,19 @@ function _applyPatch(params) {
         obj = obj[parts[i]];
       }
       if (obj) delete obj[parts[parts.length - 1]];
+    } else if (op.op === 'merge') {
+      let obj = _state;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (obj[parts[i]] == null) obj[parts[i]] = {};
+        obj = obj[parts[i]];
+      }
+      let key = parts[parts.length - 1];
+      let current = obj[key];
+      if (current && typeof current === 'object' && !Array.isArray(current)) {
+        obj[key] = { ...current, ...(op.value || {}) };
+      } else {
+        obj[key] = op.value;
+      }
     } else {
       // Set
       let obj = _state;
@@ -203,4 +216,9 @@ function disconnect() {
 }
 
 export const stateSync = { on, get, commit, connect, disconnect };
+export const __stateSyncTest = {
+  applySnapshot: _applySnapshot,
+  applyPatch: _applyPatch,
+  getState: () => _state,
+};
 export default stateSync;

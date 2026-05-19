@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,7 +26,7 @@ describe('ops runtime utilities', () => {
 
   beforeEach(() => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-ops-runtime-'));
-    options = { projectRoot: tempRoot, env: {} };
+    options = { projectRoot: tempRoot, env: { AGENT_PORTAL_CONFIG_DIR: path.join(tempRoot, 'portal-home') } };
   });
 
   afterEach(() => {
@@ -33,15 +34,21 @@ describe('ops runtime utilities', () => {
   });
 
   it('resolves project-local runtime paths and normalizes path parts', () => {
-    assert.equal(getRuntimeDir(options), path.join(tempRoot, '.agent-portal/runtime'));
+    const projectState = path.join(
+      tempRoot,
+      'portal-home',
+      'projects',
+      `${path.basename(tempRoot)}-${createHash('sha1').update(path.resolve(tempRoot)).digest('hex').slice(0, 12)}`,
+    );
+    assert.equal(getRuntimeDir(options), path.join(projectState, 'runtime'));
     assert.equal(
       getRuntimePath(['/logs/', '', 'portal'], options),
-      path.join(tempRoot, '.agent-portal/runtime/logs/portal'),
+      path.join(projectState, 'runtime/logs/portal'),
     );
-    assert.equal(getDataPath('/api/', ['cache.json'], options), path.join(tempRoot, '.agent-portal/runtime/data/api/cache.json'));
-    assert.equal(getLogPath('api', ['server.log'], options), path.join(tempRoot, '.agent-portal/runtime/logs/api/server.log'));
-    assert.equal(getPidPath('api', options), path.join(tempRoot, '.agent-portal/runtime/pids/api.pid'));
-    assert.equal(getStatusPath('api', options), path.join(tempRoot, '.agent-portal/runtime/status/api.json'));
+    assert.equal(getDataPath('/api/', ['cache.json'], options), path.join(projectState, 'runtime/data/api/cache.json'));
+    assert.equal(getLogPath('api', ['server.log'], options), path.join(projectState, 'runtime/logs/api/server.log'));
+    assert.equal(getPidPath('api', options), path.join(projectState, 'runtime/pids/api.pid'));
+    assert.equal(getStatusPath('api', options), path.join(projectState, 'runtime/status/api.json'));
   });
 
   it('rejects parent-directory path segments', () => {
@@ -64,7 +71,7 @@ describe('ops runtime utilities', () => {
 
   it('creates runtime directories on demand', () => {
     let dir = ensureRuntimeDir(['logs', 'portal'], options);
-    assert.equal(dir, path.join(tempRoot, '.agent-portal/runtime/logs/portal'));
+    assert.match(dir, /portal-home\/projects\/.+\/runtime\/logs\/portal$/);
     assert.equal(fs.statSync(dir).isDirectory(), true);
   });
 

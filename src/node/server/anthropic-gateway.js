@@ -73,6 +73,10 @@ function normalizePath(baseUrl, suffix) {
   return `${base}${suffix}`;
 }
 
+function isAnthropicProvider(provider) {
+  return provider?.type === 'anthropic' || provider?.type === 'anthropic-compatible';
+}
+
 function resolveModel(requestedModel, config) {
   let model = requestedModel || config.defaultModel;
   let lower = model.toLowerCase();
@@ -157,7 +161,7 @@ function convertMessages(messages = []) {
 }
 
 function convertTools(tools = []) {
-  return tools.map(tool => ({
+  return dedupeTools(tools).map(tool => ({
     type: 'function',
     function: {
       name: tool.name,
@@ -165,6 +169,23 @@ function convertTools(tools = []) {
       parameters: tool.input_schema || { type: 'object', properties: {} },
     },
   }));
+}
+
+function dedupeTools(tools = []) {
+  let seen = new Set();
+  let out = [];
+  for (let tool of tools || []) {
+    if (!tool?.name) continue;
+    if (seen.has(tool.name)) continue;
+    seen.add(tool.name);
+    out.push(tool);
+  }
+  return out;
+}
+
+function sanitizeAnthropicBody(body = {}) {
+  if (!Array.isArray(body.tools)) return body;
+  return { ...body, tools: dedupeTools(body.tools) };
 }
 
 function buildOpenAIRequest(body, modelInfo) {
@@ -180,6 +201,7 @@ function buildOpenAIRequest(body, modelInfo) {
     max_tokens: body.max_tokens,
     temperature: body.temperature,
     top_p: body.top_p,
+    stream: body.stream === true,
   };
 
   let tools = convertTools(body.tools || []);
@@ -261,6 +283,207 @@ async function callOpenAICompatible(provider, request) {
   return data;
 }
 
+async function callOpenAICompatibleStream(provider, request, res, requestedModel, modelInfo) {
+  let apiKey = provider.apiKey || (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : null);
+  if (!apiKey) {
+    throw new Error(`Missing API key. Set ${provider.apiKeyEnv || 'provider apiKey'} for ${provider.baseUrl}.`);
+  }
+
+  let response = await fetch(normalizePath(provider.baseUrl, '/chat/completions'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      Authorization: `Bearer ${apiKey}`,
+      ...(provider.headers || {}),
+    },
+    body: JSON.stringify({ ...request, stream: true }),
+  });
+
+  if (!response.ok) {
+    let text = await response.text();
+    let data;
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+    throw new Error(data.error?.message || data.message || text || `Upstream HTTP ${response.status}`);
+  }
+
+  await streamOpenAIChunksAsAnthropic(response, res, requestedModel, modelInfo);
+}
+
+function beginAnthropicSse(res, message) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+  });
+
+  writeSse(res, 'message_start', {
+    type: 'message_start',
+    message: { ...message, content: [], stop_reason: null, stop_sequence: null },
+  });
+}
+
+async function streamOpenAIChunksAsAnthropic(response, res, requestedModel, modelInfo) {
+  let message = {
+    id: `msg_${randomUUID().replaceAll('-', '')}`,
+    type: 'message',
+    role: 'assistant',
+    model: requestedModel || modelInfo.model,
+    content: [],
+    stop_reason: null,
+    stop_sequence: null,
+    usage: { input_tokens: 0, output_tokens: 0 },
+  };
+
+  beginAnthropicSse(res, message);
+
+  let contentIndex = null;
+  let toolIndexes = new Map();
+  let toolNames = new Map();
+  let nextIndex = 0;
+  let finishReason = null;
+  let usage = null;
+
+  function ensureTextBlock() {
+    if (contentIndex !== null) return contentIndex;
+    contentIndex = nextIndex++;
+    writeSse(res, 'content_block_start', {
+      type: 'content_block_start',
+      index: contentIndex,
+      content_block: { type: 'text', text: '' },
+    });
+    return contentIndex;
+  }
+
+  function ensureToolBlock(call) {
+    let key = call.index ?? call.id ?? toolIndexes.size;
+    if (toolIndexes.has(key)) return toolIndexes.get(key);
+    let index = nextIndex++;
+    let name = call.function?.name || toolNames.get(key) || 'tool';
+    toolNames.set(key, name);
+    toolIndexes.set(key, index);
+    writeSse(res, 'content_block_start', {
+      type: 'content_block_start',
+      index,
+      content_block: {
+        type: 'tool_use',
+        id: call.id || `toolu_${randomUUID().replaceAll('-', '')}`,
+        name,
+        input: {},
+      },
+    });
+    return index;
+  }
+
+  let decoder = new TextDecoder();
+  let buffer = '';
+  for await (let chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+
+    for (let rawLine of lines) {
+      let line = rawLine.trim();
+      if (!line || line.startsWith(':')) continue;
+      if (!line.startsWith('data:')) continue;
+      let dataLine = line.slice('data:'.length).trim();
+      if (dataLine === '[DONE]') continue;
+
+      let chunkData;
+      try { chunkData = JSON.parse(dataLine); } catch { continue; }
+      if (chunkData.usage) usage = chunkData.usage;
+
+      for (let choice of chunkData.choices || []) {
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+        let delta = choice.delta || {};
+        if (delta.content) {
+          let index = ensureTextBlock();
+          writeSse(res, 'content_block_delta', {
+            type: 'content_block_delta',
+            index,
+            delta: { type: 'text_delta', text: delta.content },
+          });
+        }
+
+        for (let call of delta.tool_calls || []) {
+          let key = call.index ?? call.id ?? toolIndexes.size;
+          if (call.function?.name) toolNames.set(key, call.function.name);
+          let index = ensureToolBlock(call);
+          if (call.function?.arguments) {
+            writeSse(res, 'content_block_delta', {
+              type: 'content_block_delta',
+              index,
+              delta: { type: 'input_json_delta', partial_json: call.function.arguments },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  if (contentIndex === null && toolIndexes.size === 0) ensureTextBlock();
+  if (contentIndex !== null) writeSse(res, 'content_block_stop', { type: 'content_block_stop', index: contentIndex });
+  for (let index of toolIndexes.values()) {
+    writeSse(res, 'content_block_stop', { type: 'content_block_stop', index });
+  }
+
+  let stopReason = anthropicStopReason({ finish_reason: finishReason });
+  writeSse(res, 'message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: usage?.completion_tokens || 0 },
+  });
+  writeSse(res, 'message_stop', { type: 'message_stop' });
+  res.end();
+}
+
+async function proxyAnthropicCompatible(provider, suffix, req, res, body = null, modelInfo = null) {
+  let apiKey = provider.apiKey || (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : null);
+  if (!apiKey) {
+    throw new Error(`Missing API key. Set ${provider.apiKeyEnv || 'provider apiKey'} for ${provider.baseUrl}.`);
+  }
+
+  let payload = body;
+  if (payload && modelInfo?.upstreamModel) {
+    payload = { ...payload, model: modelInfo.upstreamModel };
+  }
+  if (payload) payload = sanitizeAnthropicBody(payload);
+
+  let headers = {
+    ...(payload ? { 'Content-Type': 'application/json' } : {}),
+    Accept: req.headers.accept || 'application/json',
+    'x-api-key': apiKey,
+    Authorization: `Bearer ${apiKey}`,
+    ...(req.headers['anthropic-version'] ? { 'anthropic-version': req.headers['anthropic-version'] } : {}),
+    ...(req.headers['anthropic-beta'] ? { 'anthropic-beta': req.headers['anthropic-beta'] } : {}),
+    ...(provider.headers || {}),
+  };
+
+  let upstream = await fetch(normalizePath(provider.baseUrl, suffix), {
+    method: req.method,
+    headers,
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+  });
+
+  let contentType = upstream.headers.get('content-type') || 'application/json';
+  res.writeHead(upstream.status, {
+    'Content-Type': contentType,
+    ...(contentType.includes('text/event-stream') ? {
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    } : {}),
+  });
+
+  if (upstream.body && contentType.includes('text/event-stream')) {
+    for await (let chunk of upstream.body) res.write(chunk);
+    res.end();
+    return;
+  }
+
+  let text = await upstream.text();
+  res.end(text);
+}
+
 function writeSse(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -330,8 +553,11 @@ function countTokens(body) {
 
 function listModels(config) {
   let ids = new Set();
-  for (let provider of Object.values(config.providers)) {
-    for (let model of provider.models || []) ids.add(model);
+  for (let [providerId, provider] of Object.entries(config.providers)) {
+    for (let model of provider.models || []) {
+      ids.add(model);
+      ids.add(`${providerId}/${model}`);
+    }
   }
   Object.values(config.aliases).forEach(model => ids.add(model));
   return [...ids].map(id => ({
@@ -365,6 +591,10 @@ export function createAnthropicGatewayHandler() {
 
       if (req.method === 'POST' && url.pathname === '/anthropic/v1/messages/count_tokens') {
         let body = await parseBody(req);
+        let modelInfo = resolveModel(body.model, config);
+        if (isAnthropicProvider(modelInfo.provider)) {
+          return proxyAnthropicCompatible(modelInfo.provider, '/v1/messages/count_tokens', req, res, body, modelInfo);
+        }
         return sendJson(res, 200, { input_tokens: countTokens(body) });
       }
 
@@ -372,15 +602,21 @@ export function createAnthropicGatewayHandler() {
         let body = await parseBody(req);
         let modelInfo = resolveModel(body.model, config);
         if (!modelInfo.provider) throw new Error('No gateway providers configured.');
+        if (isAnthropicProvider(modelInfo.provider)) {
+          return proxyAnthropicCompatible(modelInfo.provider, '/v1/messages', req, res, body, modelInfo);
+        }
+
         if ((modelInfo.provider.type || 'openai-compatible') !== 'openai-compatible') {
           throw new Error(`Unsupported provider type: ${modelInfo.provider.type}`);
         }
 
         let upstreamRequest = buildOpenAIRequest(body, modelInfo);
+        if (body.stream) {
+          return callOpenAICompatibleStream(modelInfo.provider, upstreamRequest, res, body.model, modelInfo);
+        }
         let upstream = await callOpenAICompatible(modelInfo.provider, upstreamRequest);
         let message = toAnthropicResponse(upstream, body.model, modelInfo);
 
-        if (body.stream) return streamAnthropicResponse(res, message);
         return sendJson(res, 200, message);
       }
 

@@ -338,6 +338,7 @@ export class AgentChat extends Symbiote {
         icon.textContent = 'arrow_upward';
       }
     }
+    this._renderMessages();
   }
   async _fetchAdapterMeta() {
     try {
@@ -508,9 +509,19 @@ export class AgentChat extends Symbiote {
     let items = [];
     let lastAgentItem = null;
     let streamingBoards = [];
+    let hasActiveStream = this._hasActiveChatTask();
+    let lastStreamingIndex = -1;
+    let lastToolIndex = -1;
 
     for (let i = 0; i < messages.length; i++) {
       let msg = messages[i];
+      if (msg?.streaming) lastStreamingIndex = i;
+      if (msg?.role === 'tool') lastToolIndex = i;
+    }
+
+    for (let i = 0; i < messages.length; i++) {
+      let msg = messages[i];
+      let isLatestStreaming = hasActiveStream && i === lastStreamingIndex && !!msg.streaming;
 
       if (msg.role === 'thinking' && msg.done) {
         let copyText = this._findPreviousAgentText(messages, i);
@@ -520,14 +531,17 @@ export class AgentChat extends Symbiote {
         }
       }
 
-      let item = this._toMessageItem(msg);
+      let item = this._toMessageItem(msg, {
+        isLatestStreaming,
+        isLatestTool: i === lastToolIndex,
+      });
       if (msg.role === 'thinking' && msg.done) {
         item.copyText = this._findPreviousAgentText(messages, i);
       }
       items.push(item);
 
       if (msg.role === 'agent') lastAgentItem = item;
-      if (msg.role === 'board' && msg.streaming && msg.taskIds?.length) {
+      if (msg.role === 'board' && item.isStreaming && msg.taskIds?.length) {
         streamingBoards.push([...msg.taskIds]);
       }
     }
@@ -547,12 +561,13 @@ export class AgentChat extends Symbiote {
     });
   }
 
-  _toMessageItem(msg) {
+  _toMessageItem(msg, options = {}) {
     return {
       type: msg.type || msg.role,
       role: msg.role,
       text: msg.text || msg.content || '',
-      isStreaming: !!msg.streaming,
+      isStreaming: !!options.isLatestStreaming,
+      isLatestTool: !!options.isLatestTool,
       name: msg.name || '',
       input: msg.input || null,
       result: msg.result || null,
@@ -564,6 +579,12 @@ export class AgentChat extends Symbiote {
       workSummaryHtml: '',
       copyText: '',
     };
+  }
+
+  _hasActiveChatTask() {
+    let chatId = this._loadedChatId || dashState.activeChatId;
+    let chat = dashState.chats?.find(c => c.id === chatId);
+    return !!(this._isSending || chat?.pendingTaskId || this.$.chatParams?.pendingTaskId);
   }
 
   _cssEscape(value) {

@@ -55,6 +55,7 @@ export class ChatSidebarItem extends Symbiote {
   renderCallback() {
     this.sub('isActive', (val) => {
       this.toggleAttribute('data-active', val);
+      this._syncAutoExpanded();
     });
 
     this.sub('isExpanded', (val) => {
@@ -69,7 +70,17 @@ export class ChatSidebarItem extends Symbiote {
     this.sub('subChats', (chats) => {
       let has = chats && chats.length > 0;
       this.$.hasChildren = has;
+      this._syncAutoExpanded();
     });
+  }
+
+  _syncAutoExpanded() {
+    let chats = this.$.subChats || [];
+    let hasActiveChild = chats.some(chat => chat.isActive);
+    let hasRunningChild = chats.some(chat => chat.pendingTaskId);
+    if (chats.length && (this.$.isActive || hasActiveChild || hasRunningChild)) {
+      this.$.isExpanded = true;
+    }
   }
 }
 
@@ -77,14 +88,14 @@ ChatSidebarItem.template = html`
 <div class="chat-item" ${{ onclick: 'onItemClick' }}>
   <span class="chat-item-icon-slot">
     <span class="material-symbols-outlined chat-icon chat-item-icon" ${{ textContent: 'icon', style: 'iconStyle' }}></span>
-    <button class="chat-item-delete" title="Delete" ${{ onclick: 'onDelete' }}>
+    <button class="chat-item-delete" title="Delete" aria-label="Delete chat" ${{ onclick: 'onDelete' }}>
       <span class="material-symbols-outlined">delete</span>
     </button>
   </span>
   <span class="chat-item-label" ${{ textContent: 'cleanName' }}></span>
   <span class="chat-status-container" ${{ innerHTML: 'statusHtml' }}></span>
   <span class="chat-item-adapter" ${{ textContent: 'adapter' }}></span>
-  <span class="material-symbols-outlined chat-expand-icon" ${{ onclick: 'onExpandToggle' }}>chevron_right</span>
+  <span class="material-symbols-outlined chat-expand-icon" role="button" tabindex="0" title="Toggle child chats" aria-label="Toggle child chats" ${{ onclick: 'onExpandToggle' }}>chevron_right</span>
 </div>
 <div class="chat-sub-items" itemize="subChats" item-tag="chat-sidebar-sub-item"></div>
 `;
@@ -142,7 +153,7 @@ ChatSidebarSubItem.template = html`
 <div class="chat-item-child" ${{ onclick: 'onItemClick' }}>
   <span class="chat-item-icon-slot">
     <span class="material-symbols-outlined chat-icon chat-item-icon" ${{ textContent: 'icon', style: 'iconStyle' }}></span>
-    <button class="chat-item-delete" title="Delete" ${{ onclick: 'onDelete' }}>
+    <button class="chat-item-delete" title="Delete" aria-label="Delete chat" ${{ onclick: 'onDelete' }}>
       <span class="material-symbols-outlined">delete</span>
     </button>
   </span>

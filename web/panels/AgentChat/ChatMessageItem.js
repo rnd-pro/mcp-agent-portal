@@ -17,6 +17,7 @@ export class ChatMessageItem extends Symbiote {
     role: '',
     text: '',
     isStreaming: false,
+    isLatestTool: false,
     name: '',
     input: null,
     result: null,
@@ -36,6 +37,7 @@ export class ChatMessageItem extends Symbiote {
     this.sub('role', () => this._renderBody());
     this.sub('text', () => this._renderBody());
     this.sub('isStreaming', () => this._renderBody());
+    this.sub('isLatestTool', () => this._renderBody());
     this.sub('name', () => this._renderBody());
     this.sub('input', () => this._renderBody());
     this.sub('result', () => this._renderBody());
@@ -66,7 +68,7 @@ export class ChatMessageItem extends Symbiote {
   _renderTool() {
     let icon = this.$.isStreaming ? 'build_circle' : 'build';
     let spinClass = this.$.isStreaming ? 'spin-icon' : '';
-    let openAttr = this.$.isStreaming ? ' open' : '';
+    let openAttr = this.$.isLatestTool ? ' open' : '';
     let htmlStr = `<details class="tool-card"${openAttr}>
       <summary class="tool-header"><span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> ${escapeHtml(this.$.name || 'tool')}</summary>`;
 

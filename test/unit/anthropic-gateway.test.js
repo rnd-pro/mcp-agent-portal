@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, beforeEach, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -43,14 +43,30 @@ function makeRes() {
   };
 }
 
+function sseResponse(lines) {
+  let encoder = new TextEncoder();
+  return {
+    ok: true,
+    body: new ReadableStream({
+      start(controller) {
+        for (let line of lines) controller.enqueue(encoder.encode(line));
+        controller.close();
+      },
+    }),
+  };
+}
+
 describe('anthropic gateway', () => {
-  beforeEach(() => {
+  before(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'anthropic-gateway-test-'));
     oldConfigPath = process.env.PORTAL_CONFIG_PATH;
     oldDeepSeekKey = process.env.DEEPSEEK_API_KEY;
     oldFetch = global.fetch;
     process.env.PORTAL_CONFIG_PATH = path.join(tmpDir, 'agent-portal.json');
     process.env.DEEPSEEK_API_KEY = 'test-key';
+  });
+
+  beforeEach(() => {
     fs.writeFileSync(process.env.PORTAL_CONFIG_PATH, JSON.stringify({
       anthropicGateway: {
         enabled: true,
@@ -62,6 +78,10 @@ describe('anthropic gateway', () => {
   });
 
   afterEach(() => {
+    global.fetch = oldFetch;
+  });
+
+  after(() => {
     if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
     else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
     if (oldDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -124,14 +144,16 @@ describe('anthropic gateway', () => {
     }]);
   });
 
-  it('returns Anthropic-shaped SSE when stream is requested', async () => {
-    global.fetch = async () => ({
-      ok: true,
-      text: async () => JSON.stringify({
-        choices: [{ finish_reason: 'stop', message: { content: 'hello' } }],
-        usage: { prompt_tokens: 1, completion_tokens: 2 },
-      }),
-    });
+  it('translates upstream OpenAI-compatible streaming chunks to Anthropic SSE', async () => {
+    let seenRequest;
+    global.fetch = async (url, opts) => {
+      seenRequest = { url, body: JSON.parse(opts.body), headers: opts.headers };
+      return sseResponse([
+        'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}\n\n',
+        'data: [DONE]\n\n',
+      ]);
+    };
 
     let { createAnthropicGatewayHandler } = await import('../../src/node/server/anthropic-gateway.js');
     let handler = createAnthropicGatewayHandler();
@@ -145,10 +167,121 @@ describe('anthropic gateway', () => {
     await handler(req, res);
 
     assert.equal(res.status, 200);
+    assert.equal(seenRequest.url, 'https://api.deepseek.com/chat/completions');
+    assert.equal(seenRequest.body.stream, true);
     assert.match(res.headers['Content-Type'], /text\/event-stream/);
     assert.match(res.body, /event: message_start/);
     assert.match(res.body, /event: content_block_delta/);
-    assert.match(res.body, /"text":"hello"/);
+    assert.match(res.body, /"text":"hel"/);
+    assert.match(res.body, /"text":"lo"/);
     assert.match(res.body, /event: message_stop/);
+  });
+
+  it('lists provider-prefixed models for multi-provider selection', async () => {
+    let { createAnthropicGatewayHandler } = await import('../../src/node/server/anthropic-gateway.js');
+    let handler = createAnthropicGatewayHandler();
+    let req = makeReq('GET', '/anthropic/v1/models', null, { authorization: 'Bearer local-token' });
+    let res = makeRes();
+
+    await handler(req, res);
+
+    assert.equal(res.status, 200);
+    let ids = JSON.parse(res.body).data.map(model => model.id);
+    assert.ok(ids.includes('deepseek-v4-flash'));
+    assert.ok(ids.includes('deepseek/deepseek-v4-flash'));
+    assert.ok(ids.includes('deepseek/deepseek-v4-pro'));
+  });
+
+  it('proxies Anthropic-compatible message requests to the configured provider', async () => {
+    fs.writeFileSync(process.env.PORTAL_CONFIG_PATH, JSON.stringify({
+      anthropicGateway: {
+        enabled: true,
+        authToken: 'local-token',
+        providers: {
+          deepseek: {
+            type: 'anthropic-compatible',
+            baseUrl: 'https://api.deepseek.com/anthropic',
+            apiKeyEnv: 'DEEPSEEK_API_KEY',
+            models: ['deepseek-chat'],
+          },
+        },
+      },
+    }));
+
+    let seenRequest;
+    global.fetch = async (url, opts) => {
+      seenRequest = { url, body: JSON.parse(opts.body), headers: opts.headers };
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: async () => JSON.stringify({ type: 'message', content: [{ type: 'text', text: 'proxied' }] }),
+      };
+    };
+
+    let { createAnthropicGatewayHandler } = await import('../../src/node/server/anthropic-gateway.js');
+    let handler = createAnthropicGatewayHandler();
+    let req = makeReq('POST', '/anthropic/v1/messages', {
+      model: 'deepseek/deepseek-chat',
+      max_tokens: 100,
+      messages: [{ role: 'user', content: 'hello' }],
+    }, { authorization: 'Bearer local-token', 'anthropic-version': '2023-06-01' });
+    let res = makeRes();
+
+    await handler(req, res);
+
+    assert.equal(res.status, 200);
+    assert.equal(seenRequest.url, 'https://api.deepseek.com/anthropic/v1/messages');
+    assert.equal(seenRequest.headers['x-api-key'], 'test-key');
+    assert.equal(seenRequest.headers['anthropic-version'], '2023-06-01');
+    assert.equal(seenRequest.body.model, 'deepseek-chat');
+    assert.deepEqual(JSON.parse(res.body), { type: 'message', content: [{ type: 'text', text: 'proxied' }] });
+  });
+
+  it('deduplicates Anthropic-compatible tools before proxying upstream', async () => {
+    fs.writeFileSync(process.env.PORTAL_CONFIG_PATH, JSON.stringify({
+      anthropicGateway: {
+        enabled: true,
+        authToken: 'local-token',
+        providers: {
+          deepseek: {
+            type: 'anthropic-compatible',
+            baseUrl: 'https://api.deepseek.com/anthropic',
+            apiKeyEnv: 'DEEPSEEK_API_KEY',
+            models: ['deepseek-chat'],
+          },
+        },
+      },
+    }));
+
+    let seenRequest;
+    global.fetch = async (url, opts) => {
+      seenRequest = { url, body: JSON.parse(opts.body) };
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: async () => JSON.stringify({ type: 'message', content: [{ type: 'text', text: 'ok' }] }),
+      };
+    };
+
+    let { createAnthropicGatewayHandler } = await import('../../src/node/server/anthropic-gateway.js');
+    let handler = createAnthropicGatewayHandler();
+    let req = makeReq('POST', '/anthropic/v1/messages', {
+      model: 'deepseek-chat',
+      max_tokens: 100,
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [
+        { name: 'get_usage_guide', input_schema: { type: 'object', properties: { a: { type: 'string' } } } },
+        { name: 'get_usage_guide', input_schema: { type: 'object', properties: { b: { type: 'string' } } } },
+        { name: 'list_tasks', input_schema: { type: 'object', properties: {} } },
+      ],
+    }, { authorization: 'Bearer local-token' });
+    let res = makeRes();
+
+    await handler(req, res);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(seenRequest.body.tools.map(tool => tool.name), ['get_usage_guide', 'list_tasks']);
   });
 });

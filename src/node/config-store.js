@@ -112,6 +112,52 @@ export function setGlobalSettings(settings) {
   writeConfig(config);
 }
 
+// ── Anthropic Gateway ───────────────────────────────────
+
+export function getAnthropicGatewayConfig() {
+  let config = readConfig();
+  return config.anthropicGateway || config.settings?.anthropicGateway || {};
+}
+
+/** @param {object} gateway */
+export function setAnthropicGatewayConfig(gateway) {
+  let config = readConfig();
+  config.anthropicGateway = gateway || {};
+  writeConfig(config);
+  return config.anthropicGateway;
+}
+
+/**
+ * Update the Anthropic gateway config.
+ * @param {object|((current: object) => object)} updater
+ * @returns {object}
+ */
+export function updateAnthropicGatewayConfig(updater) {
+  let config = readConfig();
+  let current = config.anthropicGateway || {};
+  let next = typeof updater === 'function'
+    ? updater({ ...current })
+    : { ...current, ...(updater || {}) };
+  config.anthropicGateway = next || {};
+  writeConfig(config);
+  return config.anthropicGateway;
+}
+
+// ── Agent Portal Libraries ─────────────────────────────────────
+
+export function getAgentPortalConfig() {
+  let config = readConfig();
+  return config.agentPortal || {};
+}
+
+/** @param {object} agentPortal */
+export function setAgentPortalConfig(agentPortal) {
+  let config = readConfig();
+  config.agentPortal = agentPortal || {};
+  writeConfig(config);
+  return config.agentPortal;
+}
+
 // ── Open Tabs ───────────────────────────────────────────
 
 /** @returns {string[]} */
@@ -255,7 +301,7 @@ export function updateChat(chatId, updates) {
   if (!chat) return;
 
   // Whitelist of keys that can be updated via API
-  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId', 'parentChatId']);
+  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'approval_mode', 'projectId', 'parentChatId']);
 
   for (let key of Object.keys(updates)) {
     if (!allowedKeys.has(key)) continue;

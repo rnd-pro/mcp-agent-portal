@@ -108,4 +108,64 @@ describe('Provider Config Injector', () => {
       else process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = oldToken;
     }
   });
+
+  it('T6: getClaudeGatewayEnv can use configured gateway baseUrl without portal URL', async () => {
+    let oldConfigPath = process.env.PORTAL_CONFIG_PATH;
+    let oldToken = process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
+    let configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'portal-config-')), 'agent-portal.json');
+    tmpDirsToCleanup.push(path.dirname(configPath));
+
+    process.env.PORTAL_CONFIG_PATH = configPath;
+    delete process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
+    fs.writeFileSync(configPath, JSON.stringify({
+      anthropicGateway: {
+        enabled: true,
+        baseUrl: 'http://127.0.0.1:3456/anthropic',
+        authToken: 'configured-token',
+      },
+    }));
+
+    try {
+      let { getClaudeGatewayEnv } = await import('../../packages/agent-pool-mcp/src/runner/provider-config.js');
+      let env = getClaudeGatewayEnv(null);
+
+      assert.equal(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:3456/anthropic');
+      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'configured-token');
+      assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
+    } finally {
+      if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+      else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
+      if (oldToken === undefined) delete process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN;
+      else process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN = oldToken;
+    }
+  });
+
+  it('T7: getClaudeGatewayEnv resolves portal URL when none is passed', async () => {
+    let oldConfigPath = process.env.PORTAL_CONFIG_PATH;
+    let oldPortalMcpUrl = process.env.PORTAL_MCP_URL;
+    let configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'portal-config-')), 'agent-portal.json');
+    tmpDirsToCleanup.push(path.dirname(configPath));
+
+    process.env.PORTAL_CONFIG_PATH = configPath;
+    process.env.PORTAL_MCP_URL = 'http://localhost:7890/mcp';
+    fs.writeFileSync(configPath, JSON.stringify({
+      anthropicGateway: {
+        enabled: true,
+        authToken: 'resolved-token',
+      },
+    }));
+
+    try {
+      let { getClaudeGatewayEnv } = await import('../../packages/agent-pool-mcp/src/runner/provider-config.js');
+      let env = getClaudeGatewayEnv(null);
+
+      assert.equal(env.ANTHROPIC_BASE_URL, 'http://localhost:7890/anthropic');
+      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'resolved-token');
+    } finally {
+      if (oldConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+      else process.env.PORTAL_CONFIG_PATH = oldConfigPath;
+      if (oldPortalMcpUrl === undefined) delete process.env.PORTAL_MCP_URL;
+      else process.env.PORTAL_MCP_URL = oldPortalMcpUrl;
+    }
+  });
 });

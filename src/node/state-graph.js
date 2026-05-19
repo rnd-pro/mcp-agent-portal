@@ -747,7 +747,7 @@ export class StateGraph extends EventEmitter {
 
   // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
-    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'projectId', 'parentChatId', 'lastTaskStatus']);
+    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'projectId', 'parentChatId', 'lastTaskStatus']);
     let filtered = {};
     for (let [k, v] of Object.entries(updates)) {
       if (!allowed.has(k)) continue;

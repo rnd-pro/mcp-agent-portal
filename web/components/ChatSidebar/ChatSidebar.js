@@ -322,6 +322,9 @@ export class ChatSidebar extends Symbiote {
     let processedChats = [];
     for (let chat of rootChats) {
       let children = childMap.get(chat.id) || [];
+      let shouldExpand = chat.id === dashState.activeChatId
+        || children.some(child => child.id === dashState.activeChatId)
+        || children.some(child => child.pendingTaskId);
       processedChats.push({
         ...chat,
         cleanName: getCleanName(chat.name),
@@ -329,6 +332,7 @@ export class ChatSidebar extends Symbiote {
         iconStyle: chat.agentColor ? `color:${chat.agentColor}` : '',
         statusHtml: getStatusHtml(chat),
         isActive: chat.id === dashState.activeChatId,
+        isExpanded: shouldExpand,
         subChats: children
       });
     }
@@ -346,6 +350,15 @@ export class ChatSidebar extends Symbiote {
     }
 
     this.$.chats = processedChats;
+    requestAnimationFrame(() => this._syncExpandedChatItems(processedChats));
+  }
+
+  _syncExpandedChatItems(chats) {
+    for (let chat of chats) {
+      let item = [...this.querySelectorAll('chat-sidebar-item')].find(el => el.$?.id === chat.id);
+      if (!item) continue;
+      item.$.isExpanded = Boolean(chat.isExpanded);
+    }
   }
 }
 ChatSidebar.template = template;

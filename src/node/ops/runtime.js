@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
-const DEFAULT_RUNTIME_DIR = '.agent-portal/runtime';
+const DEFAULT_RUNTIME_DIR = 'runtime';
 const DEFAULT_TMP_NAME = 'mcp-agent-portal';
 
 /**
@@ -68,9 +69,20 @@ export function getProjectRoot(projectRoot = process.cwd()) {
   return path.resolve(projectRoot);
 }
 
+function getPortalHome(env = process.env) {
+  return path.resolve(env.AGENT_PORTAL_CONFIG_DIR || path.join(os.homedir(), '.agent-portal'));
+}
+
+function getProjectStateDir(projectRoot = process.cwd(), env = process.env) {
+  const root = getProjectRoot(projectRoot);
+  const hash = createHash('sha1').update(root).digest('hex').slice(0, 12);
+  const name = path.basename(root).replace(/[^a-zA-Z0-9._-]+/g, '-') || 'project';
+  return path.join(getPortalHome(env), 'projects', `${name}-${hash}`);
+}
+
 /**
  * Resolve the portal runtime directory. AGENT_PORTAL_RUNTIME_DIR can override
- * the default project-local `.agent-portal/runtime` directory.
+ * the default local project state runtime directory.
  * @param {RuntimePathOptions} [options]
  * @returns {string}
  */
@@ -78,7 +90,7 @@ export function getRuntimeDir(options = {}) {
   let env = options.env || process.env;
   let configured = env.AGENT_PORTAL_RUNTIME_DIR;
   if (configured) return path.resolve(configured);
-  return path.join(getProjectRoot(options.projectRoot), DEFAULT_RUNTIME_DIR);
+  return path.join(getProjectStateDir(options.projectRoot, env), DEFAULT_RUNTIME_DIR);
 }
 
 /**

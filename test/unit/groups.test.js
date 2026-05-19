@@ -5,11 +5,13 @@ import path from 'node:path';
 import os from 'node:os';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-groups-test-${Date.now()}`);
+const TEST_HOME = path.join(TEST_CWD, 'portal-home');
 
 describe('groups.js', () => {
   let createGroup, listGroups, getGroup, deleteGroup, getGroupNextModel, getGroupNextProfile;
 
   before(async () => {
+    process.env.AGENT_PORTAL_CONFIG_DIR = TEST_HOME;
     const mod = await import('../../packages/agent-pool-mcp/src/tools/groups.js');
     createGroup = mod.createGroup;
     listGroups = mod.listGroups;
@@ -24,6 +26,7 @@ describe('groups.js', () => {
   });
 
   after(() => {
+    delete process.env.AGENT_PORTAL_CONFIG_DIR;
     if (fs.existsSync(TEST_CWD)) {
       fs.rmSync(TEST_CWD, { recursive: true, force: true });
     }
@@ -63,7 +66,7 @@ describe('groups.js', () => {
     assert.strictEqual(getGroupNextModel(TEST_CWD, 'test-group'), 'modelA'); // Wraps around
 
     // Check persistence in file
-    const stateFile = path.join(TEST_CWD, '.agent-portal', 'group-states.json');
+    const stateFile = path.join(TEST_HOME, 'resource-group-states.json');
     assert.ok(fs.existsSync(stateFile));
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
     assert.strictEqual(state['test-group'].currentIndex, 1);

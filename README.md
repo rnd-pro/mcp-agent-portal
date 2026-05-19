@@ -139,8 +139,8 @@ Agent Portal can expose an Anthropic-compatible gateway for Claude Code at `/ant
     "plannerModel": "deepseek-v4-pro",
     "providers": {
       "deepseek": {
-        "type": "openai-compatible",
-        "baseUrl": "https://api.deepseek.com",
+        "type": "anthropic-compatible",
+        "baseUrl": "https://api.deepseek.com/anthropic",
         "apiKeyEnv": "DEEPSEEK_API_KEY",
         "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
       }

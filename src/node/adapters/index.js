@@ -3,7 +3,9 @@ import { createClaudeAdapter } from './claude.js';
 import { createCodexAdapter } from './codex.js';
 import { getStateGraph } from '../state-graph.js';
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
 
 let ADAPTERS = {
@@ -29,7 +31,7 @@ export function resolveAdapter(type) {
 // Default (fallback) models per provider — used only if no CLI / user config
 const DEFAULT_MODELS = {
   gemini: ['default', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-  claude: ['default', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
+  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
   codex: ['default'],
   opencode: ['default'],
 };
@@ -145,19 +147,45 @@ function getEffectiveModels(provider) {
 let _agentCache = null;
 let _agentCacheTime = 0;
 let _portalRoot = null;
+let _agentCacheKey = '';
+const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+function getAgentRootCandidates() {
+  let candidates = [
+    process.env.AGENT_PORTAL_MEMORY_ROOT,
+    process.env.AGENT_PORTAL_AGENTS_ROOT,
+    _portalRoot,
+    process.cwd(),
+    MODULE_ROOT,
+  ].filter(Boolean).map(root => resolve(root));
+  return [...new Set(candidates)];
+}
+
+function resolveAgentRoot() {
+  for (let root of getAgentRootCandidates()) {
+    if (existsSync(join(root, '.agent-portal', 'agents'))) return root;
+  }
+  return _portalRoot || process.cwd();
+}
 
 /** Set the portal root so agent-parser can find .agent-portal/ */
-export function setPortalRoot(root) { _portalRoot = root; }
+export function setPortalRoot(root) {
+  _portalRoot = root;
+  _agentCache = null;
+  _agentCacheTime = 0;
+  _agentCacheKey = '';
+}
 
 /** Get agent catalog (slug, icon, color, description, role). Cached 5s. */
 export function getAgentList() {
-  if (_agentCache && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
-  if (!_portalRoot) return [];
-  let agentsDir = join(_portalRoot, '.agent-portal', 'agents');
-  let skillsDir = join(_portalRoot, '.agent-portal', 'skills');
+  let root = resolveAgentRoot();
+  if (_agentCache && _agentCacheKey === root && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
+  let agentsDir = join(root, '.agent-portal', 'agents');
+  let skillsDir = join(root, '.agent-portal', 'skills');
   let agents = loadAgents(agentsDir, skillsDir);
   _agentCache = getAgentCatalog(agents);
   _agentCacheTime = Date.now();
+  _agentCacheKey = root;
   return _agentCache;
 }
 
@@ -169,7 +197,7 @@ function buildAdapterMetadata() {
     // Humanize slug: backend-engineer → Backend Engineer, qa-engineer → QA Engineer
     let acronyms = new Set(['qa', 'ui', 'api', 'db', 'ci', 'cd', 'ml', 'ai', 'devops', 'sre']);
     let name = a.slug.split('-').map(w => acronyms.has(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).join(' ');
-    return { val: a.slug, text: name };
+    return { val: a.slug, text: name, approvalMode: a.approvalMode };
   });
   // Ensure 'none' is always first — direct mode, no agent persona
   agentOptions.unshift({ val: 'none', text: 'Direct (no agent)' });
@@ -180,6 +208,16 @@ function buildAdapterMetadata() {
       parameters: [
         { id: 'agent', label: 'Agent', type: 'select', options: agentOptions },
         { id: 'chatType', label: 'Chat Type', type: 'select', options: ['standard', 'planning', 'review'] },
+        {
+          id: 'approval_mode',
+          label: 'Access',
+          type: 'select',
+          options: [
+            { val: 'yolo', text: 'Full access' },
+            { val: 'auto_edit', text: 'Edit only' },
+            { val: 'plan', text: 'Read only' },
+          ],
+        },
       ]
     },
     gemini: {

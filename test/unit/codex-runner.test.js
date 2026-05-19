@@ -91,6 +91,24 @@ for (const event of events) console.log(JSON.stringify(event));
     assert.equal(args.includes('default'), false);
   });
 
+  it('maps approval modes to Codex sandbox modes', async () => {
+    let argsFile = path.join(tmpDir, 'args-plan.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+
+    let { runCodexStreaming } = await import('../../packages/agent-pool-mcp/src/runner/codex-runner.js');
+    await runCodexStreaming({ prompt: 'hello', cwd: tmpDir, approvalMode: 'plan', timeout: 5 });
+
+    let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args[args.indexOf('-s') + 1], 'read-only');
+
+    argsFile = path.join(tmpDir, 'args-auto-edit.json');
+    process.env.CODEX_RUNNER_ARGS_FILE = argsFile;
+    await runCodexStreaming({ prompt: 'hello', cwd: tmpDir, approvalMode: 'auto_edit', timeout: 5 });
+
+    args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
+    assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
+  });
+
   it('uses codex exec resume when sessionId is provided', async () => {
     let argsFile = path.join(tmpDir, 'args-resume.json');
     process.env.CODEX_RUNNER_ARGS_FILE = argsFile;

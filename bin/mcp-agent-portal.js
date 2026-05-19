@@ -7,6 +7,11 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import os from 'os';
 import http from 'http';
 import WebSocket from 'ws';
+import { randomBytes } from 'crypto';
+import {
+  getAnthropicGatewayConfig,
+  updateAnthropicGatewayConfig,
+} from '../src/node/config-store.js';
 
 let __filename = fileURLToPath(import.meta.url);
 let __dirname = dirname(__filename);
@@ -123,6 +128,117 @@ function parseFlags(argsArr) {
     }
   }
   return { flags, positional };
+}
+
+const DEFAULT_DEEPSEEK_GATEWAY = {
+  type: 'anthropic-compatible',
+  baseUrl: 'https://api.deepseek.com/anthropic',
+  apiKeyEnv: 'DEEPSEEK_API_KEY',
+  models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+};
+
+function buildGatewayConfigStatus(gateway = {}) {
+  return {
+    enabled: gateway.enabled === true,
+    authTokenConfigured: Boolean(gateway.authToken || process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN),
+    defaultModel: gateway.defaultModel || 'deepseek-v4-flash',
+    plannerModel: gateway.plannerModel || 'deepseek-v4-pro',
+    providers: gateway.providers || {},
+  };
+}
+
+function printGatewayStatus(gateway = getAnthropicGatewayConfig()) {
+  let status = buildGatewayConfigStatus(gateway);
+  console.log('Anthropic gateway config');
+  console.log(`  Enabled:      ${status.enabled ? 'yes' : 'no'}`);
+  console.log(`  Auth token:   ${status.authTokenConfigured ? 'configured' : 'missing'}`);
+  console.log(`  Default:      ${status.defaultModel}`);
+  console.log(`  Planner:      ${status.plannerModel}`);
+  console.log('  Providers:');
+
+  let entries = Object.entries(status.providers);
+  if (entries.length === 0) {
+    console.log('    none');
+    return;
+  }
+
+  for (let [name, provider] of entries) {
+    let apiKeyEnv = provider.apiKeyEnv || '(not configured)';
+    let keyStatus = provider.apiKey
+      ? 'configured inline'
+      : provider.apiKeyEnv && process.env[provider.apiKeyEnv]
+        ? 'env present'
+        : 'missing';
+    console.log(`    - ${name}`);
+    console.log(`      type:       ${provider.type || 'openai-compatible'}`);
+    console.log(`      baseUrl:    ${provider.baseUrl || '(missing)'}`);
+    console.log(`      apiKeyEnv:  ${apiKeyEnv} (${keyStatus})`);
+    console.log(`      models:     ${(provider.models || []).join(', ') || '(none)'}`);
+  }
+}
+
+function makeGatewayAuthToken() {
+  return `portal-${randomBytes(24).toString('base64url')}`;
+}
+
+function withoutInlineApiKey(provider = {}) {
+  let { apiKey, ...safeProvider } = provider;
+  return safeProvider;
+}
+
+function validateGatewayConfig(gateway = getAnthropicGatewayConfig()) {
+  let issues = [];
+  if (gateway.enabled !== true) issues.push('gateway is disabled');
+  if (!gateway.authToken && !process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN) issues.push('auth token is not configured');
+
+  let providers = gateway.providers || {};
+  if (Object.keys(providers).length === 0) issues.push('no providers configured');
+
+  for (let [name, provider] of Object.entries(providers)) {
+    if (!provider.baseUrl) issues.push(`${name}: baseUrl is missing`);
+    if (provider.apiKey) {
+      // Inline keys are allowed for local-only testing, but never printed.
+    } else if (!provider.apiKeyEnv) {
+      issues.push(`${name}: apiKeyEnv is missing`);
+    } else if (!process.env[provider.apiKeyEnv]) {
+      issues.push(`${name}: ${provider.apiKeyEnv} is not set`);
+    }
+    if (!Array.isArray(provider.models) || provider.models.length === 0) {
+      issues.push(`${name}: models are missing`);
+    }
+  }
+
+  return issues;
+}
+
+function httpJsonRequest(port, path, token = null) {
+  return new Promise((resolvePromise, reject) => {
+    let headers = { Accept: 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    let req = http.request(
+      { hostname: '127.0.0.1', port, path, method: 'GET', headers },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          let parsed = null;
+          try { parsed = data ? JSON.parse(data) : null; }
+          catch { /* keep raw body */ }
+
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`${path} returned HTTP ${res.statusCode}: ${parsed?.error?.message || data}`));
+            return;
+          }
+
+          resolvePromise(parsed);
+        });
+      }
+    );
+
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 function parseRunArgs(argsArr) {
@@ -389,6 +505,89 @@ let CLI = {
         console.error(err.message);
         process.exit(1);
       }
+    },
+  },
+
+  gateway: {
+    desc: 'Configure Anthropic/Claude gateway (usage: gateway status|enable|disable|test)',
+    async handler() {
+      let { flags, positional } = parseFlags(args);
+      let subcmd = positional[0] || 'status';
+
+      if (subcmd === 'status') {
+        printGatewayStatus();
+        return;
+      }
+
+      if (subcmd === 'enable') {
+        let provider = flags.provider || positional[1] || 'deepseek';
+        if (provider !== 'deepseek') {
+          console.error(`Unsupported gateway provider: ${provider}`);
+          console.error('Supported providers: deepseek');
+          process.exit(1);
+        }
+
+        let next = updateAnthropicGatewayConfig((current) => ({
+          ...current,
+          enabled: true,
+          authToken: current.authToken || process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN || makeGatewayAuthToken(),
+          defaultModel: current.defaultModel || 'deepseek-v4-flash',
+          plannerModel: current.plannerModel || 'deepseek-v4-pro',
+          providers: {
+            ...(current.providers || {}),
+            deepseek: {
+              ...DEFAULT_DEEPSEEK_GATEWAY,
+              ...withoutInlineApiKey(current.providers?.deepseek),
+            },
+          },
+        }));
+
+        console.log('Anthropic gateway enabled.');
+        console.log('Set DEEPSEEK_API_KEY in the backend environment before sending model requests.');
+        printGatewayStatus(next);
+        return;
+      }
+
+      if (subcmd === 'disable') {
+        let next = updateAnthropicGatewayConfig({ enabled: false });
+        console.log('Anthropic gateway disabled.');
+        printGatewayStatus(next);
+        return;
+      }
+
+      if (subcmd === 'test') {
+        let gateway = getAnthropicGatewayConfig();
+        let port = getBackendPort();
+        if (!port) {
+          console.log('Backend not running; checked config and environment only.');
+          let issues = validateGatewayConfig(gateway);
+          if (issues.length) {
+            console.log('Issues:');
+            for (let issue of issues) console.log(`  - ${issue}`);
+            process.exit(1);
+          }
+          console.log('Config looks valid. Start the portal backend to test /anthropic endpoints.');
+          return;
+        }
+
+        try {
+          let token = gateway.authToken || process.env.ANTHROPIC_GATEWAY_AUTH_TOKEN || null;
+          let health = await httpJsonRequest(port, '/anthropic/health', token);
+          let models = await httpJsonRequest(port, '/anthropic/v1/models', token);
+          console.log(`Gateway backend: http://127.0.0.1:${port}`);
+          console.log(`Health: ${health?.ok ? 'ok' : 'unknown'}`);
+          console.log(`Providers: ${(health?.providers || []).join(', ') || '(none)'}`);
+          console.log(`Models: ${(models?.data || []).map(model => model.id).join(', ') || '(none)'}`);
+        } catch (err) {
+          console.error('Gateway test failed:', err.message);
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.error(`Unknown gateway command: ${subcmd}`);
+      console.error('Usage: mcp-agent-portal gateway status|enable|disable|test');
+      process.exit(1);
     },
   },
 
@@ -660,11 +859,20 @@ Options for 'run':
   --provider <name>      Provider to use (gemini, codex, opencode)
   --cwd <path>           Working directory (default: current)
 
+Options for 'gateway':
+  status                 Show gateway config without secrets
+  enable --provider deepseek
+                         Enable DeepSeek gateway defaults
+  disable                Disable the gateway
+  test                   Probe running /anthropic endpoints or validate config
+
 Web Dashboard:
   http://portal.local/   Available while the server is running
 
 Examples:
   npx mcp-agent-portal run "scan directory" --sync
+  npx mcp-agent-portal gateway enable --provider deepseek
+  npx mcp-agent-portal gateway test
   npx mcp-agent-portal tasks
   npx mcp-agent-portal call list_skills
 `);

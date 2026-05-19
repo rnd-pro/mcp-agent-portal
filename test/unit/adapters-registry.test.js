@@ -42,4 +42,30 @@ describe('adapters-registry', () => {
     assert.ok(metadata, 'should return metadata');
     assert.equal(types.length, 5, 'should have exactly 5 adapter types in metadata');
   });
+
+  it('exposes DeepSeek gateway models for Claude provider selection', async () => {
+    let { listAdapterTypes } = await import('../../src/node/adapters/index.js');
+
+    let { metadata } = listAdapterTypes();
+    let modelOptions = metadata.claude.parameters.find(param => param.id === 'model').options;
+    let values = modelOptions.map(option => option.val);
+
+    assert.ok(values.includes('deepseek/deepseek-v4-flash'));
+    assert.ok(values.includes('deepseek/deepseek-v4-pro'));
+  });
+
+  it('exposes agent default approval modes from markdown metadata', async () => {
+    let { setPortalRoot, listAdapterTypes } = await import('../../src/node/adapters/index.js');
+    setPortalRoot(process.cwd());
+
+    let { metadata } = listAdapterTypes();
+    let agentOptions = metadata.pool.parameters.find(param => param.id === 'agent').options;
+    let reviewer = agentOptions.find(option => option.val === 'code-reviewer');
+    let backend = agentOptions.find(option => option.val === 'backend-engineer');
+    let orchestrator = agentOptions.find(option => option.val === 'orchestrator');
+
+    assert.equal(reviewer.approvalMode, 'plan');
+    assert.equal(backend.approvalMode, 'auto_edit');
+    assert.equal(orchestrator.approvalMode, 'yolo');
+  });
 });

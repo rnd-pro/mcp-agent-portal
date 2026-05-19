@@ -46,7 +46,8 @@ export class ChatWsServer {
   }
 
   async _handleChatSend(ws, params) {
-    let { chatId, prompt, sessionId, timeout, model, provider } = params;
+    let { chatId, prompt, sessionId, timeout, model, provider, approval_mode } = params;
+    let agentSlug = params.agent || params.agent_slug;
     console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, provider=${provider}, model=${model}`);
     if (!prompt) return;
 
@@ -55,9 +56,13 @@ export class ChatWsServer {
       let cwd = params.cwd || this.mcpProxy.projectRoot;
       let proj = sg.addProject({ path: cwd, name: path.basename(cwd) });
 
-      let chat = sg.createChat({ 
+      let chat = sg.createChat({
         name: prompt.substring(0, 40) + (prompt.length > 40 ? '...' : ''),
-        projectId: proj.id
+        projectId: proj.id,
+        agent: agentSlug && agentSlug !== 'none' ? agentSlug : null,
+        provider: provider || null,
+        model: model || null,
+        approval_mode: approval_mode || null
       });
       chatId = chat.id;
       sg.appendChatMessage(chatId, { role: 'user', content: prompt });
@@ -81,6 +86,8 @@ export class ChatWsServer {
         if (!provider && chatData.provider) provider = chatData.provider;
         if (!model && chatData.model) model = chatData.model;
         if (!sessionId && chatData.sessionId) sessionId = chatData.sessionId;
+        if (!approval_mode && chatData.approval_mode) approval_mode = chatData.approval_mode;
+        if ((!agentSlug || agentSlug === 'none') && chatData.agent) agentSlug = chatData.agent;
       }
     }
     
@@ -88,9 +95,9 @@ export class ChatWsServer {
     if (sessionId) delegateArgs.session_id = sessionId;
     if (model) delegateArgs.model = model;
     if (provider) delegateArgs.provider = provider;
+    if (approval_mode) delegateArgs.approval_mode = approval_mode;
     
-    // Agent selection: read from UI chatParams (agent selector dropdown)
-    let agentSlug = params.agent;
+    // Agent selection: read from UI/MCP chat params or persisted chat metadata.
     if (agentSlug && agentSlug !== 'none') {
       delegateArgs.agent_slug = agentSlug;
       delegateArgs.chat_id = chatId;

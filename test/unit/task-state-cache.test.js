@@ -185,4 +185,33 @@ describe('Task State Cache — StateGraph integration', () => {
     // tasks have a finite lifetime. This test verifies events accumulate correctly.
     assert.ok(events.length === 250, `Should have 250 events, got ${events.length}`);
   });
+
+  it('preserves agent and approval mode in chat metadata updates', () => {
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'chat-meta-snap.json'),
+      walPath: path.join(tmpDir, 'chat-meta-wal.log'),
+    });
+
+    sg.commit([{
+      op: 'set',
+      path: 'chats/chat-001',
+      value: {
+        id: 'chat-001',
+        name: 'Chat',
+        agent: null,
+        approval_mode: null,
+      },
+    }], 'test');
+
+    sg.updateChat('chat-001', {
+      agent: 'code-reviewer',
+      approval_mode: 'plan',
+      unknown: 'ignored',
+    }, 'test');
+
+    let chat = sg.get('chats/chat-001');
+    assert.equal(chat.agent, 'code-reviewer');
+    assert.equal(chat.approval_mode, 'plan');
+    assert.equal(chat.unknown, undefined);
+  });
 });

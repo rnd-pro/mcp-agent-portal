@@ -158,7 +158,7 @@ registerSection('resource-groups', {
 });
 
 registerSection('skills', {
-  icon: 'school', label: 'Skills', order: 30, scope: 'home',
+  icon: 'school', label: 'Skills', order: 30, scope: 'both',
   layout: withChat(() => LayoutTree.createSplit('horizontal',
     LayoutTree.createSplit('vertical',
       LayoutTree.createPanel('agent-portal-tree'),

@@ -78,8 +78,8 @@ for (const event of events) console.log(JSON.stringify(event));
     assert.deepEqual(result.toolResults, [{ name: 'tool', output: 'ok' }]);
 
     let args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
-    assert.deepEqual(args.slice(0, 5), ['-p', 'hello', '--output-format', 'stream-json', '--permission-mode']);
-    assert.equal(args[5], 'bypassPermissions');
+    assert.deepEqual(args.slice(0, 6), ['-p', 'hello', '--output-format', 'stream-json', '--verbose', '--permission-mode']);
+    assert.equal(args[6], 'bypassPermissions');
   });
 
   it('maps read-only approval mode to Claude plan mode', async () => {

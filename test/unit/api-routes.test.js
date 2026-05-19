@@ -102,6 +102,58 @@ describe('api-routes', () => {
     assert.match(payload.error, /Invalid UI state path/);
   });
 
+  it('POST /api/agent-portal/file only writes editable public markdown or JSON content', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-tree-'));
+    let routes = createRoutes(makeRoutes(tmpDir));
+
+    let okReq = makeReq('POST', '/api/agent-portal/file', {
+      path: 'skills/code/example.md',
+      content: '# Example\n',
+    });
+    let okRes = makeRes();
+    await routes['POST /api/agent-portal/file'](okReq, okRes);
+
+    assert.equal(okRes.status, 200);
+    assert.equal(await fs.readFile(path.join(tmpDir, '.agent-portal/skills/code/example.md'), 'utf8'), '# Example\n');
+
+    let deniedReq = makeReq('POST', '/api/agent-portal/file', {
+      path: 'runtime/state.json',
+      content: '{}',
+    });
+    let deniedRes = makeRes();
+    await routes['POST /api/agent-portal/file'](deniedReq, deniedRes);
+
+    assert.equal(deniedRes.status, 400);
+    assert.match(deniedRes.json().error, /not editable public|local portal state/);
+  });
+
+  it('POST /api/agent-portal/open-library/install rejects non-public targets', async () => {
+    let oldOpenLibrary = process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-install-'));
+    let libDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-open-library-'));
+    process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = libDir;
+    await fs.mkdir(path.join(libDir, 'skills/code'), { recursive: true });
+    await fs.writeFile(path.join(libDir, 'skills/code/example.md'), '# Example\n');
+
+    try {
+      let routes = createRoutes(makeRoutes(tmpDir));
+      let req = makeReq('POST', '/api/agent-portal/open-library/install', {
+        sourcePath: 'skills/code/example.md',
+        targetPath: 'messages/example.md',
+      });
+      let res = makeRes();
+      await routes['POST /api/agent-portal/open-library/install'](req, res);
+
+      assert.equal(res.status, 400);
+      assert.match(res.json().error, /not editable public|local portal state/);
+    } finally {
+      if (oldOpenLibrary === undefined) delete process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
+      else process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = oldOpenLibrary;
+    }
+  });
+
   it('GET /api/project-graph-metadata returns missing sidecar metadata', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-graph-metadata-'));

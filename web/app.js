@@ -307,8 +307,9 @@ function handleProjectSwitch(projectId) {
 
   // Clear active chat if it does not belong to the new project
   if (dashState.activeChatId) {
+    let routeChatId = parseQuery(getRoute().query || '').chat || null;
     let chat = (dashState.chats || []).find(c => c.id === dashState.activeChatId);
-    if (!chat || chat.projectId !== projectId) {
+    if ((!chat && routeChatId !== dashState.activeChatId) || (chat && chat.projectId !== projectId)) {
       dashState.activeChatId = null;
       updateParams({ chat: null });
       dashEmit('active-chat-changed', { id: null });

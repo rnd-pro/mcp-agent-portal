@@ -5,11 +5,13 @@ import path from 'node:path';
 import os from 'node:os';
 
 const TEST_CWD = path.join(os.tmpdir(), `agent-pool-context-test-${Date.now()}`);
+const TEST_HOME = path.join(TEST_CWD, 'portal-home');
 
 describe('file-tracker', () => {
   let trackFiles, untrackFiles, getTrackedFiles;
 
   before(async () => {
+    process.env.AGENT_PORTAL_CONFIG_DIR = TEST_HOME;
     const mod = await import('../../packages/agent-pool-mcp/src/tools/file-tracker.js');
     trackFiles = mod.trackFiles;
     untrackFiles = mod.untrackFiles;
@@ -21,6 +23,7 @@ describe('file-tracker', () => {
   });
 
   after(() => {
+    delete process.env.AGENT_PORTAL_CONFIG_DIR;
     if (fs.existsSync(TEST_CWD)) {
       fs.rmSync(TEST_CWD, { recursive: true, force: true });
     }
