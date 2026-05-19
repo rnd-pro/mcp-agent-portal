@@ -128,6 +128,35 @@ describe('api-routes', () => {
     assert.match(deniedRes.json().error, /not editable public|local portal state/);
   });
 
+  it('rejects .agent-portal file symlinks that escape the project portal root', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-symlink-'));
+    let outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-outside-'));
+    let skillDir = path.join(tmpDir, '.agent-portal/skills/code');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(path.join(outsideDir, 'secret.md'), '# secret\n');
+    await fs.symlink(path.join(outsideDir, 'secret.md'), path.join(skillDir, 'leak.md'));
+
+    let routes = createRoutes(makeRoutes(tmpDir));
+    let readReq = makeReq('GET', '/api/agent-portal/file?path=skills%2Fcode%2Fleak.md');
+    let readRes = makeRes();
+    await routes['GET /api/agent-portal/file'](readReq, readRes);
+
+    assert.equal(readRes.status, 400);
+    assert.match(readRes.json().error, /must stay inside configured root/);
+
+    let writeReq = makeReq('POST', '/api/agent-portal/file', {
+      path: 'skills/code/leak.md',
+      content: '# overwritten\n',
+    });
+    let writeRes = makeRes();
+    await routes['POST /api/agent-portal/file'](writeReq, writeRes);
+
+    assert.equal(writeRes.status, 400);
+    assert.match(writeRes.json().error, /symbolic link/);
+    assert.equal(await fs.readFile(path.join(outsideDir, 'secret.md'), 'utf8'), '# secret\n');
+  });
+
   it('POST /api/agent-portal/open-library/install rejects non-public targets', async () => {
     let oldOpenLibrary = process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
@@ -148,6 +177,33 @@ describe('api-routes', () => {
 
       assert.equal(res.status, 400);
       assert.match(res.json().error, /not editable public|local portal state/);
+    } finally {
+      if (oldOpenLibrary === undefined) delete process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
+      else process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = oldOpenLibrary;
+    }
+  });
+
+  it('POST /api/agent-portal/open-library/install rejects source symlinks that escape the library root', async () => {
+    let oldOpenLibrary = process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-install-symlink-'));
+    let libDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-open-library-symlink-'));
+    let outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-open-library-outside-'));
+    process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = libDir;
+    await fs.mkdir(path.join(libDir, 'skills/code'), { recursive: true });
+    await fs.writeFile(path.join(outsideDir, 'secret.md'), '# secret\n');
+    await fs.symlink(path.join(outsideDir, 'secret.md'), path.join(libDir, 'skills/code/leak.md'));
+
+    try {
+      let routes = createRoutes(makeRoutes(tmpDir));
+      let req = makeReq('POST', '/api/agent-portal/open-library/install', {
+        sourcePath: 'skills/code/leak.md',
+      });
+      let res = makeRes();
+      await routes['POST /api/agent-portal/open-library/install'](req, res);
+
+      assert.equal(res.status, 400);
+      assert.match(res.json().error, /must stay inside configured root/);
     } finally {
       if (oldOpenLibrary === undefined) delete process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
       else process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = oldOpenLibrary;

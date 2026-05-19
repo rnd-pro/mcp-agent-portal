@@ -211,6 +211,37 @@ async function writeTextAtomic(filePath, content) {
   await fs.rename(tmpPath, filePath);
 }
 
+function isPathInside(root, targetPath) {
+  let rel = path.relative(root, targetPath);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+async function assertRealPathInside(root, targetPath, label) {
+  let [realRoot, realTarget] = await Promise.all([
+    fs.realpath(root),
+    fs.realpath(targetPath),
+  ]);
+  if (!isPathInside(realRoot, realTarget)) {
+    throw new Error(`${label} must stay inside configured root`);
+  }
+  return realTarget;
+}
+
+async function assertSafeWriteTarget(root, targetPath) {
+  await fs.mkdir(root, { recursive: true });
+  let dir = path.dirname(targetPath);
+  await fs.mkdir(dir, { recursive: true });
+  await assertRealPathInside(root, dir, 'Path');
+  try {
+    let stat = await fs.lstat(targetPath);
+    if (stat.isSymbolicLink()) {
+      throw new Error('Refusing to write through a symbolic link');
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+}
+
 /**
  * Parse JSON body from request.
  * @param {import('node:http').IncomingMessage} req
@@ -474,6 +505,7 @@ export function createRoutes(ctx) {
         let relPath = url.searchParams.get('path') || '';
         if (!relPath) throw new Error('Missing path');
         let { root, targetPath, cleanPath } = resolveOpenLibraryPath(relPath);
+        await assertRealPathInside(root, targetPath, 'Path');
         let stat = await fs.stat(targetPath);
         if (!stat.isFile()) throw new Error('Path is not a file');
         let content = await fs.readFile(targetPath, 'utf8');
@@ -495,6 +527,8 @@ export function createRoutes(ctx) {
         assertWritableAgentPortalPath(targetRelPath);
         assertWritableAgentPortalPath(source.cleanPath);
         let target = resolveAgentPortalPath(activeProjectRoot, targetRelPath);
+        await assertRealPathInside(source.root, source.targetPath, 'Source path');
+        await assertSafeWriteTarget(target.root, target.targetPath);
         let stat = await fs.stat(source.targetPath);
         if (!stat.isFile()) throw new Error('Only file installation is supported');
         let content = await fs.readFile(source.targetPath, 'utf8');
@@ -514,6 +548,7 @@ export function createRoutes(ctx) {
         if (!relPath) throw new Error('Missing path');
         let activeProjectRoot = resolveProjectRoot(projectRoot, url.searchParams.get('project') || null);
         let { root, targetPath, cleanPath } = resolveAgentPortalPath(activeProjectRoot, relPath);
+        await assertRealPathInside(root, targetPath, 'Path');
         let stat = await fs.stat(targetPath);
         if (!stat.isFile()) throw new Error('Path is not a file');
         let content = await fs.readFile(targetPath, 'utf8');
@@ -533,6 +568,7 @@ export function createRoutes(ctx) {
         let activeProjectRoot = resolveRequestProjectRoot(req, projectRoot, body);
         assertWritableAgentPortalPath(body.path);
         let { root, targetPath, cleanPath } = resolveAgentPortalPath(activeProjectRoot, body.path);
+        await assertSafeWriteTarget(root, targetPath);
         await writeTextAtomic(targetPath, body.content);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, root, path: cleanPath }));
