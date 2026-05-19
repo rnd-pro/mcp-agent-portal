@@ -147,7 +147,7 @@ export default `
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
-    background: var(--sn-node-hover, rgba(255, 255, 255, 0.035));
+    background: rgba(255, 255, 255, 0.035);
     box-sizing: border-box;
   }
 
@@ -198,7 +198,7 @@ export default `
     place-items: center;
     border: 1px solid var(--sn-border-subtle, rgba(255, 255, 255, 0.1));
     border-radius: 3px;
-    background: var(--sn-node-hover, rgba(255, 255, 255, 0.04));
+    background: rgba(255, 255, 255, 0.04);
     color: var(--sn-text, #e0e0e0);
     cursor: pointer;
   }
@@ -332,7 +332,7 @@ export default `
   /* Toolbar separator */
   .pcb-toolbar-sep {
     width: 1px;
-    background: var(--sn-node-hover, rgba(255,255,255,0.1));
+    background: rgba(255,255,255,0.1);
     margin: 0 4px;
     align-self: stretch;
   }

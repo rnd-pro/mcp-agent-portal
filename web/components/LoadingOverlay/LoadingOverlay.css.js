@@ -34,7 +34,7 @@ export default /*css*/`
   .pcb-loader-track {
     width: 200px;
     height: 2px;
-    background: var(--sn-node-hover, rgba(255,255,255,0.08));
+    background: rgba(255,255,255,0.08);
     border-radius: 1px;
     overflow: hidden;
   }

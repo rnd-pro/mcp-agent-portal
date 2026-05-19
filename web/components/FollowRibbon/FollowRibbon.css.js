@@ -29,7 +29,7 @@ export default `
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 12px;
     font-weight: 500;
-    color: var(--sn-node-hover, rgba(255, 255, 255, 0.9));
+    color: rgba(255, 255, 255, 0.9);
     white-space: nowrap;
     max-width: 500px;
   }
@@ -52,7 +52,7 @@ export default `
     display: inline-block;
     width: 16px;
     text-align: left;
-    color: var(--sn-node-hover, rgba(255, 255, 255, 0.4));
+    color: rgba(255, 255, 255, 0.4);
   }
 
   @keyframes fr-pulse {

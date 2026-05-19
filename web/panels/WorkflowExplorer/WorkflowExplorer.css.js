@@ -20,7 +20,7 @@ export default `
   font-weight: 500;
 }
 .step-header:hover {
-  background: var(--sn-node-hover, rgba(255,255,255,0.05));
+  background: rgba(255,255,255,0.05);
 }
 .step-content {
   padding: 16px;
@@ -31,7 +31,7 @@ export default `
   display: block;
 }
 .step-card.expanded .step-header {
-  background: var(--sn-node-hover, rgba(255,255,255,0.05));
+  background: rgba(255,255,255,0.05);
 }
 .node-id {
   font-size: 11px;

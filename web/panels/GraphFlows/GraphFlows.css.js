@@ -98,7 +98,7 @@ pg-graph-flows {
   margin-bottom: 6px;
   border: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
   border-radius: 4px;
-  background: var(--sn-node-hover, rgba(255,255,255,0.03));
+  background: rgba(255,255,255,0.03);
   color: inherit;
   text-align: left;
   cursor: pointer;

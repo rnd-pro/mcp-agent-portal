@@ -80,7 +80,7 @@ chat-sidebar-item, chat-sidebar-sub-item {
 .chat-nav-resize-handle:hover,
 .chat-nav-resize-handle.dragging,
 .chat-nav[resizing] .chat-nav-resize-handle {
-  background: var(--sn-node-hover, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .chat-nav-header {

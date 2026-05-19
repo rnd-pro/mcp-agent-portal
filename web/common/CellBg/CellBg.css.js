@@ -25,7 +25,7 @@ cell-bg::after {
   /* Layered backgrounds for smooth blending without banding (dithering via noise) */
   background: 
     /* 1. Subtle curved glass glare */
-    radial-gradient(ellipse 80% 50% at 50% -10%, var(--sn-node-hover, rgba(255,255,255,0.02)) 0%, transparent 100%),
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(255,255,255,0.02) 0%, transparent 100%),
     /* 2. Smooth Vignette: transparent center -> 100% opaque edges */
     radial-gradient(ellipse at 50% 50%, transparent 20%, rgba(26,26,26, 0.7) 70%, rgba(26,26,26, 1) 100%),
     /* 3. Dithering noise to completely eliminate CSS gradient color banding */
