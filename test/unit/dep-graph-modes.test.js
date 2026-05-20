@@ -1,12 +1,35 @@
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  getNextPathStyle,
-  getPathStyleDisplay,
-  resolveInitialViewMode,
-} from '../../web/panels/dep-graph-modes.js';
+import { register } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const symbioteNodeUiUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'ui', 'index.js')).href;
+const loaderSource = `
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'symbiote-node/ui') {
+    return { url: ${JSON.stringify(symbioteNodeUiUrl)}, shortCircuit: true };
+  }
+  return nextResolve(specifier, context);
+}
+`;
+
+register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url);
 
 describe('dep-graph-modes', () => {
+  let getNextPathStyle;
+  let getPathStyleDisplay;
+  let resolveInitialViewMode;
+
+  before(async () => {
+    ({
+      getNextPathStyle,
+      getPathStyleDisplay,
+      resolveInitialViewMode,
+    } = await import('../../web/panels/dep-graph-modes.js'));
+  });
+
   it('resolveInitialViewMode supports mode and legacy flat query params', () => {
     assert.equal(resolveInitialViewMode(new URLSearchParams('mode=flat')), 'flat');
     assert.equal(resolveInitialViewMode(new URLSearchParams('flat=true')), 'flat');

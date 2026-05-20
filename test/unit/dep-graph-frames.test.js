@@ -1,11 +1,33 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
+import { register } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import {
-  addDirectoryFrames,
-  setGraphLayerVisible,
-  toggleLayerButtonState,
-} from '../../web/panels/dep-graph-frames.js';
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const symbioteNodeUiUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'ui', 'index.js')).href;
+const loaderSource = `
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'symbiote-node/ui') {
+    return { url: ${JSON.stringify(symbioteNodeUiUrl)}, shortCircuit: true };
+  }
+  return nextResolve(specifier, context);
+}
+`;
+
+register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url);
+
+let addDirectoryFrames;
+let setGraphLayerVisible;
+let toggleLayerButtonState;
+
+before(async () => {
+  ({
+    addDirectoryFrames,
+    setGraphLayerVisible,
+    toggleLayerButtonState,
+  } = await import('../../web/panels/dep-graph-frames.js'));
+});
 
 test('addDirectoryFrames creates bounded frames for multi-file directories', () => {
   class TestFrame {
