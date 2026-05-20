@@ -194,7 +194,7 @@ export class DepGraph extends Symbiote {
     });
 
     // Phase 3: Layer toggle controls
-    this.querySelectorAll('.pcb-layer-btn').forEach(btn => {
+    this.querySelectorAll('.graph-explorer-layer-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const layer = btn.getAttribute('data-layer');
         this._toggleLayer(layer, toggleLayerButtonState(btn));
@@ -510,11 +510,11 @@ export class DepGraph extends Symbiote {
    */
   _updateModeVisibility(mode) {
     const hideStructuredOnly = mode === 'flat';
-    this.querySelectorAll('.pcb-structured-only').forEach(el => {
+    this.querySelectorAll('.graph-explorer-structured-only').forEach(el => {
       el.hidden = hideStructuredOnly;
     });
     const hideFlatOnly = mode !== 'flat';
-    this.querySelectorAll('.pcb-flat-only').forEach(el => {
+    this.querySelectorAll('.graph-explorer-flat-only').forEach(el => {
       el.hidden = hideFlatOnly;
     });
   }
@@ -1477,11 +1477,11 @@ export class DepGraph extends Symbiote {
     const statsEl = this.querySelector('.pcb-stats');
     if (statsEl) {
       statsEl.innerHTML = `
-        <span><span class="pcb-stat-val">${fileMap.size}</span> files</span>
-        <span><span class="pcb-stat-val">${stats.functions || 0}</span> fn</span>
-        <span><span class="pcb-stat-val">${stats.classes || 0}</span> cls</span>
-        <span><span class="pcb-stat-val">${editor.getConnections().length}</span> edges</span>
-        ${viaCount > 0 ? `<span><span class="pcb-stat-val">${viaCount}</span> vias</span>` : ''}
+        <span><span class="graph-explorer-stat-val">${fileMap.size}</span> files</span>
+        <span><span class="graph-explorer-stat-val">${stats.functions || 0}</span> fn</span>
+        <span><span class="graph-explorer-stat-val">${stats.classes || 0}</span> cls</span>
+        <span><span class="graph-explorer-stat-val">${editor.getConnections().length}</span> edges</span>
+        ${viaCount > 0 ? `<span><span class="graph-explorer-stat-val">${viaCount}</span> vias</span>` : ''}
       `;
     }
   }

@@ -1,58 +1,59 @@
 export default `
-  <div class="pcb-toolbar">
-    <button class="pcb-btn" data-action="fit" title="Fit view">
+  <graph-explorer-shell>
+  <div slot="toolbar" class="graph-explorer-toolbar">
+    <button class="graph-explorer-btn" data-action="fit" title="Fit view">
       <span class="material-symbols-outlined">fit_screen</span>
       FIT
     </button>
-    <div class="pcb-toolbar-sep"></div>
+    <div class="graph-explorer-toolbar-sep"></div>
     <button
-      class="pcb-btn label-mode-btn pcb-structured-only"
+      class="graph-explorer-btn label-mode-btn graph-explorer-structured-only"
       data-mode="always"
       data-active
       title="Always show labels"
     >LBL:ALW</button>
     <button
-      class="pcb-btn label-mode-btn pcb-structured-only"
+      class="graph-explorer-btn label-mode-btn graph-explorer-structured-only"
       data-mode="hover"
       title="Hover labels"
     >LBL:HOV</button>
     <button
-      class="pcb-btn label-mode-btn pcb-structured-only"
+      class="graph-explorer-btn label-mode-btn graph-explorer-structured-only"
       data-mode="focus"
       title="Focus labels"
     >LBL:FOC</button>
-    <div class="pcb-toolbar-sep pcb-structured-only"></div>
+    <div class="graph-explorer-toolbar-sep graph-explorer-structured-only"></div>
     <button
-      class="pcb-btn pcb-layer-btn pcb-structured-only"
+      class="graph-explorer-btn graph-explorer-layer-btn graph-explorer-structured-only"
       data-layer="zones"
       data-active
       title="Toggle directory zones"
     >ZONES</button>
     <button
-      class="pcb-btn pcb-layer-btn pcb-structured-only"
+      class="graph-explorer-btn graph-explorer-layer-btn graph-explorer-structured-only"
       data-layer="vias"
       title="Toggle via markers"
     >VIAS</button>
-    <div class="pcb-toolbar-sep"></div>
-    <button class="pcb-btn" data-action="view-mode" title="Toggle view: Flat <-> Structured">
+    <div class="graph-explorer-toolbar-sep"></div>
+    <button class="graph-explorer-btn" data-action="view-mode" title="Toggle view: Flat <-> Structured">
       <span class="material-symbols-outlined">account_tree</span>
       FLAT
     </button>
-    <button class="pcb-btn pcb-structured-only" data-action="path-style" title="Toggle lines: PCB <-> Bezier">
+    <button class="graph-explorer-btn graph-explorer-structured-only" data-action="path-style" title="Toggle lines: PCB <-> Bezier">
       <span class="material-symbols-outlined">route</span>
       PCB
     </button>
-    <button class="pcb-btn" data-action="graph-metadata" title="Edit graph metadata">
+    <button class="graph-explorer-btn" data-action="graph-metadata" title="Edit graph metadata">
       <span class="material-symbols-outlined">edit_note</span>
       META
     </button>
-    <button class="pcb-btn pcb-flat-only" data-action="cluster-legend" title="Show semantic color legend" hidden>
+    <button class="graph-explorer-btn graph-explorer-flat-only" data-action="cluster-legend" title="Show semantic color legend" hidden>
       <span class="material-symbols-outlined">palette</span>
       COLORS
     </button>
   </div>
-  <div class="pcb-clusters" aria-label="Semantic color legend" hidden></div>
-  <dialog class="pcb-metadata-dialog" aria-labelledby="graph-metadata-title">
+  <div slot="legend" class="pcb-clusters" aria-label="Semantic color legend" hidden></div>
+  <dialog slot="overlay" class="pcb-metadata-dialog" aria-labelledby="graph-metadata-title">
     <form method="dialog">
       <header>
         <h3 id="graph-metadata-title">Graph Metadata</h3>
@@ -63,11 +64,11 @@ export default `
       <textarea spellcheck="false" aria-label="Graph metadata JSON" autocomplete="off"></textarea>
       <footer>
         <span class="pcb-metadata-status" role="status" aria-live="polite"></span>
-        <button class="pcb-btn" value="cancel" type="submit" data-action="close-graph-metadata">
+        <button class="graph-explorer-btn" value="cancel" type="submit" data-action="close-graph-metadata">
           Cancel
         </button>
         <button
-          class="pcb-btn"
+          class="graph-explorer-btn"
           data-action="save-graph-metadata"
           value="save"
           type="button"
@@ -79,8 +80,9 @@ export default `
       </footer>
     </form>
   </dialog>
-  <loading-overlay ref="loader"></loading-overlay>
-  <node-canvas connection-engine="canvas"></node-canvas>
-  <pg-canvas-graph></pg-canvas-graph>
-  <div class="pcb-stats"></div>
+  <loading-overlay slot="overlay" ref="loader"></loading-overlay>
+  <node-canvas slot="canvas" connection-engine="canvas"></node-canvas>
+  <pg-canvas-graph slot="canvas"></pg-canvas-graph>
+  <div slot="stats" class="graph-explorer-stats pcb-stats"></div>
+  </graph-explorer-shell>
 `;
