@@ -68,7 +68,8 @@ describe('CanvasGraph portal wrapper', () => {
     assert.equal(customElements.get('canvas-graph'), BaseCanvasGraph);
     assert.equal(customElements.get('pg-canvas-graph'), CanvasGraph);
     assert.equal(Object.getPrototypeOf(CanvasGraph.prototype), BaseCanvasGraph.prototype);
-    assert.equal(CanvasGraph.rootStyleSheets, BaseCanvasGraph.rootStyleSheets);
+    assert.notEqual(CanvasGraph.rootStyleSheets, BaseCanvasGraph.rootStyleSheets);
+    assert.equal(CanvasGraph.rootStyleSheets.length, BaseCanvasGraph.rootStyleSheets.length + 1);
 
     for (let method of [
       'setGraphModel',
