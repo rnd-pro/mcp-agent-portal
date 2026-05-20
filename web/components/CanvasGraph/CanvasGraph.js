@@ -1,9 +1,5 @@
 import Symbiote from '@symbiotejs/symbiote';
-import {
-  findClusterForPath,
-  normalizeProjectGraphMetadata,
-  parseHexColor,
-} from '../../services/project-graph-metadata.js';
+import { createCanvasGraphStore, ForceLayout } from 'symbiote-node/ui';
 import css from './CanvasGraph.css.js';
 
 const INIT_NODE_COUNT = 40;
@@ -53,6 +49,16 @@ function getNodeColor(node) {
   return parseHexColor(node.color) || TYPE_COLORS[node.type] || TYPE_COLORS.data;
 }
 
+function parseHexColor(value) {
+  if (typeof value !== 'string') return null;
+  const hex = value.trim().replace(/^#/, '');
+  if (!/^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(hex)) return null;
+  const parts = hex.length === 3
+    ? [...hex].map((part) => part + part)
+    : [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)];
+  return parts.map((part) => parseInt(part, 16));
+}
+
 const MENU_ITEMS = [
   { action: 'drill', label: 'Enter Group', path: 'M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z' },
   { action: 'explore', label: 'Explore', path: 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z' },
@@ -94,7 +100,6 @@ export class CanvasGraph extends Symbiote {
     this.adjMap = new Map();
     this.interactionDepths = new Map();
     this.nodePositions = new Map();
-    this.nodeIds = [];
     
     this.worker = null;
     this.paused = false;
@@ -136,8 +141,6 @@ export class CanvasGraph extends Symbiote {
     this._idleFrames = 0;      // Count consecutive frames with no visual change
     this._prevDragDeltaX = 0;  // Previous frame's focus drag delta X
     this._prevDragDeltaY = 0;  // Previous frame's focus drag delta Y
-    this._skeleton = null;     // Skeleton data reference for metadata
-    this._projectGraphMetadata = null;
     this._layoutSnapshot = null;
 
     // Info panel state (typewriter HUD to the right of active node)
@@ -229,7 +232,7 @@ export class CanvasGraph extends Symbiote {
   disconnectedCallback() {
     this._loopRunning = false;
     if (this._animationFrame) cancelAnimationFrame(this._animationFrame);
-    if (this.worker) this.worker.terminate();
+    if (this.worker) this.worker.stop();
   }
 
   /**
@@ -402,185 +405,13 @@ export class CanvasGraph extends Symbiote {
       return;
     }
     
-    // The pathStr is exactly the group ID in our new universal routing model
     if (pathStr !== this.currentGroupId) {
       this.loadLevel(pathStr);
     }
   }
 
-  // ─── HELPERS ───
-  _dirOf(filePath) {
-    const idx = filePath.lastIndexOf('/');
-    return idx >= 0 ? filePath.slice(0, idx + 1) : './';
-  }
-
-  _resolveImport(importPath, fromFile, knownFiles) {
-    if (knownFiles.has(importPath)) return importPath;
-    if (knownFiles.has(importPath + '.js')) return importPath + '.js';
-    if (importPath.startsWith('.')) {
-      const dir = this._dirOf(fromFile);
-      let resolved = dir + importPath.replace(/^\.\//,  '');
-      const parts = resolved.split('/');
-      const normalized = [];
-      for (const part of parts) {
-        if (part === '..') normalized.pop();
-        else if (part !== '.') normalized.push(part);
-      }
-      resolved = normalized.join('/');
-      if (knownFiles.has(resolved)) return resolved;
-      if (knownFiles.has(resolved + '.js')) return resolved + '.js';
-      if (knownFiles.has(resolved + '/index.js')) return resolved + '/index.js';
-    }
-    return null;
-  }
-
-  _classifyFile(file, classFiles) {
-    const name = file.split('/').pop().toLowerCase();
-    const ext = name.split('.').pop();
-    
-    // Explicit file names
-    if (name.includes('test') || name.includes('spec')) return 'external';
-    if (name === 'index.js' || name === 'index.mjs') return 'output';
-    if (name === 'package.json' || name.startsWith('.env') || name.startsWith('.git')) return 'config';
-
-    // By extension
-    if (ext === 'css' || ext === 'scss' || ext === 'less') return 'style';
-    if (ext === 'html' || ext === 'tpl' || ext === 'vue' || ext === 'jsx' || ext === 'tsx') return 'output';
-    if (ext === 'json' || ext === 'yaml' || ext === 'yml' || ext === 'toml') return 'config';
-    if (ext === 'md' || ext === 'txt' || ext === 'csv') return 'docs';
-    if (ext === 'svg' || ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'ico') return 'asset';
-    
-    // Default code files
-    if (ext === 'js' || ext === 'ts' || ext === 'mjs' || ext === 'py' || ext === 'go' || ext === 'rs') return 'action';
-    
-    if (classFiles.has(file)) return 'action';
-    return 'data';
-  }
-
-  // ─── SKELETON PARSER ───
-  setProjectGraphMetadata(metadata) {
-    this._projectGraphMetadata = normalizeProjectGraphMetadata(metadata);
-  }
-
-  setSkeleton(skeleton, metadata = this._projectGraphMetadata) {
-    this._skeleton = skeleton;
-    this._projectGraphMetadata = normalizeProjectGraphMetadata(metadata);
-    this.graphDB = { nodes: new Map(), edges: [], rootNodes: [] };
-    const N = skeleton.n || {};
-    const X = skeleton.X || {};
-    const I = skeleton.I || {};
-    const L = skeleton.L || {};
-
-    // 1. Collect all known files
-    const allFiles = new Set();
-    const classFiles = new Set(); // files that have classes/exports
-    for (const data of Object.values(N)) {
-      if (data.f) { allFiles.add(data.f); classFiles.add(data.f); }
-    }
-    for (const file of Object.keys(X)) allFiles.add(file);
-    // skeleton.f = { "dirPath/": ["file1.js", ...] }
-    for (const [dir, names] of Object.entries(skeleton.f || {})) {
-      for (const name of names) allFiles.add(dir === './' ? name : dir + name);
-    }
-    // skeleton.a = asset files (non-source)
-    for (const [dir, names] of Object.entries(skeleton.a || {})) {
-      for (const name of names) allFiles.add(dir === './' ? name : dir + name);
-    }
-
-    const semanticAssignments = new Map();
-    const semanticClusterFiles = new Map();
-    for (const file of allFiles) {
-      const cluster = findClusterForPath(file, this._projectGraphMetadata);
-      if (!cluster) continue;
-      const clusterId = `cluster:${cluster.id}`;
-      semanticAssignments.set(file, cluster);
-      if (!semanticClusterFiles.has(clusterId)) {
-        semanticClusterFiles.set(clusterId, { cluster, files: [] });
-      }
-      semanticClusterFiles.get(clusterId).files.push(file);
-    }
-
-    // 2. Build directory hierarchy from file paths. Files claimed by a semantic
-    // cluster move under that cluster, so their directories are not duplicated at root.
-    const dirs = new Set();
-    for (const file of allFiles) {
-      if (semanticAssignments.has(file)) continue;
-      const parts = file.split('/');
-      for (let i = 1; i < parts.length; i++) {
-        dirs.add(parts.slice(0, i).join('/'));
-      }
-    }
-
-    for (const [clusterId, { cluster, files }] of semanticClusterFiles.entries()) {
-      if (files.length === 0) continue;
-      const node = {
-        id: clusterId,
-        label: cluster.label,
-        w: 180,
-        h: 48,
-        type: 'group',
-        color: cluster.color,
-        description: cluster.description,
-        isGroup: true,
-        isSemanticCluster: true,
-        parentId: null,
-        children: [],
-      };
-      this.graphDB.nodes.set(clusterId, node);
-      this.graphDB.rootNodes.push(clusterId);
-    }
-
-    // Create directory group nodes
-    for (const dir of [...dirs].sort()) {
-      const parentDir = dir.includes('/') ? dir.substring(0, dir.lastIndexOf('/')) : null;
-      const label = dir.split('/').pop();
-      const node = { id: dir, label, w: 160, h: 40, type: 'group', isGroup: true, parentId: parentDir, children: [] };
-      this.graphDB.nodes.set(dir, node);
-      if (!parentDir || !dirs.has(parentDir)) {
-        this.graphDB.rootNodes.push(dir);
-      }
-    }
-    // Link child directories to parents
-    for (const node of this.graphDB.nodes.values()) {
-      if (node.parentId && this.graphDB.nodes.has(node.parentId)) {
-        this.graphDB.nodes.get(node.parentId).children.push(node.id);
-      }
-    }
-
-    // 3. Create file nodes
-    for (const file of allFiles) {
-      const parentId = this._dirOf(file).replace(/\/$/, '') || null;
-      const cluster = semanticAssignments.get(file);
-      const clusterParent = cluster ? `cluster:${cluster.id}` : null;
-      const actualParent = clusterParent || (parentId && this.graphDB.nodes.has(parentId) ? parentId : null);
-      const type = this._classifyFile(file, classFiles);
-      const label = file.split('/').pop();
-      const node = { id: file, label, w: 160, h: 40, type, isGroup: false, parentId: actualParent, children: [] };
-      this.graphDB.nodes.set(file, node);
-      if (actualParent) {
-        this.graphDB.nodes.get(actualParent).children.push(file);
-      } else {
-        this.graphDB.rootNodes.push(file);
-      }
-    }
-
-    // 4. Extract edges from skeleton.I (import sources)
-    const edgeList = [];
-    const edgeSet = new Set();
-    for (const [srcFile, imports] of Object.entries(I)) {
-      if (!allFiles.has(srcFile)) continue;
-      for (const impPath of imports) {
-        // Skip bare module imports (node_modules)
-        if (!impPath.startsWith('.') && !impPath.startsWith('/')) continue;
-        const targetFile = this._resolveImport(impPath, srcFile, allFiles);
-        if (!targetFile || targetFile === srcFile) continue;
-        const key = srcFile + '>' + targetFile;
-        if (edgeSet.has(key)) continue;
-        edgeSet.add(key);
-        edgeList.push({ from: srcFile, to: targetFile });
-      }
-    }
-    this.graphDB.edges = edgeList;
+  setGraphModel(model) {
+    this.graphDB = createCanvasGraphStore(model);
 
     // Center viewport BEFORE worker starts — prevents nodes flashing at top-left
     const rect = this.canvas.getBoundingClientRect();
@@ -592,7 +423,6 @@ export class CanvasGraph extends Symbiote {
     this.loadLevel(null);
   }
 
-  // ... (Other test-force-sim logic converted to class methods with `this.`)
   rebuildNodeMap() { this.nodeMap = new Map(this.nodes.map(n => [n.id, n])); }
   
   rebuildAdjMap() {
@@ -759,43 +589,34 @@ export class CanvasGraph extends Symbiote {
   }
 
   startWorker(customOptions = null) {
-    if (this.worker) this.worker.terminate();
-    const workerUrl = new URL('../../packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
-    this.worker = new Worker(workerUrl);
+    if (this.worker) this.worker.stop();
+    this.worker = new ForceLayout(ForceLayout.defaultWorkerUrl());
 
-    this.worker.onmessage = (e) => {
-      const { type } = e.data;
-      if (type === 'nodeIds') this.nodeIds = e.data.ids;
-      if (type === 'tick') {
-        const draggedId = this.dragNode ? this.dragNode.id : null;
-        if (e.data.packed) {
-          const buf = new Float32Array(e.data.packed);
-          for (let i = 0; i < this.nodeIds.length; i++) {
-            const id = this.nodeIds[i];
-            if (id === draggedId) continue;
-            const pos = this.nodePositions.get(id);
-            if (pos) { pos.x = buf[i * 2]; pos.y = buf[i * 2 + 1]; }
-            else this.nodePositions.set(id, { x: buf[i * 2], y: buf[i * 2 + 1] });
-          }
-        } else if (e.data.positions) {
-          for (const [id, p] of Object.entries(e.data.positions)) {
-            if (id === draggedId) continue;
-            const pos = this.nodePositions.get(id);
-            if (pos) { pos.x = p.x; pos.y = p.y; }
-            else this.nodePositions.set(id, p);
-          }
+    this.worker.onTick = (positions, meta = {}) => {
+      const draggedId = this.dragNode ? this.dragNode.id : null;
+      for (const [id, p] of Object.entries(positions || {})) {
+        if (id === draggedId) continue;
+        const pos = this.nodePositions.get(id);
+        if (pos) {
+          pos.x = p.x;
+          pos.y = p.y;
+        } else {
+          this.nodePositions.set(id, p);
         }
-        this.lastAlpha = e.data.alpha || 0;
-        this.tickCount++;
-        this.frameCount++;
-        this._wakeLoop();  // Worker sent new positions — resume rendering
-        this.dispatchEvent(new CustomEvent('layout-tick', { detail: { alpha: this.lastAlpha } }));
       }
-      if (type === 'done' && e.data.positions) {
-        for (const [id, pos] of Object.entries(e.data.positions)) this.nodePositions.set(id, pos);
-        this.dispatchEvent(new CustomEvent('layout-done'));
-        this._emitLayoutSnapshot();
+      this.lastAlpha = meta.alpha || 0;
+      this.tickCount++;
+      this.frameCount++;
+      this._wakeLoop();
+      this.dispatchEvent(new CustomEvent('layout-tick', { detail: { alpha: this.lastAlpha } }));
+    };
+
+    this.worker.onDone = (positions) => {
+      if (positions) {
+        for (const [id, pos] of Object.entries(positions)) this.nodePositions.set(id, pos);
       }
+      this.dispatchEvent(new CustomEvent('layout-done'));
+      this._emitLayoutSnapshot();
     };
 
     const options = customOptions || {
@@ -816,8 +637,7 @@ export class CanvasGraph extends Symbiote {
       mode: 'continuous',
     };
 
-    this.worker.postMessage({
-      type: 'init',
+    this.worker.start({
       nodes: this.nodes.map(n => {
         const restoredPos = this._layoutSnapshot?.positions?.[n.id];
         const pos = this.smoothPositions.get(n.id) || this.nodePositions.get(n.id) || restoredPos;
@@ -839,11 +659,11 @@ export class CanvasGraph extends Symbiote {
       groups: {}, options
     });
 
-    this.worker.postMessage({ type: 'updateConfig', config: {
+    this.worker.updateConfig({
       contAlphaFloor: this.$.alphaFloor, contAlphaTarget: this.$.alphaTarget,
       brownian: this.$.brownian, brownianThresh: this.$.brownianThresh,
       pinReheat: this.$.pinReheat, pinCap: this.$.pinCap,
-    }});
+    });
 
     this.smoothPositions.clear();
     const viewport = this._layoutSnapshot?.viewport;
@@ -1415,22 +1235,16 @@ export class CanvasGraph extends Symbiote {
       lines.push(`Children: ${node.children.length}`);
     }
 
-    if (this._skeleton) {
-      const X = this._skeleton.X || {};
-      const exports = X[node.id];
-      if (exports && exports.length > 0) {
-        lines.push('');
-        lines.push('Exports:');
-        for (const exp of exports.slice(0, 8)) {
-          lines.push(`  ${exp}`);
-        }
-        if (exports.length > 8) lines.push(`  ... +${exports.length - 8}`);
+    if (Array.isArray(node.exports) && node.exports.length > 0) {
+      lines.push('');
+      lines.push('Exports:');
+      for (const exp of node.exports.slice(0, 8)) {
+        lines.push(`  ${exp}`);
       }
-
-      const L = this._skeleton.L || {};
-      const loc = L[node.id];
-      if (loc) lines.push(`Lines: ${loc}`);
+      if (node.exports.length > 8) lines.push(`  ... +${node.exports.length - 8}`);
     }
+
+    if (node.lines) lines.push(`Lines: ${node.lines}`);
 
     return lines;
   }
@@ -1687,7 +1501,7 @@ export class CanvasGraph extends Symbiote {
         this._dragStartY = e.clientY;
         this.canvas.style.cursor = 'grabbing';
         this.canvas.setPointerCapture(e.pointerId);
-        this.worker.postMessage({ type: 'pin', id: hit.id, x: pos.x, y: pos.y });
+        this.worker?.pin(hit.id, pos.x, pos.y);
         e.preventDefault();
       } else {
         // Start panning — cancel any fitView/flyToNode animation
@@ -1709,7 +1523,7 @@ export class CanvasGraph extends Symbiote {
         const newX = world.x - this.dragOffset.x;
         const newY = world.y - this.dragOffset.y;
         this.nodePositions.set(this.dragNode.id, { x: newX, y: newY });
-        this.worker.postMessage({ type: 'pin', id: this.dragNode.id, x: newX, y: newY });
+        this.worker?.pin(this.dragNode.id, newX, newY);
         this.hoverNode = null;
       } else if (this.isPanning) {
         this._wakeLoop();  // Panning — resume rendering
@@ -1725,7 +1539,7 @@ export class CanvasGraph extends Symbiote {
     this.canvas.addEventListener('pointerup', (e) => {
       const draggedNode = this.dragNode;
       if (this.dragNode) {
-        this.worker.postMessage({ type: 'unpin', id: this.dragNode.id });
+        this.worker?.unpin(this.dragNode.id);
         this.dragNode = null;
       }
       this.isPanning = false;

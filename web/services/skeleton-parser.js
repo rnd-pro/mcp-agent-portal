@@ -8,91 +8,18 @@ import {
   Output,
   computeAutoLayout,
 } from 'symbiote-node';
+import {
+  baseName,
+  collectSkeletonFiles,
+  dirOf,
+  resolveImport,
+} from './project-graph-skeleton-utils.js';
 
 // ── Socket types (for wire coloring) ──
 const S_IMPORT = new Socket('import');
 S_IMPORT.color = '#c87533';   // copper
 const S_EXPORT = new Socket('export');
 S_EXPORT.color = '#d4a04a';   // gold
-
-/**
- * Extract directory from file path
- * @param {string} filePath
- * @returns {string}
- */
-function dirOf(filePath) {
-  if (!filePath) return './';
-  const idx = filePath.lastIndexOf('/');
-  return idx >= 0 ? filePath.slice(0, idx + 1) : './';
-}
-
-/**
- * Short filename for node label
- * @param {string} filePath
- * @returns {string}
- */
-function baseName(filePath) {
-  if (!filePath) return '?';
-  const idx = filePath.lastIndexOf('/');
-  return idx >= 0 ? filePath.slice(idx + 1) : filePath;
-}
-
-
-
-/**
- * Resolve import path to a known file
- * @param {string} importPath
- * @param {string} fromFile
- * @param {Set<string>} knownFiles
- * @returns {string|null}
- */
-function resolveImport(importPath, fromFile, knownFiles) {
-  // Direct match
-  if (knownFiles.has(importPath)) return importPath;
-
-  // Try with .js extension
-  if (knownFiles.has(importPath + '.js')) return importPath + '.js';
-
-  // Relative resolution
-  if (importPath.startsWith('.')) {
-    const dir = dirOf(fromFile);
-    let resolved = dir + importPath.replace(/^\.\//, '');
-    // Normalize ../ segments
-    const parts = resolved.split('/');
-    const normalized = [];
-    for (const part of parts) {
-      if (part === '..') normalized.pop();
-      else if (part !== '.') normalized.push(part);
-    }
-    resolved = normalized.join('/');
-
-    if (knownFiles.has(resolved)) return resolved;
-    if (knownFiles.has(resolved + '.js')) return resolved + '.js';
-    // Try index
-    if (knownFiles.has(resolved + '/index.js')) return resolved + '/index.js';
-  }
-
-  // Module name match via pre-built index — O(1) instead of O(N)
-  const base = importPath.split('/').pop();
-  const idx = buildBasenameIndex(knownFiles);
-  return idx.get(base) || idx.get(base.replace(/\.js$/, '')) || null;
-}
-
-let _basenameIndex = null;
-let _indexedSet = null;
-function buildBasenameIndex(knownFiles) {
-  if (_indexedSet === knownFiles) return _basenameIndex;
-  _indexedSet = knownFiles;
-  _basenameIndex = new Map();
-  for (const file of knownFiles) {
-    const base = file.split('/').pop();
-    _basenameIndex.set(base, file);
-    if (!base.endsWith('.js')) {
-      _basenameIndex.set(base + '.js', file);
-    }
-  }
-  return _basenameIndex;
-}
 
 /**
  * Build a file-level graph from skeleton data.
@@ -106,31 +33,7 @@ function buildFileGraph(skeleton) {
   const fileMap = new Map(); // filePath → nodeId
   const dirMap = new Map(); // dirPath → nodeId (hub nodes)
 
-  // Collect all files that have symbols
-  const files = new Set();
-  const assetFiles = new Set(); // non-source files (.css, .html, .json, .md, etc.)
-  // From nodes (classes) — each has .f (file) property
-  for (const data of Object.values(skeleton.n || {})) {
-    if (data.f) files.add(data.f);
-  }
-  // From exports map — keys are files
-  for (const file of Object.keys(skeleton.X || {})) {
-    files.add(file);
-  }
-  // From source files without symbols
-  for (const [dir, names] of Object.entries(skeleton.f || {})) {
-    for (const name of names) {
-      files.add(dir === './' ? name : dir + name);
-    }
-  }
-  // From non-source/asset files (.css, .html, .json, .md, etc.)
-  for (const [dir, names] of Object.entries(skeleton.a || {})) {
-    for (const name of names) {
-      const fullPath = dir === './' ? name : dir + name;
-      files.add(fullPath);
-      assetFiles.add(fullPath);
-    }
-  }
+  const { files, assetFiles } = collectSkeletonFiles(skeleton);
 
   if (files.size === 0) return { editor, fileMap };
 
@@ -259,28 +162,7 @@ function buildStructuredGraph(skeleton) {
     }
   }
 
-  // Collect all files
-  const files = new Set();
-  const assetFiles = new Set();
-  for (const data of Object.values(N)) {
-    if (data.f) files.add(data.f);
-  }
-  for (const file of Object.keys(skeleton.X || {})) {
-    files.add(file);
-  }
-  for (const [dir, names] of Object.entries(skeleton.f || {})) {
-    for (const name of names) {
-      files.add(dir === './' ? name : dir + name);
-    }
-  }
-  // Non-source/asset files (.css, .html, .json, .md, etc.)
-  for (const [dir, names] of Object.entries(skeleton.a || {})) {
-    for (const name of names) {
-      const fullPath = dir === './' ? name : dir + name;
-      files.add(fullPath);
-      assetFiles.add(fullPath);
-    }
-  }
+  const { files, assetFiles } = collectSkeletonFiles(skeleton);
 
   if (files.size === 0) return { editor, fileMap };
 

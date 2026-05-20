@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node bin/mcp-agent-portal.js",
     "dev": "node index.js --dev",
+    "test:audit": "node scripts/test-hygiene-audit.js",
     "test:unit": "node --test --test-timeout 10000 test/unit/*.test.js",
     "test:integration": "node --test --test-timeout 20000 test/integration/*.test.js",
     "test": "npm run test:unit && npm run test:integration",

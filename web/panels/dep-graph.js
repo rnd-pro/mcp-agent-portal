@@ -21,13 +21,17 @@ import {
   Frame,
   computeAutoLayout,
   computeTreeLayout,
+  computeInitialGraphPositions,
+  createForceLayoutPayload,
   applyTheme,
+  getDrillableFiles,
+  getGraphCacheKey,
+  getOrBuildGraph,
   SubgraphRouter,
-  LODManager,
   PinExpansion,
   ForceLayout,
   PCB_DARK,
-} from 'symbiote-node';
+} from 'symbiote-node/ui';
 import { api, state, events, emit, resolveProjectPath } from '../app.js';
 import { emit as dashEmit } from '../dashboard-state.js';
 import { persistUiValue, readUiValue } from '../common/ui-state.js';
@@ -35,12 +39,12 @@ import { persistUiValue, readUiValue } from '../common/ui-state.js';
 import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
 import '../components/LoadingOverlay/LoadingOverlay.js';
 import PCB_CSS from './dep-graph.css.js';
-import { createForceLayoutPayload, getDrillableFiles, getGraphCacheKey, getOrBuildGraph } from './dep-graph-build.js';
 import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
-import { buildFlatGroups, computeInitialGraphPositions } from './dep-graph-layout.js';
+import { buildFlatGroups } from './dep-graph-layout.js';
 import { normalizeProjectGraphMetadata } from '../services/project-graph-metadata.js';
+import { buildCanvasGraphModelFromSkeleton } from '../services/project-graph-canvas-model.js';
 import {
   getNextPathStyle,
   renderPathStyleButton,
@@ -77,8 +81,6 @@ export class DepGraph extends Symbiote {
   _router = null;
   /** @type {PinExpansion} */
   _pinExpansion = null;
-  /** @type {LODManager} */
-  _lodManager = null;
   /** @type {boolean} Guard against duplicate graph builds */
   _graphBuilt = false;
   _projectGraphMetadata = normalizeProjectGraphMetadata();
@@ -523,7 +525,6 @@ export class DepGraph extends Symbiote {
       if (!res.ok) throw new Error(`metadata load failed: ${res.status}`);
       let data = await res.json();
       this._projectGraphMetadata = normalizeProjectGraphMetadata(data.metadata || {});
-      this._pgCanvasGraph?.setProjectGraphMetadata?.(this._projectGraphMetadata);
       this._renderClusterPanel();
       if (state.skeleton && this._graphBuilt && this._projectGraphMetadata.clusters.length > 0) {
         this._rebuildWithGraphMetadata();
@@ -683,7 +684,6 @@ export class DepGraph extends Symbiote {
   }
 
   _rebuildWithGraphMetadata() {
-    this._pgCanvasGraph?.setProjectGraphMetadata?.(this._projectGraphMetadata);
     this._renderClusterPanel();
     if (!state.skeleton || !this._graphBuilt) return;
     this._graphBuilt = false;
@@ -737,7 +737,6 @@ export class DepGraph extends Symbiote {
     }
   }
 
-  /**
   /**
    * Start radial exploration from a focus node.
    * Shows the node at center with imports (left) and dependents (right).
@@ -923,9 +922,9 @@ export class DepGraph extends Symbiote {
         this._pgCanvasGraph.addEventListener('layout-tick', hideCanvasLoader);
         this._pgCanvasGraph.addEventListener('layout-done', hideCanvasLoader);
         
-        this._pgCanvasGraph.setProjectGraphMetadata?.(this._projectGraphMetadata);
+        const graphModel = buildCanvasGraphModelFromSkeleton(skeleton, this._projectGraphMetadata);
         this._pgCanvasGraph.setLayoutSnapshot?.(this._readGraphLayoutSnapshot());
-        this._pgCanvasGraph.setSkeleton(skeleton, this._projectGraphMetadata);
+        this._pgCanvasGraph.setGraphModel(graphModel);
         
         // Restore path from URL
         this._pgCanvasGraph.setPath(parseGraphHash().path);
@@ -1022,8 +1021,7 @@ export class DepGraph extends Symbiote {
     const nodeCount = editor.getNodes().length;
     if (!isStructured && nodeCount > 50) {
       if (!this._forceLayout) {
-        const workerUrl = new URL('../../packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
-        this._forceLayout = new ForceLayout(workerUrl);
+        this._forceLayout = new ForceLayout(ForceLayout.defaultWorkerUrl());
       }
 
       const editorNodes = [...editor.getNodes()];
@@ -1317,52 +1315,10 @@ export class DepGraph extends Symbiote {
           });
           correctedPositions = layoutResult.positions ? layoutResult.positions : layoutResult;
         } else {
-          // ── Group-aware circular initial positions ──
-          // Instead of Sugiyama (vertical line), place groups in concentric rings.
-          // This gives the force simulation a balanced 2D starting point.
-          correctedPositions = {};
-          const groupEntries = groups ? Object.entries(groups) : [];
-          const totalNodes = editorNodes.length;
+          correctedPositions = computeInitialGraphPositions({ editor, groups });
 
-          if (groupEntries.length > 1) {
-            // Place each group's centroid on a spiral, then fan members around it
-            const globalRadius = Math.sqrt(totalNodes) * 80;
-            let groupIdx = 0;
-            for (const [, memberIds] of groupEntries) {
-              const angle = (2 * Math.PI * groupIdx) / groupEntries.length;
-              const r = globalRadius * (0.3 + 0.7 * (groupIdx / groupEntries.length));
-              const cx = Math.cos(angle) * r;
-              const cy = Math.sin(angle) * r;
-
-              const memberRadius = Math.sqrt(memberIds.length) * 60;
-              for (let mi = 0; mi < memberIds.length; mi++) {
-                const mAngle = (2 * Math.PI * mi) / memberIds.length;
-                correctedPositions[memberIds[mi]] = {
-                  x: cx + Math.cos(mAngle) * memberRadius + (Math.random() - 0.5) * 20,
-                  y: cy + Math.sin(mAngle) * memberRadius + (Math.random() - 0.5) * 20,
-                };
-              }
-              groupIdx++;
-            }
-          }
-
-          // Fill any ungrouped nodes in a ring
-          for (const n of editorNodes) {
-            if (!correctedPositions[n.id]) {
-              const angle = Math.random() * 2 * Math.PI;
-              const r = Math.sqrt(totalNodes) * 50 + Math.random() * 200;
-              correctedPositions[n.id] = {
-                x: Math.cos(angle) * r,
-                y: Math.sin(angle) * r,
-              };
-            }
-          }
-
-          // Start force simulation. Apply circular seed BEFORE starting so there's no
-          // position race between the random seed write (below) and the first worker tick.
           if (!this._forceLayout) {
-            const workerUrl = new URL('../../packages/symbiote-node/canvas/ForceWorker.js', import.meta.url).href;
-            this._forceLayout = new ForceLayout(workerUrl);
+            this._forceLayout = new ForceLayout(ForceLayout.defaultWorkerUrl());
           }
 
           const forcePayload = createForceLayoutPayload({
@@ -1432,12 +1388,10 @@ export class DepGraph extends Symbiote {
             options: forcePayload.options,
           });
 
-          // BUG-FIX: Do NOT write correctedPositions to canvas here.
-          // The circular seed has already been applied to forcePayload.nodes above.
-          // Writing it now would overwrite the first worker tick with stale random positions.
+          // Keep the circular seed in forcePayload until the worker emits real positions.
           return;
-        } // end if (editorNodes.length >= 50)
-      } // end outer else (flat/tree mode branch)
+        }
+      }
 
 
 
@@ -1501,10 +1455,6 @@ export class DepGraph extends Symbiote {
           }
        }, 300);
     }
-    // Phase 3: Directory frames (flat mode only)
-    // DISABLED: Zone group frames temporarily turned off
-
-    // Store skeleton for Phase 2 pin resolution (flat mode only)
     this._skeleton = skeleton;
     this._pinExpansion?.clearPins();
     if (!isStructured) {
@@ -1518,16 +1468,6 @@ export class DepGraph extends Symbiote {
           }
         });
       }
-      /*
-      if (!this._lodManager) {
-        this._lodManager = new LODManager(this._canvas, { threshold: 0.7 });
-        this._lodManager.onLodChange((lod) => {
-          this._pinExpansion?.applyLOD(lod);
-        });
-        this._lodManager.attach();
-      }
-      this._lodManager.update();
-      */
       this._buildPinCache(skeleton, fileMap);
     }
 
