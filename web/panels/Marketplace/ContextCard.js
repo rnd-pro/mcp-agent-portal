@@ -19,6 +19,14 @@ const css = `
   min-width: 0;
 }
 
+.mp-card-title-text {
+  word-break: break-all;
+}
+
+.mp-card-type {
+  margin-left: auto;
+}
+
 .mp-card-icon {
   display: inline-flex;
   align-items: center;
@@ -36,6 +44,10 @@ const css = `
 .mp-card-actions {
   display: flex;
   gap: 8px;
+}
+
+.mp-context-btn {
+  flex: 1;
 }
 
 .mp-form-status {
@@ -61,33 +73,33 @@ export class ContextCard extends Symbiote {
 
   renderCallback() {
     this.sub('isError', (isError) => {
-      this.ref.status.style.color = isError ? '#ef4444' : 'inherit';
+      this.ref.status.style.color = isError ? 'var(--sn-danger-color)' : 'inherit';
     });
   }
 }
 
 ContextCard.template = html`
-<div class="ui-card">
+<sn-card>
   <div class="mp-card-header">
     <div class="mp-card-title">
       <span class="mp-card-icon">
         <span class="material-symbols-outlined" ${{ textContent: 'icon' }}></span>
       </span>
-      <span style="word-break:break-all" ${{ textContent: 'title' }}></span>
+      <span class="mp-card-title-text" ${{ textContent: 'title' }}></span>
     </div>
-    <span class="ui-badge info" style="margin-left:auto" ${{ textContent: 'type' }}></span>
+    <span class="ui-badge info mp-card-type" ${{ textContent: 'type' }}></span>
   </div>
   <div class="mp-card-desc" ${{ textContent: 'description' }}></div>
   <div class="mp-card-actions">
-    <button class="ui-btn" style="flex:1" data-dest="project" ${{ onclick: '^onContextInstall' }}>
+    <button class="ui-btn mp-context-btn" data-dest="project" ${{ onclick: '^onContextInstall' }}>
       <span class="material-symbols-outlined">download</span> Project
     </button>
-    <button class="ui-btn primary" style="flex:1" data-dest="team" ${{ onclick: '^onContextInstall' }}>
+    <button class="ui-btn primary mp-context-btn" data-dest="team" ${{ onclick: '^onContextInstall' }}>
       <span class="material-symbols-outlined">group</span> Team
     </button>
   </div>
   <div class="mp-form-status" ref="status" ${{ textContent: 'status' }}></div>
-</div>
+</sn-card>
 `;
 
 ContextCard.rootStyles = cssShared + css;

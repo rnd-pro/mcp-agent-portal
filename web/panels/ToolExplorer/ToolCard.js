@@ -10,14 +10,14 @@ export class ToolCard extends Symbiote {
 }
 
 ToolCard.template = html`
-<div class="ui-card">
+<sn-card>
   <div class="te-tool-name" ${{ textContent: 'name' }}></div>
   <div class="te-tool-desc" ${{ textContent: 'description' }}></div>
   <div>
     <div class="te-schema-title">Input Schema</div>
     <div class="te-schema-block" ${{ textContent: 'schemaJson' }}></div>
   </div>
-</div>
+</sn-card>
 `;
 
 ToolCard.rootStyles = `
@@ -44,7 +44,7 @@ ToolCard.rootStyles = `
   font-family: var(--sn-font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 11px;
   overflow-x: auto;
-  color: #a8b2d1;
+  color: var(--sn-text);
   white-space: pre-wrap;
   border: 1px solid var(--sn-node-border);
 }

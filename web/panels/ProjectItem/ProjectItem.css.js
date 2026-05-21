@@ -2,13 +2,13 @@ export default`
 :host {
   display: block;
 }
-.ui-card {
-  padding: 10px 12px;
-  margin-bottom: 8px;
+sn-card {
+  --sn-card-padding: 10px 12px;
+  --sn-card-margin-block-end: 8px;
   transition: border-color 0.2s;
 }
-.ui-card:hover {
-  border-color: var(--project-accent, #7878ff);
+sn-card:hover {
+  border-color: var(--project-accent, var(--sn-node-selected));
 }
 .project-title {
   font-size: 14px;
@@ -21,11 +21,11 @@ export default`
 .token-badge {
   font-size: 10px;
   font-weight: 500;
-  color: var(--sn-cat-server, #64b5f6);
+  color: var(--sn-cat-server);
   padding: 1px 6px;
   border-radius: 8px;
-  background: rgba(100, 181, 246, 0.1);
-  border: 1px solid var(--sn-cat-server, rgba(100, 181, 246, 0.15));
+  background: color-mix(in srgb, var(--sn-cat-server) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sn-cat-server) 15%, transparent);
   font-family: var(--sn-font-mono, monospace);
   white-space: nowrap;
 }
@@ -44,11 +44,11 @@ export default`
   opacity: 0;
   transition: opacity 0.2s, color 0.2s;
 }
-.ui-card:hover .delete-btn {
+sn-card:hover .delete-btn {
   opacity: 1;
 }
 .delete-btn:hover {
-  color: var(--sn-danger-color, #ef5350);
+  color: var(--sn-danger-color);
 }
 .path {
   font-size: 11px;
@@ -60,7 +60,7 @@ export default`
   text-overflow: ellipsis;
 }
 a {
-  color: var(--project-accent, #7878ff);
+  color: var(--project-accent, var(--sn-node-selected));
   text-decoration: none;
 }
 a:hover {

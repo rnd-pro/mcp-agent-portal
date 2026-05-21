@@ -61,12 +61,26 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote surface cards for reusable card shells', () => {
+    for (let relative of [
+      'web/panels/ActiveTasks/TaskCard.js',
+      'web/panels/ToolExplorer/ToolCard.js',
+      'web/panels/Marketplace/McpServerCard.js',
+      'web/panels/Marketplace/ContextCard.js',
+      'web/panels/ProjectItem/ProjectItem.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('<sn-card'), `${relative} must compose the library card surface`);
+      assert.equal(source.includes('<div class="ui-card"'), false, `${relative} must not copy card shell markup`);
+    }
+  });
+
   it('keeps active task cards off inline copied theme values', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
     for (let literal of ['#9ca3af', '#404040', 'style="']) {
       assert.equal(source.includes(literal), false, `TaskCard must not copy provider styling with ${literal}`);
     }
-    for (let token of ['--sn-font-mono', '--sn-text-dim', '--sn-node-border']) {
+    for (let token of ['--sn-font-mono', '--sn-text-dim']) {
       assert.ok(source.includes(token), `TaskCard must consume ${token}`);
     }
   });

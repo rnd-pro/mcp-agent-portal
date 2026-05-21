@@ -6,7 +6,7 @@ const css = `
   display: block;
 }
 
-.ui-card {
+sn-card {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -28,18 +28,22 @@ const css = `
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #fff;
+  color: var(--sn-text);
 }
 
 .mp-card-icon .material-symbols-outlined {
   font-size: 20px;
-  color: #fff;
+  color: var(--sn-text);
 }
 
 .mp-card-source {
   font-size: 10px;
   opacity: 0.3;
   margin-top: 1px;
+}
+
+.mp-card-name {
+  margin-bottom: 0;
 }
 
 .mp-card-desc {
@@ -115,7 +119,7 @@ export class McpServerCard extends Symbiote {
     name: '',
     description: '',
     icon: 'bolt',
-    gradient: 'linear-gradient(135deg, #6b7280, #4b5563)',
+    gradient: 'linear-gradient(135deg, var(--sn-node-selected), var(--sn-node-hover))',
     sourceHost: '',
     envHint: '',
     status: 'Available',
@@ -126,13 +130,13 @@ export class McpServerCard extends Symbiote {
 }
 
 McpServerCard.template = html`
-<div class="ui-card">
+<sn-card>
   <div class="mp-card-header">
     <div class="mp-card-icon" ${{ 'style.background': 'gradient' }}>
       <span class="material-symbols-outlined" ${{ textContent: 'icon' }}></span>
     </div>
     <div>
-      <div class="ui-card-title" style="margin-bottom:0" ${{ textContent: 'name' }}></div>
+      <div class="sn-card-title mp-card-name" ${{ textContent: 'name' }}></div>
       <div class="mp-card-source" ${{ textContent: 'sourceHost', hidden: '!sourceHost' }}></div>
     </div>
   </div>
@@ -145,7 +149,7 @@ McpServerCard.template = html`
     </div>
     <button class="mp-card-toggle" ${{ '@data-action': 'action', textContent: 'actionLabel', onclick: '^onServerAction' }}></button>
   </div>
-</div>
+</sn-card>
 `;
 
 McpServerCard.rootStyles = cssShared + css;

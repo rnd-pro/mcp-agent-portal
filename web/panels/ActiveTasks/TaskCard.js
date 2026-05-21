@@ -24,7 +24,7 @@ export class TaskCard extends Symbiote {
 }
 
 TaskCard.template = html`
-<div class="ui-card">
+<sn-card>
   <div class="task-card-head">
     <div class="task-card-id" ${{ textContent: 'shortId', title: 'id' }}></div>
     <div ${{ textContent: 'status', className: 'badgeClass' }}></div>
@@ -38,11 +38,11 @@ TaskCard.template = html`
       <span ${{ hidden: 'hideEvents' }}><span ${{ textContent: 'events' }}></span> events</span>
     </div>
   </div>
-  <div class="task-card-actions">
+  <div slot="footer" class="task-card-actions">
     <button class="ui-btn danger" ${{ hidden: 'hideCancel', '@data-task-id': 'id', onclick: '^onCancelTask' }}>Cancel</button>
     <button class="ui-btn" ${{ hidden: 'hideFinish', '@data-task-id': 'id', onclick: '^onFinishTask' }}>Finish</button>
   </div>
-</div>
+</sn-card>
 `;
 
 TaskCard.rootStyles = cssShared + `
@@ -78,9 +78,6 @@ TaskCard.rootStyles = cssShared + `
 }
 
 .task-card-actions {
-  margin-top: 16px;
-  border-top: 1px solid var(--sn-node-border);
-  padding-top: 16px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
