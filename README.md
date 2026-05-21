@@ -173,7 +173,7 @@ Agent Portal aggregates the RND-PRO MCP ecosystem:
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |
-| [team-memory](https://github.com/rnd-pro/team-memory) | Shared skills, agents, and workflows (git submodule) | ✅ Production |
+| `.agent-portal` skills | Project-local skills, agents, and workflows | ✅ Production |
 | browser-x-mcp | Browser automation, form testing | 🟡 Beta |
 | terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
 
@@ -186,29 +186,26 @@ npm install
 node index.js
 ```
 
-If you've already cloned without `--recurse-submodules`:
+If `.agent-portal` is configured as a private skills submodule, set its local remote before initializing submodules:
 
 ```bash
-git submodule update --init --recursive
+git config submodule..agent-portal.url <private-agent-portal-skills-remote>
+git submodule update --init .agent-portal
+git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp packages/symbiote-node
 ```
 
-### Team Memory (`.agent-portal/`)
+### Agent Portal Skills (`.agent-portal/`)
 
-Agent Portal reads skills, agents, and workflows from the `.agent-portal/` directory in your project root. This directory is a [git submodule](https://github.com/rnd-pro/team-memory) — shared across all team projects.
+Agent Portal reads project-local skills, agents, and workflows from the `.agent-portal/` directory in your project root.
 
-**Add to your project:**
+The skills directory can be configured as a private submodule. Set the private remote in local Git config before initializing it:
 
 ```bash
-git submodule add git@github.com:rnd-pro/team-memory.git .agent-portal
+git config submodule..agent-portal.url <private-agent-portal-skills-remote>
+git submodule update --init .agent-portal
 ```
 
-**Sync latest:**
-
-```bash
-git submodule update --remote .agent-portal
-```
-
-See [team-memory README](https://github.com/rnd-pro/team-memory) for details on creating skills and agents.
+See `.agent-portal/README.md` when project-local skills are installed.
 
 ## Related Projects
 

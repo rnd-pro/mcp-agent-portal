@@ -26,7 +26,12 @@ import {
 
 const _realFetch = window.fetch.bind(window);
 
-/** Return a mock JSON Response */
+/**
+ * Return a mock JSON Response.
+ * @param {object} data
+ * @param {number} [status=200]
+ * @returns {Response}
+ */
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -34,7 +39,12 @@ function jsonResponse(data, status = 200) {
   });
 }
 
-/** Route /api/* requests to mock data */
+/**
+ * Route /api/* requests to mock data.
+ * @param {RequestInfo|string} input
+ * @param {RequestInit} init
+ * @returns {Promise<Response>|Response}
+ */
 function mockFetch(input, init) {
   let url;
   try {
@@ -151,7 +161,11 @@ function resolveRepoUrl(relativePath) {
   return repoUrl;
 }
 
-/** Handle /api/mcp-call — route to appropriate mock tool response */
+/**
+ * Handle /api/mcp-call by routing to an appropriate mock tool response.
+ * @param {object} body
+ * @returns {Promise<Response>}
+ */
 async function handleMcpCall(body) {
   let serverName = body?.serverName || 'project-graph';
   let method = body?.method;
@@ -341,7 +355,7 @@ class MockWebSocket extends EventTarget {
             state: {
               project: {
                 name: 'mcp-agent-portal',
-                path: '/home/dev/mcp-agent-portal',
+                path: '/workspace/agent-portal',
                 color: '#4c8bf5',
                 agents: 2,
                 pid: 41200,
@@ -406,7 +420,7 @@ window.WebSocket = MockWebSocket;
 function addDemoBadge() {
   let badge = document.createElement('div');
   badge.id = 'demo-badge';
-  badge.innerHTML = `LIVE DEMO`;
+  badge.textContent = 'LIVE DEMO';
   Object.assign(badge.style, {
     position: 'fixed',
     top: '7px',

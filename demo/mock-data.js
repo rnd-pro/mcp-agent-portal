@@ -15,7 +15,7 @@ export const instances = [
     color: '#4c8bf5',
     agents: 0,
     projectName: 'mcp-agent-portal',
-    projectPath: '/home/dev/mcp-agent-portal',
+    projectPath: '/workspace/agent-portal',
   },
   {
     name: 'agent-pool-mcp',
@@ -26,7 +26,7 @@ export const instances = [
     color: '#e8710a',
     agents: 2,
     projectName: 'mcp-agent-portal',
-    projectPath: '/home/dev/mcp-agent-portal',
+    projectPath: '/workspace/agent-portal',
   },
   {
     name: 'browser-x-mcp',
@@ -37,7 +37,7 @@ export const instances = [
     color: '#9334e6',
     agents: 1,
     projectName: 'symbiote-video',
-    projectPath: '/home/dev/symbiote-video',
+    projectPath: '/workspace/symbiote-video',
   },
   {
     name: 'terminal-x-mcp',
@@ -48,18 +48,18 @@ export const instances = [
     color: '#ea4335',
     agents: 0,
     projectName: 'symbiote-app',
-    projectPath: '/home/dev/symbiote-app',
+    projectPath: '/workspace/symbiote-app',
   },
   {
     name: 'remote-client',
     prefix: '/rc',
     command: 'remote-client',
-    args: ['gpu-worker.internal:9090'],
+    args: ['worker.example.invalid:9090'],
     pid: 41225,
     color: '#fbbc04',
     agents: 3,
     projectName: 'ml-pipeline',
-    projectPath: '/home/dev/ml-pipeline',
+    projectPath: '/workspace/ml-pipeline',
   },
 ];
 
@@ -68,49 +68,49 @@ export const projectHistory = {
     {
       id: 'proj-portal',
       name: 'Agent Portal',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#4c8bf5',
       lastOpened: Date.now() - 60_000,
     },
     {
       id: 'proj-pool',
       name: 'Agent Pool MCP',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#e8710a',
       lastOpened: Date.now() - 3600_000,
     },
     {
       id: 'proj-graph',
       name: 'Project Graph MCP',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#34a853',
       lastOpened: Date.now() - 7200_000,
     },
     {
       id: 'proj-node',
       name: 'Symbiote Node',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#fbbc04',
       lastOpened: Date.now() - 86400_000,
     },
     {
       id: 'proj-context',
       name: 'Context X MCP',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#9334e6',
       lastOpened: Date.now() - 172800_000,
     },
     {
       id: 'proj-browser',
       name: 'Browser X MCP',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#00bcd4',
       lastOpened: Date.now() - 604800_000,
     },
     {
       id: 'proj-terminal',
       name: 'Terminal X MCP',
-      path: '/home/dev/mcp-agent-portal',
+      path: '/workspace/agent-portal',
       color: '#ea4335',
       lastOpened: Date.now() - 604800_000,
     },
@@ -140,9 +140,9 @@ export const chats = [
       { role: 'thinking', elapsed: 8, done: true, status: 'Analyzing project structure…', meta: { mode: 'yolo', exitCode: 0, sessionId: 'demo-session-00000001', tools: 3, tokens: 6200, cost: 0.0186 } },
 
       // 3. Tool calls — research phase
-      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal' }, result: '{\n  "project": "mcp-agent-portal",\n  "stats": { "files": 87, "functions": 234, "lines": 12450 },\n  "dirs": ["src/node/server/", "src/node/proxy/", "web/panels/", "web/services/", "packages/"]\n}' },
-      { role: 'tool', name: 'analyze', input: { action: 'full_analysis', path: '/home/dev/mcp-agent-portal' }, result: '{\n  "totalFiles": 87,\n  "totalLines": 12450,\n  "avgComplexity": 3.1,\n  "topModules": ["web-server.js", "mcp-proxy.js", "AgentChat.js", "state-sync.js"],\n  "frameworks": ["Symbiote.js", "Node.js", "MCP SDK"]\n}' },
-      { role: 'tool', name: 'navigate', input: { action: 'deps', symbol: 'startWebServer', path: '/home/dev/mcp-agent-portal' }, result: 'Dependencies of startWebServer:\n  → createRoutes (api-routes.js)\n  → MCPProxyManager (mcp-proxy.js)\n  → TaskRouter (task-router.js)\n  → BackendLifecycle (backend-lifecycle.js)\n  → LocalGateway (local-gateway.js)' },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/agent-portal' }, result: '{\n  "project": "mcp-agent-portal",\n  "stats": { "files": 87, "functions": 234, "lines": 12450 },\n  "dirs": ["src/node/server/", "src/node/proxy/", "web/panels/", "web/services/", "packages/"]\n}' },
+      { role: 'tool', name: 'analyze', input: { action: 'full_analysis', path: '/workspace/agent-portal' }, result: '{\n  "totalFiles": 87,\n  "totalLines": 12450,\n  "avgComplexity": 3.1,\n  "topModules": ["web-server.js", "mcp-proxy.js", "AgentChat.js", "state-sync.js"],\n  "frameworks": ["Symbiote.js", "Node.js", "MCP SDK"]\n}' },
+      { role: 'tool', name: 'navigate', input: { action: 'deps', symbol: 'startWebServer', path: '/workspace/agent-portal' }, result: 'Dependencies of startWebServer:\n  → createRoutes (api-routes.js)\n  → MCPProxyManager (mcp-proxy.js)\n  → TaskRouter (task-router.js)\n  → BackendLifecycle (backend-lifecycle.js)\n  → LocalGateway (local-gateway.js)' },
 
       // 4. Agent: full project overview (injected from README.md at build time)
       { role: 'agent', text: "__README_CONTENT__" },
@@ -161,7 +161,7 @@ export const chats = [
       { role: 'thinking', elapsed: 34, done: true, meta: { mode: 'yolo', exitCode: 0, tools: 8, tokens: 18400, cost: 0.0552 } },
 
       // 9. Tool results
-      { role: 'tool', name: 'get_task_result', input: { task_id: 'task-arch-analysis' }, result: '✅ Analysis complete:\n- TaskRouter dispatches to AdapterPool based on agent type\n- delegate_task creates isolated sub-agent sessions\n- Status tracked via StateGraph with WebSocket deltas\n- Zero-Zombie process groups ensure clean shutdown' },
+      { role: 'tool', name: 'get_task_result', input: { task_id: 'task-arch-analysis' }, result: 'Analysis complete:\n- TaskRouter dispatches to AdapterPool based on agent type\n- delegate_task creates isolated sub-agent sessions\n- Status tracked via StateGraph with WebSocket deltas\n- Process groups are cleaned up after task completion' },
       { role: 'tool', name: 'consult_peer', input: { question: 'What message types does AgentChat support?', context: 'Reviewing the UI rendering pipeline' }, result: '6 message types:\n1. user — text input\n2. agent — markdown with streaming cursor\n3. tool — collapsible cards with input/result\n4. thinking — elapsed time + meta chips (mode, tokens, cost)\n5. board — delegation cards with live status polling\n6. system — status notifications' },
 
       // 10. Final comprehensive response
@@ -186,7 +186,7 @@ export const chats = [
     messages: [
       { role: 'user', text: 'Describe the agent-pool-mcp package — what it does, its tools, and how delegation works.' },
       { role: 'thinking', elapsed: 6, done: true, meta: { tools: 2, tokens: 4800, cost: 0.0072 } },
-      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal/packages/agent-pool-mcp' }, result: '{\n  "project": "agent-pool-mcp",\n  "stats": { "files": 32, "functions": 89, "lines": 4200 },\n  "dirs": ["src/runner/", "src/tools/", "src/adapters/"]\n}' },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/agent-portal/packages/agent-pool-mcp' }, result: '{\n  "project": "agent-pool-mcp",\n  "stats": { "files": 32, "functions": 89, "lines": 4200 },\n  "dirs": ["src/runner/", "src/tools/", "src/adapters/"]\n}' },
       { role: 'agent', text: "__SUBREADME:packages/agent-pool-mcp/README.md__" },
     ],
   },
@@ -205,7 +205,7 @@ export const chats = [
     messages: [
       { role: 'user', text: 'Describe the project-graph-mcp package — AST analysis, tools, and how it provides codebase context.' },
       { role: 'thinking', elapsed: 5, done: true, meta: { tools: 2, tokens: 3600, cost: 0.0108 } },
-      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal/packages/project-graph-mcp' }, result: '{\n  "project": "project-graph-mcp",\n  "stats": { "files": 28, "functions": 76, "lines": 3800 },\n  "dirs": ["src/analysis/", "src/tools/", "src/rules/"]\n}' },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/agent-portal/packages/project-graph-mcp' }, result: '{\n  "project": "project-graph-mcp",\n  "stats": { "files": 28, "functions": 76, "lines": 3800 },\n  "dirs": ["src/analysis/", "src/tools/", "src/rules/"]\n}' },
       { role: 'agent', text: "__SUBREADME:packages/project-graph-mcp/README.md__" },
     ],
   },
@@ -224,7 +224,7 @@ export const chats = [
     messages: [
       { role: 'user', text: 'Describe symbiote-node — the Studio UX framework, layout engine, and node graph system.' },
       { role: 'thinking', elapsed: 7, done: true, meta: { tools: 2, tokens: 5100, cost: 0.0153 } },
-      { role: 'tool', name: 'get_skeleton', input: { path: '/home/dev/mcp-agent-portal/packages/symbiote-node' }, result: '{\n  "project": "symbiote-node",\n  "stats": { "files": 45, "functions": 128, "lines": 6200 },\n  "dirs": ["layout/", "canvas/", "node/", "inspector/", "engine/"]\n}' },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/agent-portal/packages/symbiote-node' }, result: '{\n  "project": "symbiote-node",\n  "stats": { "files": 45, "functions": 128, "lines": 6200 },\n  "dirs": ["layout/", "canvas/", "node/", "inspector/", "engine/"]\n}' },
       { role: 'agent', text: "__SUBREADME:packages/symbiote-node/README.md__" },
     ],
   },
@@ -261,9 +261,9 @@ export const chats = [
     messages: [
       { role: 'user', text: 'The data loader crashes on large CSV files (>2GB). Getting OOM errors.' },
       { role: 'thinking', elapsed: 5, done: true, meta: { mode: 'normal', exitCode: 0, tools: 3, tokens: 4100 } },
-      { role: 'tool', name: 'compact', input: { action: 'compact_file', path: '/home/dev/ml-pipeline/src/loader.py' }, result: 'def load_csv(path):\n    # Reads entire file into memory\n    df = pd.read_csv(path)\n    return df.to_numpy()' },
-      { role: 'agent', text: "Found the root cause: `pd.read_csv()` loads the **entire file into memory**.\n\n### Fix: Chunked streaming loader\n\n```python\ndef load_csv(path, chunk_size=50_000):\n    for chunk in pd.read_csv(path, chunksize=chunk_size):\n        yield chunk.to_numpy()\n```\n\nThis reduces peak memory from **O(n)** to **O(chunk_size)**, allowing processing of arbitrarily large files.\n\n> ⚠️ Downstream consumers need to handle the generator interface instead of a single array." },
-      { role: 'system', text: '✅ Fix applied and verified. Memory usage stable at ~200MB for a 4GB test file.' },
+      { role: 'tool', name: 'compact', input: { action: 'compact_file', path: '/workspace/ml-pipeline/src/loader.py' }, result: 'def load_csv(path):\n    # Reads entire file into memory\n    df = pd.read_csv(path)\n    return df.to_numpy()' },
+      { role: 'agent', text: "Found the root cause: `pd.read_csv()` loads the **entire file into memory**.\n\n### Fix: Chunked streaming loader\n\n```python\ndef load_csv(path, chunk_size=50_000):\n    for chunk in pd.read_csv(path, chunksize=chunk_size):\n        yield chunk.to_numpy()\n```\n\nThis reduces peak memory from **O(n)** to **O(chunk_size)**, allowing processing of arbitrarily large files.\n\n> Downstream consumers need to handle the generator interface instead of a single array." },
+      { role: 'system', text: 'Fix applied and verified. Memory usage stable at ~200MB for a 4GB test file.' },
     ],
   },
 
@@ -283,8 +283,8 @@ export const chats = [
       { role: 'user', text: 'Analyze the delegation architecture: task-router.js, agent-pool-mcp tools, and chat-ws-server.js' },
       { role: 'thinking', elapsed: 14, done: true, meta: { tools: 4, tokens: 9200, cost: 0.0276 } },
       { role: 'tool', name: 'search_context', input: { query: 'delegate_task', scope: 'packages/agent-pool-mcp' }, result: 'Found 3 files matching "delegate_task"' },
-      { role: 'agent', text: '### Delegation Architecture Analysis\n\n1. **`task-router.js`**: Intercepts `delegate_task` tool calls from the orchestrator.\n2. **`agent-pool-mcp tools`**: Defines the `delegate_task` schema and creates new isolated Agent contexts.\n3. **`chat-ws-server.js`**: Streams live telemetry via WebSockets to the `EventFeed` and `ActionBoard`.\n\nThe system runs sub-agents in independent detached processes to guarantee zero zombie lockups.' },
-      { role: 'system', text: '✅ Task completed and returned to orchestrator.' }
+      { role: 'agent', text: '### Delegation Architecture Analysis\n\n1. **`task-router.js`**: Intercepts `delegate_task` tool calls from the orchestrator.\n2. **`agent-pool-mcp tools`**: Defines the `delegate_task` schema and creates new isolated Agent contexts.\n3. **`chat-ws-server.js`**: Streams live telemetry via WebSockets to the `EventFeed` and `ActionBoard`.\n\nThe system runs sub-agents in independent detached processes and cleans process groups after task completion.' },
+      { role: 'system', text: 'Task completed and returned to orchestrator.' }
     ]
   },
 
@@ -305,7 +305,7 @@ export const chats = [
       { role: 'thinking', elapsed: 21, done: true, meta: { tools: 6, tokens: 11400, cost: 0.0342 } },
       { role: 'tool', name: 'get_skeleton', input: { path: 'web/panels/AgentChat' }, result: 'Found files: AgentChat.js, AgentChat.tpl.js, AgentChat.css.js' },
       { role: 'agent', text: '### UI Audit Complete\n\nThe UI pipeline supports 6 core message types. The `chat-messages` container properly renders all types natively using the Symbiote layout engine.\n\nThe delegation board (`role: board`) relies on the `chat.subTasks` structure injected via WebSocket polling.' },
-      { role: 'system', text: '✅ Task completed and returned to orchestrator.' }
+      { role: 'system', text: 'Task completed and returned to orchestrator.' }
     ]
   }
 ];
@@ -413,8 +413,6 @@ export const skeleton = {
     "CS3": "CbSquiggle",
     "CW": "CodeWidget",
     "EW": "EventWidget",
-    "LW": "ListWidget",
-    "MGW": "MiniGraphWidget",
     "FR": "FollowRibbon",
     "QO": "QuickOpen",
     "FC": "FollowController",
@@ -1291,7 +1289,7 @@ export const skeleton = {
     "CB": {
       "m": 13,
       "$": 1,
-      "f": "web/common/CellBg/CellBg.js",
+      "f": "packages/symbiote-node/effects/CellBg/CellBg.js",
       "l": 31
     },
     "AB": {
@@ -1309,19 +1307,19 @@ export const skeleton = {
     "CSI": {
       "m": 1,
       "$": 14,
-      "f": "web/components/ChatSidebar/ChatSidebarItem.js",
+      "f": "packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.js",
       "l": 5
     },
     "CSS": {
       "m": 1,
       "$": 11,
-      "f": "web/components/ChatSidebar/ChatSidebarItem.js",
+      "f": "packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.js",
       "l": 90
     },
     "LO": {
       "m": 3,
       "$": 4,
-      "f": "web/components/LoadingOverlay/LoadingOverlay.js",
+      "f": "packages/symbiote-node/display/LoadingOverlay/LoadingOverlay.js",
       "l": 5
     },
     "PW": {
@@ -1345,19 +1343,19 @@ export const skeleton = {
     "CG": {
       "m": 28,
       "$": 18,
-      "f": "web/components/canvas-graph.js",
+      "f": "web/components/CanvasGraph/CanvasGraph.js",
       "l": 52
     },
     "CB1": {
       "m": 6,
       "$": 8,
-      "f": "web/components/code-block.js",
+      "f": "packages/symbiote-node/display/CodeBlock/CodeBlock.js",
       "l": 4
     },
     "CS3": {
       "m": 1,
       "$": 4,
-      "f": "web/components/code-block.js",
+      "f": "packages/symbiote-node/display/CodeBlock/CodeBlock.js",
       "l": 46
     },
     "CW": {
@@ -1372,28 +1370,16 @@ export const skeleton = {
       "f": "web/components/event-feed/EventWidget.js",
       "l": 3
     },
-    "LW": {
-      "m": 2,
-      "$": 1,
-      "f": "web/components/event-feed/ListWidget.js",
-      "l": 3
-    },
-    "MGW": {
-      "m": 3,
-      "$": 1,
-      "f": "web/components/event-feed/MiniGraphWidget.js",
-      "l": 3
-    },
     "FR": {
       "m": 2,
       "$": 2,
-      "f": "web/components/follow-ribbon.js",
+      "f": "web/components/FollowRibbon/FollowRibbon.js",
       "l": 10
     },
     "QO": {
       "m": 9,
       "$": 4,
-      "f": "web/components/quick-open.js",
+      "f": "web/components/QuickOpen/QuickOpen.js",
       "l": 3
     },
     "FC": {
@@ -1517,13 +1503,13 @@ export const skeleton = {
     "CV1": {
       "m": 8,
       "$": 9,
-      "f": "web/panels/code-viewer.js",
+      "f": "web/panels/CodeViewer/CodeViewer.js",
       "l": 19
     },
     "CP": {
       "m": 4,
       "$": 2,
-      "f": "web/panels/ctx-panel.js",
+      "f": "web/panels/CtxPanel/CtxPanel.js",
       "l": 3
     },
     "DG": {
@@ -1534,19 +1520,19 @@ export const skeleton = {
     "FT": {
       "m": 14,
       "$": 4,
-      "f": "web/panels/file-tree.js",
+      "f": "web/panels/FileTree/FileTree.js",
       "l": 3
     },
     "HP": {
       "m": 3,
       "$": 2,
-      "f": "web/panels/health-panel.js",
+      "f": "web/panels/HealthPanel/HealthPanel.js",
       "l": 3
     },
     "OP": {
       "m": 2,
       "$": 2,
-      "f": "web/panels/ops-panel.js",
+      "f": "web/panels/OpsPanel/OpsPanel.js",
       "l": 10
     },
     "CA": {
@@ -1708,7 +1694,7 @@ export const skeleton = {
       "AT2",
       "TR3"
     ],
-    "packages/agent-pool-mcp/src/script-store.js": [
+    "packages/agent-pool-mcp/src/tools/scripts.js": [
       "sS4",
       "lS2"
     ],
@@ -1746,17 +1732,17 @@ export const skeleton = {
       "APM",
       "PM4"
     ],
-    "packages/agent-pool-mcp/src/file-tracker.js": [
+    "packages/agent-pool-mcp/src/tools/file-tracker.js": [
       "tF",
       "uF",
       "TF"
     ],
-    "packages/agent-pool-mcp/src/git-sync.js": [
+    "src/node/git-sync.js": [
       "GR",
       "sM1",
       "AP1"
     ],
-    "packages/agent-pool-mcp/src/workflow-index.js": [
+    "packages/agent-pool-mcp/src/tools/workflow-index.js": [
       "TI2",
       "BT",
       "LL"
@@ -2192,7 +2178,7 @@ export const skeleton = {
       "IH",
       "IWH"
     ],
-    "web/common/ui-dialogs.js": [
+    "packages/symbiote-node/ui/index.js": [
       "uC2",
       "uP2",
       "uA"
@@ -2372,8 +2358,7 @@ export const skeleton = {
       "synthwave.js"
     ],
     "src/node/adapters/": [
-      "base.js",
-      "stubs.js"
+      "base.js"
     ],
     "src/node/plugins/github/": [
       "index.js"
@@ -2778,30 +2763,26 @@ export const skeleton = {
       "state.ctx.md",
       "style.css"
     ],
-    "web/common/CellBg/": [
-      "CellBg.css.js",
-      "CellBg.tpl.js"
-    ],
     "web/common/": [
-      "ui-shared.css.js"
+      "base-path.js",
+      "icons.js",
+      "list-item-adapter.js",
+      "mcp-call.js",
+      "tree-panel-adapter.js",
+      "ui-state.js"
     ],
     "web/components/AgentBoard/": [
       "AgentBoard.css.js",
       "AgentBoard.tpl.js"
     ],
     "web/components/ChatSidebar/": [
-      "ChatSidebar.tpl.js"
-    ],
-    "web/components/LoadingOverlay/": [
-      "LoadingOverlay.css.js",
-      "LoadingOverlay.tpl.js"
+      "ChatSidebar.js"
     ],
     "web/components/PgWorkspace/": [
       "PgWorkspace.tpl.js"
     ],
     "web/components/ProjectTabs/": [
-      "ProjectTabs.css.js",
-      "ProjectTabs.tpl.js"
+      "ProjectTabs.js"
     ],
     "web/components/": [
       "code-block.ctx",
@@ -2831,8 +2812,6 @@ export const skeleton = {
       "AgentListItem.tpl.js"
     ],
     "web/panels/ChatList/": [
-      "ChatList.css.js",
-      "ChatList.tpl.js"
     ],
     "web/panels/EventItem/": [
       "EventItem.css.ctx",
@@ -3107,23 +3086,23 @@ export const skeleton = {
       "node:url",
       "./markdown-parser.js"
     ],
-    "packages/agent-pool-mcp/src/config.js": [
+    "packages/agent-pool-mcp/src/runner/config.js": [
       "node:fs",
       "node:path",
       "node:os"
     ],
-    "packages/agent-pool-mcp/src/file-tracker.js": [
+    "packages/agent-pool-mcp/src/tools/file-tracker.js": [
       "node:fs",
       "node:path"
     ],
-    "packages/agent-pool-mcp/src/git-sync.js": [
+    "src/node/git-sync.js": [
       "child_process",
       "fs",
       "path"
     ],
-    "packages/agent-pool-mcp/src/mcp-server.js": [
+    "packages/agent-pool-mcp/src/server.js": [
       "./config.js",
-      "./git-sync.js",
+      "../../src/node/git-sync.js",
       "./workflow-index.js",
       "node:fs",
       "node:path",
@@ -3132,11 +3111,11 @@ export const skeleton = {
       "./script-store.js",
       "./file-tracker.js"
     ],
-    "packages/agent-pool-mcp/src/script-store.js": [
+    "packages/agent-pool-mcp/src/tools/scripts.js": [
       "node:fs",
       "node:path"
     ],
-    "packages/agent-pool-mcp/src/workflow-index.js": [
+    "packages/agent-pool-mcp/src/tools/workflow-index.js": [
       "node:fs",
       "node:path"
     ],
@@ -3992,7 +3971,7 @@ export const skeleton = {
       "node:crypto",
       "node:events"
     ],
-    "test/integration/opencode-e2e.js": [
+    "scripts/diagnostics/opencode-e2e.js": [
       "ws"
     ],
     "web/app.js": [
@@ -4026,12 +4005,10 @@ export const skeleton = {
       "./components/ProjectTabs/ProjectTabs.js",
       "./dashboard-state.js",
       "./state-sync.js",
-      "./common/ui-dialogs.js"
+      "symbiote-node/ui"
     ],
-    "web/common/CellBg/CellBg.js": [
-      "@symbiotejs/symbiote",
-      "./CellBg.tpl.js",
-      "./CellBg.css.js"
+    "packages/symbiote-node/effects/CellBg/CellBg.js": [
+      "symbiote-node"
     ],
     "web/components/AgentBoard/AgentBoard.js": [
       "@symbiotejs/symbiote",
@@ -4044,19 +4021,16 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
       "symbiote-node",
-      "./ChatSidebar.tpl.js",
       "../../state-sync.js",
-      "./ChatSidebarItem.js"
+      "symbiote-node/ui"
     ],
-    "web/components/ChatSidebar/ChatSidebarItem.js": [
+    "packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
       "symbiote-node"
     ],
-    "web/components/LoadingOverlay/LoadingOverlay.js": [
-      "@symbiotejs/symbiote",
-      "./LoadingOverlay.tpl.js",
-      "./LoadingOverlay.css.js"
+    "packages/symbiote-node/display/LoadingOverlay/LoadingOverlay.js": [
+      "symbiote-node"
     ],
     "web/components/PgWorkspace/PgWorkspace.js": [
       "@symbiotejs/symbiote",
@@ -4069,15 +4043,12 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
       "symbiote-node",
-      "./ProjectTabs.css.js",
-      "./ProjectTabs.tpl.js",
-      "../../common/ui-dialogs.js",
+      "symbiote-node/ui"
+    ],
+    "web/components/CanvasGraph/CanvasGraph.js": [
       "@symbiotejs/symbiote"
     ],
-    "web/components/canvas-graph.js": [
-      "@symbiotejs/symbiote"
-    ],
-    "web/components/code-block.js": [
+    "packages/symbiote-node/display/CodeBlock/CodeBlock.js": [
       "@symbiotejs/symbiote",
       "../highlight.js",
       "../app.js"
@@ -4088,24 +4059,18 @@ export const skeleton = {
     "web/components/event-feed/EventWidget.js": [
       "@symbiotejs/symbiote"
     ],
-    "web/components/event-feed/ListWidget.js": [
-      "@symbiotejs/symbiote"
-    ],
-    "web/components/event-feed/MiniGraphWidget.js": [
-      "@symbiotejs/symbiote"
-    ],
-    "web/components/follow-ribbon.js": [
+    "web/components/FollowRibbon/FollowRibbon.js": [
       "@symbiotejs/symbiote",
       "../app.js"
     ],
-    "web/components/quick-open.js": [
+    "web/components/QuickOpen/QuickOpen.js": [
       "@symbiotejs/symbiote",
       "../app.js"
     ],
     "web/panels/ActionBoard/ActionBoard.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "../../common/ui-shared.css.js",
+      "symbiote-node/ui",
       "./ActionBoard.tpl.js",
       "../EventItem/EventItem.js"
     ],
@@ -4119,8 +4084,8 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../state-sync.js",
       "./ActiveTasks.tpl.js",
-      "../../common/ui-dialogs.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui",
+      "symbiote-node/ui"
     ],
     "web/panels/AgentChat/AgentChat.js": [
       "@symbiotejs/symbiote",
@@ -4128,8 +4093,8 @@ export const skeleton = {
       "symbiote-node",
       "./AgentChat.tpl.js",
       "./AgentChat.css.js",
-      "../../common/CellBg/CellBg.js",
-      "../../common/ui-dialogs.js",
+      "symbiote-node/ui",
+      "symbiote-node/ui",
       "../../common/icons.js",
       "../../utils/markdown-formatter.js",
       "../../services/chat-ws-client.js",
@@ -4144,10 +4109,8 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
       "symbiote-node",
-      "./ChatList.css.js",
-      "../../common/ui-shared.css.js",
-      "./ChatList.tpl.js",
-      "../../common/ui-dialogs.js"
+      "symbiote-node/ui",
+      "symbiote-node/ui"
     ],
     "web/panels/EventItem/EventItem.js": [
       "@symbiotejs/symbiote",
@@ -4158,48 +4121,48 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./GroupManager.tpl.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
     "web/panels/Marketplace/Marketplace.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./Marketplace.tpl.js",
-      "../../common/ui-dialogs.js",
+      "symbiote-node/ui",
       "./Marketplace.css.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
     "web/panels/PeerReview/PeerReview.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./PeerReview.tpl.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
     "web/panels/PipelineManager/PipelineManager.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./PipelineManager.tpl.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
     "web/panels/ProjectItem/ProjectItem.js": [
       "@symbiotejs/symbiote",
       "./ProjectItem.css.js",
-      "../../common/ui-shared.css.js",
+      "symbiote-node/ui",
       "./ProjectItem.tpl.js",
-      "../../common/ui-dialogs.js"
+      "symbiote-node/ui"
     ],
     "web/panels/ProjectList/ProjectList.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "../../common/ui-shared.css.js",
+      "symbiote-node/ui",
       "./ProjectList.tpl.js",
       "../ProjectItem/ProjectItem.js"
     ],
     "web/panels/SettingsPanel/SettingsPanel.js": [
       "@symbiotejs/symbiote",
-      "../../common/ui-shared.css.js",
+      "symbiote-node/ui",
       "./SettingsPanel.css.js",
       "./SettingsPanel.tpl.js",
-      "../../common/ui-dialogs.js"
+      "symbiote-node/ui"
     ],
     "web/panels/SkillLibraryPanel/SkillListItem.js": [
       "@symbiotejs/symbiote",
@@ -4209,34 +4172,34 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./SkillManager.tpl.js",
-      "../../common/ui-dialogs.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui",
+      "symbiote-node/ui"
     ],
     "web/panels/ToolExplorer/ToolExplorer.js": [
       "@symbiotejs/symbiote",
       "./ToolExplorer.tpl.js",
       "./ToolExplorer.css.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
     "web/panels/Topology/TopologyPanel.js": [
       "@symbiotejs/symbiote",
       "./TopologyPanel.tpl.js",
       "./TopologyPanel.css.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
     "web/panels/WorkflowExplorer/WorkflowExplorer.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./WorkflowExplorer.tpl.js",
       "./WorkflowExplorer.css.js",
-      "../../common/ui-shared.css.js"
+      "symbiote-node/ui"
     ],
-    "web/panels/code-viewer.js": [
+    "web/panels/CodeViewer/CodeViewer.js": [
       "@symbiotejs/symbiote",
       "../app.js",
-      "../components/code-block.js"
+      "symbiote-node/ui"
     ],
-    "web/panels/ctx-panel.js": [
+    "web/panels/CtxPanel/CtxPanel.js": [
       "@symbiotejs/symbiote",
       "../app.js"
     ],
@@ -4245,22 +4208,20 @@ export const skeleton = {
       "symbiote-node",
       "../app.js",
       "../services/skeleton-parser.js",
-      "../components/LoadingOverlay/LoadingOverlay.js"
+      "symbiote-node/ui"
     ],
-    "web/panels/file-tree.js": [
+    "web/panels/FileTree/FileTree.js": [
       "@symbiotejs/symbiote",
       "../app.js"
     ],
-    "web/panels/health-panel.js": [
+    "web/panels/HealthPanel/HealthPanel.js": [
       "@symbiotejs/symbiote",
       "../app.js"
     ],
-    "web/panels/ops-panel.js": [
+    "web/panels/OpsPanel/OpsPanel.js": [
       "@symbiotejs/symbiote",
       "../app.js",
       "../components/event-feed/CodeWidget.js",
-      "../components/event-feed/MiniGraphWidget.js",
-      "../components/event-feed/ListWidget.js",
       "../components/event-feed/EventWidget.js"
     ],
     "web/router-registry.js": [
@@ -4394,7 +4355,7 @@ export function generateEvent(idx) {
   return {
     type: 'tool_call',
     tool,
-    args: { path: `/home/dev/${project}` },
+    args: { path: `/workspace/${project}` },
     result: { ok: true },
     ts: Date.now() - idx * 4500,
     duration: 120 + Math.random() * 2000 | 0,
