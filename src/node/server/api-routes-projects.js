@@ -134,7 +134,6 @@ export function createProjectRoutes() {
 
     'POST /api/chats': async (req, res) => {
       try {
-        console.log('[API] POST /api/chats called!', req.headers['referer'] || req.url);
         let opts = await parseBody(req);
         let sg = getStateGraph();
         let result = sg.createChat(opts, 'http');
