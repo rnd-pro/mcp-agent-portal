@@ -20,8 +20,6 @@ html, body {
   font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
-  --sn-node-border: transparent;
-  --layout-border: transparent;
 }
 
 /* === App shell — full viewport flex column === */
