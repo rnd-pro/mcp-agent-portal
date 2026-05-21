@@ -84,7 +84,7 @@ export class AgentPortalTree extends Symbiote {
       this.#showPlaceholder('No files found');
       return;
     }
-    let tree = this.ref.tree;
+    let tree = this.ref.panel || this.ref.tree;
     if (!tree?.setItems) return;
     setTreeItems(this, this._tree.map(node => this.#toTreeItem(node)), this.$.filterText);
     this.#showTree();
@@ -132,7 +132,8 @@ export class AgentPortalTree extends Symbiote {
   #handleTreeSelect(item) {
     if (!item) return;
     if (item.type === 'dir') {
-      if (this.ref.tree) this.ref.tree.selectedId = this.#selectedId;
+      let tree = this.ref.panel || this.ref.tree;
+      if (tree) tree.selectedId = this.#selectedId;
       return;
     }
     this.#selectedId = item.id;

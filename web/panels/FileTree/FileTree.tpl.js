@@ -1,12 +1,7 @@
 export default `
-  <div class="pg-panel-toolbar">
-    <input type="search" placeholder="Filter files..." bind="oninput: onFilterInput">
-    <button class="pg-collapse-all" bind="onclick: onCollapseAll" title="Collapse All Folders">
-      <span class="material-symbols-outlined icon-sm">unfold_less</span>
-    </button>
-  </div>
-  <div class="pg-tree-content">
-    <div class="pg-placeholder" ref="placeholder">Loading files...</div>
-    <sn-tree-view ref="tree" hidden></sn-tree-view>
-  </div>
+  <sn-tree-panel
+    ref="panel"
+    filter-placeholder="Filter files..."
+    placeholder="Loading files..."
+    collapse-title="Collapse All Folders"></sn-tree-panel>
 `;

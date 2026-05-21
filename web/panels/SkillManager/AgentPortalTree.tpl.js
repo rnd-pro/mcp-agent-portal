@@ -1,12 +1,7 @@
 export default `
-  <div class="pg-panel-toolbar">
-    <input type="search" placeholder="Filter .agent-portal..." bind="oninput: onFilterInput">
-    <button class="pg-collapse-all" bind="onclick: onCollapseAll" title="Collapse All Folders">
-      <span class="material-symbols-outlined pg-toolbar-icon">unfold_less</span>
-    </button>
-  </div>
-  <div class="pg-tree-content">
-    <div class="pg-placeholder" ref="placeholder">Loading .agent-portal...</div>
-    <sn-tree-view ref="tree" hidden></sn-tree-view>
-  </div>
+  <sn-tree-panel
+    ref="panel"
+    filter-placeholder="Filter .agent-portal..."
+    placeholder="Loading .agent-portal..."
+    collapse-title="Collapse All Folders"></sn-tree-panel>
 `;

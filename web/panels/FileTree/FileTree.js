@@ -78,7 +78,7 @@ export class FileTree extends Symbiote {
 
   _selectItem(item) {
     if (!item) return;
-    let tree = this.ref.tree;
+    let tree = this.ref.panel || this.ref.tree;
     if (tree) {
       tree.selectedId = item.id;
     }

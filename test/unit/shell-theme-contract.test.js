@@ -48,6 +48,19 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses the symbiote tree panel component for project trees', () => {
+    for (let relative of [
+      'web/panels/FileTree/FileTree.tpl.js',
+      'web/panels/SkillManager/AgentPortalTree.tpl.js',
+      'web/panels/SkillManager/OpenLibraryTree.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('<sn-tree-panel'), `${relative} must compose the library tree panel`);
+      assert.equal(source.includes('<sn-tree-view'), false, `${relative} must not bypass tree panel chrome`);
+      assert.equal(source.includes('pg-panel-toolbar'), false, `${relative} must not copy panel toolbar markup`);
+    }
+  });
+
   it('keeps active task cards off inline copied theme values', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
     for (let literal of ['#9ca3af', '#404040', 'style="']) {
