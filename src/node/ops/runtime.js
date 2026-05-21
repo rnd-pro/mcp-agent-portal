@@ -83,7 +83,7 @@ function getProjectStateDir(projectRoot = process.cwd(), env = process.env) {
 /**
  * Resolve the portal runtime directory. AGENT_PORTAL_RUNTIME_DIR can override
  * the default local project state runtime directory.
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function getRuntimeDir(options = {}) {
@@ -96,7 +96,7 @@ export function getRuntimeDir(options = {}) {
 /**
  * Resolve a path inside the portal runtime directory.
  * @param {Array<string|number|boolean|null|undefined>} [parts]
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function getRuntimePath(parts = [], options = {}) {
@@ -106,7 +106,7 @@ export function getRuntimePath(parts = [], options = {}) {
 /**
  * Resolve a namespaced temporary path for transient ops files.
  * @param {Array<string|number|boolean|null|undefined>} [parts]
- * @param {{ env?: NodeJS.ProcessEnv }} [options]
+ * @param {Object|{ env?: NodeJS.ProcessEnv }} [options]
  * @returns {string}
  */
 export function getTempPath(parts = [], options = {}) {
@@ -119,7 +119,7 @@ export function getTempPath(parts = [], options = {}) {
  * Resolve a service data path under runtime/data.
  * @param {string} service
  * @param {Array<string|number|boolean|null|undefined>} [parts]
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function getDataPath(service, parts = [], options = {}) {
@@ -130,7 +130,7 @@ export function getDataPath(service, parts = [], options = {}) {
  * Resolve a service log path under runtime/logs.
  * @param {string} service
  * @param {Array<string|number|boolean|null|undefined>} [parts]
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function getLogPath(service, parts = [], options = {}) {
@@ -140,7 +140,7 @@ export function getLogPath(service, parts = [], options = {}) {
 /**
  * Resolve a service pid file path under runtime/pids.
  * @param {string} service
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function getPidPath(service, options = {}) {
@@ -150,7 +150,7 @@ export function getPidPath(service, options = {}) {
 /**
  * Resolve a service status JSON path under runtime/status.
  * @param {string} name
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function getStatusPath(name, options = {}) {
@@ -160,7 +160,7 @@ export function getStatusPath(name, options = {}) {
 /**
  * Ensure a runtime directory exists.
  * @param {Array<string|number|boolean|null|undefined>} [parts]
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {string}
  */
 export function ensureRuntimeDir(parts = [], options = {}) {
@@ -199,8 +199,8 @@ export function writeJsonFile(filePath, data) {
 /**
  * Persist a runtime status record for a service or process.
  * @param {string} name
- * @param {Partial<RuntimeStatus>} status
- * @param {RuntimePathOptions} [options]
+ * @param {Object|Partial<RuntimeStatus>} status
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {RuntimeStatus}
  */
 export function writeRuntimeStatus(name, status = {}, options = {}) {
@@ -217,7 +217,7 @@ export function writeRuntimeStatus(name, status = {}, options = {}) {
 /**
  * Read a runtime status record.
  * @param {string} name
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {RuntimeStatus|null}
  */
 export function readRuntimeStatus(name, options = {}) {
@@ -227,7 +227,7 @@ export function readRuntimeStatus(name, options = {}) {
 /**
  * Remove a runtime status record if it exists.
  * @param {string} name
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {boolean}
  */
 export function removeRuntimeStatus(name, options = {}) {
@@ -241,7 +241,7 @@ export function removeRuntimeStatus(name, options = {}) {
 
 /**
  * List all readable runtime status records.
- * @param {RuntimePathOptions} [options]
+ * @param {Object|RuntimePathOptions} [options]
  * @returns {RuntimeStatus[]}
  */
 export function listRuntimeStatuses(options = {}) {

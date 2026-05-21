@@ -40,7 +40,9 @@ export class AdapterPool {
     for (let i = list.length - 1; i >= 0; i--) {
       let a = list[i];
       if (a.busy && a.busySince > 0 && now - a.busySince > MAX_BUSY_MS) {
-        try { a.destroy(); } catch (e) { console.warn('[pool] Evict destroy failed:', e.message); }
+        try {
+          if (typeof a.destroy === 'function') a.destroy();
+        } catch {}
         list.splice(i, 1);
       }
     }
@@ -58,8 +60,7 @@ export class AdapterPool {
     let factory;
     try {
       factory = resolveAdapter(type);
-    } catch (e) {
-      console.warn(`[pool] Unknown adapter type "${type}":`, e.message);
+    } catch {
       return null;
     }
 
@@ -77,7 +78,7 @@ export class AdapterPool {
         }
       },
       destroy() {
-        instance.destroy();
+        if (typeof instance.destroy === 'function') instance.destroy();
       }
     };
     
@@ -95,6 +96,7 @@ export class AdapterPool {
 
   /**
    * Get pool status for dashboard.
+   * @returns {{adapters: Record<string, {total: number, busy: number}>}}
    */
   getStatus() {
     return {
@@ -113,7 +115,9 @@ export class AdapterPool {
   destroy() {
     for (const list of this.instances.values()) {
       for (const adapter of list) {
-        try { adapter.destroy(); } catch (e) { console.warn('[pool] Destroy failed:', e.message); }
+        try {
+          if (typeof adapter.destroy === 'function') adapter.destroy();
+        } catch {}
       }
     }
     this.instances.clear();

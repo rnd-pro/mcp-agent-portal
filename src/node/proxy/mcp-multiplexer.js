@@ -231,7 +231,6 @@ export class MCPMultiplexer {
 
     // Rebuild tool index and notify IDE when servers change
     this.proxyManager.onServerChange = async (action, serverName) => {
-      console.error(`🔄 [multiplexer] Server ${action}: "${serverName}" — rebuilding tool index`);
       // Wait for new server to initialize before indexing
       setTimeout(async () => {
         await this._ensureIndex(true);
@@ -251,7 +250,7 @@ export class MCPMultiplexer {
           let msg = JSON.parse(data.toString());
           this.handleIdeMessage(msg);
         } catch (err) {
-          console.error('🔴 [multiplexer] Failed to parse WS msg:', err);
+          console.error('[multiplexer] Failed to parse WS msg:', err);
         }
       });
       this.ws.on('close', () => {
@@ -269,7 +268,7 @@ export class MCPMultiplexer {
           let msg = JSON.parse(line);
           this.handleIdeMessage(msg);
         } catch (err) {
-          console.error('🔴 [multiplexer] Failed to parse IDE msg:', err);
+          console.error('[multiplexer] Failed to parse IDE msg:', err);
         }
       });
     }
@@ -285,9 +284,7 @@ export class MCPMultiplexer {
       if (toolTags) {
         this.toolIndex.setTags(toolTags);
       }
-    } catch (err) {
-      console.error('🟡 [multiplexer] Failed to load tool tags:', err.message);
-    }
+    } catch {}
   }
 
   async _ensureIndex(force = false) {
@@ -348,7 +345,7 @@ export class MCPMultiplexer {
             });
           }
         }).catch(err => {
-          console.error('🔴 [multiplexer] Failed to register project from roots:', err.message);
+          console.error('[multiplexer] Failed to register project from roots:', err.message);
         });
       }
 
@@ -405,6 +402,7 @@ export class MCPMultiplexer {
 
   /**
    * Generates the 3 meta-tools with dynamic hints about currently available tools.
+   * @returns {Array<object>}
    */
   _getDynamicMetaTools() {
     let discoverDesc = META_TOOLS[0].description;
@@ -608,7 +606,7 @@ export class MCPMultiplexer {
             realArgs.chat_id = chat.id;
             this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
           } catch (e) {
-            console.error(`🔴 [MCP Multiplexer] failed to auto-create chat for delegate_task:`, e.message);
+            console.error('[MCP Multiplexer] failed to auto-create chat for delegate_task:', e.message);
           }
         }
 
@@ -664,9 +662,7 @@ export class MCPMultiplexer {
             allItems.push(item);
           }
         }
-      } catch (err) {
-        console.error(`🟡 [multiplexer] Failed to get ${key} from ${serverName}:`, err.message);
-      }
+      } catch {}
     }
 
     this.sendToIde({

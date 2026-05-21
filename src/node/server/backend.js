@@ -44,6 +44,5 @@ const checkInterval = setInterval(() => {
   if (addr) {
     clearInterval(checkInterval);
     writePortFile(projectRoot, addr.port);
-    console.log(`[portal] Backend started on port ${addr.port}`);
   }
 }, 50);

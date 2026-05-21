@@ -15,13 +15,19 @@ export class PluginLoader {
     this.config = config.plugins || {};
     this.portalAPI = portalAPI;
     this.activePlugins = new Map();
+    this.failures = [];
+    this.verbose = Boolean(config.verbose || portalAPI.verbose);
+  }
+
+  _report(level, message, err = null) {
+    this.failures.push({ level, message, error: err?.message || null });
+    if (!this.verbose) return;
+    console[level](err ? `${message}: ${err.message}` : message);
   }
 
   async initAll() {
-    console.log('🔄 [PluginLoader] Discovering plugins...');
     for (const [pluginName, pluginConfig] of Object.entries(this.config)) {
       if (pluginConfig.enabled === false) {
-        console.log(`🟡 [PluginLoader] Plugin '${pluginName}' is disabled.`);
         continue;
       }
       
@@ -29,7 +35,7 @@ export class PluginLoader {
         // Try to resolve bundled plugin first
         const pluginPath = path.join(__dirname, pluginName, 'index.js');
         if (!fs.existsSync(pluginPath)) {
-          console.warn(`🔴 [PluginLoader] Plugin entry not found for '${pluginName}' at ${pluginPath}`);
+          this._report('warn', `[PluginLoader] Plugin entry not found for "${pluginName}"`);
           continue;
         }
 
@@ -37,30 +43,27 @@ export class PluginLoader {
         const pluginInstance = pluginModule.default || pluginModule;
         
         if (typeof pluginInstance.init !== 'function') {
-          console.warn(`🔴 [PluginLoader] Plugin '${pluginName}' missing init() export.`);
+          this._report('warn', `[PluginLoader] Plugin "${pluginName}" missing init() export`);
           continue;
         }
 
         await pluginInstance.init(this.portalAPI, pluginConfig);
         this.activePlugins.set(pluginName, pluginInstance);
-        console.log(`✅ [PluginLoader] Successfully initialized '${pluginName}'.`);
         
       } catch (err) {
-        console.error(`🔴 [PluginLoader] Failed to load plugin '${pluginName}':`, err);
+        this._report('error', `[PluginLoader] Failed to load plugin "${pluginName}"`, err);
       }
     }
   }
 
   async destroyAll() {
-    console.log('🔄 [PluginLoader] Shutting down plugins...');
     for (const [pluginName, instance] of this.activePlugins.entries()) {
       try {
         if (typeof instance.destroy === 'function') {
           await instance.destroy();
         }
-        console.log(`✅ [PluginLoader] Shut down '${pluginName}'.`);
       } catch (err) {
-        console.error(`🔴 [PluginLoader] Error destroying plugin '${pluginName}':`, err);
+        this._report('error', `[PluginLoader] Error destroying plugin "${pluginName}"`, err);
       }
     }
     this.activePlugins.clear();
@@ -77,7 +80,7 @@ export class PluginLoader {
         try {
           instance.onAlert(alert);
         } catch (err) {
-          console.error(`🔴 [PluginLoader] Alert dispatch error in '${pluginName}':`, err);
+          this._report('error', `[PluginLoader] Alert dispatch error in "${pluginName}"`, err);
         }
       }
     }

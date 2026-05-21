@@ -503,7 +503,7 @@ function extractTextResult(res) {
 async function apiRequest(path, method = 'GET', body = null) {
   let port = getBackendPort();
   if (!port) {
-    console.error('🔴 Backend not running. Start it with: npx mcp-agent-portal');
+    console.error('Backend not running. Start it with: npx mcp-agent-portal');
     process.exit(1);
   }
 
@@ -554,7 +554,7 @@ const META_TOOLS = new Set([
 async function mcpCall(toolName, argsObj = {}) {
   let port = getBackendPort();
   if (!port) {
-    console.error('🔴 Backend not running. Start it with: npx mcp-agent-portal');
+    console.error('Backend not running. Start it with: npx mcp-agent-portal');
     process.exit(1);
   }
 
@@ -925,7 +925,7 @@ let CLI = {
         process.exit(1);
       }
       try {
-        let res = await mcpCall('get_task_result', { taskId });
+        let res = await mcpCall('get_task_result', { task_id: taskId });
         console.log(JSON.stringify(res, null, 2));
       } catch (err) {
         console.error('Error:', err.message);
@@ -944,8 +944,30 @@ let CLI = {
         process.exit(1);
       }
       try {
-        let res = await mcpCall('cancel_task', { taskId });
+        let res = await mcpCall('cancel_task', { task_id: taskId });
         console.log(res.content?.[0]?.text || 'Cancelled');
+      } catch (err) {
+        console.error('Error:', err.message);
+        process.exit(1);
+      }
+    }
+  },
+
+  finish: {
+    desc: 'Finish a task lifecycle and clean child processes (usage: finish <id> [--remove])',
+    async handler() {
+      let { positional, flags } = parseFlags(args);
+      let taskId = positional[0];
+      if (!taskId) {
+        console.error('Usage: mcp-agent-portal finish <taskId> [--remove]');
+        process.exit(1);
+      }
+      try {
+        let res = await mcpCall('finish_task', {
+          task_id: taskId,
+          remove_from_memory: flags.remove === true,
+        });
+        console.log(res.content?.[0]?.text || 'Finished');
       } catch (err) {
         console.error('Error:', err.message);
         process.exit(1);
@@ -1020,7 +1042,7 @@ let CLI = {
 
       let port = getBackendPort();
       if (!port) {
-        console.error('🔴 Backend not running. Start it with: npx mcp-agent-portal');
+        console.error('Backend not running. Start it with: npx mcp-agent-portal');
         process.exit(1);
       }
 
@@ -1060,14 +1082,14 @@ let CLI = {
             if (p.event === 'stdout' && p.data) {
               process.stdout.write(p.data);
             } else if (p.event === 'tool_call') {
-              console.log(`\n> 🛠️  ${p.data.tool}(${JSON.stringify(p.data.args)})`);
+              console.log(`\n> tool ${p.data.tool}(${JSON.stringify(p.data.args)})`);
             } else if (p.event === 'error') {
-              console.error(`\n> ❌  Error: ${p.data.message}`);
+              console.error(`\n> Error: ${p.data.message}`);
             }
           } else if (msg.method === 'chat.done') {
             let text = msg.params.text || '';
             if (!text && currentTask) {
-              let result = await mcpCall('get_task_result', { taskId: currentTask });
+              let result = await mcpCall('get_task_result', { task_id: currentTask });
               text = extractTextResult(result);
             }
             console.log(`\n[Task Completed: ${currentTask}]\nResult: ${text}`);
@@ -1141,6 +1163,9 @@ Options for 'hub':
   doctor                 Probe the current MCP endpoint
   cleanup                Remove dead backend files and stale routes
 
+Options for 'finish':
+  --remove               Delete the task entry from in-memory result storage after cleanup
+
 Web Dashboard:
   http://portal.local/   Available while the server is running
 
@@ -1151,6 +1176,7 @@ Examples:
   npx mcp-agent-portal gateway enable --provider deepseek
   npx mcp-agent-portal gateway test
   npx mcp-agent-portal tasks
+  npx mcp-agent-portal finish <taskId>
   npx mcp-agent-portal call list_skills
 `);
 }
@@ -1176,13 +1202,13 @@ if (command === '--help' || command === '-h') {
     child = spawn('node', [scriptPath, ...fwdArgs], { stdio: 'inherit' });
 
     child.on('error', (err) => {
-      console.error('🔴 Failed to start mcp-agent-portal:', err);
+      console.error('Failed to start mcp-agent-portal:', err);
       process.exit(1);
     });
 
     child.on('exit', (code) => {
       if (code === 2) {
-        console.log('🔄 Restarting mcp-agent-portal...');
+        console.log('Restarting mcp-agent-portal...');
         startServer();
       } else if (code !== 0 && code !== null) {
         process.exit(code);

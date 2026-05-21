@@ -16,7 +16,6 @@ describe('plugin-loader', () => {
     let { PluginLoader } = await import('../../src/node/plugins/plugin-loader.js');
     
     let loader = new PluginLoader();
-    // Should not throw even with no plugins
     assert.doesNotThrow(() => {
       loader.dispatchAlert({ type: 'crash', server: 'test', message: 'test error' });
     });
@@ -29,5 +28,24 @@ describe('plugin-loader', () => {
     await assert.doesNotReject(async () => {
       await loader.destroyAll();
     });
+  });
+
+  it('keeps missing plugin diagnostics quiet and structured by default', async () => {
+    let { PluginLoader } = await import('../../src/node/plugins/plugin-loader.js');
+    let warnCalls = 0;
+    let oldWarn = console.warn;
+    console.warn = () => { warnCalls++; };
+
+    try {
+      let loader = new PluginLoader({ plugins: { missing: { enabled: true } } });
+      await loader.initAll();
+
+      assert.equal(warnCalls, 0);
+      assert.equal(loader.failures.length, 1);
+      assert.equal(loader.failures[0].level, 'warn');
+      assert.match(loader.failures[0].message, /missing/);
+    } finally {
+      console.warn = oldWarn;
+    }
   });
 });

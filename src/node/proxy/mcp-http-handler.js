@@ -91,7 +91,6 @@ function handleDelete(req, res) {
   let sessionId = req.headers['mcp-session-id'];
   if (sessionId && sessions.has(sessionId)) {
     sessions.delete(sessionId);
-    console.error(`🔌 [MCP-HTTP] Session closed: ${sessionId}`);
   }
   res.writeHead(204);
   res.end();
@@ -111,9 +110,6 @@ function handleGet(req, res) {
     res: res, // Store response to push server-to-client messages if needed
     chatId: chatId,
   });
-
-  console.error(`🔌 [MCP-HTTP] SSE Session opened: ${sessionId}`);
-
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -133,7 +129,6 @@ function handleGet(req, res) {
   req.on('close', () => {
     clearInterval(keepAlive);
     sessions.delete(sessionId);
-    console.error(`🔌 [MCP-HTTP] SSE Session closed: ${sessionId}`);
   });
 }
 
@@ -148,7 +143,7 @@ function handlePost(req, res, opts) {
   let url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   let sessionId = url.searchParams.get('sessionId');
 
-  // Fallback to header for backwards compatibility with our custom clients
+  // Streamable HTTP continues sessions via the Mcp-Session-Id header.
   if (!sessionId) {
     sessionId = req.headers['mcp-session-id'];
   }
@@ -161,7 +156,7 @@ function handlePost(req, res, opts) {
 
     try {
       msg = JSON.parse(raw);
-    } catch (e) {
+    } catch {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }));
       return;
@@ -177,7 +172,6 @@ function handlePost(req, res, opts) {
         res: null, // no SSE stream for Streamable HTTP mode
         chatId: url.searchParams.get('chatId'),
       });
-      console.error(`🔌 [MCP-HTTP] Streamable HTTP session created: ${sessionId}`);
     }
 
     if (!sessionId || !sessions.has(sessionId)) {
@@ -235,6 +229,11 @@ function handlePost(req, res, opts) {
 
 /**
  * Process a single JSON-RPC message
+ * @param {object} msg
+ * @param {import('node:http').IncomingMessage} req
+ * @param {object} opts
+ * @param {string} sessionId
+ * @returns {Promise<object|null>}
  */
 async function processMessage(msg, req, opts, sessionId) {
   if (!msg.jsonrpc || msg.jsonrpc !== '2.0') {
@@ -245,12 +244,10 @@ async function processMessage(msg, req, opts, sessionId) {
 
   sessions.get(sessionId).lastActivity = Date.now();
   let method = msg.method;
-  console.error(`🔌 [MCP-HTTP] Received method: ${method} from session ${sessionId}`);
 
   if (method === 'initialize') {
     if (msg.params?.clientInfo) {
       sessions.get(sessionId).clientInfo = msg.params.clientInfo;
-      console.error(`🔌 [MCP-HTTP] Client initialized: ${msg.params.clientInfo.name}`);
     }
     return {
       jsonrpc: '2.0',
@@ -271,7 +268,6 @@ async function processMessage(msg, req, opts, sessionId) {
       tools = opts.tools || [];
     }
     
-    console.error(`🔌 [MCP-HTTP] Returning ${tools.length} tools: ${tools.map(t => t.name).join(', ')}`);
     return {
       jsonrpc: '2.0',
       id: msg.id,
@@ -340,18 +336,6 @@ async function processMessage(msg, req, opts, sessionId) {
     id: msg.id,
     error: { code: -32601, message: `Unknown method: ${method}` },
   };
-}
-
-function sendJsonResponse(res, body) {
-  let status = body?._status || 200;
-  if (body?._status) delete body._status;
-  
-  let json = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(json),
-  });
-  res.end(json);
 }
 
 export default createMcpHttpHandler;

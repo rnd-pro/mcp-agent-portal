@@ -12,6 +12,7 @@ export class ToolIndex {
     this.tools = new Map();
     /** @type {Map<string, string[]>} tag → tool names */
     this.tags = new Map();
+    this.failures = [];
     this._ready = false;
   }
 
@@ -31,12 +32,14 @@ export class ToolIndex {
           }
         }
       } catch (err) {
-        console.error(`🟡 [ToolIndex] Failed to index tools from "${serverName}":`, err.message);
+        this.failures.push({
+          server: serverName,
+          message: err.message,
+        });
       }
     }
 
     this._ready = true;
-    console.error(`✅ [ToolIndex] Indexed ${this.tools.size} tools from ${proxyManager.servers.size} servers`);
   }
 
   /**
@@ -53,8 +56,8 @@ export class ToolIndex {
 
   /**
    * Search tools by keyword, tag, or server name.
-   * @param {{ query?: string, tag?: string, server?: string }} params
-   * @returns {{ tools: { name: string, description: string, server: string }[] }}
+   * @param {Object|{ query?: string, tag?: string, server?: string }} params
+   * @returns {{ tools: { name: string, description: string, server: string }[], total: number }}
    */
   search(params = {}) {
     let { query, tag, server } = params;

@@ -19,7 +19,7 @@ try {
   let pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../package.json');
   pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 } catch (e) {
-  console.error("🔴 Failed to load package.json for version:", e);
+  console.error('Failed to load package.json for version:', e);
   pkgJson = { version: 'unknown' };
 }
 const SERVER_VERSION = `${pkgJson.version}+${Date.now()}`;
@@ -33,6 +33,7 @@ const DISABLED_MCP_SERVERS = new Set(['context-x']);
  * Inactivity Watchdog
  * @param {() => void} onTimeout 
  * @param {number} inactivityMs 
+ * @returns {{kick: Function, stop: Function}}
  */
 function createWatchdog(onTimeout, inactivityMs = 30000) {
   let timer = null;
@@ -87,7 +88,6 @@ export class MCPProxyManager {
         if (config.mcpServers) {
           for (let [name, settings] of Object.entries(config.mcpServers)) {
             if (DISABLED_MCP_SERVERS.has(name)) {
-              console.error(`🟡 [config] Server "${name}" is disabled and will not be started`);
               continue;
             }
             let color = `hsl(${Math.floor(Math.random() * 360)}, 65%, 55%)`;
@@ -112,18 +112,17 @@ export class MCPProxyManager {
         });
       }
     } catch (err) {
-      console.error('🔴 Failed to load MCP config:', err);
+      console.error('Failed to load MCP config:', err);
     }
 
     // Validate loaded entries
     for (let [name, settings] of this.servers) {
       if (!settings.command) {
-        console.error(`🔴 [config] Server "${name}" missing "command" field — skipping`);
+        console.error(`[config] Server "${name}" missing "command" field; skipping`);
         this.servers.delete(name);
         continue;
       }
       if (!Array.isArray(settings.args)) {
-        console.error(`🟡 [config] Server "${name}" has no "args" — defaulting to []`);
         settings.args = [];
       }
     }
@@ -146,7 +145,6 @@ export class MCPProxyManager {
             respawnTimer: null,
           });
           configUpdated = true;
-          console.error(`🟢 [Auto-Install] Added core server: ${coreName}`);
         }
       }
     }
@@ -178,7 +176,7 @@ export class MCPProxyManager {
     for (let serverName of this.servers.keys()) {
       this.spawnServer(serverName);
     }
-    this.pluginLoader.initAll().catch(err => console.error('🔴 [MCPProxy] Plugin init error:', err));
+    this.pluginLoader.initAll().catch(err => console.error('[MCPProxy] Plugin init error:', err));
     this.startHealthCheck();
 
     // Set up persistent roots/list handler for all child servers
@@ -248,7 +246,6 @@ export class MCPProxyManager {
               jsonrpc: '2.0',
               method: 'notifications/initialized',
             });
-            console.error(`🟢 [${sName}] Synthetic initialize completed`);
           },
           reject: () => {},
         });
@@ -332,18 +329,19 @@ export class MCPProxyManager {
             let msg = JSON.parse(line.slice('__TASK_NOTIFY__'.length));
             if (this.taskRouter) this.taskRouter.route(msg);
           } catch (err) {
-            console.error(`🔴 [${serverName}] Failed to parse __TASK_NOTIFY__:`, err.message);
+            console.error(`[${serverName}] Failed to parse __TASK_NOTIFY__:`, err.message);
           }
           continue;
         }
-        if (line.trim()) {
-          console.error(`🟡 [${serverName}]`, line.trim());
+        let stderrLine = line.trim();
+        if (stderrLine) {
+          settings.lastStderr = stderrLine;
         }
       }
     });
 
     child.on('error', (err) => {
-      console.error(`🔴 [${serverName}] Spawn error:`, err);
+      console.error(`[${serverName}] Spawn error:`, err);
     });
 
     child.on('exit', (code, signal) => {
@@ -360,14 +358,13 @@ export class MCPProxyManager {
 
       // Intentional shutdown (SIGTERM from stop/restart) — don't respawn
       if (signal === 'SIGTERM' || code === 0) {
-        console.error(`🟡 [${serverName}] stopped (code=${code}, signal=${signal})`);
         return;
       }
 
       // Crash — respawn with exponential backoff
       settings.crashes = (settings.crashes || 0) + 1;
       let delay = Math.min(1000 * Math.pow(2, settings.crashes - 1), 30000);
-      console.error(`🔴 [${serverName}] crashed (code=${code}). Respawning in ${delay}ms... (attempt ${settings.crashes})`);
+      console.error(`[${serverName}] crashed (code=${code}). Respawning in ${delay}ms (attempt ${settings.crashes})`);
 
       this.broadcastMonitor({
         jsonrpc: '2.0',
@@ -391,7 +388,7 @@ export class MCPProxyManager {
 
       // P3: Stop respawning after MAX_CRASHES consecutive failures
       if (settings.crashes >= MAX_CRASHES) {
-        console.error(`🔴 [${serverName}] Exceeded ${MAX_CRASHES} consecutive crashes — giving up. Restart manually.`);
+        console.error(`[${serverName}] Exceeded ${MAX_CRASHES} consecutive crashes; restart manually.`);
         return;
       }
 
@@ -434,7 +431,6 @@ export class MCPProxyManager {
 
             // Route task notifications to chat WebSocket clients
             if (msg.method === 'notifications/task/event') {
-              console.error(`📡 [ChatWS] Task notification: ${msg.params?.type} for ${msg.params?.taskId?.substring(0, 8)}`);
               if (this.taskRouter) this.taskRouter.route(msg);
             }
 
@@ -442,7 +438,7 @@ export class MCPProxyManager {
               cb(serverName, msg);
             }
           } catch (e) {
-            console.error(`🔴 [${serverName}] Failed to broadcast event:`, e.message);
+            console.error(`[${serverName}] Failed to broadcast event:`, e.message);
           }
         }
       }
@@ -461,6 +457,7 @@ export class MCPProxyManager {
    * @param {string} serverName
    * @param {string} method
    * @param {object} params
+   * @param {number} [timeout=5000]
    * @returns {Promise<object>}
    */
   requestFromChild(serverName, method, params, timeout = 5000) {
@@ -543,7 +540,6 @@ export class MCPProxyManager {
     this.spawnServer(name);
     this.#persistConfig();
     if (this.onServerChange) this.onServerChange('add', name);
-    console.error(`✅ [Marketplace] Installed and started "${name}"`);
   }
 
   /**
@@ -589,7 +585,7 @@ export class MCPProxyManager {
       }
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
     } catch (err) {
-      console.error('🔴 [Marketplace] Failed to persist config:', err.message);
+      console.error('[Marketplace] Failed to persist config:', err.message);
     }
   }
 
@@ -656,7 +652,7 @@ export class MCPProxyManager {
             sg.commit(msg.params.ops, msg.params?.source || 'browser');
           }
         } catch (err) {
-          console.error('🔴 [StateWS] message error:', err.message);
+          console.error('[StateWS] message error:', err.message);
         }
       });
     });
@@ -687,7 +683,7 @@ export class MCPProxyManager {
           // Backpressure: disconnect slow clients
           client._pendingMessages = (client._pendingMessages || 0) + 1;
           if (client._pendingMessages > MAX_WS_QUEUE) {
-            console.warn('🟡 [StateWS] Backpressure: disconnecting slow client');
+            console.warn('[StateWS] Backpressure: disconnecting slow client');
             client.close(4001, 'Too slow');
             this.#stateClients.delete(client);
             continue;
@@ -792,7 +788,6 @@ export class MCPProxyManager {
       };
       
       this.servers.set(remoteId, virtualServer);
-      console.log(`✅ [Master] Remote client connected: ${remoteId}`);
 
       ws.on('message', (data) => {
         try {
@@ -807,12 +802,11 @@ export class MCPProxyManager {
             cb(remoteId, msg);
           }
         } catch (e) {
-          console.error(`🔴 [${serverName}] Multiplexer callback error:`, e.message);
+          console.error(`[${serverName}] Multiplexer callback error:`, e.message);
         }
       });
 
       ws.on('close', () => {
-        console.log(`🟡 [Master] Remote client disconnected: ${remoteId}`);
         this.servers.delete(remoteId);
       });
     });
@@ -848,7 +842,6 @@ export class MCPProxyManager {
     this.#healthInterval = setInterval(() => this.#runHealthCheck(), 30000);
     // First check after 10s (let servers initialize)
     createWatchdog(() => this.#runHealthCheck(), 10000);
-    console.error('💓 [HealthCheck] Started (30s interval)');
   }
 
   stopHealthCheck() {
@@ -879,7 +872,7 @@ export class MCPProxyManager {
         results[name] = { status: 'unhealthy', failures: fails, error: err.message };
 
         if (fails === 3) {
-          console.error(`🔴 [HealthCheck] "${name}" unresponsive (3 consecutive failures)`);
+          console.error(`[HealthCheck] "${name}" unresponsive after 3 consecutive failures`);
           this.pluginLoader.dispatchAlert({
             type: 'health',
             server: name,
@@ -926,7 +919,7 @@ export class MCPProxyManager {
       this.adapterPool.destroy();
     }
     if (this.pluginLoader) {
-      this.pluginLoader.destroyAll().catch(err => console.error('🔴 [MCPProxy] Plugin destroy error:', err));
+      this.pluginLoader.destroyAll().catch(err => console.error('[MCPProxy] Plugin destroy error:', err));
     }
   }
 }

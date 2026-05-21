@@ -278,7 +278,8 @@ async function callOpenAICompatible(provider, request) {
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
   if (!response.ok) {
-    throw new Error(data.error?.message || data.message || text || `Upstream HTTP ${response.status}`);
+    let message = data.error?.message ?? data.message ?? text;
+    throw new Error(message == null ? `Upstream HTTP ${response.status}` : String(message));
   }
   return data;
 }
@@ -304,7 +305,8 @@ async function callOpenAICompatibleStream(provider, request, res, requestedModel
     let text = await response.text();
     let data;
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-    throw new Error(data.error?.message || data.message || text || `Upstream HTTP ${response.status}`);
+    let message = data.error?.message ?? data.message ?? text;
+    throw new Error(message == null ? `Upstream HTTP ${response.status}` : String(message));
   }
 
   await streamOpenAIChunksAsAnthropic(response, res, requestedModel, modelInfo);
@@ -487,59 +489,6 @@ async function proxyAnthropicCompatible(provider, suffix, req, res, body = null,
 function writeSse(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-function streamAnthropicResponse(res, message) {
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-  });
-
-  writeSse(res, 'message_start', {
-    type: 'message_start',
-    message: { ...message, content: [], stop_reason: null, stop_sequence: null },
-  });
-
-  message.content.forEach((block, index) => {
-    if (block.type === 'text') {
-      writeSse(res, 'content_block_start', {
-        type: 'content_block_start',
-        index,
-        content_block: { type: 'text', text: '' },
-      });
-      if (block.text) {
-        writeSse(res, 'content_block_delta', {
-          type: 'content_block_delta',
-          index,
-          delta: { type: 'text_delta', text: block.text },
-        });
-      }
-    } else if (block.type === 'tool_use') {
-      writeSse(res, 'content_block_start', {
-        type: 'content_block_start',
-        index,
-        content_block: { type: 'tool_use', id: block.id, name: block.name, input: {} },
-      });
-      let input = JSON.stringify(block.input || {});
-      if (input !== '{}') {
-        writeSse(res, 'content_block_delta', {
-          type: 'content_block_delta',
-          index,
-          delta: { type: 'input_json_delta', partial_json: input },
-        });
-      }
-    }
-    writeSse(res, 'content_block_stop', { type: 'content_block_stop', index });
-  });
-
-  writeSse(res, 'message_delta', {
-    type: 'message_delta',
-    delta: { stop_reason: message.stop_reason, stop_sequence: null },
-    usage: { output_tokens: message.usage.output_tokens },
-  });
-  writeSse(res, 'message_stop', { type: 'message_stop' });
-  res.end();
 }
 
 function countTokens(body) {

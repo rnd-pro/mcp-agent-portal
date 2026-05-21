@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const BEGIN_MARKER = '# --- BEGIN RND-PRO TEAM RULES ---';
-const END_MARKER = '# --- END RND-PRO TEAM RULES ---';
-const EXPLANATION = '# These rules are automatically synchronized from the Global Team Memory.\n# Do not edit them directly here, as they will be overwritten on next portal startup.\n';
+const BEGIN_MARKER = '# --- BEGIN AGENT PORTAL WORKSPACE RULES ---';
+const END_MARKER = '# --- END AGENT PORTAL WORKSPACE RULES ---';
+const EXPLANATION = '# These rules are automatically synchronized by Agent Portal.\n# Do not edit them directly here, as they will be overwritten on next portal startup.\n';
 
 /**
  * Synchronize global team rules into the local workspace IDE rule files
@@ -48,13 +48,11 @@ export function syncWorkspaceRules(projectRoot) {
         const newContent = `${before.trim()}\n\n${blockToInject}\n${after.trim()}`.trim() + '\n';
         if (newContent !== fileContent) {
           fs.writeFileSync(filePath, newContent, 'utf-8');
-          console.error(`[portal] Updated global team rules in ${filename}`);
         }
       } else {
         // Append block if it doesn't exist
         const newContent = `${fileContent.trim()}\n\n${blockToInject}`.trim() + '\n';
         fs.writeFileSync(filePath, newContent, 'utf-8');
-        console.error(`[portal] Injected global team rules into ${filename}`);
       }
     }
   } catch (err) {

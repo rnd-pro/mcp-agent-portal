@@ -30,7 +30,7 @@ export class ChatWsServer {
             await this._handleChatCancel(ws, msg.params || {});
           }
         } catch (e) {
-          console.error('❌ [ChatWS] Message handler error:', e);
+          console.error('[ChatWS] Message handler error:', e);
           if (ws.readyState === 1) {
             ws.send(JSON.stringify({ method: 'chat.error', params: { error: e.message || 'Internal error' } }));
           }
@@ -49,7 +49,6 @@ export class ChatWsServer {
   async _handleChatSend(ws, params) {
     let { chatId, prompt, sessionId, timeout, model, provider, approval_mode } = params;
     let agentSlug = params.agent || params.agent_slug;
-    console.log(`💬 [Chat] Received chat.send for chatId=${chatId}, provider=${provider}, model=${model}`);
     if (!prompt) return;
 
     let sg = getStateGraph();
@@ -67,7 +66,6 @@ export class ChatWsServer {
       });
       chatId = chat.id;
       sg.appendChatMessage(chatId, { role: 'user', content: prompt });
-      console.log(`💬 [Chat] Created new chat ${chatId} for CLI request in project ${proj.id}`);
     }
 
     let resolvedCwd = params.cwd;
@@ -102,21 +100,17 @@ export class ChatWsServer {
     if (agentSlug && agentSlug !== 'none') {
       delegateArgs.agent_slug = agentSlug;
       delegateArgs.chat_id = chatId;
-      console.log(`💬 [Chat] Using agent: ${agentSlug}`);
     }
 
     try {
-      console.log(`💬 [Chat] Calling delegate_task...`, delegateArgs);
       let result = await this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
         name: 'delegate_task',
         arguments: delegateArgs,
       });
-      
-      console.log(`💬 [Chat] delegate_task returned`, result);
       let delegateText = result.content?.[0]?.text || '';
       
       if (result.isError) {
-        console.error(`❌ [Chat] delegate_task returned an error state:`, delegateText);
+        console.error('[Chat] delegate_task returned an error state:', delegateText);
         if (ws.readyState === 1) {
           ws.send(JSON.stringify({ method: 'chat.error', params: { chatId, error: delegateText } }));
         }
@@ -127,7 +121,6 @@ export class ChatWsServer {
       let taskId = taskIdMatch?.[1];
 
       if (taskId) {
-        console.log(`💬 [Chat] Subscribing WS to taskId=${taskId}`);
         this.subscribe(taskId, ws, chatId);
         getStateGraph().updateChatTask(chatId, taskId);
 
@@ -141,7 +134,7 @@ export class ChatWsServer {
         params: { chatId, taskId, text: delegateText },
       }));
     } catch (err) {
-      console.error(`❌ [Chat] Error in delegate_task:`, err);
+      console.error('[Chat] Error in delegate_task:', err);
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ method: 'chat.error', params: { chatId, error: err.message || 'Server error' } }));
       }
@@ -152,7 +145,6 @@ export class ChatWsServer {
     let { chatId, taskId } = params;
     if (!taskId) return;
 
-    console.log(`💬 [Chat] Resuming subscription for taskId=${taskId}, chatId=${chatId}`);
     this.subscribe(taskId, ws, chatId);
 
     try {
@@ -172,7 +164,7 @@ export class ChatWsServer {
         ws.send(JSON.stringify({ method: 'chat.resumed', params: { chatId, taskId, status: 'running' } }));
       }
     } catch (err) {
-      console.error(`❌ [Chat] Failed to fetch task result for resume:`, err.message);
+      console.error('[Chat] Failed to fetch task result for resume:', err.message);
       this._recoverLostTask(ws, chatId, taskId);
     }
   }
@@ -224,13 +216,12 @@ export class ChatWsServer {
       taskId = chat?.pendingTaskId;
     }
     if (taskId) {
-      console.log(`💬 [Chat] Canceling task: ${taskId} for chat ${chatId}`);
       try {
         await this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
           name: 'cancel_task',
           arguments: { task_id: taskId }
         });
-      } catch (e) { console.error('🔴 Failed to cancel task:', e); }
+      } catch (e) { console.error('Failed to cancel task:', e); }
     }
   }
 

@@ -177,6 +177,27 @@ describe('anthropic gateway', () => {
     assert.match(res.body, /event: message_stop/);
   });
 
+  it('preserves falsy upstream error message values', async () => {
+    global.fetch = async () => ({
+      ok: false,
+      status: 429,
+      text: async () => JSON.stringify({ message: 0 }),
+    });
+
+    let { createAnthropicGatewayHandler } = await import('../../src/node/server/anthropic-gateway.js');
+    let handler = createAnthropicGatewayHandler();
+    let req = makeReq('POST', '/anthropic/v1/messages', {
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hello' }],
+    }, { authorization: 'Bearer local-token' });
+    let res = makeRes();
+
+    await handler(req, res);
+
+    assert.equal(res.status, 500);
+    assert.equal(JSON.parse(res.body).error.message, '0');
+  });
+
   it('lists provider-prefixed models for multi-provider selection', async () => {
     let { createAnthropicGatewayHandler } = await import('../../src/node/server/anthropic-gateway.js');
     let handler = createAnthropicGatewayHandler();

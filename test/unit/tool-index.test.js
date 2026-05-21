@@ -85,4 +85,27 @@ describe('ToolIndex', () => {
     let tags = index.getAvailableTags();
     assert.deepStrictEqual(tags.sort(), ['delegate', 'nav']);
   });
+
+  it('records child server indexing failures without console noise', async () => {
+    let index = new ToolIndex();
+    let errorCalls = 0;
+    let oldError = console.error;
+    console.error = () => { errorCalls++; };
+
+    try {
+      await index.rebuild({
+        servers: new Map([['broken-server', {}]]),
+        requestFromChild: async () => {
+          throw new Error('tools/list failed');
+        },
+      });
+
+      assert.strictEqual(errorCalls, 0);
+      assert.strictEqual(index.failures.length, 1);
+      assert.strictEqual(index.failures[0].server, 'broken-server');
+      assert.match(index.failures[0].message, /tools\/list failed/);
+    } finally {
+      console.error = oldError;
+    }
+  });
 });

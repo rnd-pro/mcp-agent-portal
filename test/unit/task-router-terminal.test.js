@@ -25,4 +25,13 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.match(source, /sg\.updateChatTask\(chatId, null\)/);
     assert.match(source, /sg\.updateChat\(chatId, \{ lastTaskStatus: 'cancelled' \}\)/);
   });
+
+  it('uses nullish fallbacks for falsy task result payload fields', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+
+    assert.match(source, /let result = data\.output \?\? data\.status \?\? '';/);
+    assert.match(source, /result: tRes \? \(tRes\.output \?\? tRes\.status\) : null,/);
+    assert.doesNotMatch(source, /data\.output \|\| data\.status/);
+    assert.doesNotMatch(source, /tRes\.output \|\| tRes\.status/);
+  });
 });

@@ -83,6 +83,7 @@ export function logFeedback(outcome, skillCreated = null) {
 
 /**
  * Returns basic telemetry stats from the dataset.
+ * @returns {object}
  */
 export function getFlywheelStats() {
   let stats = {

@@ -1,6 +1,12 @@
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
 
+const TERMINAL_TYPES = new Set(['done', 'error', 'cancelled']);
+
+export function isTerminalTaskNotificationType(type) {
+  return TERMINAL_TYPES.has(type);
+}
+
 /** Routes task notifications from child servers to WebSocket subscribers. */
 export class TaskRouter {
   /**
@@ -21,8 +27,6 @@ export class TaskRouter {
     let { taskId, type, data } = notification.params || {};
     if (!taskId) return;
 
-    console.log(`💬 [TaskNotify] taskId=${taskId} type=${type}`);
-
     let sg = getStateGraph();
     let meta = data?.meta;
 
@@ -31,7 +35,7 @@ export class TaskRouter {
       try {
         // Compact event summary for ring buffer (but keep enough for UI rendering)
         let summary = {
-          type: data.type || 'unknown',
+          type: data.type ?? 'unknown',
           ts: Date.now(),
         };
         if (data.role) summary.role = data.role;
@@ -56,7 +60,7 @@ export class TaskRouter {
         }], 'task-event');
       } catch (err) {
         // Non-critical: event caching failure shouldn't break routing
-        console.warn(`🟡 [TaskNotify] Event cache failed for ${taskId}:`, err.message);
+        console.warn(`[TaskNotify] Event cache failed for ${taskId}:`, err.message);
       }
     }
 
@@ -67,18 +71,18 @@ export class TaskRouter {
         updatedAt: Date.now(),
       }}];
 
-      if (type === 'done' || type === 'error' || type === 'cancelled') {
+      if (isTerminalTaskNotificationType(type)) {
         setTimeout(() => {
-          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`🟡 [TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
+          try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
       try { sg.commit(ops, `agent-pool:${type}`); } catch (err) {
-        console.error(`🔴 [TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
+        console.error(`[TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
       }
     }
 
     let chatWsServer = this.mcpProxy.chatWsServer;
-    let chatId = chatWsServer?.taskChatMap.get(taskId) || data?.meta?.chatId || this._findChatForTask(taskId);
+    let chatId = chatWsServer?.taskChatMap.get(taskId) ?? data?.meta?.chatId ?? this._findChatForTask(taskId);
 
     // ── Phase 1: Atomically update chat.messages[] on server ──
     let metaDelta = null;
@@ -89,8 +93,6 @@ export class TaskRouter {
     let clients = chatWsServer ? chatWsServer.chatSubscriptions.get(taskId) : null;
 
     if (!clients || clients.size === 0) {
-      console.log(`💬 [TaskNotify] No subscribers for taskId=${taskId}, type=${type} — caching for 5s`);
-      
       if (!this.pendingNotifications.has(taskId)) {
         this.pendingNotifications.set(taskId, []);
         setTimeout(() => this.pendingNotifications.delete(taskId), 5000);
@@ -98,11 +100,16 @@ export class TaskRouter {
       this.pendingNotifications.get(taskId).push(notification);
 
 
-      if (type === 'done' || type === 'error') {
+      if (isTerminalTaskNotificationType(type)) {
         if (chatId) {
           if (chatWsServer) chatWsServer.taskChatMap.delete(taskId);
+          this._streamState.delete(taskId);
+          if (type === 'cancelled') {
+            this._finalizeCancelledTask(chatId, taskId, chatWsServer);
+            return;
+          }
           fetchTaskResult(this.mcpProxy, taskId).then(result => {
-            let text = result.content?.[0]?.text || '';
+            let text = result.content?.[0]?.text ?? '';
             let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
             let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
             this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt, parsedResult);
@@ -116,9 +123,14 @@ export class TaskRouter {
       return;
     }
 
-    console.log(`💬 [TaskNotify] Routing to ${clients.size} client(s)`);
+    if (isTerminalTaskNotificationType(type)) {
+      if (type === 'cancelled') {
+        if (chatId) chatWsServer.taskChatMap.delete(taskId);
+        this._streamState.delete(taskId);
+        this._finalizeCancelledTask(chatId, taskId, chatWsServer);
+        return;
+      }
 
-    if (type === 'done' || type === 'error') {
       let method = type === 'done' ? 'chat.done' : 'chat.error';
       if (chatId) chatWsServer.taskChatMap.delete(taskId);
 
@@ -132,7 +144,7 @@ export class TaskRouter {
 
       // Then fetch + persist the rich parsed result in background
       fetchTaskResult(this.mcpProxy, taskId).then(result => {
-        let text = result.content?.[0]?.text || '';
+        let text = result.content?.[0]?.text ?? '';
         let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
         let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
 
@@ -177,7 +189,7 @@ export class TaskRouter {
         if (data.role === 'system') {
           // System status — update thinking indicator status
           state.phase = 'thinking';
-          state.thinkingStatus = data.content || '';
+          state.thinkingStatus = data.content ?? '';
           // Don't persist transient system messages to chat.messages
         } else if (data.role === 'assistant') {
           let text = data.content ?? data.text ?? '';
@@ -217,7 +229,7 @@ export class TaskRouter {
       }
 
       case 'tool_result': {
-        let result = data.output || data.status || '';
+        let result = data.output ?? data.status ?? '';
         state.phase = 'responding';
 
         // Find the last streaming tool and close it
@@ -232,8 +244,8 @@ export class TaskRouter {
       }
 
       case 'error': {
-        let errText = data.message || data.error || JSON.stringify(data);
-        msgs.push({ role: 'system', text: `⚠️ Error: ${errText}` });
+        let errText = data.message ?? data.error ?? JSON.stringify(data);
+        msgs.push({ role: 'system', text: `Error: ${errText}` });
         changed = true;
         break;
       }
@@ -250,22 +262,20 @@ export class TaskRouter {
       taskId,
       phase: state.phase,
       messageCount: msgs.length,
-      lastToolName: state.lastToolName || null,
-      thinkingStatus: state.thinkingStatus || null,
+      lastToolName: state.lastToolName ?? null,
+      thinkingStatus: state.thinkingStatus ?? null,
     };
   }
 
   replayCachedNotifications(taskId) {
     let cached = this.pendingNotifications.get(taskId);
     if (cached && cached.length > 0) {
-      console.log(`💬 [Chat] Replaying ${cached.length} cached notification(s) for taskId=${taskId}`);
-      
-      // Separate terminal notifications (done/error) from streaming events
+      // Separate terminal notifications from streaming events
       let streamingNotes = [];
       let terminalNotes = [];
       for (let note of cached) {
         let type = note.params?.type;
-        if (type === 'done' || type === 'error') {
+        if (isTerminalTaskNotificationType(type)) {
           terminalNotes.push(note);
         } else {
           streamingNotes.push(note);
@@ -301,6 +311,32 @@ export class TaskRouter {
     return null;
   }
 
+  _finalizeCancelledTask(chatId, taskId, chatWsServer = this.mcpProxy.chatWsServer) {
+    if (chatWsServer) {
+      chatWsServer.broadcastTaskEvent(taskId, 'chat.error', {
+        taskId,
+        chatId,
+        status: 'cancelled',
+        error: 'Task cancelled',
+      });
+      chatWsServer.unsubscribe(taskId);
+    }
+
+    if (!chatId) return;
+
+    let sg = getStateGraph();
+    let chat = sg.getChat(chatId);
+    if (chat) {
+      let msgs = (chat.messages || []).map((message) => (
+        message.streaming ? { ...message, streaming: false } : message
+      ));
+      sg.replaceChatMessages(chatId, msgs);
+    }
+    sg.updateChatTask(chatId, null);
+    sg.updateChat(chatId, { lastTaskStatus: 'cancelled' });
+    this.mcpProxy.broadcastMonitor?.({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
+  }
+
   /**
    * @param {string} chatId 
    * @param {string} text 
@@ -316,7 +352,7 @@ export class TaskRouter {
     
 
     msgs = msgs.filter(m => 
-      !(m.role === 'system' && (m.text.startsWith('⏳') || m.text.startsWith('✅')))
+      !(m.role === 'system' && (m.text.startsWith('Waiting') || m.text.startsWith('Done')))
       && !(m.role === 'thinking' && !m.done)
     );
 
@@ -331,7 +367,7 @@ export class TaskRouter {
           role: 'tool',
           name: call.name,
           input: call.args,
-          result: tRes ? (tRes.output || tRes.status) : null,
+          result: tRes ? (tRes.output ?? tRes.status) : null,
           streaming: false
         });
       }

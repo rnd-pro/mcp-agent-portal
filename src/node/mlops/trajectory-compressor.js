@@ -10,6 +10,10 @@ const COMPRESSED_PATH = path.join(os.homedir(), '.agent-portal', 'compressed-tra
  * Compresses a sequence of tool calls.
  * Protects the head (first 2) and tail (last 2) tool calls.
  * Summarizes the middle calls by keeping only the tool name and discarding large result summaries.
+ * @param {Array<object>} block
+ * @param {string} outcome
+ * @param {string|null} skillCreated
+ * @returns {object|null}
  */
 function compressTrajectoryBlock(block, outcome, skillCreated) {
   if (block.length === 0) return null;

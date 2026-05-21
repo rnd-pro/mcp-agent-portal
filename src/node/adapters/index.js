@@ -65,9 +65,7 @@ async function fetchOpenRouterMetadata() {
       });
     }
     _lastMetadataFetch = Date.now();
-  } catch (err) {
-    console.warn('[adapters] OpenRouter fetch failed:', err.message);
-  }
+  } catch {}
 }
 
 // Discover models from OpenCode CLI (`opencode models`) and enrich with OpenRouter pricing.
@@ -80,7 +78,6 @@ export async function discoverOpenCodeModels() {
   return new Promise((resolve) => {
     execFile('opencode', ['models'], { timeout: 10000 }, (err, stdout) => {
       if (err) {
-        console.warn('[adapters] opencode models discovery failed:', err.message);
         resolve([]);
         return;
       }
@@ -99,7 +96,6 @@ export async function discoverOpenCodeModels() {
       });
       
       _cliModels = richModels;
-      console.log(`[adapters] Discovered ${richModels.length} OpenCode models`);
       resolve(richModels);
     });
   });
@@ -121,7 +117,7 @@ export function getCLIModels() {
  */
 function getEffectiveModels(provider) {
   let userModels = {};
-  try { userModels = getStateGraph().getAllProviderModels(); } catch (e) { console.debug('[adapters] StateGraph not initialized yet'); }
+  try { userModels = getStateGraph().getAllProviderModels(); } catch {}
   let models = [];
   
   if (userModels[provider]?.length > 0) {
@@ -176,7 +172,10 @@ export function setPortalRoot(root) {
   _agentCacheKey = '';
 }
 
-/** Get agent catalog (slug, icon, color, description, role). Cached 5s. */
+/**
+ * Get agent catalog (slug, icon, color, description, role). Cached 5s.
+ * @returns {Array<object>}
+ */
 export function getAgentList() {
   let root = resolveAgentRoot();
   if (_agentCache && _agentCacheKey === root && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
@@ -256,6 +255,4 @@ export function listAdapterTypes() {
 
 // Pre-warm the cache on module load so that getEffectiveModels has metadata available 
 // immediately for the initial /api/adapter/types request when a chat opens.
-discoverOpenCodeModels().catch(err => {
-  console.warn('[adapters] Failed to pre-warm OpenCode models:', err.message);
-});
+discoverOpenCodeModels().catch(() => {});

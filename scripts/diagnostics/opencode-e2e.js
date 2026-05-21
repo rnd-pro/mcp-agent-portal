@@ -2,7 +2,7 @@
  * E2E diagnostic test: WebSocket chat pipeline with streaming validation
  * Traces every step: connect → send → delegated → streaming events → done/error
  *
- * Usage: PORTAL_HOST=<host> node test/integration/opencode-e2e.js
+ * Usage: PORTAL_HOST=<host> node scripts/diagnostics/opencode-e2e.js
  */
 import WebSocket from 'ws';
 
@@ -12,7 +12,7 @@ const WS_URL = `ws://${HOST}/ws/chat`;
 const CHAT_ID = 'test-e2e-' + Date.now();
 const TIMEOUT_S = 60;
 
-console.log(`\n🧪 E2E Chat Pipeline Diagnostic`);
+console.log(`\nE2E Chat Pipeline Diagnostic`);
 console.log(`   URL: ${WS_URL}`);
 console.log(`   Model: ${MODEL}`);
 console.log(`   Chat ID: ${CHAT_ID}`);
@@ -31,7 +31,7 @@ function elapsed() {
 }
 
 ws.on('open', () => {
-  console.log(`[${elapsed()}] ✅ WebSocket connected`);
+  console.log(`[${elapsed()}] WebSocket connected`);
 
   const msg = {
     method: 'chat.send',
@@ -44,12 +44,12 @@ ws.on('open', () => {
     },
   };
 
-  console.log(`[${elapsed()}] 📤 Sending chat.send (provider=opencode, model=${MODEL})`);
+  console.log(`[${elapsed()}] Sending chat.send (provider=opencode, model=${MODEL})`);
   ws.send(JSON.stringify(msg));
 });
 
 const timeout = setTimeout(() => {
-  console.log(`\n[${elapsed()}] ⏰ TIMEOUT after ${TIMEOUT_S}s`);
+  console.log(`\n[${elapsed()}] TIMEOUT after ${TIMEOUT_S}s`);
   console.log(`   Task ID: ${taskId || 'NONE'}`);
   console.log(`   Streamed chunks: ${streamedChunks}`);
   console.log(`   Tool calls: ${toolCalls}`);
@@ -65,34 +65,34 @@ ws.on('message', (data) => {
     switch (msg.method) {
       case 'chat.delegated':
         taskId = msg.params?.taskId;
-        console.log(`[${elapsed()}] 📋 Delegated — taskId=${taskId || 'MISSING!'}`);
+        console.log(`[${elapsed()}] Delegated - taskId=${taskId || 'MISSING!'}`);
         if (!taskId) {
-          console.log(`   ❌ Full response:`, JSON.stringify(msg, null, 2));
+          console.log(`   Full response:`, JSON.stringify(msg, null, 2));
         }
         break;
 
       case 'chat.event': {
         let ev = msg.params?.event;
         if (!ev) {
-          console.log(`[${elapsed()}] ⚠️  chat.event with no event payload:`, JSON.stringify(msg.params));
+          console.log(`[${elapsed()}] chat.event with no event payload:`, JSON.stringify(msg.params));
           break;
         }
         if (ev.type === 'message' && ev.role === 'system') {
-          console.log(`[${elapsed()}] 🔧 System: "${ev.content}"`);
+          console.log(`[${elapsed()}] System: "${ev.content}"`);
         } else if (ev.type === 'message' && ev.role === 'assistant') {
           streamedChunks++;
-          console.log(`[${elapsed()}] 💬 Stream #${streamedChunks}: "${(ev.content || '').substring(0, 100)}"`);
+          console.log(`[${elapsed()}] Stream #${streamedChunks}: "${(ev.content || '').substring(0, 100)}"`);
         } else if (ev.type === 'tool_use') {
           toolCalls++;
-          console.log(`[${elapsed()}] 🔨 Tool: ${ev.name || ev.tool_name}`);
+          console.log(`[${elapsed()}] Tool: ${ev.name || ev.tool_name}`);
         } else if (ev.type === 'tool_result') {
           toolResults++;
-          console.log(`[${elapsed()}] 📎 Tool result`);
+          console.log(`[${elapsed()}] Tool result`);
         } else if (ev.type === 'error') {
           errors.push(ev.message || ev.error);
-          console.log(`[${elapsed()}] ⚠️  Error event: ${ev.message || ev.error}`);
+          console.log(`[${elapsed()}] Error event: ${ev.message || ev.error}`);
         } else {
-          console.log(`[${elapsed()}] 📦 Event: type=${ev.type} role=${ev.role}`);
+          console.log(`[${elapsed()}] Event: type=${ev.type} role=${ev.role}`);
         }
         break;
       }
@@ -100,11 +100,11 @@ ws.on('message', (data) => {
       case 'chat.done': {
         clearTimeout(timeout);
         let responsePreview = (msg.params?.text || '').substring(0, 200);
-        console.log(`[${elapsed()}] ✅ DONE`);
+        console.log(`[${elapsed()}] DONE`);
         console.log(`   Response: "${responsePreview}"`);
 
         // Validation summary
-        console.log(`\n📊 Streaming Report:`);
+        console.log(`\nStreaming Report:`);
         console.log(`   Streamed chunks: ${streamedChunks}`);
         console.log(`   Tool calls: ${toolCalls}`);
         console.log(`   Tool results: ${toolResults}`);
@@ -112,14 +112,14 @@ ws.on('message', (data) => {
 
         let pass = true;
         if (streamedChunks === 0) {
-          console.log(`   ❌ FAIL: No streaming chunks received — streaming is broken!`);
+          console.log(`   FAIL: No streaming chunks received - streaming is broken!`);
           pass = false;
         } else {
-          console.log(`   ✅ PASS: Streaming works (${streamedChunks} chunk(s))`);
+          console.log(`   PASS: Streaming works (${streamedChunks} chunk(s))`);
         }
 
         if (errors.length > 0) {
-          console.log(`   ⚠️  Errors during execution: ${errors.join('; ')}`);
+          console.log(`   Errors during execution: ${errors.join('; ')}`);
         }
 
         ws.close();
@@ -128,25 +128,25 @@ ws.on('message', (data) => {
       }
 
       case 'chat.error':
-        console.log(`[${elapsed()}] ❌ ERROR: ${msg.params?.text || msg.params?.error}`);
+        console.log(`[${elapsed()}] ERROR: ${msg.params?.text || msg.params?.error}`);
         clearTimeout(timeout);
         ws.close();
         process.exit(1);
         break;
 
       default:
-        console.log(`[${elapsed()}] ❓ Unknown method: ${msg.method}`, JSON.stringify(msg.params || {}).substring(0, 100));
+        console.log(`[${elapsed()}] Unknown method: ${msg.method}`, JSON.stringify(msg.params || {}).substring(0, 100));
     }
   } catch (e) {
-    console.log(`[${elapsed()}] 📥 Parse error:`, data.toString().substring(0, 200));
+    console.log(`[${elapsed()}] Parse error:`, data.toString().substring(0, 200));
   }
 });
 
 ws.on('error', (err) => {
-  console.log(`[${elapsed()}] ❌ WS error: ${err.message}`);
+  console.log(`[${elapsed()}] WS error: ${err.message}`);
   process.exit(1);
 });
 
 ws.on('close', () => {
-  console.log(`[${elapsed()}] 🔌 WebSocket closed`);
+  console.log(`[${elapsed()}] WebSocket closed`);
 });

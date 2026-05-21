@@ -91,7 +91,7 @@ export function isProcessAlive(pid) {
 /**
  * Sends a signal to a detached child process group, falling back to the child.
  * @param {import('node:child_process').ChildProcess|number} childOrPid
- * @param {NodeJS.Signals} [signal]
+ * @param {string|NodeJS.Signals} [signal]
  * @returns {boolean}
  */
 export function killProcessTree(childOrPid, signal = 'SIGTERM') {
@@ -119,7 +119,7 @@ export function killProcessTree(childOrPid, signal = 'SIGTERM') {
  * leaving nested subprocesses behind.
  * @param {string} command
  * @param {string[]} [args]
- * @param {WatchedProcessOptions} [options]
+ * @param {Object|WatchedProcessOptions} [options]
  * @returns {Promise<ProcessResult>}
  * @throws {ProcessError} PROCESS_TIMEOUT, PROCESS_INACTIVITY_TIMEOUT, PROCESS_ABORTED, PROCESS_OUTPUT_LIMIT, or exit code.
  */
@@ -292,7 +292,7 @@ export function runProcessWithWatchdog(command, args = [], options = {}) {
 /**
  * Run a shell command with the same watchdog behavior as process execution.
  * @param {string} command
- * @param {WatchedProcessOptions} [options]
+ * @param {Object|WatchedProcessOptions} [options]
  * @returns {Promise<ProcessResult>}
  */
 export function runShellWithWatchdog(command, options = {}) {
@@ -307,7 +307,7 @@ export function runShellWithWatchdog(command, options = {}) {
  * Start a detached background process and return its pid.
  * @param {string} command
  * @param {string[]} [args]
- * @param {Pick<WatchedProcessOptions, 'cwd'|'env'|'label'>} [options]
+ * @param {Object|Pick<WatchedProcessOptions, 'cwd'|'env'|'label'>} [options]
  * @returns {number|undefined}
  */
 export function startDetachedProcess(command, args = [], options = {}) {
