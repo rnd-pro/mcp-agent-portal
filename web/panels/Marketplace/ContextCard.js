@@ -91,12 +91,12 @@ ContextCard.template = html`
   </div>
   <div class="mp-card-desc" ${{ textContent: 'description' }}></div>
   <div class="mp-card-actions">
-    <button class="ui-btn mp-context-btn" data-dest="project" ${{ onclick: '^onContextInstall' }}>
+    <sn-button class="mp-context-btn" data-dest="project" ${{ onclick: '^onContextInstall' }}>
       <span class="material-symbols-outlined">download</span> Project
-    </button>
-    <button class="ui-btn primary mp-context-btn" data-dest="team" ${{ onclick: '^onContextInstall' }}>
+    </sn-button>
+    <sn-button variant="primary" class="mp-context-btn" data-dest="team" ${{ onclick: '^onContextInstall' }}>
       <span class="material-symbols-outlined">group</span> Team
-    </button>
+    </sn-button>
   </div>
   <div class="mp-form-status" ref="status" ${{ textContent: 'status' }}></div>
 </sn-card>

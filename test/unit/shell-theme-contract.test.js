@@ -75,6 +75,18 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote action buttons inside reusable card shells', () => {
+    for (let relative of [
+      'web/panels/ActiveTasks/TaskCard.js',
+      'web/panels/Marketplace/McpServerCard.js',
+      'web/panels/Marketplace/ContextCard.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('<sn-button'), `${relative} must compose the library action control`);
+      assert.equal(source.includes('class="ui-btn'), false, `${relative} must not copy button shell classes`);
+    }
+  });
+
   it('keeps active task cards off inline copied theme values', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
     for (let literal of ['#9ca3af', '#404040', 'style="']) {

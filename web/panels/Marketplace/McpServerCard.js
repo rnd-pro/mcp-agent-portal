@@ -87,30 +87,26 @@ sn-card {
   background: var(--sn-node-hover);
 }
 
-.mp-card-toggle {
-  background: none;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 6px;
-  color: inherit;
-  font-size: 11px;
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+sn-button.mp-card-toggle {
+  --sn-button-bg: transparent;
+  --sn-button-padding: 4px 10px;
+  --sn-button-radius: 6px;
+  --sn-button-font-size: 11px;
+  --sn-button-min-height: 26px;
 }
 
-.mp-card-toggle:hover {
-  background: color-mix(in srgb, var(--sn-node-selected) 12%, transparent);
-  border-color: var(--sn-node-selected);
+sn-button.mp-card-toggle:hover {
+  --sn-button-hover-bg: color-mix(in srgb, var(--sn-node-selected) 12%, transparent);
+  --sn-button-hover-border: var(--sn-node-selected);
 }
 
-.mp-card-toggle[data-action="remove"]:hover {
-  background: color-mix(in srgb, var(--sn-danger-color) 12%, transparent);
-  border-color: var(--sn-danger-color);
+sn-button.mp-card-toggle[data-action="remove"]:hover {
+  --sn-button-hover-bg: color-mix(in srgb, var(--sn-danger-color) 12%, transparent);
+  --sn-button-hover-border: var(--sn-danger-color);
 }
 
-.mp-card-toggle:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+sn-button.mp-card-toggle[disabled] {
+  --sn-button-disabled-opacity: 0.3;
 }
 `;
 
@@ -147,7 +143,7 @@ McpServerCard.template = html`
       <span class="mp-status-dot" ${{ 'data-active': 'isInstalled' }}></span>
       <span ${{ textContent: 'status' }}></span>
     </div>
-    <button class="mp-card-toggle" ${{ '@data-action': 'action', textContent: 'actionLabel', onclick: '^onServerAction' }}></button>
+    <sn-button class="mp-card-toggle" ${{ '@data-action': 'action', textContent: 'actionLabel', onclick: '^onServerAction' }}></sn-button>
   </div>
 </sn-card>
 `;

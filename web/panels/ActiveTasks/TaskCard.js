@@ -39,8 +39,8 @@ TaskCard.template = html`
     </div>
   </div>
   <div slot="footer" class="task-card-actions">
-    <button class="ui-btn danger" ${{ hidden: 'hideCancel', '@data-task-id': 'id', onclick: '^onCancelTask' }}>Cancel</button>
-    <button class="ui-btn" ${{ hidden: 'hideFinish', '@data-task-id': 'id', onclick: '^onFinishTask' }}>Finish</button>
+    <sn-button variant="danger" ${{ hidden: 'hideCancel', '@data-task-id': 'id', onclick: '^onCancelTask' }}>Cancel</sn-button>
+    <sn-button ${{ hidden: 'hideFinish', '@data-task-id': 'id', onclick: '^onFinishTask' }}>Finish</sn-button>
   </div>
 </sn-card>
 `;
