@@ -87,6 +87,17 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote field wrappers for reusable form shells', () => {
+    for (let relative of [
+      'web/panels/Marketplace/Marketplace.tpl.js',
+      'web/panels/PeerReview/PeerReview.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('<sn-field'), `${relative} must compose the library field wrapper`);
+      assert.equal(source.includes('<div class="ui-field">'), false, `${relative} must not copy field shell markup`);
+    }
+  });
+
   it('keeps active task cards off inline copied theme values', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
     for (let literal of ['#9ca3af', '#404040', 'style="']) {

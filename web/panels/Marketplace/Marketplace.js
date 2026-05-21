@@ -221,7 +221,8 @@ class Marketplace extends Symbiote {
   }
 
   _getEventButton(e) {
-    return e.target?.closest?.('button') || e.composedPath?.().find(el => el?.tagName === 'BUTTON');
+    return e.target?.closest?.('sn-button,button')
+      || e.composedPath?.().find(el => ['SN-BUTTON', 'BUTTON'].includes(el?.tagName));
   }
 
   _getItemHost(e, tagName) {

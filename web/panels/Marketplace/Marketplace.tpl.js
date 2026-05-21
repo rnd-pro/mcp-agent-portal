@@ -40,30 +40,30 @@ export default html`
         <div class="ui-card-title mp-custom-title">Install Custom MCP Server</div>
         <p class="mp-form-desc">Add any MCP server by specifying its command and arguments.</p>
         
-        <div class="ui-field">
+        <sn-field>
           <label>Name <span class="mp-required">*</span></label>
           <input type="text" ref="customName" placeholder="my-server" />
-        </div>
+        </sn-field>
         
-        <div class="ui-field">
+        <sn-field>
           <label>Command <span class="mp-required">*</span></label>
           <input type="text" ref="customCommand" placeholder="npx" />
-        </div>
+        </sn-field>
         
-        <div class="ui-field">
+        <sn-field>
           <label>Arguments <span class="mp-hint">(comma-separated)</span></label>
           <input type="text" ref="customArgs" placeholder="-y, @scope/mcp-server-name" />
-        </div>
+        </sn-field>
 
-        <div class="ui-field">
+        <sn-field>
           <label>Environment Variables <span class="mp-hint">(KEY=VALUE, one per line)</span></label>
           <textarea ref="customEnv" rows="3" placeholder="API_KEY=sk-xxx&#10;DEBUG=true"></textarea>
-        </div>
+        </sn-field>
         
-        <button class="ui-btn primary" ref="customInstallBtn">
+        <sn-button variant="primary" ref="customInstallBtn">
           <span class="material-symbols-outlined mp-install-icon">add_circle</span>
           Install Server
-        </button>
+        </sn-button>
         <div class="mp-form-status" ref="customStatus"></div>
       </div>
     </div>

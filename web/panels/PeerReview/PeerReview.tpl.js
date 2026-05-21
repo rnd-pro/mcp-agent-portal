@@ -9,22 +9,24 @@ export default `
       <div class="ui-card">
         <h3 class="ui-card-title">Initiate Consultation</h3>
         
-        <div class="ui-field">
+        <sn-field>
           <label>Context</label>
           <textarea id="pr-context" placeholder="Paste relevant code, logs, or context here..."></textarea>
-        </div>
+        </sn-field>
         
-        <div class="ui-field">
+        <sn-field>
           <label>Proposal</label>
           <textarea id="pr-proposal" placeholder="I propose we build a UI using Symbiote.js because..."></textarea>
-        </div>
+        </sn-field>
         
-        <button class="ui-btn primary" id="consult-btn"><span class="material-symbols-outlined">psychology</span> Request Peer Review</button>
+        <sn-button variant="primary" id="consult-btn"><span class="material-symbols-outlined">psychology</span> Request Peer Review</sn-button>
       </div>
       
       <div class="ui-card">
         <h3 class="ui-card-title">Iteration History (Previous Rounds)</h3>
-        <textarea id="pr-history" class="ui-field pr-history" placeholder="Any previous feedback you want the peer to consider..."></textarea>
+        <sn-field class="pr-history">
+          <textarea id="pr-history" placeholder="Any previous feedback you want the peer to consider..."></textarea>
+        </sn-field>
       </div>
     </div>
     
@@ -32,7 +34,7 @@ export default `
       <div class="ui-card pr-card-full">
         <div class="pr-feedback-header">
           <h3 class="ui-card-title">Peer Feedback</h3>
-          <button class="ui-btn-icon" ref="refreshBtn" title="Refresh task status"><span class="material-symbols-outlined">refresh</span></button>
+          <sn-button variant="icon" ref="refreshBtn" title="Refresh task status"><span class="material-symbols-outlined">refresh</span></sn-button>
         </div>
         
         <div id="pr-status-banner" class="ui-banner" hidden></div>
