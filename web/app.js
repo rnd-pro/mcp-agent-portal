@@ -1,10 +1,11 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
-import { Layout as e, LayoutTree as t, applyTheme as n, CARBON as o, registerGlobalParam, setDefaultPanel, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node";
-import { panelTypes, getSections, getSectionsForScope, getLayout, hasSection } from "./router-registry.js";
+import { LayoutTree as t, applyTheme as n, DEFAULT_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
+import { panelTypes, getSectionsForScope, getLayout, hasSection } from "./router-registry.js";
+import { layoutMatchesSection } from "./layout-policy.js";
 import { followController } from "./follow-controller.js";
 import "./components/FollowRibbon/FollowRibbon.js";
-import { state as a, subscribe as s, onEvent as i, call as r, connect as c } from "./state.js";
+import { subscribe as s, onEvent as i } from "./state.js";
 import "./panels/FileTree/FileTree.js";
 import "./panels/CodeViewer/CodeViewer.js";
 import "./panels/CtxPanel/CtxPanel.js";
@@ -35,15 +36,15 @@ import "./panels/SkillManager/SkillManager.js";
 import "./panels/SkillManager/SkillMetadata.js";
 import "./panels/PeerReview/PeerReview.js";
 import "./components/ProjectTabs/ProjectTabs.js";
-import { state as dashState, events as dashEvents, emit as dashEmit } from "./dashboard-state.js";
+import { state as dashState, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
 import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
 
 export const state = { skeleton: null, activeFile: null, ws: null, monitorEvents: [] };
 export { formatStats } from "./stats-format.js";
-import { uiAlert } from "./common/ui-dialogs.js";
+import { uiAlert } from "symbiote-node/ui";
 window.alert = (msg) => uiAlert(msg);
-export const baseUrl = new URL(".", import.meta.url).href; const l = baseUrl;
+export const baseUrl = new URL(".", import.meta.url).href;
 
 export function resolveProjectPath(p) {
   let projectRoot = null;
@@ -132,14 +133,13 @@ export function emit(e, t = {}) { events.dispatchEvent(new CustomEvent(e, { deta
 async function fetchProjects() {
   const e = await fetch("/api/instances");
   if (!e.ok) {
-    const t = await e.text();
-    throw console.error("[dashboard] fetch failed:", e.status, t), new Error(`Fetch failed: ${e.status}`);
+    throw new Error(`Fetch failed: ${e.status}`);
   }
   return e.json();
 }
 
 function initDashboardWS(e) {
-  if (!e.length) return void console.warn("[dashboard] No projects to connect WebSockets for");
+  if (!e.length) return;
   const t = "https:" === location.protocol ? "wss://" : "ws://", o = location.host;
   for (const r of e) connectDashboardWS(r, t, o)
 }
@@ -148,7 +148,6 @@ function connectDashboardWS(e, t, o, _att = 0) {
   const r = `${t}${o}${e.prefix}/ws/monitor`, n = new WebSocket(r);
   n.onopen = () => {
     _att = 0;
-    console.log("[dashboard] WS connected:", e.name || e.projectName);
   };
   n.onmessage = t => {
     let o; try { o = JSON.parse(t.data) } catch { return }
@@ -176,9 +175,8 @@ function connectDashboardWS(e, t, o, _att = 0) {
     }
     o.type && (o._projectPrefix = e.prefix, o._projectName = e.name || e.projectName, dashState.events.push(o), dashState.events.length > 1e3 && dashState.events.shift(), dashEmit("global-tool-event", o))
   };
-  n.onerror = () => { console.error("[dashboard] WS error:", e.name || e.projectName) };
+  n.onerror = () => {};
   n.onclose = r => {
-    console.warn("[dashboard] WS closed:", e.name || e.projectName, r.code);
     const n = dashState.projects.find(t => t.prefix === e.prefix);
     n && (n.connected = false, dashEmit("projects-updated", dashState.projects));
     setTimeout(() => connectDashboardWS(e, t, o, _att + 1), Math.min(500 * Math.pow(2, _att), 3e4));
@@ -193,59 +191,13 @@ let _currentSection = '';
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
-function collectPanelTypes(node, panels = []) {
-  if (!node) return panels;
-  let type = node.type || node.nodeType;
-  if (type === 'panel') {
-    panels.push({ panelType: node.panelType, global: !!node.global });
-  }
-  if (node.first) collectPanelTypes(node.first, panels);
-  if (node.second) collectPanelTypes(node.second, panels);
-  if (node.children) node.children.forEach(child => collectPanelTypes(child, panels));
-  return panels;
-}
-
-function primaryPanelType(node) {
-  return collectPanelTypes(node).find(panel => !panel.global)?.panelType || null;
-}
-
-const sectionLayoutMigrations = {
-  dashboard: {
-    disallowedPanelTypes: new Set(['action-board'])
-  },
-  orchestration: {
-    disallowedPanelTypes: new Set(['group-mgr', 'workflow-exp', 'pipeline-mgr'])
-  },
-  skills: {
-    disallowedPanelTypes: new Set(['peer-review']),
-    requiredPanelTypes: new Set(['agent-portal-tree', 'agent-portal-library', 'skill-meta'])
-  }
-};
-
-function layoutMatchesSection(sectionId, layoutTree, fallbackTree = getLayout(sectionId)) {
-  if (!layoutTree) return false;
-  let migration = sectionLayoutMigrations[sectionId];
-  if (migration?.disallowedPanelTypes) {
-    let hasDisallowedPanel = collectPanelTypes(layoutTree).some(panel => {
-      return migration.disallowedPanelTypes.has(panel.panelType);
-    });
-    if (hasDisallowedPanel) return false;
-  }
-  if (migration?.requiredPanelTypes) {
-    let panelTypes = new Set(collectPanelTypes(layoutTree).map(panel => panel.panelType));
-    for (let panelType of migration.requiredPanelTypes) {
-      if (!panelTypes.has(panelType)) return false;
-    }
-  }
-  let expectedPrimary = primaryPanelType(fallbackTree);
-  if (!expectedPrimary) return true;
-  return collectPanelTypes(layoutTree).some(panel => !panel.global && panel.panelType === expectedPrimary);
-}
-
 /**
  * Pre-calculate subPanels for a section based on its layout tree.
  * This ensures the sidebar correctly shows expand chevrons for sections with multiple panels
  * even before the user navigates to them.
+ * @param {string} sectionId
+ * @param {string} projectId
+ * @returns {Array<object>}
  */
 function getSubPanelsForSection(sectionId, projectId) {
   let storageKey = `pg-layout-v4-${projectId || 'global'}-${sectionId}`;
@@ -253,25 +205,7 @@ function getSubPanelsForSection(sectionId, projectId) {
   let tree = readLayout(storageKey);
   if (!layoutMatchesSection(sectionId, tree, fallback)) tree = fallback;
   
-  let panels = [];
-  function walk(node) {
-    if (!node) return;
-    if (node.nodeType === 'panel') {
-      let pType = node.panelType || 'panel';
-      let config = panelTypes[pType] || {};
-      panels.push({
-        title: config.title || pType,
-        icon: config.icon || 'dashboard',
-        panelId: node.id || Math.random().toString(36).substr(2, 9),
-        isMaster: panels.length === 0
-      });
-    }
-    if (node.children) node.children.forEach(walk);
-  }
-  walk(tree);
-  
-  // If there is only 1 panel, we don't show a submenu
-  return panels.length > 1 ? panels : [];
+  return t.createSidebarSubPanels(tree, panelTypes);
 }
 
 /**
@@ -325,9 +259,7 @@ function handleProjectSwitch(projectId) {
   api('/api/skeleton', {}).then(sk => {
     state.skeleton = sk;
     emit('skeleton-loaded', sk);
-  }).catch(err => {
-    console.warn('[app] skeleton fetch for project switch:', err);
-  });
+  }).catch(() => {});
   
   updateTopbarPath();
 }
@@ -376,7 +308,7 @@ function handleRoute() {
     if (saved) {
       try {
         layout.setLayout(saved);
-      } catch (err) {
+      } catch {
         if (fallback) layout.setLayout(fallback);
       }
     } else {
@@ -486,9 +418,7 @@ async function u() {
       dashEmit('projects-history-updated', dashState.projectHistory);
       dashEmit('chats-updated');
       updateTopbarPath();
-    } catch (err) {
-      console.warn('[app] project/chat init error:', err);
-    }
+    } catch {}
 
     localStorage.removeItem("pg-explorer-layout");
     localStorage.removeItem("pg-layout-v2");

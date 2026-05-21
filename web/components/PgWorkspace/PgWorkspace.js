@@ -1,28 +1,10 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { getRoute, setDefaultPanel, navigate } from 'symbiote-node';
+import { getRoute, navigate } from 'symbiote-node/ui';
 import { panelTypes, getHomeSections, getProjectSections, getLayout, hasSection } from '../../router-registry.js';
+import { layoutMatchesSection } from '../../layout-policy.js';
 import { emit as dashEmit } from '../../dashboard-state.js';
 import { persistLayout, readLayout } from '../../common/ui-state.js';
 import tpl from './PgWorkspace.tpl.js';
-
-function collectPanelTypes(node, panels = []) {
-  if (!node) return panels;
-  let type = node.type || node.nodeType;
-  if (type === 'panel') panels.push(node.panelType);
-  if (node.first) collectPanelTypes(node.first, panels);
-  if (node.second) collectPanelTypes(node.second, panels);
-  if (node.children) node.children.forEach(child => collectPanelTypes(child, panels));
-  return panels;
-}
-
-function layoutMatchesSection(section, layoutTree) {
-  if (!layoutTree) return false;
-  if (section !== 'skills') return true;
-  let panelTypes = new Set(collectPanelTypes(layoutTree));
-  return panelTypes.has('agent-portal-tree')
-    && panelTypes.has('agent-portal-library')
-    && panelTypes.has('skill-meta');
-}
 
 /**
  * PgWorkspace — isolated workspace container.

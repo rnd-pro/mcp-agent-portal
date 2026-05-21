@@ -1,265 +1,205 @@
 // @ctx .context/web/panels/code-viewer.ctx
-import e from "@symbiotejs/symbiote"; import { api as n, events as t, state as o, formatStats, resolveProjectPath } from "../../app.js"; import "../../components/CodeBlock/CodeBlock.js";
+import Symbiote from "@symbiotejs/symbiote";
+import {
+  api,
+  events,
+  state,
+  formatStats,
+  resolveProjectPath,
+} from "../../app.js";
+import {
+  buildDirectoryInfo,
+  getSourceLanguage,
+  isDirectoryLikePath,
+} from "symbiote-node/ui";
 import template from "./CodeViewer.tpl.js";
 import css from "./CodeViewer.css.js";
 
-const _extLang = { '.md': 'md', '.markdown': 'md', '.sql': 'sql', '.json': 'json', '.css': 'css', '.html': 'html', '.htm': 'html', '.xml': 'xml', '.yaml': 'yaml', '.yml': 'yaml', '.toml': 'toml', '.sh': 'sh', '.bash': 'bash', '.env': 'env', '.ini': 'ini', '.conf': 'conf', '.cfg': 'cfg', '.txt': 'plain', '.csv': 'csv', '.gitignore': 'plain', '.dockerignore': 'plain', '.editorconfig': 'plain', '.py': 'python', '.pyw': 'python', '.pyi': 'python', '.rb': 'ruby', '.rake': 'ruby', '.gemspec': 'ruby', '.go': 'go', '.rs': 'rust', '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin', '.swift': 'swift', '.c': 'c', '.h': 'c', '.cpp': 'c', '.hpp': 'c', '.cc': 'c', '.cxx': 'c', '.hh': 'c', '.cs': 'csharp', '.php': 'php', '.phtml': 'php', '.dart': 'dart', '.lua': 'lua', '.ts': 'typescript', '.tsx': 'typescript', '.graphql': 'graphql', '.gql': 'graphql', '.prisma': 'prisma', '.dockerfile': 'dockerfile', '.r': 'plain', '.R': 'plain', '.scala': 'java', '.groovy': 'java', '.gradle': 'java', '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.gif': 'image', '.svg': 'image', '.webp': 'image', '.bmp': 'image', '.ico': 'image', '.pdf': 'binary', '.zip': 'binary', '.tar': 'binary', '.gz': 'binary', '.woff': 'binary', '.woff2': 'binary', '.ttf': 'binary', '.eot': 'binary', '.mp3': 'binary', '.mp4': 'binary', '.wav': 'binary', '.avi': 'binary', '.mov': 'binary' };
-function _getLang(path) { if (!path) return 'js'; const base = path.split('/').pop() || ''; const i = path.lastIndexOf('.'); if (i >= 0) { const ext = _extLang[path.substring(i).toLowerCase()]; if (ext) return ext } if (['Dockerfile'].includes(base)) return 'dockerfile'; if (['Makefile', 'Procfile', 'LICENSE', 'README', 'CHANGELOG'].some(n => base.startsWith(n))) return 'plain'; return i < 0 ? 'plain' : 'js' }
+function normalizeSkeletonDir(dir) {
+  return dir === "./" ? "" : String(dir || "").replace(/^\.\//, "").replace(/\/$/, "");
+}
 
-export class CodeViewer extends e {
-  init$ = {
-    filename: "Select a file", hasFile: !1, viewMode: "source", modeLabel: "source", statsText: "", showToggle: !1, toggleLabel: "", onShowInGraph: () => {
-      if (!this._currentPath) return;
-      window.location.hash = `#graph?focus=${encodeURIComponent(this._currentPath)}`;
-    }, onToggleMode: () => {
-      const lang = _getLang(this._currentPath);
-      if (lang === 'md') {
-        this.$.viewMode = this.$.viewMode === "rendered" ? "raw" : "rendered";
-        this._showCurrentMode();
-        return;
+function directoryIndexFromSkeleton(skeleton = null) {
+  if (!skeleton) return { directories: [] };
+  const directories = new Set();
+  for (const group of [skeleton.f, skeleton.a]) {
+    if (!group) continue;
+    for (const dir of Object.keys(group)) {
+      const normalized = normalizeSkeletonDir(dir);
+      directories.add(normalized);
+      const parts = normalized.split("/").filter(Boolean);
+      for (let index = 1; index < parts.length; index++) {
+        directories.add(parts.slice(0, index).join("/"));
       }
-      // Toggle between source and the transformation
-      this.$.viewMode = this.$.viewMode === "source" ? "transformed" : "source";
-      this._showCurrentMode();
     }
-  }; _fileData = null; _isReadable = !1; _transformCache = null; _loadingTransform = !1; _currentPath = null; initCallback() { t.addEventListener("file-selected", e => this._loadFile(e.detail.path)); t.addEventListener("follow-focus-changed", e => { const d = e.detail; if (d.type === "file" && d.target) { this._loadFile(d.target); if (d.meta?.startLine) { setTimeout(() => { const c = this._getCodeBlock(); if (c && c.scrollToLine) c.scrollToLine(d.meta.startLine) }, 200) } } }); if (o.activeFile) requestAnimationFrame(() => this._loadFile(o.activeFile)) } renderCallback() {
-    this.sub("hasFile", e => { this.toggleAttribute("has-file", e) }), this.sub("viewMode", e => {
-      const lang = _getLang(this._currentPath);
-      this.toggleAttribute("mode-raw", "source" !== e);
-      if (lang === 'md') {
-        this.$.modeLabel = e === "rendered" ? "rendered" : "source";
-      } else {
-        this.$.modeLabel = e === "source" ? "source" : (this._isReadable ? "compact" : "expanded");
-      }
-    })
-  } _getCodeBlock() { return this.querySelector("code-block") } async _showCurrentMode() {
-    if (!this._fileData) return; const e = this._getCodeBlock(); if (!e) return;
-    const lang = _getLang(this._currentPath);
-    if (lang === 'md') {
-      if (this.$.viewMode === "rendered") {
-        e.$.lang = 'md';
-        e.setBasePath(this._currentPath);
-        e.$.code = this._fileData.raw;
-      } else {
-        e.$.lang = 'plain';
-        e.$.code = this._fileData.raw;
-      }
-      return;
-    }
-    e.$.lang = lang;
-    if ("transformed" === this.$.viewMode) {
-      // Show cached transform if available
-      if (this._transformCache) {
-        e.$.code = this._transformCache;
-        if (this._transformStatsText) this.$.statsText = this._transformStatsText;
-        return;
-      }
-      if (this._loadingTransform) return;
-      this._loadingTransform = !0;
-      e.$.code = this._isReadable ? "// Compressing..." : "// Expanding...";
-      try {
-        if (this._isReadable) {
-          // MODE A: readable source → compress
-          const t = await n("/api/compact-file", { path: this._currentPath });
-          this._transformCache = t?.code || "// Compression unavailable";
-          this._transformStatsText = t ? `Compressed: ${(t.compressed / 1000).toFixed(1)}K chars (${t.savings})` : "";
+  }
+  return { directories: [...directories] };
+}
+
+function directoryInfoFromSkeleton(path, skeleton = null) {
+  if (!skeleton) return null;
+
+  const norm = String(path || "").replace(/\/$/, "");
+  const prefix = norm ? `${norm}/` : "";
+  const files = [];
+  const subdirectories = new Set();
+  const fileTypes = {};
+
+  for (const group of [skeleton.f, skeleton.a]) {
+    if (!group) continue;
+    for (const [dir, items] of Object.entries(group)) {
+      const normalized = normalizeSkeletonDir(dir);
+      const fullDir = normalized ? `${normalized}/` : "";
+      if (!fullDir.startsWith(prefix) && normalized !== norm) continue;
+      for (const item of items) {
+        const fullPath = `${fullDir}${item}`;
+        if (!fullPath.startsWith(prefix)) continue;
+        const rel = fullPath.slice(prefix.length);
+        const slashIdx = rel.indexOf("/");
+        if (slashIdx > 0) {
+          subdirectories.add(rel.slice(0, slashIdx));
         } else {
-          // MODE B: compact source → expand (beautify + inject JSDoc from .ctx)
-          const t = await n("/api/expand-file", { path: this._currentPath });
-          this._transformCache = t?.code || "// Expand unavailable";
-          this._transformStatsText = t ? `Expanded: ${(t.decompiled / 1000).toFixed(1)}K chars | JSDocs injected: ${t.injected || 0}` : "";
+          files.push(rel);
         }
-        if (this._transformStatsText) this.$.statsText = this._transformStatsText;
-        e.$.code = this._transformCache;
-      } catch { e.$.code = this._isReadable ? "// Compression failed" : "// Expand failed" }
-      finally { this._loadingTransform = !1 }
+        const dot = rel.lastIndexOf(".");
+        const ext = dot >= 0 ? rel.slice(dot) : "(no ext)";
+        fileTypes[ext] = (fileTypes[ext] || 0) + 1;
+      }
+    }
+  }
+
+  let symbolCount = 0;
+  if (skeleton.n) {
+    for (const node of Object.values(skeleton.n)) {
+      if (node?.f && node.f.startsWith(prefix)) symbolCount++;
+    }
+  }
+
+  return {
+    files,
+    subdirectories: [...subdirectories],
+    fileTypes,
+    totalFiles: Object.values(fileTypes).reduce((sum, count) => sum + count, 0),
+    totalSubdirectories: subdirectories.size,
+    symbolCount,
+  };
+}
+
+export class CodeViewer extends Symbiote {
+  initCallback() {
+    this.addEventListener("source-viewer-show-graph", (event) => {
+      const path = event.detail?.path;
+      if (path) window.location.hash = `#graph?focus=${encodeURIComponent(path)}`;
+    });
+
+    events.addEventListener("file-selected", (event) => this._loadFile(event.detail.path));
+    events.addEventListener("follow-focus-changed", (event) => {
+      const detail = event.detail;
+      if (detail.type !== "file" || !detail.target) return;
+      this._loadFile(detail.target);
+      if (detail.meta?.startLine) {
+        setTimeout(() => this._getSourceViewer()?.scrollToLine?.(detail.meta.startLine), 200);
+      }
+    });
+
+    if (state.activeFile) requestAnimationFrame(() => this._loadFile(state.activeFile));
+  }
+
+  _getSourceViewer() {
+    return this.querySelector("source-viewer");
+  }
+
+  async _loadFile(path) {
+    const viewer = this._getSourceViewer();
+    if (!viewer) return;
+
+    viewer.showEmpty(path);
+    const lang = getSourceLanguage(path);
+
+    const directoryIndex = directoryIndexFromSkeleton(state.skeleton);
+    if (isDirectoryLikePath(path, directoryIndex)) {
+      viewer.showDirectory(path, buildDirectoryInfo(path, directoryInfoFromSkeleton(path, state.skeleton)));
       return;
     }
-    // Source mode — raw file as-is
-    this.$.statsText = this._baseStatsText;
-    e.$.code = this._fileData.raw;
-  } async _loadFile(e) {
-    this.$.filename = e, this.$.hasFile = !1, this._fileData = null, this.$.statsText = "", this._baseStatsText = "", this._transformStatsText = "", this._transformCache = null, this._currentPath = e;
-    const lang = _getLang(e);
-    // Directory detection: no extension or ends with /
-    const isDir = e.endsWith('/') || (!e.includes('.') && !['Dockerfile', 'Makefile', 'Procfile', 'LICENSE', 'README', 'CHANGELOG', 'Gemfile', 'Rakefile', 'Vagrantfile'].some(n => e.split('/').pop()?.startsWith(n))) || this._isDirInSkeleton(e);
-    if (isDir) {
-      const i = this._getCodeBlock();
-      if (i) { i.$.lang = 'plain'; i.$.code = this._buildDirInfo(e) }
-      this.$.viewMode = "source";
-      this.$.modeLabel = "directory";
-      this.$.showToggle = !1;
-      this.$.hasFile = !0;
+
+    if (lang === "image") {
+      viewer.showImage(path);
       return;
     }
-    if (lang === 'image') {
-      const i = this._getCodeBlock();
-      if (i) { i.$.lang = 'image'; i.setBasePath(e); i.$.code = e }
-      this.$.viewMode = "rendered";
-      this.$.modeLabel = "image";
-      this.$.showToggle = !1;
-      this.$.hasFile = !0;
+
+    if (lang === "binary") {
+      viewer.showBinary(path);
       return;
     }
-    if (lang === 'binary') {
-      const i = this._getCodeBlock();
-      if (i) { i.$.lang = 'plain'; i.$.code = `// Binary file: ${e}\n// Cannot display binary content` }
-      this.$.viewMode = "source";
-      this.$.modeLabel = "binary";
-      this.$.showToggle = !1;
-      this.$.hasFile = !0;
-      return;
-    }
+
     try {
-      const [t, _raw] = await Promise.all([n("/api/file", { path: e }), n("/api/raw-file", { path: e }).catch(() => null)]); const o = "string" == typeof t.code ? t.code : "string" == typeof t.compressed ? t.compressed : t.content || JSON.stringify(t, null, 2);
-      let s = t.raw || _raw?.content || o;
-      // Detect mode: if .ctx documentation exists (ctxTok > 0), source is compact → EXPAND available
-      // If no .ctx, source is readable → COMPACT available
-      const hasCtx = !!(t.ctxTok && t.ctxTok > 0);
-      this._isReadable = !hasCtx;
-      this._fileData = { compact: o, raw: s, codeTok: t.codeTok || 0, ctxTok: t.ctxTok || 0, totalTok: t.totalTok || 0, expanded: t.expanded || 0, savings: t.savings || "0%" };
-      this._baseStatsText = t.codeTok && t.expanded ? formatStats(t) : "";
-      this.$.statsText = this._baseStatsText;
-      const i = this._getCodeBlock();
-      if (lang === 'md') {
-        this.$.viewMode = "rendered";
-        this.$.modeLabel = "rendered";
-        this.$.showToggle = !0;
-        this.$.toggleLabel = "source";
-        if (i) { i.$.lang = 'md'; i.setBasePath(e); i.$.code = s }
+      const [file, rawFile] = await Promise.all([
+        api("/api/file", { path }),
+        api("/api/raw-file", { path }).catch(() => null),
+      ]);
+
+      const code = typeof file.code === "string"
+        ? file.code
+        : typeof file.compressed === "string"
+          ? file.compressed
+          : file.content || JSON.stringify(file, null, 2);
+      const raw = file.raw || rawFile?.content || code;
+      const isReadable = !(file.ctxTok && file.ctxTok > 0);
+
+      viewer.showFile({
+        path,
+        raw,
+        lang,
+        isReadable,
+        statsText: file.codeTok && file.expanded ? formatStats(file) : "",
+        transform: (context) => this._transformFile(context),
+      });
+
+      this._lintCurrentFile(path);
+    } catch (error) {
+      viewer.showError(path, error);
+    }
+  }
+
+  async _transformFile({ path, isReadable }) {
+    if (isReadable) {
+      const result = await api("/api/compact-file", { path });
+      return {
+        code: result?.code || "// Compression unavailable",
+        statsText: result ? `Compressed: ${(result.compressed / 1000).toFixed(1)}K chars (${result.savings})` : "",
+      };
+    }
+
+    const result = await api("/api/expand-file", { path });
+    return {
+      code: result?.code || "// Expand unavailable",
+      statsText: result ? `Expanded: ${(result.decompiled / 1000).toFixed(1)}K chars | JSDocs injected: ${result.injected || 0}` : "",
+    };
+  }
+
+  async _lintCurrentFile(path) {
+    const lang = getSourceLanguage(path);
+    if (lang !== "js" && lang !== "mjs") return;
+
+    const viewer = this._getSourceViewer();
+    if (!viewer) return;
+
+    try {
+      const response = await fetch("/api/lint-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath: resolveProjectPath(path) }),
+      });
+      const diagnostics = await response.json();
+      if (Array.isArray(diagnostics) && diagnostics[0]?.messages?.length > 0) {
+        viewer.setDiagnostics(diagnostics[0].messages);
       } else {
-        i && (i.$.lang = lang);
-        // Always start in SOURCE mode
-        this.$.viewMode = "source";
-        this.$.modeLabel = "source";
-        // Toggle: readable → COMPACT button, compact → EXPAND button
-        this.$.showToggle = !0;
-        this.$.toggleLabel = this._isReadable ? "compact" : "expand";
-        i && (i.$.code = s);
+        viewer.clearDiagnostics();
       }
-      this.$.hasFile = !0; this._lintCurrentFile()
-    } catch (e) { const n = this._getCodeBlock(); n && (n.$.lang = 'plain', n.$.code = `// Error: ${e.message}`), this.$.showToggle = !1, this.$.hasFile = !0 }
+    } catch {
+      viewer.clearDiagnostics();
+    }
   }
-  _isDirInSkeleton(path) {
-    const sk = o.skeleton;
-    if (!sk) return false;
-    const norm = path.replace(/\/$/, '');
-    // Check if path is a directory key in skeleton.f (files by dir)
-    if (sk.f) {
-      for (const dir of Object.keys(sk.f)) {
-        const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
-        if (d === norm) return true;
-        // Also check if any file starts with this dir
-        if (d.startsWith(norm + '/')) return true;
-      }
-    }
-    // Check skeleton.a (asset dirs)
-    if (sk.a) {
-      for (const dir of Object.keys(sk.a)) {
-        const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
-        if (d === norm) return true;
-        if (d.startsWith(norm + '/')) return true;
-      }
-    }
-    return false;
-  }
-  _buildDirInfo(path) {
-    const sk = o.skeleton;
-    const norm = path.replace(/\/$/, '');
-    const lines = [];
-    lines.push(`📁 Directory: ${norm || '.'}`);
-    lines.push('─'.repeat(60));
-    lines.push('');
-    if (!sk) {
-      lines.push('Skeleton not loaded — unable to display directory metadata.');
-      return lines.join('\n');
-    }
-    // Collect all files under this directory
-    const files = [];
-    const subdirs = new Set();
-    const prefix = norm ? norm + '/' : '';
-    if (sk.f) {
-      for (const [dir, items] of Object.entries(sk.f)) {
-        const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
-        const fullDir = d ? d + '/' : '';
-        if (!fullDir.startsWith(prefix) && d !== norm) continue;
-        for (const item of items) {
-          const fullPath = fullDir + item;
-          if (fullPath.startsWith(prefix)) {
-            files.push(fullPath.slice(prefix.length));
-            // Track immediate subdirectories
-            const rel = fullPath.slice(prefix.length);
-            const slashIdx = rel.indexOf('/');
-            if (slashIdx > 0) subdirs.add(rel.slice(0, slashIdx));
-          }
-        }
-      }
-    }
-    if (sk.a) {
-      for (const [dir, items] of Object.entries(sk.a)) {
-        const d = dir === './' ? '' : dir.replace(/^\.\//, '').replace(/\/$/, '');
-        const fullDir = d ? d + '/' : '';
-        if (!fullDir.startsWith(prefix) && d !== norm) continue;
-        for (const item of items) {
-          const fullPath = fullDir + item;
-          if (fullPath.startsWith(prefix)) {
-            files.push(fullPath.slice(prefix.length));
-            const rel = fullPath.slice(prefix.length);
-            const slashIdx = rel.indexOf('/');
-            if (slashIdx > 0) subdirs.add(rel.slice(0, slashIdx));
-          }
-        }
-      }
-    }
-    // Stats by extension
-    const extCounts = {};
-    const directFiles = [];
-    for (const f of files) {
-      if (!f.includes('/')) directFiles.push(f);
-      const dot = f.lastIndexOf('.');
-      const ext = dot >= 0 ? f.slice(dot) : '(no ext)';
-      extCounts[ext] = (extCounts[ext] || 0) + 1;
-    }
-    // Subdirectories
-    if (subdirs.size > 0) {
-      lines.push(`📂 Subdirectories (${subdirs.size}):`);
-      for (const d of [...subdirs].sort()) {
-        lines.push(`   └─ ${d}/`);
-      }
-      lines.push('');
-    }
-    // Direct files
-    if (directFiles.length > 0) {
-      lines.push(`📄 Files (${directFiles.length}):`);
-      for (const f of directFiles.sort()) {
-        lines.push(`   ├─ ${f}`);
-      }
-      lines.push('');
-    }
-    // Extension breakdown
-    const sorted = Object.entries(extCounts).sort((a, b) => b[1] - a[1]);
-    if (sorted.length > 0) {
-      lines.push('📊 File types:');
-      for (const [ext, count] of sorted) {
-        const bar = '█'.repeat(Math.min(count, 30));
-        lines.push(`   ${ext.padEnd(12)} ${String(count).padStart(4)}  ${bar}`);
-      }
-      lines.push('');
-    }
-    // Summary
-    lines.push('─'.repeat(60));
-    lines.push(`Total: ${files.length} files across ${subdirs.size} subdirectories`);
-    // Skeleton node info
-    if (sk.n) {
-      let nodeCount = 0;
-      for (const [, node] of Object.entries(sk.n)) {
-        if (node.f && node.f.startsWith(prefix)) nodeCount++;
-      }
-      if (nodeCount > 0) lines.push(`Symbols: ${nodeCount} exported nodes in this directory`);
-    }
-    return lines.join('\n');
-  }
-  async _lintCurrentFile() { if (!this._currentPath) return; const lang = _getLang(this._currentPath); if (lang !== 'js' && lang !== 'mjs') return; const cb = this._getCodeBlock(); if (!cb || !cb.setDiagnostics) return; try { const r = await fetch('/api/lint-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: resolveProjectPath(this._currentPath) }) }); const d = await r.json(); if (Array.isArray(d) && d[0] && d[0].messages && d[0].messages.length > 0) { cb.setDiagnostics(d[0].messages) } else { cb.clearDiagnostics() } } catch { cb.clearDiagnostics() } }
 }
 
 CodeViewer.template = template;

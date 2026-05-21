@@ -1,5 +1,5 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 export class PipelineItem extends Symbiote {
   init$ = {

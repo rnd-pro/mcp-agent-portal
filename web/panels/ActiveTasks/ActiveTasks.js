@@ -1,8 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { stateSync } from '../../state-sync.js';
 import template from './ActiveTasks.tpl.js';
-import { uiConfirm } from '../../common/ui-dialogs.js';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared, uiConfirm } from 'symbiote-node/ui';
 import css from './ActiveTasks.css.js';
 import './TaskCard.js';
 
@@ -11,6 +10,9 @@ export class ActiveTasks extends Symbiote {
     tasks: [],
     onCancelTask: async (e) => {
       await this.cancelTask(e.currentTarget.dataset.taskId);
+    },
+    onFinishTask: async (e) => {
+      await this.finishTask(e.currentTarget.dataset.taskId);
     },
   };
 
@@ -49,24 +51,41 @@ export class ActiveTasks extends Symbiote {
       // But for tasks that already exist in agent-pool but not in graph,
       // parse and merge them locally.
       let data = await res.json();
-      let text = data.content?.[0]?.text || '';
+      let text = data.result?.content?.[0]?.text || data.content?.[0]?.text || '';
       try {
-        let arr = JSON.parse(text);
-        if (Array.isArray(arr) && arr.length > 0) {
+        let parsed = JSON.parse(text);
+        let list = Array.isArray(parsed) ? { tasks: parsed, staleProcesses: [] } : parsed;
+        let taskList = Array.isArray(list?.tasks) ? list.tasks : [];
+        let staleProcesses = Array.isArray(list?.staleProcesses) ? list.staleProcesses : [];
+        if (taskList.length > 0 || staleProcesses.length > 0) {
           // Merge into local view if state-sync hasn't caught up yet
           let merged = { ...(this._tasksById || {}) };
-          for (let t of arr) {
-            if (t.id && !merged[t.id]) {
-              merged[t.id] = {
-                status: t.status,
-                prompt: t.prompt,
-                pid: t.pid,
-                startedAt: t.startedAt,
-                completedAt: t.completedAt,
-                eventCount: t.eventCount || 0,
-                approvalMode: t.approvalMode,
-              };
-            }
+          for (let t of taskList) {
+            if (!t.id) continue;
+            merged[t.id] = {
+              ...(merged[t.id] || {}),
+              status: t.status,
+              prompt: t.prompt,
+              pid: t.pid,
+              startedAt: t.startedAt,
+              completedAt: t.completedAt,
+              eventCount: t.eventCount || merged[t.id]?.eventCount || 0,
+              approvalMode: t.approvalMode,
+              trackedChildren: t.trackedChildren || [],
+            };
+          }
+          for (let p of staleProcesses) {
+            if (!p.taskId) continue;
+            merged[p.taskId] = {
+              ...(merged[p.taskId] || {}),
+              status: 'stale',
+              prompt: `Tracked process without matching task state: ${p.label || 'process'}`,
+              pid: p.pid,
+              startedAt: p.startTime,
+              eventCount: 0,
+              trackedChildren: [p],
+              isStaleProcess: true,
+            };
           }
           this._tasksById = merged;
           this.renderGrid();
@@ -91,8 +110,27 @@ export class ActiveTasks extends Symbiote {
           params: { name: 'cancel_task', arguments: { task_id: taskId } },
         }),
       });
+      await this._forceRefresh();
     } catch (err) {
       alert(`Failed to cancel: ${err.message}`);
+    }
+  }
+
+  async finishTask(taskId) {
+    if (!(await uiConfirm(`Finish task ${taskId.substring(0, 8)} and clean up tracked processes?`))) return;
+    try {
+      await fetch('/api/mcp-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverName: 'agent-pool',
+          method: 'tools/call',
+          params: { name: 'finish_task', arguments: { task_id: taskId } },
+        }),
+      });
+      await this._forceRefresh();
+    } catch (err) {
+      alert(`Failed to finish task: ${err.message}`);
     }
   }
 
@@ -124,6 +162,7 @@ export class ActiveTasks extends Symbiote {
       if (task.status === 'running') badgeClass = 'success';
       else if (task.status === 'error') badgeClass = 'error';
       else if (task.status === 'cancelled') badgeClass = 'warn';
+      else if (task.status === 'stale') badgeClass = 'warn';
       else if (task.status === 'done') badgeClass = 'info';
 
       let promptText = (task.prompt || '').substring(0, 120);
@@ -141,9 +180,12 @@ export class ActiveTasks extends Symbiote {
         chatName: task.chatName || '',
         pid: task.pid || '',
         events: task.eventCount ? String(task.eventCount) : '',
+        trackedChildren: task.trackedChildren?.length ? String(task.trackedChildren.length) : '',
         hidePid: !task.pid,
         hideEvents: !task.eventCount,
+        hideTracked: !task.trackedChildren?.length,
         hideCancel: !isRunning,
+        hideFinish: false,
       };
     });
   }

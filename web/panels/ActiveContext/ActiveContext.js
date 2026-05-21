@@ -4,6 +4,75 @@ import template from './ActiveContext.tpl.js';
 import css from './ActiveContext.css.js';
 import { events } from '../../dashboard-state.js';
 
+function makeEmptyState(message, styles = {}) {
+  let node = document.createElement('div');
+  node.className = 'ui-empty-state';
+  node.textContent = message;
+  Object.assign(node.style, styles);
+  return node;
+}
+
+function makeFileRow(file) {
+  let row = document.createElement('div');
+  Object.assign(row.style, {
+    padding: '6px 8px',
+    borderRadius: '4px',
+    marginBottom: '4px',
+    background: 'var(--sn-node-bg)',
+    border: '1px solid var(--sn-node-border)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  });
+
+  let icon = document.createElement('span');
+  icon.className = 'material-symbols-outlined';
+  icon.textContent = 'insert_drive_file';
+  Object.assign(icon.style, {
+    fontSize: '14px',
+    color: 'var(--sn-cat-server)',
+  });
+
+  let content = document.createElement('div');
+  content.title = file;
+  Object.assign(content.style, {
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
+
+  let name = document.createElement('div');
+  name.textContent = file.split('/').pop();
+  Object.assign(name.style, {
+    fontSize: '12px',
+    fontWeight: '500',
+  });
+
+  let path = document.createElement('div');
+  path.textContent = file;
+  Object.assign(path.style, {
+    fontSize: '10px',
+    color: 'var(--sn-text-dim)',
+    fontFamily: 'monospace',
+  });
+
+  let button = document.createElement('button');
+  button.className = 'ui-btn-icon';
+  button.dataset.untrack = file;
+  button.style.padding = '2px';
+
+  let closeIcon = document.createElement('span');
+  closeIcon.className = 'material-symbols-outlined';
+  closeIcon.textContent = 'close';
+  closeIcon.style.fontSize = '14px';
+
+  content.replaceChildren(name, path);
+  button.replaceChildren(closeIcon);
+  row.replaceChildren(icon, content, button);
+  return row;
+}
+
 export class ActiveContext extends Symbiote {
   init$ = {
     files: [],
@@ -32,7 +101,7 @@ export class ActiveContext extends Symbiote {
 
   async loadContext() {
     try {
-      this.ref.fileList.innerHTML = '<div class="ui-empty-state" style="padding:10px;">Loading...</div>';
+      this.ref.fileList.replaceChildren(makeEmptyState('Loading...', { padding: '10px' }));
       let res = await mcpCall('agent-pool', 'get_tracked_files', {});
       
       let data = res;
@@ -43,28 +112,23 @@ export class ActiveContext extends Symbiote {
       
       let files = data.tracked_files || [];
       if (files.length === 0) {
-        this.ref.fileList.innerHTML = '<div class="ui-empty-state" style="padding:20px; font-size:12px; color:var(--sn-text-dim); text-align:center;">No files tracked.</div>';
+        this.ref.fileList.replaceChildren(makeEmptyState('No files tracked.', {
+          padding: '20px',
+          fontSize: '12px',
+          color: 'var(--sn-text-dim)',
+          textAlign: 'center',
+        }));
         return;
       }
       
-      this.ref.fileList.innerHTML = files.map(f => {
-        let name = f.split('/').pop();
-        return `
-          <div style="padding:6px 8px; border-radius:4px; margin-bottom:4px; background:var(--sn-node-bg); border:1px solid var(--sn-node-border); display:flex; align-items:center; gap:8px;">
-            <span class="material-symbols-outlined" style="font-size:14px; color:var(--sn-cat-server);">insert_drive_file</span>
-            <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${f}">
-              <div style="font-size:12px; font-weight:500;">${name}</div>
-              <div style="font-size:10px; color:var(--sn-text-dim); font-family:monospace;">${f}</div>
-            </div>
-            <button class="ui-btn-icon" style="padding:2px;" data-untrack="${f}">
-              <span class="material-symbols-outlined" style="font-size:14px;">close</span>
-            </button>
-          </div>
-        `;
-      }).join('');
+      this.ref.fileList.replaceChildren(...files.map(f => makeFileRow(f)));
       
     } catch (err) {
-      this.ref.fileList.innerHTML = `<div class="ui-empty-state" style="color:#f87171; padding:10px; font-size:12px;">${err.message}</div>`;
+      this.ref.fileList.replaceChildren(makeEmptyState(err.message, {
+        color: '#f87171',
+        padding: '10px',
+        fontSize: '12px',
+      }));
     }
   }
 

@@ -1,6 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { events } from '../../app.js';
-import '../../components/CodeBlock/CodeBlock.js';
+import 'symbiote-node/ui';
 import './SkillMetadata.js';
 import template from './SkillManager.tpl.js';
 import styles from './SkillManager.css.js';
@@ -53,7 +53,7 @@ export class SkillManager extends Symbiote {
       if (path.startsWith('.agent-portal/')) this.loadFile(path);
       if (path.startsWith('.open-library/')) this.loadFile(path, { source: 'open-library' });
     });
-    this.ref.editor.addEventListener('input', () => {
+    this.ref.editor.addEventListener('source-editor-input', () => {
       this.setDirty(true);
       this.syncPreview();
       this.dispatchMetadata();
@@ -85,8 +85,9 @@ export class SkillManager extends Symbiote {
         ? `/api/agent-portal/open-library/file?path=${encodeURIComponent(relPath)}`
         : withActiveProject(`/api/agent-portal/file?path=${encodeURIComponent(relPath)}`);
       let data = await this.fetchJson(url);
-      this.ref.editor.value = data.content || '';
+      this.ref.editor.setContent(data.content || '');
       this.ref.editor.disabled = source === 'open-library' || !EDITABLE_EXTS.has(extensionOf(path));
+      this.ref.editor.setLanguage(isMarkdown(path) ? 'markdown' : extensionOf(path).replace(/^\./, '') || 'plain');
       this.syncPreview();
       this.setEditMode(source !== 'open-library' && !isMarkdown(path));
       this.$.hasFile = true;
@@ -95,7 +96,7 @@ export class SkillManager extends Symbiote {
       this.setDirty(false);
       this.dispatchMetadata();
     } catch (err) {
-      this.ref.editor.value = `Error: ${err.message}`;
+      this.ref.editor.setContent(`Error: ${err.message}`);
       this.ref.editor.disabled = true;
       this.$.hasFile = true;
       this.$.canEdit = false;
@@ -128,7 +129,7 @@ export class SkillManager extends Symbiote {
     let markdown = isMarkdown(path);
     preview.setBasePath(path);
     preview.$.lang = markdown ? 'md' : 'plain';
-    preview.$.code = this.ref.editor.value || '';
+    preview.$.code = this.ref.editor.getContent();
   }
 
   dispatchMetadata() {
@@ -136,14 +137,14 @@ export class SkillManager extends Symbiote {
     events.dispatchEvent(new CustomEvent('agent-portal-file-loaded', {
       detail: {
         path: this._currentPath,
-        content: this.ref.editor.value,
+        content: this.ref.editor.getContent(),
         editable: !this.ref.editor.disabled
       }
     }));
   }
 
   applyContent(content) {
-    this.ref.editor.value = content;
+    this.ref.editor.setContent(content, { dirty: true });
     this.syncPreview();
     this.setDirty(true);
   }
@@ -158,7 +159,7 @@ export class SkillManager extends Symbiote {
         body: JSON.stringify({
           projectId: activeProjectId(),
           path: portalRelativePath(this._currentPath),
-          content: this.ref.editor.value
+          content: this.ref.editor.getContent()
         })
       });
       this.setDirty(false);

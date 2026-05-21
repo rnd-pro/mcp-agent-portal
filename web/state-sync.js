@@ -30,13 +30,36 @@ function _checkVersion(serverVersion) {
   if (!_initialServerVersion) {
     _initialServerVersion = serverVersion;
   } else if (_initialServerVersion !== serverVersion) {
-    console.warn(`[stateSync] Server version changed from ${_initialServerVersion} to ${serverVersion}. Reload required.`);
     let banner = document.getElementById('version-warning-banner');
     if (!banner) {
       banner = document.createElement('div');
       banner.id = 'version-warning-banner';
       let displayVersion = serverVersion.split('+')[0];
-      banner.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;margin-right:4px">warning</span> Agent Portal was updated (v${displayVersion}). Please <a href="#" onclick="location.reload()" style="color: white; text-decoration: underline;">refresh the page</a>.`;
+
+      let icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined';
+      icon.textContent = 'warning';
+      Object.assign(icon.style, {
+        fontSize: '16px',
+        verticalAlign: 'middle',
+        marginRight: '4px',
+      });
+
+      let message = document.createTextNode(` Agent Portal was updated (v${displayVersion}). Please `);
+      let link = document.createElement('a');
+      link.href = '#';
+      link.textContent = 'refresh the page';
+      Object.assign(link.style, {
+        color: 'white',
+        textDecoration: 'underline',
+      });
+      link.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        location.reload();
+      };
+
+      banner.replaceChildren(icon, message, link, document.createTextNode('.'));
       Object.assign(banner.style, {
         position: 'fixed', top: '0', left: '0', width: '100%', background: 'rgba(220, 38, 38, 0.95)', color: '#fff',
         textAlign: 'center', padding: '8px', zIndex: '999999', fontWeight: 'bold', cursor: 'pointer',
@@ -178,7 +201,6 @@ function connect() {
   _ws = new WebSocket(url);
 
   _ws.onopen = () => {
-    console.log('[stateSync] connected');
     if (_reconnectTimer) {
       clearTimeout(_reconnectTimer);
       _reconnectTimer = null;

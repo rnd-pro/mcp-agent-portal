@@ -1,13 +1,16 @@
-import { Symbiote, PubSub } from '@symbiotejs/symbiote';
+import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
-import { setGlobalParam, parseQuery, getRoute } from 'symbiote-node';
+import {
+  buildChatMessageItems,
+  buildSessionMetaHtml,
+  escapeHtml,
+  getRoute,
+  parseQuery,
+  setGlobalParam,
+} from 'symbiote-node/ui';
 import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
-import '../../common/CellBg/CellBg.js';
-import './ChatMessageItem.js';
-import { uiPrompt } from '../../common/ui-dialogs.js';
-import { replaceIconsWithHtml, ICONS } from '../../common/icons.js';
-import { escapeHtml, formatElapsed } from '../../utils/markdown-formatter.js';
+import { ICONS } from '../../common/icons.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import {
@@ -15,18 +18,10 @@ import {
   mergeAttachedContext,
   removeAttachedContext,
 } from '../../services/chat-context.js';
-import { ChatSidebar } from '../../components/ChatSidebar/ChatSidebar.js';
+import '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
- * AgentChat — single layout panel with integrated chat-nav sidebar.
- *
- * Layout:
- *   [chat-nav] | [chat-view]
- *
- * chat-nav: sidebar-style list of chats (collapsed 48px / expanded 200px)
- * chat-view: header + messages + input
- *
- * Can be collapsed/fullscreened via standard layout panel controls.
+ * AgentChat — portal adapter for chat state, transport, and routing.
  */
 export class AgentChat extends Symbiote {
   static isoMode = true;
@@ -44,132 +39,6 @@ export class AgentChat extends Symbiote {
     isInputDisabled: true,
     inputPlaceholder: 'Ask anything, @ to mention, / for workflows',
     sessionMetaHtml: '',
-
-    onKeyDown: (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        this._sendMessage();
-      }
-      if (e.key === 'Escape') this._ac?.hide();
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (this._ac?.isVisible) {
-          e.preventDefault();
-          this._ac?.navigate(e.key === 'ArrowDown' ? 1 : -1);
-        }
-      }
-      if (e.key === 'Tab' && this._ac?.isVisible) {
-        e.preventDefault();
-        this._ac?.select();
-      }
-    },
-
-    onInput: (e) => {
-      let ta = e.target;
-      this.$.inputVal = ta.value;
-      // Auto-grow
-      ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
-      // Autocomplete trigger
-      this._ac?.check(ta.value, ta.selectionStart);
-    },
-
-    onSend: () => {
-      let targetChatId = this._loadedChatId || dashState.activeChatId;
-      if (this._isSending && targetChatId) {
-        let chat = dashState.chats?.find(c => c.id === targetChatId);
-        let taskId = chat?.pendingTaskId || this.$.chatParams?.pendingTaskId;
-        this._wsClient?.stop(targetChatId, taskId);
-        return;
-      }
-      this._sendMessage();
-    },
-
-    onParamChangeDelegated: (e) => {
-      let el = e.target;
-      if (!el || (!el.classList.contains('composer-footer-select') && !el.classList.contains('composer-footer-checkbox'))) return;
-      
-      let id = el.dataset.param;
-      let val = el.type === 'checkbox' ? el.checked : el.value;
-
-      let currentParams = this.$.chatParams || {};
-      let updatedParams = { ...currentParams, [id]: val };
-
-      // Cascade: when provider changes, reset model
-      if (id === 'provider') {
-        delete updatedParams.model;
-      }
-      if (id === 'agent') {
-        updatedParams.approval_mode = this._getAgentDefaultApprovalMode(val);
-      }
-
-      this.$.chatParams = updatedParams;
-
-      let chatId = this._loadedChatId || dashState.activeChatId;
-      if (chatId) {
-        let saveData = { id: chatId, [id]: val };
-        if (id === 'provider') saveData.model = null;
-        if (id === 'agent') saveData.approval_mode = updatedParams.approval_mode;
-        fetch('/api/chats/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saveData)
-        });
-      }
-    },
-
-    onAttachClick: async () => {
-      let path = await uiPrompt('Enter file or folder path to attach:');
-      if (path && path.trim()) {
-        this._attachContext({ type: 'file', path: path.trim(), source: 'manual' });
-      }
-    },
-
-    onRemoveContext: (e) => {
-      this.$.attachedContext = removeAttachedContext(this.$.attachedContext, e.currentTarget.dataset.key);
-    },
-
-    onScrollToBottom: () => {
-      this._scrollMessagesToBottom({ smooth: true });
-    },
-
-    onDragOver: (e) => {
-      e.preventDefault();
-      e.currentTarget.classList.add('drag-over');
-    },
-
-    onDragLeave: (e) => {
-      e.currentTarget.classList.remove('drag-over');
-    },
-
-    onDrop: (e) => {
-      e.preventDefault();
-      e.currentTarget.classList.remove('drag-over');
-
-      let path = e.dataTransfer.getData('text/plain');
-      if (path && path.trim()) {
-        this._attachContext({ type: 'file', path: path.trim(), source: 'drop' });
-      }
-    },
-
-    onMessageItemClick: (e) => {
-      let copyBtn = e.target.closest('.work-copy-btn');
-      if (copyBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        this._copyMessageText(copyBtn.dataset.copyText || '', copyBtn);
-        return;
-      }
-
-      let card = e.target.closest('.delegation-card');
-      if (card) {
-        let chatId = card.dataset.chatId;
-        if (chatId) {
-          dashState.activeChatId = chatId;
-          setGlobalParam('chat', chatId);
-          dashEmit('active-chat-changed', { id: chatId });
-        }
-      }
-    },
   };
 
   renderCallback() {
@@ -180,23 +49,29 @@ export class AgentChat extends Symbiote {
     // Fetch adapter metadata
     this._fetchAdapterMeta();
 
+    this._bindComposer();
 
-    
     this._ac = new ChatAutocomplete({
-      popupEl: this.ref.autocompletePopup,
-      textareaEl: this.ref.chatInput,
+      popupEl: this.ref.composer?.getAutocompleteElement?.(),
+      textareaEl: this.ref.composer?.getInputElement?.(),
       onAttachFile: (newVal, path) => {
         this.$.inputVal = newVal;
-        this.ref.chatInput.value = newVal;
+        this.ref.composer?.setValue?.(newVal);
         this._attachContext({ type: 'file', path, source: 'autocomplete' });
       },
       onInsertWorkflow: (newVal) => {
         this.$.inputVal = newVal;
-        this.ref.chatInput.value = newVal;
+        this.ref.composer?.setValue?.(newVal);
       }
     });
 
-    this.ref.chatMessages?.addEventListener('scroll', () => this._updateScrollBottomButton(), { passive: true });
+    this.ref.chatTranscript?.addEventListener('delegation-card-open', (event) => {
+      let chatId = event.detail?.chatId;
+      if (!chatId) return;
+      dashState.activeChatId = chatId;
+      setGlobalParam('chat', chatId);
+      dashEmit('active-chat-changed', { id: chatId });
+    });
 
     this._wsClient = new ChatWsClient({
       getMessages: () => this.$.messages,
@@ -220,15 +95,14 @@ export class AgentChat extends Symbiote {
         this._renderLiveStatus(null);
         this._updateEmptyState();
       },
-      onError: (errText) => {
+      onError: (_errText) => {
         this._setSending(false);
         this._renderLiveStatus(null);
         this._updateEmptyState();
       },
-      buildSessionMetaHtml: (text) => this._buildSessionMetaHtml(text)
+      buildSessionMetaHtml
     });
     dashEvents.addEventListener('active-chat-changed', (e) => {
-      console.log('[AgentChat] active-chat-changed received:', e.detail);
       this._loadChat(e.detail?.id);
     });
     dashEvents.addEventListener('graph-context-selected', (e) => {
@@ -236,13 +110,12 @@ export class AgentChat extends Symbiote {
     });
 
     // Self-register with router: react to ?chat= URL param changes
-    this.sub('ROUTER/query', (query) => {
-      console.log('[AgentChat] ROUTER/query changed:', query);
+    this.sub('ROUTER/query', () => {
       this._syncChatFromRouter();
     });
 
     // Re-render messages when they change
-    this.sub('messages', (msgs) => {
+    this.sub('messages', (_msgs) => {
       this._renderMessages();
       this._updateEmptyState();
       // Re-evaluate adapter options to lock provider when messages appear.
@@ -259,9 +132,107 @@ export class AgentChat extends Symbiote {
       if (!this._updatingOptions) this._updateComposerFooter();
       this._updateInputState();
     });
+    this.sub('inputVal', () => this._syncComposerComponent());
+    this.sub('attachedContext', () => this._syncComposerComponent());
+    this.sub('isInputDisabled', () => this._syncComposerComponent());
+    this.sub('inputPlaceholder', () => this._syncComposerComponent());
+    this.sub('composerFooterHtml', () => this._syncComposerComponent());
 
     // Sync state from router after all listeners are attached (fixes cold load bug)
     this._syncChatFromRouter();
+  }
+
+  _bindComposer() {
+    let composer = this.ref.composer;
+    if (!composer || this._composerBound) return;
+    this._composerBound = true;
+
+    composer.addEventListener('chat-composer-input', (event) => {
+      let value = event.detail?.value || '';
+      this.$.inputVal = value;
+      this._ac?.check(value, event.detail?.selectionStart);
+    });
+
+    composer.addEventListener('chat-composer-key', (event) => {
+      let key = event.detail?.key;
+      let originalEvent = event.detail?.event;
+      if (key === 'Escape') this._ac?.hide();
+      if (key === 'ArrowDown' || key === 'ArrowUp') {
+        if (this._ac?.isVisible) {
+          originalEvent?.preventDefault?.();
+          this._ac?.navigate(key === 'ArrowDown' ? 1 : -1);
+        }
+      }
+      if (key === 'Tab' && this._ac?.isVisible) {
+        originalEvent?.preventDefault?.();
+        this._ac?.select();
+      }
+    });
+
+    composer.addEventListener('chat-composer-submit', () => this._sendMessage());
+    composer.addEventListener('chat-composer-send', () => this._handleComposerSend());
+    composer.addEventListener('chat-composer-param-change', (event) => this._handleComposerParamChange(event.detail));
+    composer.addEventListener('chat-composer-context-remove', (event) => {
+      this.$.attachedContext = removeAttachedContext(this.$.attachedContext, event.detail?.key);
+    });
+    composer.addEventListener('chat-composer-context-drop', (event) => {
+      let path = event.detail?.path;
+      if (path) this._attachContext({ type: 'file', path, source: 'drop' });
+    });
+
+    this._syncComposerComponent();
+  }
+
+  _syncComposerComponent() {
+    let composer = this.ref.composer;
+    if (!composer) return;
+    composer.setValue?.(this.$.inputVal || '');
+    composer.setAttachedContext?.(this.$.attachedContext || []);
+    composer.setDisabled?.(this.$.isInputDisabled);
+    composer.setPlaceholder?.(this.$.inputPlaceholder || '');
+    composer.setFooterHtml?.(this.$.composerFooterHtml || '');
+    composer.setSending?.(this._isSending);
+  }
+
+  _handleComposerSend() {
+    let targetChatId = this._loadedChatId || dashState.activeChatId;
+    if (this._isSending && targetChatId) {
+      let chat = dashState.chats?.find(c => c.id === targetChatId);
+      let taskId = chat?.pendingTaskId || this.$.chatParams?.pendingTaskId;
+      this._wsClient?.stop(targetChatId, taskId);
+      return;
+    }
+    this._sendMessage();
+  }
+
+  _handleComposerParamChange(detail = {}) {
+    let id = detail.id;
+    if (!id) return;
+    let val = detail.value;
+
+    let currentParams = this.$.chatParams || {};
+    let updatedParams = { ...currentParams, [id]: val };
+
+    if (id === 'provider') {
+      delete updatedParams.model;
+    }
+    if (id === 'agent') {
+      updatedParams.approval_mode = this._getAgentDefaultApprovalMode(val);
+    }
+
+    this.$.chatParams = updatedParams;
+
+    let chatId = this._loadedChatId || dashState.activeChatId;
+    if (chatId) {
+      let saveData = { id: chatId, [id]: val };
+      if (id === 'provider') saveData.model = null;
+      if (id === 'agent') saveData.approval_mode = updatedParams.approval_mode;
+      fetch('/api/chats/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(saveData)
+      });
+    }
   }
 
   _updateInputState() {
@@ -280,41 +251,6 @@ export class AgentChat extends Symbiote {
     this.$.attachedContext = mergeAttachedContext(this.$.attachedContext || [], item);
   }
 
-  /**
-   * Build compact HTML for the session metadata shown in the chat header.
-   * @param {string} text - Formatted markdown result from get_task_result
-   * @returns {string} HTML string
-   */
-  _buildSessionMetaHtml(text) {
-    if (!text) return '';
-    let chips = [];
-    let modeMatch = text.match(/- Mode:\s*(.+)/i);
-    if (modeMatch) {
-      let mode = modeMatch[1].trim();
-      let iconName = mode === 'yolo' ? 'bolt' : mode === 'plan' ? 'lock' : 'settings';
-      chips.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${escapeHtml(mode)}</span>`);
-    }
-    let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
-    if (exitMatch) {
-      let code = parseInt(exitMatch[1]);
-      let cls = code === 0 ? 'meta-ok' : 'meta-err';
-      chips.push(`<span class="meta-chip ${cls}">exit ${code}</span>`);
-    }
-    let sidMatch = text.match(/- Session ID:\s*`([^`]+)`/i);
-    if (sidMatch) {
-      chips.push(`<span class="meta-chip meta-sid" title="${escapeHtml(sidMatch[1])}">${escapeHtml(sidMatch[1].substring(0, 12))}…</span>`);
-    }
-    let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
-    if (tokensMatch) {
-      chips.push(`<span class="meta-chip meta-info" title="Tokens">${tokensMatch[1]} tks</span>`);
-    }
-    let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
-    if (costMatch) {
-      chips.push(`<span class="meta-chip meta-info" title="Cost">$${costMatch[1]}</span>`);
-    }
-    return chips.join('');
-  }
-
   /** Toggle empty attribute on chat-view based on message count */
   _updateEmptyState() {
     let view = this.ref.chatView;
@@ -327,17 +263,7 @@ export class AgentChat extends Symbiote {
   /** Toggle send button between arrow_upward and stop */
   _setSending(active) {
     this._isSending = active;
-    let btn = this.ref.btnSend;
-    let icon = this.ref.sendIcon;
-    if (btn && icon) {
-      if (active) {
-        btn.classList.add('btn-stop');
-        icon.textContent = 'stop';
-      } else {
-        btn.classList.remove('btn-stop');
-        icon.textContent = 'arrow_upward';
-      }
-    }
+    this.ref.composer?.setSending?.(active);
     this._renderMessages();
   }
   async _fetchAdapterMeta() {
@@ -485,100 +411,37 @@ export class AgentChat extends Symbiote {
     let route = getRoute();
     let globals = parseQuery(route.query || '');
     let chatId = globals.chat || null;
-    console.log('[AgentChat] _syncChatFromRouter: route=', route, 'chatId=', chatId, 'dashState.activeChatId=', dashState.activeChatId);
-
     if (chatId && chatId !== dashState.activeChatId) {
-      console.log('[AgentChat] Emitting active-chat-changed for', chatId);
       dashState.activeChatId = chatId;
       dashEmit('active-chat-changed', { id: chatId, fromRoute: true });
     } else if (chatId !== this._loadedChatId) {
-      console.log('[AgentChat] dashState already matches but not loaded locally. Loading', chatId);
       this._loadChat(chatId);
     }
   }
 
 
   _renderMessages() {
-    let container = this.ref.chatMessages || this.querySelector('.chat-messages');
-    if (!container) return;
-    
-    // Check if user has scrolled up
-    let isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 10;
+    let transcript = this.ref.chatTranscript;
+    if (!transcript) return;
+    let isAtBottom = transcript.isAtBottom?.(10) ?? true;
 
     let messages = this.$.messages || [];
-    let items = [];
-    let lastAgentItem = null;
-    let streamingBoards = [];
     let hasActiveStream = this._hasActiveChatTask();
-    let lastStreamingIndex = -1;
-    let lastToolIndex = -1;
-
-    for (let i = 0; i < messages.length; i++) {
-      let msg = messages[i];
-      if (msg?.streaming) lastStreamingIndex = i;
-      if (msg?.role === 'tool') lastToolIndex = i;
-    }
-
-    for (let i = 0; i < messages.length; i++) {
-      let msg = messages[i];
-      let isLatestStreaming = hasActiveStream && i === lastStreamingIndex && !!msg.streaming;
-
-      if (msg.role === 'thinking' && msg.done) {
-        let copyText = this._findPreviousAgentText(messages, i);
-        if (lastAgentItem) {
-          lastAgentItem.workSummaryHtml = this._buildWorkSummaryHtml(msg, copyText);
-          continue;
-        }
-      }
-
-      let item = this._toMessageItem(msg, {
-        isLatestStreaming,
-        isLatestTool: i === lastToolIndex,
-      });
-      if (msg.role === 'thinking' && msg.done) {
-        item.copyText = this._findPreviousAgentText(messages, i);
-      }
-      items.push(item);
-
-      if (msg.role === 'agent') lastAgentItem = item;
-      if (msg.role === 'board' && item.isStreaming && msg.taskIds?.length) {
-        streamingBoards.push([...msg.taskIds]);
-      }
-    }
+    let { items, streamingBoards } = buildChatMessageItems(messages, { hasActiveStream });
 
     this.$.messageItems = items;
+    transcript.setMessageItems?.(items);
 
     requestAnimationFrame(() => {
       for (let taskIds of streamingBoards) {
-        let firstCard = container.querySelector(`[data-task-id="${this._cssEscape(taskIds[0])}"]`);
-        let board = firstCard?.closest('.delegation-board');
+        let board = transcript.findDelegationBoard?.(taskIds);
         if (board) this._startDelegationPolling(taskIds, board);
       }
       if (isAtBottom) {
-        this._scrollMessagesToBottom();
+        transcript.scrollToBottom?.();
       }
-      this._updateScrollBottomButton();
+      transcript.updateScrollBottomButton?.();
     });
-  }
-
-  _toMessageItem(msg, options = {}) {
-    return {
-      type: msg.type || msg.role,
-      role: msg.role,
-      text: msg.text || msg.content || '',
-      isStreaming: !!options.isLatestStreaming,
-      isLatestTool: !!options.isLatestTool,
-      name: msg.name || '',
-      input: msg.input || null,
-      result: msg.result || null,
-      done: !!msg.done,
-      elapsedText: formatElapsed(msg.elapsed || 0),
-      status: msg.status || '',
-      metaHtml: this._buildWorkMetaHtml(msg.meta),
-      taskIds: msg.taskIds || [],
-      workSummaryHtml: '',
-      copyText: '',
-    };
   }
 
   _hasActiveChatTask() {
@@ -587,117 +450,7 @@ export class AgentChat extends Symbiote {
     return !!(this._isSending || chat?.pendingTaskId || this.$.chatParams?.pendingTaskId);
   }
 
-  _cssEscape(value) {
-    let str = String(value || '');
-    return globalThis.CSS?.escape ? CSS.escape(str) : str.replace(/["\\]/g, '\\$&');
-  }
-
-  _buildWorkSummaryHtml(msg, copyText) {
-    let metaHtml = this._buildWorkMetaHtml(msg.meta);
-    let bodyHtml = metaHtml ? `<div class="work-body">${metaHtml}</div>` : '';
-    let copyBtn = copyText
-      ? `<button class="work-copy-btn" type="button" title="Copy response" data-copy-text="${escapeHtml(copyText)}"><span class="material-symbols-outlined">content_copy</span></button>`
-      : '';
-    return `<div class="work-summary-wrap"><details class="work-summary"><summary><span class="material-symbols-outlined" style="font-size:16px;color:var(--sn-success-color)">check_circle</span>Worked for ${escapeHtml(formatElapsed(msg.elapsed || 0))}</summary>${bodyHtml}</details>${copyBtn}</div>`;
-  }
-
-  _buildWorkMetaHtml(meta) {
-    if (!meta) return '';
-    let items = [];
-    if (meta.mode) {
-      let iconName = meta.mode === 'yolo' ? 'bolt' : 'settings';
-      items.push(`<span class="meta-chip"><span class="material-symbols-outlined" style="font-size:12px">${iconName}</span> ${escapeHtml(meta.mode)}</span>`);
-    }
-    if (meta.exitCode != null) {
-      let cls = meta.exitCode === 0 ? 'meta-ok' : 'meta-err';
-      items.push(`<span class="meta-chip ${cls}">exit ${meta.exitCode}</span>`);
-    }
-    if (meta.sessionId) items.push(`<span class="meta-chip meta-sid" title="${escapeHtml(meta.sessionId)}">${escapeHtml(meta.sessionId.substring(0, 16))}...</span>`);
-    if (meta.tools) items.push(`<span class="meta-chip">${meta.tools} tool call${meta.tools > 1 ? 's' : ''}</span>`);
-    if (meta.tokens != null) items.push(`<span class="meta-chip meta-info">${meta.tokens} tks</span>`);
-    if (meta.cost != null) items.push(`<span class="meta-chip meta-info">$${meta.cost.toFixed(4)}</span>`);
-    if (meta.errors) items.push(`<span class="meta-chip meta-err">${escapeHtml(meta.errors)}</span>`);
-    return items.join('');
-  }
-
-  _findPreviousAgentText(messages, fromIndex) {
-    for (let i = fromIndex - 1; i >= 0; i--) {
-      let msg = messages[i];
-      if (msg?.role === 'agent' && typeof msg.text === 'string' && msg.text.trim()) return msg.text;
-      if (msg?.role === 'user') break;
-    }
-    return '';
-  }
-
-  async _copyMessageText(text, btn) {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        this._copyTextFallback(text);
-      }
-      this._flashCopyButton(btn, 'check');
-    } catch {
-      if (this._copyTextFallback(text)) {
-        this._flashCopyButton(btn, 'check');
-      } else {
-        this._flashCopyButton(btn, 'error');
-      }
-    }
-  }
-
-  _copyTextFallback(text) {
-    let ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    let ok = false;
-    try {
-      ok = document.execCommand('copy');
-    } catch {
-      ok = false;
-    }
-    ta.remove();
-    return ok;
-  }
-
-  _flashCopyButton(btn, iconName) {
-    if (!btn) return;
-    let icon = btn.querySelector('.material-symbols-outlined');
-    let original = icon?.textContent || 'content_copy';
-    btn.classList.add(iconName === 'check' ? 'copied' : 'copy-error');
-    if (icon) icon.textContent = iconName;
-    setTimeout(() => {
-      btn.classList.remove('copied', 'copy-error');
-      if (icon) icon.textContent = original;
-    }, 1200);
-  }
-
-  _scrollMessagesToBottom({ smooth = false } = {}) {
-    let container = this.ref.chatMessages || this.querySelector('.chat-messages');
-    if (!container) return;
-    if (smooth && typeof container.scrollTo === 'function') {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    } else {
-      container.scrollTop = container.scrollHeight;
-    }
-    this._updateScrollBottomButton();
-  }
-
-  _updateScrollBottomButton() {
-    let container = this.ref.chatMessages || this.querySelector('.chat-messages');
-    let btn = this.ref.scrollBottomBtn;
-    if (!container || !btn) return;
-    let hasOverflow = container.scrollHeight > container.clientHeight + 12;
-    let isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 32;
-    btn.classList.toggle('visible', hasOverflow && !isAtBottom);
-  }
-
   async _sendMessage() {
-    console.log('[AgentChat] _sendMessage called!', new Error().stack);
     this._syncComposerParamsFromDom();
     let chatId = this._loadedChatId || dashState.activeChatId;
 
@@ -748,10 +501,8 @@ export class AgentChat extends Symbiote {
     this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
     this.$.inputVal = '';
     this.$.attachedContext = []; // Clear context after send
-    if (this.ref.chatInput) {
-      this.ref.chatInput.value = '';
-      this.ref.chatInput.style.height = 'auto';
-    }
+    this.ref.composer?.setValue?.('');
+    this.ref.composer?.resetInputHeight?.();
     this._setSending(true);
 
     // Persist
@@ -835,7 +586,7 @@ export class AgentChat extends Symbiote {
 
   _syncComposerParamsFromDom() {
     if (!this.ref.composer) return false;
-    let selects = this.ref.composer.querySelectorAll('.composer-footer-select');
+    let selects = this.ref.composer.getParamControls?.() || [];
     let paramsObj = { ...this.$.chatParams };
     let hasChanges = false;
     for (let select of selects) {
@@ -852,7 +603,6 @@ export class AgentChat extends Symbiote {
   }
 
   async _loadChat(chatId) {
-    console.log('[AgentChat] _loadChat called with', chatId);
     this._loadedChatId = chatId;
     // Reset sending state — each chat manages its own task lifecycle independently.
     // The correct state will be restored below if the chat has a pendingTaskId.
@@ -869,7 +619,6 @@ export class AgentChat extends Symbiote {
     }
 
     try {
-      console.log('[AgentChat] Fetching /api/chats/get for', chatId);
       let res = await fetch('/api/chats/get', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -887,7 +636,6 @@ export class AgentChat extends Symbiote {
         return;
       }
 
-      console.log('[AgentChat] Successfully loaded chat:', chat);
       this.$.chatName = chat.name || 'Chat';
       this.$.chatAdapter = chat.adapter || 'pool';
       // Filter out stale transient status messages (process artifacts, not conversation content)
@@ -914,7 +662,6 @@ export class AgentChat extends Symbiote {
       
       // Resume pending task if exists (e.g. browser was reloaded mid-chat)
       if (chat.pendingTaskId) {
-        console.log(`[AgentChat] Resuming pending task: ${chat.pendingTaskId}`);
         this._setSending(true);
         this._wsClient.resume(chatId, chat.pendingTaskId);
       }
@@ -931,48 +678,7 @@ export class AgentChat extends Symbiote {
    * @param {object|null} meta - { phase, messageCount, lastToolName, thinkingStatus } or null to clear
    */
   _renderLiveStatus(meta) {
-    let container = this.querySelector('.chat-messages');
-    if (!container) return;
-
-    // Remove existing status indicator
-    let existing = container.querySelector('.live-status-indicator');
-    if (existing) existing.remove();
-
-    if (!meta) return;
-
-    let indicator = document.createElement('div');
-    indicator.className = 'live-status-indicator';
-
-    let icon, text, spinClass;
-    switch (meta.phase) {
-      case 'thinking':
-        icon = 'pending';
-        spinClass = 'spin-icon';
-        text = meta.thinkingStatus || 'Thinking…';
-        break;
-      case 'tool':
-        icon = 'build_circle';
-        spinClass = 'spin-icon';
-        text = `Running: ${escapeHtml(meta.lastToolName || 'tool')}`;
-        break;
-      case 'responding':
-        icon = 'edit_note';
-        spinClass = '';
-        text = 'Writing response…';
-        break;
-      default:
-        icon = 'pending';
-        spinClass = 'spin-icon';
-        text = 'Processing…';
-    }
-
-    indicator.innerHTML = `<span class="material-symbols-outlined ${spinClass}" style="font-size:14px">${icon}</span> <span>${text}</span>`;
-    container.appendChild(indicator);
-
-    // Auto-scroll
-    requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-    });
+    this.ref.chatTranscript?.renderLiveStatus(meta);
   }
 
   /**
@@ -998,47 +704,12 @@ export class AgentChat extends Symbiote {
 
         for (let taskId of taskIds) {
           let task = data.tasks[taskId];
-          let card = boardEl.querySelector(`[data-task-id="${taskId}"]`);
-          if (!card || !task) continue;
+          if (!task) continue;
 
           let status = task.status || 'running';
           let isDone = status === 'done' || status === 'error' || status === 'cancelled' || status === 'lost';
 
-          card.dataset.status = isDone ? status : 'running';
-
-          // Update header icon
-          let headerEl = card.querySelector('.delegation-card-header');
-          if (headerEl) {
-            let icon = isDone
-              ? (status === 'done' ? 'check_circle' : 'error')
-              : 'pending';
-            let spin = isDone ? '' : 'spin-icon';
-            let iconColor = status === 'done' ? 'color:var(--sn-success-color)' : status === 'error' ? 'color:var(--sn-danger-color)' : '';
-            headerEl.querySelector('.material-symbols-outlined').className = `material-symbols-outlined ${spin}`;
-            headerEl.querySelector('.material-symbols-outlined').textContent = icon;
-            if (iconColor) headerEl.querySelector('.material-symbols-outlined').setAttribute('style', iconColor);
-          }
-
-          // Update status text
-          let statusEl = card.querySelector('.delegation-card-status');
-          if (statusEl) {
-            if (isDone) {
-              statusEl.textContent = status === 'done' ? 'Completed' : status === 'error' ? 'Failed' : 'Cancelled';
-            } else {
-              let elapsed = task.updatedAt ? formatElapsed(Math.round((Date.now() - (task.startedAt || task.updatedAt)) / 1000)) : '';
-              statusEl.textContent = `Running${elapsed ? ' · ' + elapsed : ''}`;
-            }
-          }
-
-          // Link card to associated chat when resolved
-          if (task.chatId && !card.dataset.chatId) {
-            card.dataset.chatId = task.chatId;
-            card.classList.add('delegation-card-linked');
-            let titleEl = card.querySelector('.card-title');
-            if (titleEl && task.chatName) {
-              titleEl.textContent = task.chatName;
-            }
-          }
+          this.ref.chatTranscript?.updateDelegationTask?.(taskId, task, { board: boardEl });
 
           if (isDone) allDone.add(taskId);
         }

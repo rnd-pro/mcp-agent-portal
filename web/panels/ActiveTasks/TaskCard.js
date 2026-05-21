@@ -1,5 +1,5 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 export class TaskCard extends Symbiote {
   init$ = {
@@ -14,9 +14,12 @@ export class TaskCard extends Symbiote {
     chatName: '',
     pid: '',
     events: '',
+    trackedChildren: '',
     hidePid: true,
     hideEvents: true,
+    hideTracked: true,
     hideCancel: true,
+    hideFinish: false,
   };
 }
 
@@ -31,11 +34,13 @@ TaskCard.template = html`
     <div style="display:flex; gap:16px; font-size:12px; color:#9ca3af; flex-wrap:wrap;">
       <span><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">timer</span> <span ${{ textContent: 'duration' }}></span></span>
       <span ${{ hidden: 'hidePid' }}><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">settings</span> PID: <span ${{ textContent: 'pid' }}></span></span>
+      <span ${{ hidden: 'hideTracked' }}><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">account_tree</span> <span ${{ textContent: 'trackedChildren' }}></span> tracked</span>
       <span ${{ hidden: 'hideEvents' }}><span ${{ textContent: 'events' }}></span> events</span>
     </div>
   </div>
-  <div style="margin-top:16px; border-top:1px solid #404040; padding-top:16px;" ${{ hidden: 'hideCancel' }}>
-    <button class="ui-btn danger" ${{ '@data-task-id': 'id', onclick: '^onCancelTask' }}>Cancel</button>
+  <div style="margin-top:16px; border-top:1px solid #404040; padding-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+    <button class="ui-btn danger" ${{ hidden: 'hideCancel', '@data-task-id': 'id', onclick: '^onCancelTask' }}>Cancel</button>
+    <button class="ui-btn" ${{ hidden: 'hideFinish', '@data-task-id': 'id', onclick: '^onFinishTask' }}>Finish</button>
   </div>
 </div>
 `;

@@ -1,17 +1,8 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import cssLocal from './RuntimeControl.css.js';
 import template from './RuntimeControl.tpl.js';
 import './InstanceItem.js';
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 function formatNumber(value) {
   return Number.isFinite(value) ? String(value) : '-';
@@ -56,13 +47,27 @@ async function fetchJson(path) {
 }
 
 function summaryCard(label, value, note = '') {
-  return `
-    <div class="rtc-summary-card">
-      <div class="rtc-summary-label">${escapeHtml(label)}</div>
-      <div class="rtc-summary-value">${escapeHtml(value)}</div>
-      ${note ? `<div class="rtc-summary-note">${escapeHtml(note)}</div>` : ''}
-    </div>
-  `;
+  let card = document.createElement('div');
+  card.className = 'rtc-summary-card';
+
+  let labelEl = document.createElement('div');
+  labelEl.className = 'rtc-summary-label';
+  labelEl.textContent = label;
+
+  let valueEl = document.createElement('div');
+  valueEl.className = 'rtc-summary-value';
+  valueEl.textContent = value;
+
+  card.append(labelEl, valueEl);
+
+  if (note) {
+    let noteEl = document.createElement('div');
+    noteEl.className = 'rtc-summary-note';
+    noteEl.textContent = note;
+    card.append(noteEl);
+  }
+
+  return card;
 }
 
 export class RuntimeControl extends Symbiote {
@@ -121,12 +126,12 @@ export class RuntimeControl extends Symbiote {
     let agents = readCount(status?.agents);
     let monitors = readCount(status?.monitors);
 
-    this.ref.summaryGrid.innerHTML = [
+    this.ref.summaryGrid.replaceChildren(
       summaryCard('Uptime', formatDuration(Number(status?.uptime)), status ? 'Portal process' : 'Status unavailable'),
       summaryCard('Agents', status ? formatNumber(agents) : '-', 'Connected MCP clients'),
       summaryCard('Monitors', status ? formatNumber(monitors) : '-', 'Open monitor sessions'),
       summaryCard('Instances', hasInstances ? formatNumber(activeInstances.length) : '-', hasInstances ? `${instances.length} registered` : 'Instances unavailable'),
-    ].join('');
+    );
   }
 
   _renderInstances(instances, hasInstances) {

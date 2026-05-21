@@ -1,8 +1,8 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './Marketplace.tpl.js';
-import { uiConfirm } from '../../common/ui-dialogs.js';
+import { uiConfirm } from 'symbiote-node/ui';
 import cssLocal from './Marketplace.css.js';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import './McpServerCard.js';
 import './McpCatalogSection.js';
 import './ContextCard.js';
@@ -30,6 +30,26 @@ let ICON_MAP = {
   'sequential-thinking': 'account_tree', 'google-maps': 'map', 'gdrive': 'folder_open',
   'docker': 'directions_boat', 'git': 'edit', 'sentry': 'bug_report', 'linear': 'assignment',
 };
+
+function makeEmptyState(message, iconName = '') {
+  let node = document.createElement('div');
+  node.className = 'ui-empty-state';
+
+  if (!iconName) {
+    node.textContent = message;
+    return node;
+  }
+
+  let icon = document.createElement('span');
+  icon.className = 'material-symbols-outlined';
+  icon.textContent = iconName;
+  icon.style.marginRight = '8px';
+
+  let text = document.createElement('span');
+  text.textContent = message;
+  node.replaceChildren(icon, text);
+  return node;
+}
 
 class Marketplace extends Symbiote {
 
@@ -130,7 +150,7 @@ class Marketplace extends Symbiote {
     } catch (err) {
       console.error('[ERROR] [marketplace] Failed to load:', err);
       this.$.installedItems = [];
-      this.ref.installedGrid.innerHTML = `<div class="ui-empty-state">Failed to load MCP servers</div>`;
+      this.ref.installedGrid.replaceChildren(makeEmptyState('Failed to load MCP servers'));
     }
   }
 
@@ -166,11 +186,11 @@ class Marketplace extends Symbiote {
     if (!servers.length) {
       this.$.installedItems = [];
       let grid = this.ref.installedGrid;
-      grid.innerHTML = `<div class="ui-empty-state"><span class="material-symbols-outlined" style="margin-right:8px">inventory_2</span><span>No MCP servers installed</span></div>`;
+      grid.replaceChildren(makeEmptyState('No MCP servers installed', 'inventory_2'));
       return;
     }
 
-    this.ref.installedGrid.innerHTML = '';
+    this.ref.installedGrid.replaceChildren();
     this.$.installedItems = servers.map(server => this._toServerItem(server.name, server, true));
   }
 
@@ -196,7 +216,7 @@ class Marketplace extends Symbiote {
       });
     }
 
-    this.ref.catalogContent.innerHTML = '';
+    this.ref.catalogContent.replaceChildren();
     this.$.catalogSections = sections;
   }
 
@@ -332,17 +352,19 @@ class Marketplace extends Symbiote {
   }
   async loadOpenMemory() {
     this.$.contextItems = [];
-    this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">Open Memory marketplace is not connected. Use project skills and workflows from .agent-portal.</div>';
+    this.ref.contextGrid.replaceChildren(makeEmptyState(
+      'Open Memory marketplace is not connected. Use project skills and workflows from .agent-portal.',
+    ));
   }
 
   _renderContextItems(paths) {
     if (!paths || paths.length === 0) {
       this.$.contextItems = [];
-      this.ref.contextGrid.innerHTML = '<div class="ui-empty-state">No context items found in open memory</div>';
+      this.ref.contextGrid.replaceChildren(makeEmptyState('No context items found in open memory'));
       return;
     }
 
-    this.ref.contextGrid.innerHTML = '';
+    this.ref.contextGrid.replaceChildren();
     this.$.contextItems = paths.map((p) => {
       // e.g. "rules/core-workflow.md"
       let parts = p.split('/');
@@ -362,8 +384,10 @@ class Marketplace extends Symbiote {
   }
 
   async _installContextItem(itemPath, destination, btn, card) {
-    let originalHtml = btn.innerHTML;
-    btn.innerHTML = `<span class="mp-spinner"></span>`;
+    let originalNodes = [...btn.childNodes];
+    let spinner = document.createElement('span');
+    spinner.className = 'mp-spinner';
+    btn.replaceChildren(spinner);
     btn.disabled = true;
     card.$.status = '';
     card.$.isError = false;
@@ -386,7 +410,7 @@ class Marketplace extends Symbiote {
       card.$.status = `Error: ${err.message}`;
       card.$.isError = true;
     } finally {
-      btn.innerHTML = originalHtml;
+      btn.replaceChildren(...originalNodes);
       btn.disabled = false;
     }
   }

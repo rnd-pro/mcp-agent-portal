@@ -18,5 +18,5 @@ export default `
     </div>
   </div>
   <code-block ref="preview"></code-block>
-  <textarea class="pg-markdown-editor" ref="editor" spellcheck="false" disabled></textarea>
+  <source-editor class="pg-source-editor" ref="editor" disabled></source-editor>
 `;

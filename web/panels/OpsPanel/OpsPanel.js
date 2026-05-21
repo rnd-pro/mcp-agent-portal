@@ -5,8 +5,6 @@ import template from "./OpsPanel.tpl.js";
 import css from "./OpsPanel.css.js";
 
 import "../../components/event-feed/CodeWidget.js";
-import "../../components/event-feed/MiniGraphWidget.js";
-import "../../components/event-feed/ListWidget.js";
 import "../../components/event-feed/EventWidget.js";
 
 export class OpsPanel extends Symbiote {

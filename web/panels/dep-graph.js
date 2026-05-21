@@ -10,14 +10,6 @@
  */
 import Symbiote from '@symbiotejs/symbiote';
 import {
-  NodeEditor,
-  Node,
-  SubgraphNode,
-  Connection,
-  Socket,
-  Input,
-  Output,
-  NodeCanvas,
   Frame,
   computeAutoLayout,
   computeTreeLayout,
@@ -36,15 +28,14 @@ import { api, state, events, emit, resolveProjectPath } from '../app.js';
 import { emit as dashEmit } from '../dashboard-state.js';
 import { persistUiValue, readUiValue } from '../common/ui-state.js';
 
-import { buildFileGraph, buildStructuredGraph } from "../services/skeleton-parser.js";
-import '../components/LoadingOverlay/LoadingOverlay.js';
+import { buildFileGraph, buildStructuredGraph } from '../services/skeleton-parser.js';
 import PCB_CSS from './dep-graph.css.js';
 import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
 import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
-import { buildFlatGroups } from './dep-graph-layout.js';
 import { normalizeProjectGraphMetadata } from '../services/project-graph-metadata.js';
 import { buildCanvasGraphModelFromSkeleton } from '../services/project-graph-canvas-model.js';
+import { buildGraphStatItems, prepareGraphBuild } from './dep-graph-build.js';
 import {
   getNextPathStyle,
   renderPathStyleButton,
@@ -52,6 +43,11 @@ import {
   resolveInitialViewMode,
 } from './dep-graph-modes.js';
 import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-routing.js';
+import {
+  mountDepGraphTemplate,
+  renderClusterPanel,
+  renderGraphStats,
+} from './dep-graph-dom.js';
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
@@ -67,7 +63,7 @@ export class DepGraph extends Symbiote {
   init$ = {};
 
 
-  /** @type {NodeEditor|null} */
+  /** @type {import('symbiote-node/ui').NodeEditor|null} */
   _editor = null;
   /** @type {boolean} Tracks whether a node was dragged (suppresses click-to-focus) */
   _wasDragged = false;
@@ -94,22 +90,22 @@ export class DepGraph extends Symbiote {
    * @param {string} [sub] - optional subtitle
    */
   _setProgress(pct, phase, sub = '') {
-    this.querySelector('loading-overlay')?.setProgress(pct, phase, sub);
+    this.querySelector('sn-loading-overlay')?.setProgress(pct, phase, sub);
   }
 
   /** Hide the PCB preloader overlay */
   _hideLoader() {
-    this.querySelector('loading-overlay')?.hide(() => this._replayPendingFollowFocus());
+    this.querySelector('sn-loading-overlay')?.hide(() => this._replayPendingFollowFocus());
   }
 
   /** Show (or re-show) the PCB preloader overlay */
   _showLoader() {
-    this.querySelector('loading-overlay')?.show();
+    this.querySelector('sn-loading-overlay')?.show();
   }
 
   initCallback() {
     // Build DOM
-    this.innerHTML = DEP_GRAPH_TEMPLATE;
+    mountDepGraphTemplate(this, DEP_GRAPH_TEMPLATE);
 
     this._canvas = this.querySelector('node-canvas');
     this._pgCanvasGraph = this.querySelector('pg-canvas-graph');
@@ -539,38 +535,13 @@ export class DepGraph extends Symbiote {
   _renderClusterPanel() {
     let panel = this.querySelector('.pcb-clusters');
     let toggle = this.querySelector('[data-action="cluster-legend"]');
-    if (!panel) return;
-    let clusters = this._projectGraphMetadata?.clusters || [];
-    let hasFlatLegend = clusters.length > 0 && this._viewMode === 'flat';
-    if (toggle) {
-      toggle.hidden = !hasFlatLegend;
-      toggle.toggleAttribute('data-active', hasFlatLegend && this._clusterLegendOpen);
-      toggle.setAttribute(
-        'title',
-        this._clusterLegendOpen ? 'Hide semantic color legend' : 'Show semantic color legend',
-      );
-    }
-    if (!hasFlatLegend || !this._clusterLegendOpen) {
-      panel.hidden = true;
-      panel.innerHTML = '';
-      return;
-    }
-
-    let escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (ch) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[ch]));
-    panel.hidden = false;
-    panel.innerHTML = clusters.map((cluster) => {
-      let pathCount = cluster.paths.length;
-      let label = escapeHtml(cluster.label);
-      let title = escapeHtml(cluster.description || `${cluster.label}: ${pathCount} paths`);
-      return `
-      <div class="pcb-cluster-row" title="${title}">
-        <span class="pcb-cluster-swatch" style="background:${escapeHtml(cluster.color)}"></span>
-        <span class="pcb-cluster-label">${label}</span>
-      </div>
-    `;
-    }).join('');
+    renderClusterPanel({
+      panel,
+      toggle,
+      clusters: this._projectGraphMetadata?.clusters || [],
+      viewMode: this._viewMode,
+      isOpen: this._clusterLegendOpen,
+    });
   }
 
   _openSemanticCluster(clusterId, emitContext = true) {
@@ -761,7 +732,6 @@ export class DepGraph extends Symbiote {
     // Dedup
     const importSet = [...new Set(imports)];
     const dependentSet = [...new Set(dependents)];
-    const allExplore = new Set([nodeId, ...importSet, ...dependentSet]);
 
     // Save pre-explore state for back navigation
     if (!this._exploreStack) this._exploreStack = [];
@@ -871,6 +841,8 @@ export class DepGraph extends Symbiote {
 
   /**
    * Build and render a complete dependency graph from skeleton data.
+   * @param {object} skeleton
+   * @returns {void}
    */
   _buildGraph(skeleton) {
     if (!skeleton || !this._canvas) return;
@@ -950,10 +922,13 @@ export class DepGraph extends Symbiote {
     if (!wasCached) {
       this._setProgress(15, 'Parsing graph…', isStructured ? 'structured mode' : 'flat mode');
     }
-    const { graph, cached } = getOrBuildGraph({
+    const { graph, cached, groups, drillableFiles } = prepareGraphBuild({
       cache: this._graphCache,
       skeleton,
       isStructured,
+      projectGraphMetadata: this._projectGraphMetadata,
+      getOrBuildGraphFn: getOrBuildGraph,
+      getDrillableFilesFn: getDrillableFiles,
       buildStructuredGraphFn: buildStructuredGraph,
       buildFileGraphFn: buildFileGraph,
     });
@@ -965,7 +940,7 @@ export class DepGraph extends Symbiote {
     this._dirNodeMap = dirNodeMap;
     this._idToPath = idToPath;
     this._symbolMap = symbolMap;
-    this._drillableFiles = getDrillableFiles(symbolMap);
+    this._drillableFiles = drillableFiles;
 
     if (this._router) this._router.destroy();
     this._router = new SubgraphRouter(this._canvas, {
@@ -974,7 +949,7 @@ export class DepGraph extends Symbiote {
       dirNodeMap,
       symbolMap,
       drillableFiles: this._drillableFiles,
-      onNavigate: (path) => {
+      onNavigate: (_path) => {
         // Optional hook: focus/pulse upon non-visual navigation
       }
     });
@@ -990,9 +965,6 @@ export class DepGraph extends Symbiote {
     this._canvas.setReadonly(true);
     const urlParams = getGraphUrlParams();
     this._canvas.setPathStyle(urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb'));
-
-    // Groups for layout clustering (flat mode only — structured has fewer top-level nodes)
-    const groups = !isStructured ? buildFlatGroups(dirFiles, fileMap, this._projectGraphMetadata) : {};
 
     // --- Layout strategy depends on mode ---
     const positions = computeInitialGraphPositions({
@@ -1460,7 +1432,7 @@ export class DepGraph extends Symbiote {
     if (!isStructured) {
       if (!this._pinExpansion) {
         this._pinExpansion = new PinExpansion(this._canvas, {
-          onPinClick: (pin, nodeId) => {
+          onPinClick: (pin, _nodeId) => {
             if (pin.file) {
               state.activeFile = pin.file;
               emit('file-selected', { path: pin.file, line: pin.line || 1 });
@@ -1472,17 +1444,15 @@ export class DepGraph extends Symbiote {
     }
 
     // Update stats
-    const stats = skeleton.s || {};
     const viaCount = editor.getConnections().filter(c => c._via).length;
     const statsEl = this.querySelector('.pcb-stats');
     if (statsEl) {
-      statsEl.innerHTML = `
-        <span><span class="graph-explorer-stat-val">${fileMap.size}</span> files</span>
-        <span><span class="graph-explorer-stat-val">${stats.functions || 0}</span> fn</span>
-        <span><span class="graph-explorer-stat-val">${stats.classes || 0}</span> cls</span>
-        <span><span class="graph-explorer-stat-val">${editor.getConnections().length}</span> edges</span>
-        ${viaCount > 0 ? `<span><span class="graph-explorer-stat-val">${viaCount}</span> vias</span>` : ''}
-      `;
+      renderGraphStats(statsEl, buildGraphStatItems({
+        skeletonStats: skeleton.s || {},
+        fileCount: fileMap.size,
+        edgeCount: editor.getConnections().length,
+        viaCount,
+      }));
     }
   }
 
@@ -1490,10 +1460,11 @@ export class DepGraph extends Symbiote {
   /**
    * Post-render reflow: measure actual DOM SubgraphNode sizes and re-position
    * to eliminate overlaps. Uses a simple top-to-bottom column packing approach.
-   * @param {NodeEditor} editor
-   * @param {Object} initialPositions
+   * @param {import('symbiote-node/ui').NodeEditor} editor
+   * @param {Object} _initialPositions
+   * @returns {void}
    */
-  _reflowStructuredNodes(editor, initialPositions) {
+  _reflowStructuredNodes(editor, _initialPositions) {
     if (!this._canvas) return;
 
     // Collect actual dimensions from DOM
@@ -1565,7 +1536,7 @@ export class DepGraph extends Symbiote {
    * Restore drill-down state from a path (directory or file).
    * Finds the SubgraphNode whose params.path matches and drills in.
    * @param {string} targetPath - e.g. 'src/core/' or 'src/core/parser.js'
-   * @param {NodeEditor} editor
+   * @param {import('symbiote-node/ui').NodeEditor} editor
    * @returns {boolean}
    */
 
@@ -1626,7 +1597,7 @@ export class DepGraph extends Symbiote {
 
   /**
    * Create directory grouping frames from dirFiles map and node positions
-   * @param {NodeEditor} editor
+   * @param {import('symbiote-node/ui').NodeEditor} editor
    * @param {Map<string, string>} fileMap
    * @param {Map<string, string[]>} dirFiles
    * @param {Object<string, {x: number, y: number}>} positions

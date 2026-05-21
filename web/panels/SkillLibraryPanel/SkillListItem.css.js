@@ -1,25 +1,20 @@
 import { css } from '@symbiotejs/symbiote';
 
 export default css`
-pg-skill-list-item {
+:host {
   display: block;
 }
 
-.skill-layout {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.skill-list-item-shell {
+  display: block;
 }
 
-.icon {
-  font-size: 16px;
-  color: var(--sn-warning-color, hsl(30, 80%, 60%));
-}
-
-.skill-text-container {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex: 1;
+sn-list-item {
+  --sn-icon-font: 'Material Symbols Outlined';
+  --sn-list-item-radius: 4px;
+  --sn-list-item-padding: 8px 10px;
+  --sn-list-item-icon-color: var(--sn-warning-color, hsl(30, 80%, 60%));
+  --sn-list-item-label-size: 12px;
+  --sn-list-item-description-size: 11px;
 }
 `;

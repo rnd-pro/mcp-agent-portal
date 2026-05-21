@@ -1,64 +1,9 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 const css = `
 :host {
   display: block;
-}
-
-.ui-card {
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
-  padding: 14px;
-  margin-bottom: 12px;
-}
-
-.ui-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 500;
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
-  color: var(--sn-text-dim);
-}
-
-.ui-badge.info {
-  color: var(--sn-node-selected);
-  border-color: var(--sn-node-selected);
-}
-
-.ui-btn {
-  background: var(--sn-node-bg);
-  color: var(--sn-text);
-  border: 1px solid var(--sn-node-border);
-  padding: 6px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-family: inherit;
-  transition: border-color 0.15s, background-color 0.15s;
-}
-
-.ui-btn:hover:not(:disabled) {
-  border-color: var(--sn-node-selected);
-}
-
-.ui-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.ui-btn.primary {
-  background: var(--sn-node-selected);
-  border-color: var(--sn-node-selected);
-  color: #fff;
 }
 
 .mp-card-header {
@@ -145,7 +90,7 @@ ContextCard.template = html`
 </div>
 `;
 
-ContextCard.rootStyles = css;
+ContextCard.rootStyles = cssShared + css;
 ContextCard.reg('mp-context-card');
 
 export default ContextCard;

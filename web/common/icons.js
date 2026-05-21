@@ -31,7 +31,8 @@ export const ICON_MAP = {
 
 /**
  * Returns the HTML string for an icon marker.
- * @param {string} marker 
+ * @param {string} marker
+ * @returns {string}
  */
 export function renderIconHtml(marker) {
   let config = ICON_MAP[marker];
@@ -43,7 +44,8 @@ export function renderIconHtml(marker) {
 /**
  * Replaces all icon markers in a text with their HTML equivalents.
  * Safe to use after HTML escaping.
- * @param {string} text 
+ * @param {string} text
+ * @returns {string}
  */
 export function replaceIconsWithHtml(text) {
   if (!text) return '';

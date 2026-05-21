@@ -21,8 +21,6 @@ export default `
   .result-body { color: var(--sn-text); }
   
   .code-widget pre { margin: 0; white-space: pre-wrap; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 10px; color: var(--sn-text-dim, #a9b7c6); }
-  .list-widget-ul { margin: 0; padding-left: 16px; font-size: 10px; color: var(--sn-text-dim, #a9b7c6); }
-  .list-widget-more { font-size: 10px; color: var(--sn-text-dim); margin-top: 4px; font-style: italic; }
   
   .raw-output { margin: 0; white-space: pre-wrap; font-size: 10px; max-height: 200px; overflow-y: auto; color: var(--sn-text-dim, #a9b7c6); }
   .error-msg { color: var(--sn-danger-color, hsl(4, 55%, 48%)); font-weight: bold; }

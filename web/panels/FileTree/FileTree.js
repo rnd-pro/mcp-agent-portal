@@ -1,36 +1,42 @@
 // @ctx .context/web/panels/file-tree.ctx
 import Symbiote from '@symbiotejs/symbiote';
+import 'symbiote-node/ui';
 import { api, state, events, emit } from '../../app.js';
+import {
+  collapseTree,
+  highlightTreePath,
+  setTreeItems,
+  setupTreePanel,
+  showTree,
+  showTreePlaceholder,
+  syncTreeFilter,
+} from 'symbiote-node/ui';
 import template from './FileTree.tpl.js';
 import css from './FileTree.css.js';
 
+const TREE_STORAGE_KEY = 'pg-tree-expanded';
+
 export class FileTree extends Symbiote {
   init$ = {
-    treeHTML: '<div class="pg-placeholder">Loading files...</div>',
     filterText: '',
     onFilterInput: (event) => {
       this.$.filterText = event.target.value.toLowerCase();
       this._applyFilter();
     },
     onCollapseAll: () => {
-      this._collapseAll();
+      collapseTree(this);
     },
   };
 
   _treeData = null;
+  _treeItems = [];
 
   initCallback() {
-    this._expandedDirs = new Set();
-
-    try {
-      const stored = localStorage.getItem('pg-tree-expanded');
-      if (stored) {
-        const expandedDirs = JSON.parse(stored);
-        if (Array.isArray(expandedDirs)) {
-          this._expandedDirs = new Set(expandedDirs);
-        }
-      }
-    } catch (err) {}
+    setupTreePanel(this, {
+      storageKey: TREE_STORAGE_KEY,
+      onSelect: (item) => this._handleTreeSelect(item),
+      onToggle: (item) => this._selectItem(item),
+    });
 
     events.addEventListener('skeleton-loaded', (event) => {
       this._renderTree(event.detail);
@@ -50,45 +56,6 @@ export class FileTree extends Symbiote {
         requestAnimationFrame(() => this._highlightFile(event.detail.path));
       }
     });
-
-    this.addEventListener('click', (event) => {
-      const fileEl = event.target.closest('.pg-tree-file');
-      if (fileEl) {
-        this.querySelectorAll('.pg-tree-file.active').forEach((el) => el.classList.remove('active'));
-        this.querySelectorAll('.pg-tree-dir.active').forEach((el) => el.classList.remove('active'));
-        fileEl.classList.add('active');
-        state.activeFile = fileEl.dataset.file;
-        emit('file-selected', { path: fileEl.dataset.file });
-        return;
-      }
-
-      const dirEl = event.target.closest('.pg-tree-dir');
-      if (dirEl) {
-        const dir = dirEl.dataset.dir;
-        if (dir != null) {
-          this._toggleDir(dir);
-          this.querySelectorAll('.pg-tree-file.active').forEach((el) => el.classList.remove('active'));
-          this.querySelectorAll('.pg-tree-dir.active').forEach((el) => el.classList.remove('active'));
-          dirEl.classList.add('active');
-          emit('file-selected', { path: `${dir}/` });
-        }
-      }
-    });
-
-    this.addEventListener('dragstart', (event) => {
-      const fileEl = event.target.closest('.pg-tree-file');
-      if (fileEl && fileEl.dataset.file) {
-        event.dataTransfer.setData('text/plain', fileEl.dataset.file);
-        event.dataTransfer.effectAllowed = 'copy';
-        return;
-      }
-
-      const dirEl = event.target.closest('.pg-tree-dir');
-      if (dirEl && dirEl.dataset.dir) {
-        event.dataTransfer.setData('text/plain', `${dirEl.dataset.dir}/`);
-        event.dataTransfer.effectAllowed = 'copy';
-      }
-    });
   }
 
   async _fetchSkeleton() {
@@ -105,98 +72,36 @@ export class FileTree extends Symbiote {
     } catch (err) {}
   }
 
-  _toggleDir(dir) {
-    if (this._expandedDirs.has(dir)) {
-      this._expandedDirs.delete(dir);
-    } else {
-      this._expandedDirs.add(dir);
+  _handleTreeSelect(item) {
+    this._selectItem(item);
+  }
+
+  _selectItem(item) {
+    if (!item) return;
+    let tree = this.ref.tree;
+    if (tree) {
+      tree.selectedId = item.id;
     }
-    this._saveExpandedState();
-    this._updateDirDOM(dir);
-  }
-
-  _saveExpandedState() {
-    localStorage.setItem('pg-tree-expanded', JSON.stringify(Array.from(this._expandedDirs)));
-  }
-
-  _lazyRenderChildren(dir) {
-    const childrenEl = this.querySelector(`.pg-tree-children[data-dir="${CSS.escape(dir)}"]`);
-    if (!childrenEl || childrenEl.dataset.rendered) return;
-    if (!this._treeData) return;
-
-    const parts = dir.split('/');
-    let node = this._treeData;
-    for (const part of parts) {
-      if (!node || !node.children[part]) {
-        node = null;
-        break;
-      }
-      node = node.children[part];
+    if (item.type === 'directory') {
+      emit('file-selected', { path: `${item.path}/` });
+      return;
     }
-
-    if (!node) return;
-
-    childrenEl.innerHTML = this._renderNode(node, dir, dir.split('/').length);
-    childrenEl.dataset.rendered = '1';
+    state.activeFile = item.path;
+    emit('file-selected', { path: item.path });
   }
 
-  _updateDirDOM(dir) {
-    const dirEl = this.querySelector(`.pg-tree-dir[data-dir="${CSS.escape(dir)}"]`);
-    const childrenEl = this.querySelector(`.pg-tree-children[data-dir="${CSS.escape(dir)}"]`);
-    if (dirEl && childrenEl) {
-      const isExpanded = this._expandedDirs.has(dir);
-      const chevronEl = dirEl.querySelector('.pg-chevron');
-      if (chevronEl) {
-        chevronEl.textContent = isExpanded ? 'expand_more' : 'chevron_right';
-      }
-      if (isExpanded) {
-        this._lazyRenderChildren(dir);
-        childrenEl.removeAttribute('hidden');
-      } else {
-        childrenEl.setAttribute('hidden', '');
-      }
-    }
-  }
-
-  _collapseAll() {
-    this._expandedDirs.clear();
-    this._saveExpandedState();
-    this.querySelectorAll('.pg-tree-dir').forEach((el) => {
-      this._updateDirDOM(el.dataset.dir);
-    });
+  _setPlaceholder(text) {
+    showTreePlaceholder(this, text);
   }
 
   _highlightFile(path) {
-    // Support directory paths (e.g. "web/" -> data-dir="web")
     if (path.endsWith('/')) {
-      const dir = path.replace(/\/$/, '');
-      const parts = dir.split('/');
-      for (let i = 1; i < parts.length; i++) {
-        const parent = parts.slice(0, i).join('/');
-        if (!this._expandedDirs.has(parent)) {
-          this._expandedDirs.add(parent);
-          this._lazyRenderChildren(parent);
-          this._updateDirDOM(parent);
-        }
-      }
-      this._saveExpandedState();
-
-      const dirEl = this.querySelector(`.pg-tree-dir[data-dir="${CSS.escape(dir)}"]`);
-      if (dirEl) {
-        this.querySelectorAll('.pg-tree-file.active').forEach((el) => el.classList.remove('active'));
-        this.querySelectorAll('.pg-tree-dir.active').forEach((el) => el.classList.remove('active'));
-        dirEl.classList.add('active');
-        dirEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
+      let dir = path.replace(/\/$/, '');
+      highlightTreePath(this, dir, { scroll: true });
       return;
     }
 
-    const fileEl = this.querySelector(`.pg-tree-file[data-file="${CSS.escape(path)}"]`);
-    if (fileEl) {
-      this.querySelectorAll('.pg-tree-file.active').forEach((el) => el.classList.remove('active'));
-      fileEl.classList.add('active');
-      fileEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
+    highlightTreePath(this, path, { scroll: true });
   }
 
   _buildTree(skeleton) {
@@ -254,56 +159,62 @@ export class FileTree extends Symbiote {
     return root;
   }
 
-  _renderNode(node, parentDir, depth) {
-    const html = [];
-    const dirs = Object.keys(node.children).sort();
-    const files = node.files.sort((a, b) => a.name.localeCompare(b.name));
-    const left = 16 * depth;
+  _buildTreeItems(node, parentDir = '') {
+    let items = [];
+    let dirs = Object.keys(node.children).sort();
+    let files = node.files.sort((a, b) => a.name.localeCompare(b.name));
 
-    for (const dirName of dirs) {
-      const dir = parentDir ? `${parentDir}/${dirName}` : dirName;
-      const isExpanded = this._expandedDirs && this._expandedDirs.has(dir);
-      const icon = isExpanded ? 'expand_more' : 'chevron_right';
-
-      html.push(`<div class="pg-tree-dir" draggable="true" data-dir="${dir}" style="padding-left:${left + 6}px"><span class="material-symbols-outlined pg-chevron" style="font-size:16px">${icon}</span> <span class="material-symbols-outlined" style="font-size:16px">folder</span> ${dirName}</div>`);
-
-      if (isExpanded) {
-        html.push(`<div class="pg-tree-children" data-dir="${dir}" data-rendered="1">`);
-        html.push(this._renderNode(node.children[dirName], dir, depth + 1));
-        html.push('</div>');
-      } else {
-        html.push(`<div class="pg-tree-children" data-dir="${dir}" hidden></div>`);
-      }
+    for (let dirName of dirs) {
+      let dir = parentDir ? `${parentDir}/${dirName}` : dirName;
+      items.push({
+        id: dir,
+        type: 'directory',
+        label: dirName,
+        path: dir,
+        icon: 'folder',
+        draggable: true,
+        payload: `${dir}/`,
+        children: this._buildTreeItems(node.children[dirName], dir),
+      });
     }
 
-    for (const file of files) {
-      const icon = FileTree._getFileIcon(file.name);
-      const badges = [];
+    for (let file of files) {
+      let badges = [];
       if (file.exports > 0) badges.push(`${file.exports}f`);
       if (file.classes > 0) badges.push(`${file.classes}c`);
 
-      const badge = badges.length > 0 ? `<span class="pg-badge">${badges.join(' ')}</span>` : '';
-      const nonSourceClass = file.nonSource ? ' pg-non-source' : '';
-      html.push(`<div class="pg-tree-file${nonSourceClass}" draggable="true" data-file="${file.f}" style="padding-left:${left + 24}px"><span class="material-symbols-outlined" style="font-size:14px">${icon}</span> ${file.name}${badge}</div>`);
+      items.push({
+        id: file.f,
+        type: 'file',
+        label: file.name,
+        path: file.f,
+        icon: FileTree._getFileIcon(file.name),
+        badges: badges.length > 0 ? [badges.join(' ')] : [],
+        draggable: true,
+        payload: file.f,
+        muted: Boolean(file.nonSource),
+      });
     }
 
-    return html.join('');
+    return items;
   }
 
   _renderTree(skeleton) {
     if (!skeleton) {
-      this.$.treeHTML = '<div class="pg-placeholder">No files found</div>';
+      this._setPlaceholder('No files found');
       return;
     }
 
     this._treeData = this._buildTree(skeleton);
-    const count = Object.keys(this._treeData.children).length + this._treeData.files.length;
+    let count = Object.keys(this._treeData.children).length + this._treeData.files.length;
     if (count === 0) {
-      this.$.treeHTML = '<div class="pg-placeholder">No files found</div>';
+      this._setPlaceholder('No files found');
       return;
     }
 
-    this.$.treeHTML = this._renderNode(this._treeData, '', 0);
+    this._treeItems = this._buildTreeItems(this._treeData);
+    showTree(this);
+    setTreeItems(this, this._treeItems, this.$.filterText);
   }
 
   static _getFileIcon(name) {
@@ -318,50 +229,7 @@ export class FileTree extends Symbiote {
   }
 
   _applyFilter() {
-    const filterText = this.$.filterText;
-    if (filterText) {
-      this._expandAllForFilter();
-      this.querySelectorAll('.pg-tree-file').forEach((fileEl) => {
-        const isMatch = fileEl.dataset.file.toLowerCase().includes(filterText);
-        fileEl.hidden = !isMatch;
-      });
-      this.querySelectorAll('.pg-tree-dir').forEach((dirEl) => {
-        const dir = dirEl.dataset.dir;
-        const childrenEl = this.querySelector(`.pg-tree-children[data-dir="${CSS.escape(dir)}"]`);
-        if (!childrenEl) return;
-
-        let hasMatch = false;
-        childrenEl.querySelectorAll('.pg-tree-file:not([hidden])').forEach(() => {
-          hasMatch = true;
-        });
-        dirEl.hidden = !hasMatch;
-      });
-    } else {
-      this.querySelectorAll('.pg-tree-file').forEach((fileEl) => {
-        fileEl.hidden = false;
-      });
-      this.querySelectorAll('.pg-tree-dir').forEach((dirEl) => {
-        dirEl.hidden = false;
-      });
-    }
-  }
-
-  _expandAllForFilter() {
-    if (!this._treeData) return;
-
-    const expand = (node, parentDir) => {
-      for (const dirName of Object.keys(node.children)) {
-        const dir = parentDir ? `${parentDir}/${dirName}` : dirName;
-        this._lazyRenderChildren(dir);
-        const childrenEl = this.querySelector(`.pg-tree-children[data-dir="${CSS.escape(dir)}"]`);
-        if (childrenEl) {
-          childrenEl.removeAttribute('hidden');
-        }
-        expand(node.children[dirName], dir);
-      }
-    };
-
-    expand(this._treeData, '');
+    syncTreeFilter(this, this.$.filterText);
   }
 }
 

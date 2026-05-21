@@ -1,18 +1,9 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './PipelineManager.tpl.js';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import css from './PipelineManager.css.js';
 import './PipelineItem.js';
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 export class PipelineManager extends Symbiote {
   init$ = {
@@ -78,36 +69,40 @@ export class PipelineManager extends Symbiote {
 
   showPipelineDetails(pipeline) {
     let main = this.ref.mainContent;
-    
-    let stepsHtml = pipeline.steps.map(s => `
-      <div class="ui-card">
-        <div class="ui-card-title" style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
-          ${escapeHtml(s.name)}
-          ${s.trigger ? `<span class="ui-badge warning">⚡ ${escapeHtml(s.trigger)}</span>` : ''}
-        </div>
-        <div style="font-family:monospace; margin-bottom:12px; white-space:pre-wrap;">${escapeHtml(s.prompt || '')}</div>
-        <div style="display:flex; gap:8px;">
-          ${s.skill ? `<span class="ui-badge info">Skill: ${escapeHtml(s.skill)}</span>` : ''}
-          ${s.timeout ? `<span class="ui-badge">Timeout: ${escapeHtml(s.timeout)}s</span>` : ''}
-          ${s.max_bounces ? `<span class="ui-badge">Max Bounces: ${escapeHtml(s.max_bounces)}</span>` : ''}
-        </div>
-      </div>
-    `).join('');
-    
-    main.innerHTML = `
-      <div class="ui-details">
-      <div class="ui-details-header">
-        <div>
-          <h2 class="ui-details-title">${escapeHtml(pipeline.name)}</h2>
-          <div class="ui-details-desc">Steps: ${pipeline.steps.length} | On Error: ${escapeHtml(pipeline.on_error || 'stop')}</div>
-        </div>
-        <button class="ui-btn primary" id="run-btn"><span class="material-symbols-outlined">play_arrow</span> Run Pipeline</button>
-      </div>
-      <div>
-        ${stepsHtml}
-      </div>
-      </div>
-    `;
+
+    let details = document.createElement('div');
+    details.className = 'ui-details';
+
+    let header = document.createElement('div');
+    header.className = 'ui-details-header';
+
+    let titleWrap = document.createElement('div');
+    let title = document.createElement('h2');
+    title.className = 'ui-details-title';
+    title.textContent = pipeline.name ?? '';
+
+    let desc = document.createElement('div');
+    desc.className = 'ui-details-desc';
+    desc.textContent = `Steps: ${pipeline.steps.length} | On Error: ${pipeline.on_error || 'stop'}`;
+    titleWrap.append(title, desc);
+
+    let runBtn = document.createElement('button');
+    runBtn.className = 'ui-btn primary';
+    runBtn.id = 'run-btn';
+    let runIcon = document.createElement('span');
+    runIcon.className = 'material-symbols-outlined';
+    runIcon.textContent = 'play_arrow';
+    runBtn.append(runIcon, document.createTextNode(' Run Pipeline'));
+
+    header.append(titleWrap, runBtn);
+
+    let stepsWrap = document.createElement('div');
+    for (let step of pipeline.steps) {
+      stepsWrap.append(this._renderStepCard(step));
+    }
+
+    details.append(header, stepsWrap);
+    main.replaceChildren(details);
     
     main.querySelector('#run-btn').onclick = async () => {
       try {
@@ -122,13 +117,64 @@ export class PipelineManager extends Symbiote {
   showCreateForm() {
     this.$.selectedPipelineId = null;
     this.renderSidebar();
-    
-    this.ref.mainContent.innerHTML = `
-      <div class="ui-details">
-        <h2 class="ui-details-title">Create New Pipeline</h2>
-        <div class="ui-details-desc">Use the AgentChat to ask the AI to design and create a pipeline for you using the create_pipeline tool. Visual builder coming soon!</div>
-      </div>
-    `;
+
+    let details = document.createElement('div');
+    details.className = 'ui-details';
+
+    let title = document.createElement('h2');
+    title.className = 'ui-details-title';
+    title.textContent = 'Create New Pipeline';
+
+    let desc = document.createElement('div');
+    desc.className = 'ui-details-desc';
+    desc.textContent = 'Use the AgentChat to ask the AI to design and create a pipeline for you using the create_pipeline tool. Visual builder coming soon!';
+
+    details.append(title, desc);
+    this.ref.mainContent.replaceChildren(details);
+  }
+
+  _renderStepCard(step) {
+    let card = document.createElement('div');
+    card.className = 'ui-card';
+
+    let title = document.createElement('div');
+    title.className = 'ui-card-title';
+    title.style.marginBottom = '8px';
+    title.style.display = 'flex';
+    title.style.alignItems = 'center';
+    title.style.gap = '8px';
+    title.append(document.createTextNode(step.name ?? ''));
+
+    if (step.trigger) {
+      let trigger = document.createElement('span');
+      trigger.className = 'ui-badge warning';
+      trigger.textContent = `⚡ ${step.trigger}`;
+      title.append(trigger);
+    }
+
+    let prompt = document.createElement('div');
+    prompt.style.fontFamily = 'monospace';
+    prompt.style.marginBottom = '12px';
+    prompt.style.whiteSpace = 'pre-wrap';
+    prompt.textContent = step.prompt || '';
+
+    let badges = document.createElement('div');
+    badges.style.display = 'flex';
+    badges.style.gap = '8px';
+
+    if (step.skill) badges.append(this._badge(`Skill: ${step.skill}`, 'ui-badge info'));
+    if (step.timeout) badges.append(this._badge(`Timeout: ${step.timeout}s`));
+    if (step.max_bounces) badges.append(this._badge(`Max Bounces: ${step.max_bounces}`));
+
+    card.append(title, prompt, badges);
+    return card;
+  }
+
+  _badge(text, className = 'ui-badge') {
+    let badge = document.createElement('span');
+    badge.className = className;
+    badge.textContent = text;
+    return badge;
   }
 
   _setPipelineState(message, isError = false) {

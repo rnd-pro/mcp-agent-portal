@@ -65,27 +65,16 @@ export default `
     min-height: 0;
     cursor: text;
   }
-  pg-skill-manager .pg-markdown-editor {
+  pg-skill-manager .pg-source-editor {
     display: none;
     flex: 1;
     min-height: 0;
     width: 100%;
-    box-sizing: border-box;
-    border: 0;
-    outline: 0;
-    resize: none;
-    padding: 14px 16px;
-    background: var(--sn-bg, hsl(37, 30%, 96%));
-    color: var(--sn-text, hsl(30, 15%, 18%));
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 12px;
-    line-height: 1.6;
-    tab-size: 2;
   }
   pg-skill-manager[mode-edit] code-block {
     display: none;
   }
-  pg-skill-manager[mode-edit] .pg-markdown-editor {
+  pg-skill-manager[mode-edit] .pg-source-editor {
     display: block;
   }
 `;

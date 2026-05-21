@@ -3,7 +3,28 @@
  * Sections are registered declaratively and can be added at runtime
  * (e.g. from marketplace plugins or dynamically discovered MCP servers).
  */
-import { LayoutTree } from 'symbiote-node';
+import {
+  LayoutTree,
+  registerSection,
+  getSections,
+  getHomeSections,
+  getProjectSections,
+  getSectionsForScope,
+  getLayout,
+  hasSection,
+  withGlobalPanel,
+} from 'symbiote-node/ui';
+
+export {
+  registerSection,
+  getSections,
+  getHomeSections,
+  getProjectSections,
+  getSectionsForScope,
+  getLayout,
+  hasSection,
+  withChat,
+};
 
 // ── Panel Type Definitions ──────────────────────────────────────
 // Each panel type maps an ID to a web component tag.
@@ -44,70 +65,17 @@ export function registerPanelType(id, definition) {
   panelTypes[id] = definition;
 }
 
-// ── Section Registry ────────────────────────────────────────────
-const _sections = new Map();
-const _layouts = new Map();
-
 /**
- * Register a navigation section.
- * @param {string} id — URL hash fragment (e.g. 'dashboard', 'chat')
- * @param {Object} opts
- * @param {string} opts.icon — Material Symbols icon name
- * @param {string} opts.label — Sidebar label
- * @param {number} [opts.order=100] — Sort order in sidebar
- * @param {string} [opts.scope='both'] — 'home' | 'project' | 'both'
- * @param {Function} opts.layout — Factory returning LayoutTree node
+ * Helper to wrap layout with a global right-sidebar chat.
+ * @param {Function} layoutFn
+ * @param {boolean} [isExpanded=false]
+ * @returns {Function}
  */
-export function registerSection(id, { icon, label, order = 100, scope = 'both', layout }) {
-  _sections.set(id, { id, icon, label, order, scope });
-  if (layout) _layouts.set(id, layout);
-}
-
-/** Get sorted sections array for sidebar (all) */
-export function getSections() {
-  return [..._sections.values()].sort((a, b) => a.order - b.order);
-}
-
-/** Get sorted sections array for Home workspace */
-export function getHomeSections() {
-  return getSections().filter(s => s.scope === 'home' || s.scope === 'both');
-}
-
-/** Get sorted sections array for Project workspaces */
-export function getProjectSections() {
-  return getSections().filter(s => s.scope === 'project' || s.scope === 'both');
-}
-
-/**
- * Get sorted sections for the current scope.
- * @param {string|null} projectId — null for Home, string for Project
- * @returns {Array}
- */
-export function getSectionsForScope(projectId) {
-  return projectId ? getProjectSections() : getHomeSections();
-}
-
-/** Get layout tree for a section */
-export function getLayout(id) {
-  const fn = _layouts.get(id);
-  return fn ? fn() : null;
-}
-
-/** Check if section exists */
-export function hasSection(id) {
-  return _sections.has(id);
-}
-
-/** Helper to wrap layout with a global right-sidebar chat */
 function withChat(layoutFn, isExpanded = false) {
-  return () => {
-    let main = layoutFn();
-    let chat = LayoutTree.createPanel('agent-chat');
-    chat.global = true;
-    chat.collapsed = !isExpanded;
-    // Set split ratio to 0.65 (chat takes 35% when expanded)
-    return LayoutTree.createSplit('horizontal', main, chat, 0.65);
-  };
+  return withGlobalPanel(layoutFn, 'agent-chat', {
+    collapsed: !isExpanded,
+    ratio: 0.65,
+  });
 }
 
 // ── Core Sections ───────────────────────────────────────────────

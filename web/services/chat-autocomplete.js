@@ -1,5 +1,3 @@
-import { escapeHtml } from '../utils/markdown-formatter.js';
-
 export class ChatAutocomplete {
   constructor(opts) {
     this.popup = opts.popupEl;
@@ -85,14 +83,32 @@ export class ChatAutocomplete {
     }
     this._visible = true;
     let header = this._trigger === '@' ? 'Files' : 'Workflows';
-    this.popup.innerHTML = `<div class="autocomplete-header">${header}</div>` +
-      this._items.map((item, i) => `
-        <div class="autocomplete-item${i === this._index ? ' active' : ''}" data-index="${i}">
-          <span class="material-symbols-outlined">${item.icon}</span>
-          <span class="autocomplete-item-label">${escapeHtml(item.label)}</span>
-          <span class="autocomplete-item-hint">${escapeHtml(item.hint)}</span>
-        </div>
-      `).join('');
+    let headerElement = document.createElement('div');
+    headerElement.className = 'autocomplete-header';
+    headerElement.textContent = header;
+
+    let itemElements = this._items.map((item, i) => {
+      let itemElement = document.createElement('div');
+      itemElement.className = `autocomplete-item${i === this._index ? ' active' : ''}`;
+      itemElement.dataset.index = String(i);
+
+      let iconElement = document.createElement('span');
+      iconElement.className = 'material-symbols-outlined';
+      iconElement.textContent = item.icon;
+
+      let labelElement = document.createElement('span');
+      labelElement.className = 'autocomplete-item-label';
+      labelElement.textContent = item.label;
+
+      let hintElement = document.createElement('span');
+      hintElement.className = 'autocomplete-item-hint';
+      hintElement.textContent = item.hint;
+
+      itemElement.append(iconElement, labelElement, hintElement);
+      return itemElement;
+    });
+
+    this.popup.replaceChildren(headerElement, ...itemElements);
     this.popup.classList.add('visible');
 
     // Click handler

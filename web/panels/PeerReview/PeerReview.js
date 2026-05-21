@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './PeerReview.tpl.js';
-import css from '../../common/ui-shared.css.js';
+import { sharedUiStyles as css } from 'symbiote-node/ui';
 
 export class PeerReview extends Symbiote {
   init$ = {
@@ -19,8 +19,9 @@ export class PeerReview extends Symbiote {
       
       if (!proposal) return alert('Proposal is required');
       
-      this.querySelector('#consult-btn').disabled = true;
-      this.querySelector('#consult-btn').innerHTML = '<span class="material-symbols-outlined" style="animation: spin 2s linear infinite;">sync</span> Initiating...';
+      let consultBtn = this.querySelector('#consult-btn');
+      consultBtn.disabled = true;
+      this._setConsultButton(consultBtn, 'sync', 'Initiating...', true);
       
       try {
         let resultText = await mcpCall('agent-pool', 'consult_peer', {
@@ -40,8 +41,9 @@ export class PeerReview extends Symbiote {
       } catch (err) {
         alert('Failed to initiate consultation: ' + err.message);
       } finally {
-        this.querySelector('#consult-btn').disabled = false;
-        this.querySelector('#consult-btn').innerHTML = '<span class="material-symbols-outlined">psychology</span> Request Peer Review';
+        let consultBtn = this.querySelector('#consult-btn');
+        consultBtn.disabled = false;
+        this._setConsultButton(consultBtn, 'psychology', 'Request Peer Review');
       }
     };
   }
@@ -67,6 +69,9 @@ export class PeerReview extends Symbiote {
       let tasks = await mcpCall('agent-pool', 'list_tasks', { json: true });
       if (typeof tasks === 'string') {
         try { tasks = JSON.parse(tasks); } catch { tasks = []; }
+      }
+      if (!Array.isArray(tasks) && Array.isArray(tasks?.tasks)) {
+        tasks = tasks.tasks;
       }
       if (!Array.isArray(tasks)) tasks = [];
       
@@ -103,7 +108,11 @@ export class PeerReview extends Symbiote {
     if (type === 'success') icon = 'check_circle';
     if (type === 'error') icon = 'error';
     
-    banner.innerHTML = `<span class="material-symbols-outlined" ${type==='running'?'style="animation: spin 2s linear infinite;"':''}>${icon}</span> ${message}`;
+    let iconEl = document.createElement('span');
+    iconEl.className = 'material-symbols-outlined';
+    iconEl.textContent = icon;
+    if (type === 'running') iconEl.style.animation = 'spin 2s linear infinite';
+    banner.replaceChildren(iconEl, document.createTextNode(` ${message}`));
   }
   
   renderResult(task) {
@@ -121,16 +130,39 @@ export class PeerReview extends Symbiote {
       
       let verdictText = text.match(/Verdict:\s*([A-Z_]+)/i)?.[1] || 'UNKNOWN';
       
-      this.querySelector('#pr-feedback').innerHTML = `
-        <div style="margin-bottom:16px;"><span class="ui-badge ${verdictClass}" style="font-size:14px; padding:4px 12px;">Verdict: ${verdictText}</span></div>
-        <div class="sm-markdown-preview" style="background:transparent; border:none; padding:0;"><pre style="white-space:pre-wrap;font-size:13px;line-height:1.6;">${this._esc(text)}</pre></div>
-      `;
+      let badge = document.createElement('span');
+      badge.className = `ui-badge ${verdictClass}`;
+      badge.style.fontSize = '14px';
+      badge.style.padding = '4px 12px';
+      badge.textContent = `Verdict: ${verdictText}`;
+
+      let badgeRow = document.createElement('div');
+      badgeRow.style.marginBottom = '16px';
+      badgeRow.append(badge);
+
+      let pre = document.createElement('pre');
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.style.fontSize = '13px';
+      pre.style.lineHeight = '1.6';
+      pre.textContent = text;
+
+      let preview = document.createElement('div');
+      preview.className = 'sm-markdown-preview';
+      preview.style.background = 'transparent';
+      preview.style.border = 'none';
+      preview.style.padding = '0';
+      preview.append(pre);
+
+      this.querySelector('#pr-feedback').replaceChildren(badgeRow, preview);
     });
   }
 
-  _esc(str) {
-    if (!str) return '';
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  _setConsultButton(button, icon, label, spinning = false) {
+    let iconEl = document.createElement('span');
+    iconEl.className = 'material-symbols-outlined';
+    iconEl.textContent = icon;
+    if (spinning) iconEl.style.animation = 'spin 2s linear infinite';
+    button.replaceChildren(iconEl, document.createTextNode(` ${label}`));
   }
 }
 

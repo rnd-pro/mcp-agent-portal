@@ -1,4 +1,6 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
+import 'symbiote-node/ui';
+import { bindListItemSelect, syncListItem } from 'symbiote-node/ui';
 
 export class ToolServerItem extends Symbiote {
   init$ = {
@@ -8,68 +10,50 @@ export class ToolServerItem extends Symbiote {
   };
 
   renderCallback() {
-    this.sub('isActive', (val) => {
-      this.toggleAttribute('active', Boolean(val));
+    this.#syncListItem();
+    this.sub('name', () => this.#syncListItem());
+    this.sub('toolCountText', () => this.#syncListItem());
+    this.sub('isActive', () => this.#syncListItem());
+  }
+
+  #syncListItem() {
+    let listItem = syncListItem(this, {
+      label: this.$.name,
+      description: this.$.toolCountText,
+      icon: 'api',
+      active: this.$.isActive,
+      name: this.$.name,
+      toolCountText: this.$.toolCountText,
+    }, {
+      active: this.$.isActive,
     });
+    if (listItem) {
+      bindListItemSelect(this, 'tool-server-item-select', (event) => ({
+        item: event.detail?.item || null,
+        name: this.$.name,
+      }));
+    }
   }
 }
 
 ToolServerItem.template = html`
-<div class="ui-item" ${{ onclick: '^onServerSelect' }}>
-  <div class="ui-item-title te-server-title">
-    <span class="material-symbols-outlined">api</span>
-    <span ${{ textContent: 'name' }}></span>
-  </div>
-  <div class="ui-item-desc" ${{ textContent: 'toolCountText', hidden: '!toolCountText' }}></div>
-</div>
+<sn-list-item ref="listItem"></sn-list-item>
 `;
 
 ToolServerItem.rootStyles = `
 :host {
   display: block;
-  color: var(--sn-text);
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
 }
-.ui-item {
-  padding: 10px 14px;
-  background: transparent;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-bottom: 1px solid var(--sn-node-hover);
-  transition: background 0.15s;
+sn-list-item {
+  --sn-icon-font: 'Material Symbols Outlined';
+  --sn-list-item-radius: 0;
+  --sn-list-item-padding: 10px 14px;
+  --sn-list-item-label-size: 13px;
+  --sn-list-item-description-size: 11px;
 }
-.ui-item:hover {
-  background: var(--sn-node-hover);
-}
-:host([active]) .ui-item {
-  background: var(--sn-node-bg);
-  border-left: 3px solid var(--sn-node-selected);
-  padding-left: 11px;
-}
-.ui-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--sn-text);
-}
-:host([active]) .ui-item-title {
-  color: var(--sn-node-selected);
-}
-.ui-item-desc {
-  font-size: 11px;
-  color: var(--sn-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.te-server-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.te-server-title .material-symbols-outlined {
-  font-size: 16px;
+:host([active]) sn-list-item {
+  --sn-list-item-label-color: var(--sn-node-selected);
+  --sn-list-item-padding: 10px 14px 10px 11px;
 }
 `;
 

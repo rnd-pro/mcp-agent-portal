@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './ToolExplorer.tpl.js';
 import cssLocal from './ToolExplorer.css.js';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import './ToolServerItem.js';
 import './ToolCard.js';
 
@@ -13,12 +13,15 @@ class ToolExplorer extends Symbiote {
     serversEmptyText: '',
     toolsEmptyText: 'Select a server to view tools',
     onServerSelect: (e) => {
-      let serverItem = e.currentTarget.getRootNode().host;
-      this.selectServer(serverItem.$.name);
+      let serverName = e.detail?.name
+        || e.detail?.item?.name
+        || e.currentTarget?.getRootNode?.().host?.$.name;
+      if (serverName) this.selectServer(serverName);
     },
   };
 
   initCallback() {
+    this.addEventListener('tool-server-item-select', this.$.onServerSelect);
     this.loadServers();
   }
 

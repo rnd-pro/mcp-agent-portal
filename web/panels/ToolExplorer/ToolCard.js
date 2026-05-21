@@ -1,4 +1,5 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 export class ToolCard extends Symbiote {
   init$ = {
@@ -22,15 +23,6 @@ ToolCard.template = html`
 ToolCard.rootStyles = `
 :host {
   display: block;
-  color: var(--sn-text);
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
-}
-.ui-card {
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
-  padding: 14px;
-  margin-bottom: 12px;
 }
 .te-tool-name {
   font-weight: 600;
@@ -63,6 +55,7 @@ ToolCard.rootStyles = `
   margin-bottom: 6px;
 }
 `;
+ToolCard.rootStyles = cssShared + ToolCard.rootStyles;
 
 ToolCard.reg('te-tool-card');
 export default ToolCard;

@@ -265,7 +265,10 @@ function applyRule(rule) {
   let badge = document.getElementById('rule-badge');
   let idx = RULE_CATALOG.indexOf(rule);
   let counter = idx >= 0 ? ` ${idx + 1}/${RULE_CATALOG.length}` : '';
-  badge.innerHTML = `B${bStr}/S${sStr} <span class="rule-name">${rule.name}${counter}</span>`;
+  let ruleName = document.createElement('span');
+  ruleName.className = 'rule-name';
+  ruleName.textContent = `${rule.name}${counter}`;
+  badge.replaceChildren(document.createTextNode(`B${bStr}/S${sStr} `), ruleName);
 
   return rule;
 }

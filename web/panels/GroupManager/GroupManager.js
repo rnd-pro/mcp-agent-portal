@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './GroupManager.tpl.js';
-import cssShared from '../../common/ui-shared.css.js';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import cssLocal from './GroupManager.css.js';
 
 const PROVIDERS = ['codex', 'claude', 'opencode', 'gemini'];
@@ -12,21 +12,36 @@ const DEFAULT_MODELS = {
   gemini: ['default'],
 };
 
-function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, ch => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[ch]));
-}
-
 function cloneGroup(group) {
   return {
     ...group,
     profiles: Array.isArray(group.profiles) ? group.profiles.map(p => ({ ...p })) : [],
   };
+}
+
+function makeElement(tagName, className = '', text = '') {
+  let node = document.createElement(tagName);
+  if (className) node.className = className;
+  if (text !== '') node.textContent = text;
+  return node;
+}
+
+function makeEmptyState(message, isError = false) {
+  let node = makeElement('div', 'ui-empty-state', message);
+  if (isError) node.style.color = 'var(--sn-danger-color)';
+  return node;
+}
+
+function makeIcon(name) {
+  return makeElement('span', 'material-symbols-outlined', name);
+}
+
+function makeOption(value, selected = false) {
+  let option = document.createElement('option');
+  option.value = value;
+  option.textContent = value;
+  option.selected = selected;
+  return option;
 }
 
 export class GroupManager extends Symbiote {
@@ -49,7 +64,7 @@ export class GroupManager extends Symbiote {
 
   async loadGroups({ retry = true } = {}) {
     try {
-      this.ref.board.innerHTML = '<div class="ui-empty-state">Loading groups...</div>';
+      this.ref.board.replaceChildren(makeEmptyState('Loading groups...'));
       let [groups, modelsInfo] = await Promise.all([
         this._mcpCall('list_groups', { json: true }),
         fetch('/api/settings/models').then(res => res.json()).catch(() => ({ userModels: {} })),
@@ -65,7 +80,7 @@ export class GroupManager extends Symbiote {
       this.renderBoard();
     } catch (err) {
       console.error('Failed to load groups:', err);
-      this.ref.board.innerHTML = `<div class="ui-empty-state" style="color:var(--sn-danger-color)">Error: ${esc(err.message)}</div>`;
+      this.ref.board.replaceChildren(makeEmptyState(`Error: ${err.message}`, true));
     }
   }
 
@@ -79,11 +94,11 @@ export class GroupManager extends Symbiote {
   renderBoard() {
     let groups = this.$.groups || [];
     if (groups.length === 0) {
-      this.ref.board.innerHTML = '<div class="ui-empty-state">No groups found</div>';
+      this.ref.board.replaceChildren(makeEmptyState('No groups found'));
       return;
     }
 
-    this.ref.board.innerHTML = groups.map(group => this._renderColumn(group)).join('');
+    this.ref.board.replaceChildren(...groups.map(group => this._renderColumn(group)));
     this._bindBoard();
   }
 
@@ -95,74 +110,111 @@ export class GroupManager extends Symbiote {
     let provider = group.provider || 'codex';
     let models = this._modelsFor(provider);
 
-    return `
-      <section class="gm-column" data-group="${esc(group.name)}">
-        <header class="gm-column-head">
-          <div>
-            <h2>${esc(group.name)}</h2>
-            <div class="gm-meta">
-              <span>${esc(group.model_tier || 'resource group')}</span>
-              ${group.max_agents ? `<span>${esc(group.max_agents)} max</span>` : ''}
-              ${group.policy ? `<span>${esc(group.policy)}</span>` : ''}
-            </div>
-          </div>
-          <button class="ui-btn-icon gm-column-save" title="Save group" data-group="${esc(group.name)}">
-            <span class="material-symbols-outlined">save</span>
-          </button>
-        </header>
+    let column = makeElement('section', 'gm-column');
+    column.dataset.group = group.name;
 
-        <div class="gm-column-config">
-          <label>
-            <span>Rotation</span>
-            <select data-field="rotation_mode" data-group="${esc(group.name)}">
-              <option value="error_fallback" ${rotation === 'error_fallback' ? 'selected' : ''}>fallback on error</option>
-              <option value="round_robin" ${rotation === 'round_robin' ? 'selected' : ''}>task round robin</option>
-            </select>
-          </label>
-          <label>
-            <span>Max</span>
-            <input data-field="max_agents" data-group="${esc(group.name)}" type="number" min="1" value="${esc(group.max_agents || '')}" placeholder="unlimited">
-          </label>
-        </div>
+    let header = makeElement('header', 'gm-column-head');
+    let titleWrap = document.createElement('div');
+    let title = makeElement('h2', '', group.name);
+    let meta = makeElement('div', 'gm-meta');
+    meta.append(makeElement('span', '', group.model_tier || 'resource group'));
+    if (group.max_agents) meta.append(makeElement('span', '', `${group.max_agents} max`));
+    if (group.policy) meta.append(makeElement('span', '', group.policy));
+    titleWrap.replaceChildren(title, meta);
 
-        <div class="gm-profile-list" data-drop-group="${esc(group.name)}">
-          ${profiles.map((profile, index) => this._renderProfile(group, profile, index)).join('')}
-        </div>
+    let saveButton = makeElement('button', 'ui-btn-icon gm-column-save');
+    saveButton.title = 'Save group';
+    saveButton.dataset.group = group.name;
+    saveButton.replaceChildren(makeIcon('save'));
+    header.replaceChildren(titleWrap, saveButton);
 
-        <div class="gm-add-profile">
-          <select data-add-provider="${esc(group.name)}">
-            ${PROVIDERS.map(p => `<option value="${p}" ${p === provider ? 'selected' : ''}>${p}</option>`).join('')}
-          </select>
-          <select data-add-model="${esc(group.name)}">
-            ${models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
-          </select>
-          <button class="ui-btn-icon" title="Add profile" data-add-profile="${esc(group.name)}">
-            <span class="material-symbols-outlined">add</span>
-          </button>
-        </div>
-      </section>
-    `;
+    let config = makeElement('div', 'gm-column-config');
+    let rotationLabel = document.createElement('label');
+    let rotationText = makeElement('span', '', 'Rotation');
+    let rotationSelect = document.createElement('select');
+    rotationSelect.dataset.field = 'rotation_mode';
+    rotationSelect.dataset.group = group.name;
+    rotationSelect.replaceChildren(
+      makeOption('error_fallback', rotation === 'error_fallback'),
+      makeOption('round_robin', rotation === 'round_robin'),
+    );
+    rotationSelect.options[0].textContent = 'fallback on error';
+    rotationSelect.options[1].textContent = 'task round robin';
+    rotationLabel.replaceChildren(rotationText, rotationSelect);
+
+    let maxLabel = document.createElement('label');
+    let maxText = makeElement('span', '', 'Max');
+    let maxInput = document.createElement('input');
+    maxInput.dataset.field = 'max_agents';
+    maxInput.dataset.group = group.name;
+    maxInput.type = 'number';
+    maxInput.min = '1';
+    maxInput.value = group.max_agents || '';
+    maxInput.placeholder = 'unlimited';
+    maxLabel.replaceChildren(maxText, maxInput);
+    config.replaceChildren(rotationLabel, maxLabel);
+
+    let profileList = makeElement('div', 'gm-profile-list');
+    profileList.dataset.dropGroup = group.name;
+    profileList.replaceChildren(
+      ...profiles.map((profile, index) => this._renderProfile(group, profile, index)),
+    );
+
+    let addProfile = makeElement('div', 'gm-add-profile');
+    let providerSelect = document.createElement('select');
+    providerSelect.dataset.addProvider = group.name;
+    providerSelect.replaceChildren(...PROVIDERS.map(p => makeOption(p, p === provider)));
+
+    let modelSelect = document.createElement('select');
+    modelSelect.dataset.addModel = group.name;
+    modelSelect.replaceChildren(...models.map(m => makeOption(m)));
+
+    let addButton = makeElement('button', 'ui-btn-icon');
+    addButton.title = 'Add profile';
+    addButton.dataset.addProfile = group.name;
+    addButton.replaceChildren(makeIcon('add'));
+    addProfile.replaceChildren(providerSelect, modelSelect, addButton);
+
+    column.replaceChildren(header, config, profileList, addProfile);
+    return column;
   }
 
   _renderProfile(group, profile, index) {
     let provider = profile.provider || group.provider || 'codex';
     let model = profile.model || group.model || 'default';
-    return `
-      <article class="gm-profile ${profile.inherited ? 'inherited' : ''}" draggable="true" data-group="${esc(group.name)}" data-index="${index}">
-        <div class="gm-profile-icon">
-          <span class="material-symbols-outlined">${provider === 'claude' ? 'hub' : provider === 'opencode' ? 'route' : provider === 'gemini' ? 'auto_awesome' : 'terminal'}</span>
-        </div>
-        <div class="gm-profile-main">
-          <div class="gm-profile-provider">${esc(provider)}</div>
-          <div class="gm-profile-model" title="${esc(model)}">${esc(model)}</div>
-        </div>
-        ${profile.inherited ? '' : `
-          <button class="ui-btn-icon gm-profile-remove" title="Remove profile" data-remove-group="${esc(group.name)}" data-remove-index="${index}">
-            <span class="material-symbols-outlined">close</span>
-          </button>
-        `}
-      </article>
-    `;
+    let card = makeElement('article', `gm-profile ${profile.inherited ? 'inherited' : ''}`.trim());
+    card.draggable = true;
+    card.dataset.group = group.name;
+    card.dataset.index = String(index);
+
+    let iconName = provider === 'claude'
+      ? 'hub'
+      : provider === 'opencode'
+        ? 'route'
+        : provider === 'gemini'
+          ? 'auto_awesome'
+          : 'terminal';
+    let iconWrap = makeElement('div', 'gm-profile-icon');
+    iconWrap.replaceChildren(makeIcon(iconName));
+
+    let main = makeElement('div', 'gm-profile-main');
+    let providerNode = makeElement('div', 'gm-profile-provider', provider);
+    let modelNode = makeElement('div', 'gm-profile-model', model);
+    modelNode.title = model;
+    main.replaceChildren(providerNode, modelNode);
+
+    if (profile.inherited) {
+      card.replaceChildren(iconWrap, main);
+      return card;
+    }
+
+    let removeButton = makeElement('button', 'ui-btn-icon gm-profile-remove');
+    removeButton.title = 'Remove profile';
+    removeButton.dataset.removeGroup = group.name;
+    removeButton.dataset.removeIndex = String(index);
+    removeButton.replaceChildren(makeIcon('close'));
+    card.replaceChildren(iconWrap, main, removeButton);
+    return card;
   }
 
   _bindBoard() {
@@ -179,7 +231,7 @@ export class GroupManager extends Symbiote {
       providerEl.onchange = () => {
         let modelEl = this.ref.board.querySelector(`[data-add-model="${CSS.escape(providerEl.dataset.addProvider)}"]`);
         if (!modelEl) return;
-        modelEl.innerHTML = this._modelsFor(providerEl.value).map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+        modelEl.replaceChildren(...this._modelsFor(providerEl.value).map(m => makeOption(m)));
       };
     });
 

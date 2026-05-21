@@ -1,11 +1,39 @@
 import { Symbiote } from "@symbiotejs/symbiote";
-import cssShared from "../../common/ui-shared.css.js";
+import { sharedUiStyles as cssShared } from "symbiote-node/ui";
 import cssLocal from "./SettingsPanel.css.js";
 import template from "./SettingsPanel.tpl.js";
-import { uiConfirm } from '../../common/ui-dialogs.js';
+import { uiConfirm } from 'symbiote-node/ui';
 
 function renderMetric(label, value, extraClass = "") {
-  return `<div class="pg-stg-metric"><span>${label}</span><span class="pg-stg-val ${extraClass}">${value}</span></div>`;
+  let metric = document.createElement("div");
+  metric.className = "pg-stg-metric";
+
+  let labelEl = document.createElement("span");
+  labelEl.textContent = String(label);
+
+  let valueEl = document.createElement("span");
+  valueEl.className = `pg-stg-val ${extraClass}`.trim();
+  valueEl.textContent = String(value);
+
+  metric.append(labelEl, valueEl);
+  return metric;
+}
+
+function renderEmptyState(message, color = "") {
+  let state = document.createElement("div");
+  state.className = "ui-empty-state";
+  state.textContent = message;
+  if (color) state.style.color = color;
+  return state;
+}
+
+function renderIconTextButton(button, icon, label, options = {}) {
+  let iconEl = document.createElement("span");
+  iconEl.className = "material-symbols-outlined";
+  iconEl.textContent = icon;
+  if (options.animation) iconEl.style.animation = options.animation;
+  if (options.fontSize) iconEl.style.fontSize = options.fontSize;
+  button.replaceChildren(iconEl, document.createTextNode(` ${label}`));
 }
 
 function _fmtTime(s) {
@@ -249,7 +277,9 @@ export class SettingsPanel extends Symbiote {
   }
 
   async fetchInfo() {
-    this.ref.backendCard.innerHTML = '<div class="ui-empty-state pg-stg-pulse">Loading…</div>';
+    let loading = renderEmptyState("Loading…");
+    loading.classList.add("pg-stg-pulse");
+    this.ref.backendCard.replaceChildren(loading);
     try {
       let [info, instances, modelsInfo] = await Promise.all([
         fetch("/api/project-info").then((res) => res.json()),
@@ -261,36 +291,38 @@ export class SettingsPanel extends Symbiote {
       this._cliModels = modelsInfo.cliModels || [];
       this._renderProviderTabs();
       
-      this.ref.backendCard.innerHTML = [
+      this.ref.backendCard.replaceChildren(
         renderMetric("Status", "Running", "pg-stg-ok"),
         renderMetric("Project", info.name || "—"),
         renderMetric("Path", info.path || "—"),
         renderMetric("PID", info.pid || "—"),
         renderMetric("Connected Agents", info.agents ?? "—"),
-      ].join("");
+      );
 
       let n = this.ref.instanceList;
-      n.innerHTML = "";
+      n.replaceChildren();
       if (Array.isArray(instances) && instances.length > 0) {
         for (let inst of instances) {
           let uptimeStr = inst.startedAt ? Math.round((Date.now() - inst.startedAt) / 60000) : "?";
           let s = document.createElement("div");
           s.className = "ui-card";
-          s.innerHTML = [
+          s.replaceChildren(
             renderMetric("Name", inst.name || "unknown"),
             renderMetric("Path", inst.project || "—"),
             renderMetric("PID", inst.pid),
             renderMetric("Port", inst.port),
             renderMetric("Uptime", `${uptimeStr} min`),
-          ].join("");
+          );
           n.appendChild(s);
         }
       } else {
-        n.innerHTML = '<div class="ui-empty-state">No active instances</div>';
+        n.replaceChildren(renderEmptyState("No active instances"));
       }
     } catch (t) {
       console.error("[SettingsPanel] fetch error:", t);
-      this.ref.backendCard.innerHTML = `<div class="ui-empty-state" style="color:var(--sn-danger-color)">Error: ${t.message}</div>`;
+      this.ref.backendCard.replaceChildren(
+        renderEmptyState(`Error: ${t.message}`, "var(--sn-danger-color)"),
+      );
     }
   }
 
@@ -313,10 +345,15 @@ export class SettingsPanel extends Symbiote {
   _renderProviderTabs() {
     let providers = ['opencode', 'gemini', 'claude', 'codex'];
     if (!providers.includes(this._activeProvider)) this._activeProvider = providers[0];
-    
-    this.ref.providerTabs.innerHTML = providers.map(p => 
-      `<button class="pm-provider-tab ${p === this._activeProvider ? 'active' : ''}" data-p="${p}">${p}</button>`
-    ).join('');
+
+    let buttons = providers.map(p => {
+      let button = document.createElement('button');
+      button.className = `pm-provider-tab ${p === this._activeProvider ? 'active' : ''}`.trim();
+      button.dataset.p = p;
+      button.textContent = p;
+      return button;
+    });
+    this.ref.providerTabs.replaceChildren(...buttons);
     
     this.ref.providerTabs.querySelectorAll('.pm-provider-tab').forEach(b => {
       b.onclick = () => {
@@ -339,21 +376,46 @@ export class SettingsPanel extends Symbiote {
 
   _renderModelList() {
     let models = this._userModels[this._activeProvider] || [];
-    let gatewaySuggestions = this._activeProvider === 'claude' && this._settings?.anthropicGateway?.enabled
-      ? `<div class="pm-model-suggestions">
-           <span>Gateway models:</span>
-           ${DEFAULT_GATEWAY.providers.deepseek.models.map(m => `deepseek/${m}`).map(m => `<button class="pm-suggest-model" data-m="${m}">${m}</button>`).join('')}
-         </div>`
-      : '';
-    if (models.length === 0) {
-      this.ref.modelList.innerHTML = `${gatewaySuggestions}<div class="ui-empty-state" style="padding:4px">No custom models. Showing defaults.</div>`;
-    } else {
-      this.ref.modelList.innerHTML = gatewaySuggestions + models.map(m =>
-        `<div class="pm-model-chip">
-           ${m} <span class="remove" data-m="${m}">×</span>
-         </div>`
-      ).join('');
+    let children = [];
+    let showGatewaySuggestions = this._activeProvider === 'claude'
+      && this._settings?.anthropicGateway?.enabled;
+    if (showGatewaySuggestions) {
+      let suggestions = document.createElement('div');
+      suggestions.className = 'pm-model-suggestions';
+      let label = document.createElement('span');
+      label.textContent = 'Gateway models:';
+      suggestions.append(label);
+      for (let defaultModel of DEFAULT_GATEWAY.providers.deepseek.models) {
+        let model = `deepseek/${defaultModel}`;
+        let button = document.createElement('button');
+        button.className = 'pm-suggest-model';
+        button.dataset.m = model;
+        button.textContent = model;
+        suggestions.append(button);
+      }
+      children.push(suggestions);
     }
+
+    if (models.length === 0) {
+      let state = renderEmptyState('No custom models. Showing defaults.');
+      state.style.padding = '4px';
+      children.push(state);
+    } else {
+      for (let model of models) {
+        let chip = document.createElement('div');
+        chip.className = 'pm-model-chip';
+        chip.append(document.createTextNode(`${model} `));
+
+        let remove = document.createElement('span');
+        remove.className = 'remove';
+        remove.dataset.m = model;
+        remove.textContent = '×';
+        chip.append(remove);
+        children.push(chip);
+      }
+    }
+    this.ref.modelList.replaceChildren(...children);
+
     this.ref.modelList.querySelectorAll('.pm-suggest-model').forEach(btn => {
       btn.onclick = () => {
         if (!this._userModels[this._activeProvider]) this._userModels[this._activeProvider] = [];
@@ -378,7 +440,9 @@ export class SettingsPanel extends Symbiote {
 
   _renderDirectory() {
     if (!this._cliModels || this._cliModels.length === 0) {
-      this.ref.directoryList.innerHTML = `<div class="ui-empty-state">No models discovered. Click 'Discover & Update'.</div>`;
+      this.ref.directoryList.replaceChildren(
+        renderEmptyState("No models discovered. Click 'Discover & Update'."),
+      );
       return;
     }
     
@@ -448,7 +512,7 @@ export class SettingsPanel extends Symbiote {
       return (a.name || a.id).localeCompare(b.name || b.id);
     });
     
-    this.ref.directoryList.innerHTML = items.map(m => {
+    let rows = items.map(m => {
       let isFav = favs.includes(m.id);
       let ctx = m.context ? `${Math.round(m.context / 1000)}k` : '—';
       let pp = m.pricePrompt ? `$${m.pricePrompt}` : '—';
@@ -460,31 +524,66 @@ export class SettingsPanel extends Symbiote {
         dateStr = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       }
       
-      if (m.isFree) {
-        pp = `<span class="pm-price-free">FREE</span>`;
-        pc = '';
-      }
-      
+      let row = document.createElement('div');
+      row.className = 'pm-grid-row';
+
+      let star = document.createElement('div');
+      star.className = `pm-col-star ${isFav ? 'active' : ''}`.trim();
+      star.dataset.id = m.id;
+      star.textContent = isFav ? '★' : '☆';
+
+      let nameCol = document.createElement('div');
+      nameCol.className = 'pm-col-name';
+      nameCol.title = m.name || m.id;
+
+      let name = document.createElement('div');
+      name.className = 'pm-model-name';
+      name.textContent = m.name || m.id;
+
+      let id = document.createElement('div');
+      id.className = 'pm-model-id';
+      id.textContent = m.id;
+
+      nameCol.append(name, id);
+
       let tags = [];
-      if (m.isVision) tags.push('<span class="pm-tag"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">visibility</span> Vision</span>');
-      if (m.isTools) tags.push('<span class="pm-tag"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">build</span> Tools</span>');
-      if (m.maxOutput) tags.push(`<span class="pm-tag"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:2px">timer</span> ${Math.round(m.maxOutput / 1000)}k Out</span>`);
-      
-      return `
-        <div class="pm-grid-row">
-          <div class="pm-col-star ${isFav ? 'active' : ''}" data-id="${m.id}">${isFav ? '★' : '☆'}</div>
-          <div class="pm-col-name" title="${m.name || m.id}">
-            <div class="pm-model-name">${m.name || m.id}</div>
-            <div class="pm-model-id">${m.id}</div>
-            ${tags.length > 0 ? `<div class="pm-tags">${tags.join('')}</div>` : ''}
-          </div>
-          <div class="pm-col-ctx">${ctx}</div>
-          <div class="pm-col-ctx">${dateStr}</div>
-          <div class="pm-col-price">${pp}</div>
-          <div class="pm-col-price">${pc}</div>
-        </div>
-      `;
-    }).join('');
+      if (m.isVision) tags.push(this._modelTag('visibility', 'Vision'));
+      if (m.isTools) tags.push(this._modelTag('build', 'Tools'));
+      if (m.maxOutput) tags.push(this._modelTag('timer', `${Math.round(m.maxOutput / 1000)}k Out`));
+      if (tags.length > 0) {
+        let tagsEl = document.createElement('div');
+        tagsEl.className = 'pm-tags';
+        tagsEl.append(...tags);
+        nameCol.append(tagsEl);
+      }
+
+      let ctxCol = document.createElement('div');
+      ctxCol.className = 'pm-col-ctx';
+      ctxCol.textContent = ctx;
+
+      let dateCol = document.createElement('div');
+      dateCol.className = 'pm-col-ctx';
+      dateCol.textContent = dateStr;
+
+      let promptPrice = document.createElement('div');
+      promptPrice.className = 'pm-col-price';
+      if (m.isFree) {
+        let free = document.createElement('span');
+        free.className = 'pm-price-free';
+        free.textContent = 'FREE';
+        promptPrice.append(free);
+      } else {
+        promptPrice.textContent = pp;
+      }
+
+      let completionPrice = document.createElement('div');
+      completionPrice.className = 'pm-col-price';
+      completionPrice.textContent = m.isFree ? '' : pc;
+
+      row.append(star, nameCol, ctxCol, dateCol, promptPrice, completionPrice);
+      return row;
+    });
+    this.ref.directoryList.replaceChildren(...rows);
     
     this.ref.directoryList.querySelectorAll('.pm-col-star').forEach(star => {
       star.onclick = () => {
@@ -504,6 +603,21 @@ export class SettingsPanel extends Symbiote {
     });
   }
 
+  _modelTag(icon, label) {
+    let tag = document.createElement('span');
+    tag.className = 'pm-tag';
+
+    let iconEl = document.createElement('span');
+    iconEl.className = 'material-symbols-outlined';
+    iconEl.style.fontSize = '12px';
+    iconEl.style.verticalAlign = 'middle';
+    iconEl.style.marginRight = '2px';
+    iconEl.textContent = icon;
+
+    tag.append(iconEl, document.createTextNode(` ${label}`));
+    return tag;
+  }
+
   async _saveProviderModels() {
     this._setStatus("Saving...", "var(--sn-text-dim)");
     try {
@@ -520,7 +634,10 @@ export class SettingsPanel extends Symbiote {
 
   async _syncFromCli() {
     let btn = this.ref.syncCliBtn;
-    btn.innerHTML = `<span class="material-symbols-outlined" style="animation:spin 1s linear infinite;font-size:14px">sync</span> Discovering...`;
+    renderIconTextButton(btn, "sync", "Discovering...", {
+      animation: "spin 1s linear infinite",
+      fontSize: "14px",
+    });
     btn.disabled = true;
     try {
       let r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
@@ -530,7 +647,7 @@ export class SettingsPanel extends Symbiote {
     } catch (e) {
       this._setStatus(`Sync failed: ${e.message}`, "var(--sn-danger-color)");
     } finally {
-      btn.innerHTML = `⟳ Discover & Update`;
+      btn.textContent = "⟳ Discover & Update";
       btn.disabled = false;
     }
   }

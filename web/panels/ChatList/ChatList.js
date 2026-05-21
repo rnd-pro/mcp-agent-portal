@@ -1,6 +1,6 @@
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import { ChatList as BaseChatList, setGlobalParam } from 'symbiote-node/ui';
-import { uiConfirm } from '../../common/ui-dialogs.js';
+import { uiConfirm } from 'symbiote-node/ui';
 
 export class ChatList extends BaseChatList {
   renderCallback() {

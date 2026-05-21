@@ -1,7 +1,7 @@
 /* Project Graph Web UI — Carbon Theme Styles */
 
 /* 
- * Design tokens come from symbiote-node CARBON theme via applyTheme().
+ * Design tokens come from the symbiote-node default Agent Portal theme via applyTheme().
  * Layout tokens (--bg-*, --text-*) are bridged from --sn-* tokens automatically.
  * Layout structure mirrors admin-panel: topbar + sidebar + content.
  */

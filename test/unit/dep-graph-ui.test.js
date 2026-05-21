@@ -12,6 +12,101 @@ import {
   shouldClearFocusOnSelection,
   shouldFitForceLayoutInitialTick,
 } from '../../web/panels/dep-graph-ui.js';
+import {
+  mountDepGraphTemplate,
+  renderClusterPanel,
+  renderGraphStats,
+} from '../../web/panels/dep-graph-dom.js';
+
+function createElement(tagName) {
+  return {
+    tagName,
+    children: [],
+    className: '',
+    hidden: false,
+    style: {},
+    textContent: '',
+    title: '',
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren(...items) {
+      this.children = items;
+    },
+    setAttribute(name, value) {
+      this[name] = value;
+    },
+    toggleAttribute(name, value) {
+      this[name] = Boolean(value);
+    },
+  };
+}
+
+const testDocument = {
+  createElement,
+  createRange() {
+    return {
+      createContextualFragment(template) {
+        return { template };
+      },
+    };
+  },
+};
+
+test('mountDepGraphTemplate replaces host content with parsed template fragment', () => {
+  const host = createElement('host');
+  mountDepGraphTemplate(host, '<node-canvas></node-canvas>', testDocument);
+
+  assert.deepEqual(host.children, [{ template: '<node-canvas></node-canvas>' }]);
+});
+
+test('renderClusterPanel hides unavailable flat legend and clears rows', () => {
+  const panel = createElement('div');
+  const toggle = createElement('button');
+
+  renderClusterPanel({
+    panel,
+    toggle,
+    clusters: [{ label: 'Core', paths: ['src/a.js'], color: 'red' }],
+    viewMode: 'structured',
+    isOpen: true,
+    doc: testDocument,
+  });
+
+  assert.equal(panel.hidden, true);
+  assert.deepEqual(panel.children, []);
+  assert.equal(toggle.hidden, true);
+});
+
+test('renderClusterPanel renders safe semantic rows', () => {
+  const panel = createElement('div');
+  const toggle = createElement('button');
+
+  renderClusterPanel({
+    panel,
+    toggle,
+    clusters: [{ label: '<Core>', paths: ['src/a.js', 'src/b.js'], color: 'red' }],
+    viewMode: 'flat',
+    isOpen: true,
+    doc: testDocument,
+  });
+
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.children.length, 1);
+  assert.equal(panel.children[0].className, 'pcb-cluster-row');
+  assert.equal(panel.children[0].children[1].textContent, '<Core>');
+  assert.equal(toggle['data-active'], true);
+});
+
+test('renderGraphStats renders value/label pairs without HTML strings', () => {
+  const stats = createElement('div');
+  renderGraphStats(stats, [[3, 'files'], [2, 'edges']], testDocument);
+
+  assert.equal(stats.children.length, 2);
+  assert.equal(stats.children[0].children[0].className, 'graph-explorer-stat-val');
+  assert.equal(stats.children[0].children[0].textContent, '3');
+  assert.equal(stats.children[0].children[1], ' files');
+});
 
 test('buildFlatPathHash preserves query params for nested paths', () => {
   const params = new URLSearchParams('mode=flat&focus=src/app.js&style=pcb');

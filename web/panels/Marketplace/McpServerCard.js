@@ -1,4 +1,5 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
+import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 const css = `
 :host {
@@ -6,24 +7,11 @@ const css = `
 }
 
 .ui-card {
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
-  padding: 14px;
-  margin-bottom: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   height: calc(100% - 12px);
   box-sizing: border-box;
-}
-
-.ui-card-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--sn-text-dim);
 }
 
 .mp-card-header {
@@ -160,7 +148,7 @@ McpServerCard.template = html`
 </div>
 `;
 
-McpServerCard.rootStyles = css;
+McpServerCard.rootStyles = cssShared + css;
 McpServerCard.reg('mp-server-card');
 
 export default McpServerCard;

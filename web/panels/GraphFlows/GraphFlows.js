@@ -5,14 +5,41 @@ import { normalizeProjectGraphMetadata } from '../../services/project-graph-meta
 import template from './GraphFlows.tpl.js';
 import css from './GraphFlows.css.js';
 
-function escapeHtml(value) {
-  return String(value || '').replace(/[&<>"']/g, (ch) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[ch]));
+function makeMessage(className, message) {
+  let node = document.createElement('div');
+  node.className = className;
+  node.textContent = message;
+  return node;
+}
+
+function makeStoryButton(story, index, isActive) {
+  let button = document.createElement('button');
+  button.className = 'flows-story';
+  button.dataset.storyIndex = String(index);
+  if (isActive) button.dataset.active = '';
+
+  let title = document.createElement('span');
+  title.className = 'flows-story-title';
+  title.textContent = story.label;
+
+  let desc = document.createElement('span');
+  desc.className = 'flows-story-desc';
+  desc.textContent = story.description;
+
+  let count = document.createElement('span');
+  count.className = 'flows-story-count';
+  count.textContent = `${story.beats.length} beats`;
+
+  button.replaceChildren(title, desc, count);
+  return button;
+}
+
+function makeTag(tag) {
+  let node = document.createElement('span');
+  node.className = 'flows-tag';
+  node.title = tag;
+  node.textContent = tag;
+  return node;
 }
 
 export class GraphFlows extends Symbiote {
@@ -30,7 +57,7 @@ export class GraphFlows extends Symbiote {
 
   async loadStories() {
     try {
-      this.ref.storyList.innerHTML = '<div class="flows-empty">Loading flows...</div>';
+      this.ref.storyList.replaceChildren(makeMessage('flows-empty', 'Loading flows...'));
       let url = `/api/project-graph-metadata?projectPath=${encodeURIComponent(resolveProjectPath('.'))}`;
       let res = await fetch(url);
       if (!res.ok) throw new Error(`metadata load failed: ${res.status}`);
@@ -46,7 +73,7 @@ export class GraphFlows extends Symbiote {
       this.$.stories = [];
       this._activeStoryIndex = -1;
       this._activeBeatIndex = 0;
-      this.ref.storyList.innerHTML = `<div class="flows-error">${escapeHtml(err.message)}</div>`;
+      this.ref.storyList.replaceChildren(makeMessage('flows-error', err.message));
       this.ref.beatPanel.hidden = true;
     }
   }
@@ -54,18 +81,17 @@ export class GraphFlows extends Symbiote {
   _renderStories() {
     let stories = this.$.stories || [];
     if (stories.length === 0) {
-      this.ref.storyList.innerHTML = '<div class="flows-empty">No graph stories in .portal/project-graph.json</div>';
+      this.ref.storyList.replaceChildren(
+        makeMessage('flows-empty', 'No graph stories in .portal/project-graph.json'),
+      );
       this.ref.beatPanel.hidden = true;
       return;
     }
 
-    this.ref.storyList.innerHTML = stories.map((story, index) => `
-      <button class="flows-story" data-story-index="${index}" ${index === this._activeStoryIndex ? 'data-active' : ''}>
-        <span class="flows-story-title">${escapeHtml(story.label)}</span>
-        <span class="flows-story-desc">${escapeHtml(story.description)}</span>
-        <span class="flows-story-count">${story.beats.length} beats</span>
-      </button>
-    `).join('');
+    let storyButtons = stories.map((story, index) => (
+      makeStoryButton(story, index, index === this._activeStoryIndex)
+    ));
+    this.ref.storyList.replaceChildren(...storyButtons);
 
     this.ref.storyList.querySelectorAll('.flows-story').forEach((button) => {
       button.onclick = () => {
@@ -103,9 +129,7 @@ export class GraphFlows extends Symbiote {
       beat.focusPath || '',
       ...beat.nodes,
     ].filter(Boolean);
-    this.ref.beatTags.innerHTML = tags.map((tag) => (
-      `<span class="flows-tag" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`
-    )).join('');
+    this.ref.beatTags.replaceChildren(...tags.map((tag) => makeTag(tag)));
   }
 
   _moveBeat(delta) {

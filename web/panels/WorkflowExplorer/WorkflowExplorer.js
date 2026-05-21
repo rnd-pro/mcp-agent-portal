@@ -2,8 +2,8 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './WorkflowExplorer.tpl.js';
 import css from './WorkflowExplorer.css.js';
-import sharedCss from '../../common/ui-shared.css.js';
-import '../../components/CodeBlock/CodeBlock.js';
+import { sharedUiStyles as sharedCss } from 'symbiote-node/ui';
+import 'symbiote-node/ui';
 import './WorkflowItem.js';
 import './WorkflowStep.js';
 
@@ -19,8 +19,10 @@ export class WorkflowExplorer extends Symbiote {
     hasSteps: false,
     loadingStep: null,
     onWorkflowSelect: (e) => {
-      let workflowItem = e.currentTarget.getRootNode().host;
-      let workflow = this._workflows.find(w => w.name === workflowItem.$.name);
+      let workflowName = e.detail?.name
+        || e.detail?.item?.name
+        || e.currentTarget?.getRootNode?.().host?.$.name;
+      let workflow = this._workflows.find(w => w.name === workflowName);
       if (!workflow) return;
 
       this.$.selectedWorkflowId = workflow.name;
@@ -48,6 +50,7 @@ export class WorkflowExplorer extends Symbiote {
   _workflows = [];
 
   initCallback() {
+    this.addEventListener('workflow-item-select', this.$.onWorkflowSelect);
     this.ref.refreshBtn.onclick = () => this.loadWorkflows();
     this.loadWorkflows();
   }
@@ -122,24 +125,32 @@ export class WorkflowExplorer extends Symbiote {
   async loadStepContent(stepEl) {
     let containerElement = stepEl.ref.markdownContainer;
     let nodeId = stepEl.$.id;
-    containerElement.innerHTML = '<div class="ui-empty-state">Fetching markdown content...</div>';
+    containerElement.replaceChildren(this.createEmptyState('Fetching markdown content...'));
     try {
       let data = await this._mcpCall('get_workflow_content', { nodeId });
       let md = data;
       if (typeof data !== 'string') {
         md = data?.content || JSON.stringify(data, null, 2);
       }
-      
-      // We can use the existing <code-block> component in markdown mode
-      containerElement.innerHTML = '<code-block mode-markdown></code-block>';
-      let codeBlock = containerElement.querySelector('code-block');
-      // Wait for element upgrade
+
+      let codeBlock = document.createElement('code-block');
+      codeBlock.setAttribute('mode-markdown', '');
+      containerElement.replaceChildren(codeBlock);
       customElements.whenDefined('code-block').then(() => {
         codeBlock.setContent(md, 'markdown');
       });
     } catch (err) {
-      containerElement.innerHTML = `<div class="ui-empty-state" style="color:#f87171">Failed to load content: ${err.message}</div>`;
+      let errorElement = this.createEmptyState(`Failed to load content: ${err.message}`);
+      errorElement.style.color = '#f87171';
+      containerElement.replaceChildren(errorElement);
     }
+  }
+
+  createEmptyState(text) {
+    let emptyState = document.createElement('div');
+    emptyState.className = 'ui-empty-state';
+    emptyState.textContent = text;
+    return emptyState;
   }
 }
 

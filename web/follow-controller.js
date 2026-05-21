@@ -156,6 +156,8 @@ class FollowController {
    * Map panel type to hash section.
    * In follow mode, graph/code/analysis all live under the 'follow' section
    * but we can use the hash to give routing hints.
+   * @param {string} panel
+   * @returns {string}
    */
   _panelToHash(panel) {
     // All panels are within the 'follow' layout, no need to switch section
@@ -265,6 +267,8 @@ class FollowController {
    * Extract short tool name from full prefixed name.
    * 'default_api:view_file' → 'view_file'
    * 'mcp_project-graph_navigate' → 'navigate'
+   * @param {string} full
+   * @returns {string}
    */
   _shortName(full) {
     // Strip 'default_api:' prefix

@@ -1,4 +1,6 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
+import 'symbiote-node/ui';
+import { bindListItemSelect, syncListItem } from 'symbiote-node/ui';
 
 export class WorkflowItem extends Symbiote {
   init$ = {
@@ -8,57 +10,48 @@ export class WorkflowItem extends Symbiote {
   };
 
   renderCallback() {
-    this.sub('isActive', (val) => {
-      this.toggleAttribute('active', Boolean(val));
+    this.#syncListItem();
+    this.sub('name', () => this.#syncListItem());
+    this.sub('stepCountText', () => this.#syncListItem());
+    this.sub('isActive', () => this.#syncListItem());
+  }
+
+  #syncListItem() {
+    let listItem = syncListItem(this, {
+      label: this.$.name,
+      description: this.$.stepCountText,
+      active: this.$.isActive,
+      name: this.$.name,
+      stepCountText: this.$.stepCountText,
+    }, {
+      active: this.$.isActive,
     });
+    if (listItem) {
+      bindListItemSelect(this, 'workflow-item-select', (event) => ({
+        item: event.detail?.item || null,
+        name: this.$.name,
+      }));
+    }
   }
 }
 
 WorkflowItem.template = html`
-<div class="ui-item" ${{ onclick: '^onWorkflowSelect' }}>
-  <div class="ui-item-title" ${{ textContent: 'name' }}></div>
-  <div class="ui-item-desc" ${{ textContent: 'stepCountText' }}></div>
-</div>
+<sn-list-item ref="listItem"></sn-list-item>
 `;
 
 WorkflowItem.rootStyles = `
 :host {
   display: block;
-  color: var(--sn-text);
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
 }
-.ui-item {
-  padding: 10px 14px;
-  background: transparent;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-bottom: 1px solid var(--sn-node-hover);
-  transition: background 0.15s;
+sn-list-item {
+  --sn-list-item-radius: 0;
+  --sn-list-item-padding: 10px 14px;
+  --sn-list-item-label-size: 13px;
+  --sn-list-item-description-size: 11px;
 }
-.ui-item:hover {
-  background: var(--sn-node-hover);
-}
-:host([active]) .ui-item {
-  background: var(--sn-node-bg);
-  border-left: 3px solid var(--sn-node-selected);
-  padding-left: 11px;
-}
-.ui-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--sn-text);
-}
-:host([active]) .ui-item-title {
-  color: var(--sn-node-selected);
-}
-.ui-item-desc {
-  font-size: 11px;
-  color: var(--sn-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+:host([active]) sn-list-item {
+  --sn-list-item-label-color: var(--sn-node-selected);
+  --sn-list-item-padding: 10px 14px 10px 11px;
 }
 `;
 

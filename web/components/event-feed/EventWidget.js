@@ -1,4 +1,5 @@
 import Symbiote from "@symbiotejs/symbiote";
+import { OutputGraphPreview, OutputListPreview } from "symbiote-node/ui";
 
 export class EventWidget extends Symbiote {
   init$ = {
@@ -9,7 +10,9 @@ export class EventWidget extends Symbiote {
     timeStr: '',
     duration: '',
     success: true,
-    widgetHTML: '',
+    mode: 'empty',
+    errorText: '',
+    rawOutput: '',
   };
 
   renderCallback() {
@@ -39,37 +42,78 @@ export class EventWidget extends Symbiote {
 
   _renderWidget(ev) {
     if (ev.type === 'tool_call') {
-      this.$.widgetHTML = ''; 
+      this.$.mode = 'empty';
       return;
     }
 
     const { tool, output, success } = ev;
     if (!success || !output) {
-      this.$.widgetHTML = `<div class="error-msg">${this._esc(output || 'Error')}</div>`;
+      this.set$({
+        mode: 'error',
+        errorText: output || 'Error',
+      });
       return;
     }
 
-    let data;
-    try {
-      data = JSON.parse(output);
-    } catch {
-      data = output;
-    }
+    let data = this._parseOutput(output);
 
     if (tool === 'default_api:view_file' || tool === 'default_api:replace_file_content' || tool === 'default_api:multi_replace_file_content' || tool === 'default_api:write_to_file') {
-       this.$.widgetHTML = `<pg-code-widget source='${this._esc(output)}'></pg-code-widget>`;
+      this.$.mode = 'code';
+      this.ref.codeWidget?.setAttribute('source', output);
     } else if (tool === 'default_api:mcp_project-graph_navigate' || tool === 'default_api:mcp_project-graph_get_skeleton') {
-       this.$.widgetHTML = `<pg-mini-graph data='${this._esc(JSON.stringify(data))}'></pg-mini-graph>`;
+      this.$.mode = 'graph';
+      let preview = this.ref.graphPreview;
+      if (preview instanceof OutputGraphPreview || preview?.setValue) {
+        preview.$.title = 'Graph output';
+        preview.setValue(this._toPreviewGraph(data));
+      }
     } else if (tool === 'default_api:list_dir' || tool === 'default_api:grep_search') {
-       this.$.widgetHTML = `<pg-list-widget data='${this._esc(output)}'></pg-list-widget>`;
+      this.$.mode = 'list';
+      let preview = this.ref.listPreview;
+      if (preview instanceof OutputListPreview || preview?.setValue) {
+        preview.$.title = 'List output';
+        preview.setValue(data);
+      }
     } else {
-       this.$.widgetHTML = `<pre class="raw-output">${this._esc(output).substring(0, 500)}${output.length > 500 ? '...' : ''}</pre>`;
+      this.set$({
+        mode: 'raw',
+        rawOutput: `${output.substring(0, 500)}${output.length > 500 ? '...' : ''}`,
+      });
     }
   }
 
-  _esc(s) {
-    if (typeof s !== 'string') return '';
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+  _parseOutput(output) {
+    try {
+      return JSON.parse(output);
+    } catch {
+      return output;
+    }
+  }
+
+  _toPreviewGraph(data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+    if (Array.isArray(data.nodes)) return data;
+
+    let nodeMap = data.n && typeof data.n === 'object' ? data.n : {};
+    let nodes = Object.entries(nodeMap).map(([id, node]) => ({
+      id,
+      label: node?.label || node?.name || node?.title || id,
+      kind: node?.kind || node?.type || 'node',
+      description: node?.description || node?.summary || '',
+    }));
+
+    let edges = Array.isArray(data.e) ? data.e.map((edge, index) => ({
+      id: edge.id || `edge-${index + 1}`,
+      source: edge.source || edge.from || edge.a || '',
+      target: edge.target || edge.to || edge.b || '',
+      label: edge.label || edge.name || '',
+      kind: edge.kind || edge.type || 'edge',
+    })) : [];
+
+    return {
+      nodes,
+      edges,
+    };
   }
 
   _formatTime(ts) {
@@ -89,7 +133,11 @@ EventWidget.template = `
     <span class="pg-mon-args" \${{ textContent: 'argsJSON' }}></span>
   </div>
   <div class="event-body result-body" \${{ hidden: 'isCall' }}>
-    <div bind="innerHTML: widgetHTML"></div>
+    <div class="error-msg" \${{ hidden: 'mode !== "error"', textContent: 'errorText' }}></div>
+    <pg-code-widget ref="codeWidget" \${{ hidden: 'mode !== "code"' }}></pg-code-widget>
+    <output-graph-preview ref="graphPreview" \${{ hidden: 'mode !== "graph"' }}></output-graph-preview>
+    <output-list-preview ref="listPreview" \${{ hidden: 'mode !== "list"' }}></output-list-preview>
+    <pre class="raw-output" \${{ hidden: 'mode !== "raw"', textContent: 'rawOutput' }}></pre>
   </div>
 </div>
 `;
