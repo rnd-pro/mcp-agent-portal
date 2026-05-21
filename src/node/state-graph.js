@@ -587,7 +587,10 @@ export class StateGraph extends EventEmitter {
     this._chatCache.set(chatId, this._cloneChat(chat));
     this._chatFileQueue = this._chatFileQueue.then(async () => {
       await fsp.mkdir(this._chatsDir, { recursive: true });
-      await fsp.writeFile(path.join(this._chatsDir, `${chatId}.json`), JSON.stringify(chat, null, 2));
+      let filePath = path.join(this._chatsDir, `${chatId}.json`);
+      let tmpPath = path.join(this._chatsDir, `.${chatId}.${process.pid}.${Date.now()}.tmp`);
+      await fsp.writeFile(tmpPath, JSON.stringify(chat, null, 2));
+      await fsp.rename(tmpPath, filePath);
     }).catch((err) => {
       console.warn(`[StateGraph] Failed to write chat file ${chatId}:`, err.message);
     });

@@ -135,18 +135,10 @@ export class TaskRouter {
         return;
       }
 
-      let method = type === 'done' ? 'chat.done' : 'chat.error';
-      if (chatId) chatWsServer.taskChatMap.delete(taskId);
-
-      // IMMEDIATELY notify WS clients — terminal signal only, no data
-      if (chatWsServer) {
-        chatWsServer.broadcastTaskEvent(taskId, method, { taskId, chatId });
-      }
-
       // Clean up streaming state
       this._streamState.delete(taskId);
 
-      // Then fetch + persist the rich parsed result in background
+      let method = type === 'done' ? 'chat.done' : 'chat.error';
       fetchTaskResult(this.mcpProxy, taskId).then(result => {
         let text = result.content?.[0]?.text ?? '';
         let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
@@ -156,10 +148,21 @@ export class TaskRouter {
           this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
           getStateGraph().updateChatTask(chatId, null);
         }
+        if (chatWsServer) {
+          chatWsServer.broadcastTaskEvent(taskId, method, { taskId, chatId });
+        }
       }).catch(err => {
         console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
         if (chatId) getStateGraph().updateChatTask(chatId, null);
+        if (chatWsServer) {
+          chatWsServer.broadcastTaskEvent(taskId, 'chat.error', {
+            taskId,
+            chatId,
+            error: 'Failed to fetch final task result',
+          });
+        }
       }).finally(() => {
+        if (chatId) chatWsServer.taskChatMap.delete(taskId);
         if (chatWsServer) chatWsServer.unsubscribe(taskId);
       });
     } else {

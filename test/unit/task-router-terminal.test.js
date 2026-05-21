@@ -34,4 +34,20 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.doesNotMatch(source, /data\.output \|\| data\.status/);
     assert.doesNotMatch(source, /tRes\.output \|\| tRes\.status/);
   });
+
+  it('broadcasts live terminal events after final result persistence', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+    let terminalBranch = source.slice(
+      source.indexOf('let method = type ==='),
+      source.indexOf('}).catch(err => {', source.indexOf('let method = type ===')),
+    );
+
+    assert.ok(terminalBranch.indexOf('this._persistFinalTaskResult') > -1);
+    assert.ok(terminalBranch.indexOf("broadcastTaskEvent(taskId, method") > -1);
+    assert.ok(
+      terminalBranch.indexOf('this._persistFinalTaskResult')
+        < terminalBranch.indexOf("broadcastTaskEvent(taskId, method"),
+      'project transactions must be persisted and broadcast before chat.done/chat.error closes the client listener',
+    );
+  });
 });

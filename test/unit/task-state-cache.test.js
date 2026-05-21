@@ -209,6 +209,11 @@ describe('Task State Cache — StateGraph integration', () => {
     await sg.flushChatWrites();
     let raw = await fsp.readFile(path.join(chatDir, `${id}.json`), 'utf8');
     assert.equal(JSON.parse(raw).messages[0].text, 'saved');
+    assert.deepEqual(
+      (await fsp.readdir(chatDir)).filter((entry) => entry.endsWith('.tmp')),
+      [],
+      'chat persistence must not leave temporary files after atomic writes',
+    );
 
     sg.deleteChat(id, 'test');
     assert.equal(sg.getChat(id), null);
