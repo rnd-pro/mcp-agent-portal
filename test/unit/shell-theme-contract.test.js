@@ -47,4 +47,14 @@ describe('portal shell theme contract', () => {
       assert.equal(source.includes('hsl(30, 15%, 18%)'), false, `${relative} must not copy provider text fallback`);
     }
   });
+
+  it('keeps active task cards off inline copied theme values', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
+    for (let literal of ['#9ca3af', '#404040', 'style="']) {
+      assert.equal(source.includes(literal), false, `TaskCard must not copy provider styling with ${literal}`);
+    }
+    for (let token of ['--sn-font-mono', '--sn-text-dim', '--sn-node-border']) {
+      assert.ok(source.includes(token), `TaskCard must consume ${token}`);
+    }
+  });
 });
