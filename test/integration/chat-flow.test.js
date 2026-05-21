@@ -167,6 +167,95 @@ echo "Integration Test Success"
     }
   });
 
+  await test('project transaction event is delivered before chat.done and persisted', async () => {
+    let ws = await connectChatClient();
+    let originalRequest = proxyManager.requestFromChild;
+    let taskId = '11111111-2222-4333-8444-555555555555';
+    let delegatedChatId = null;
+    let projectTransactionEvent = null;
+    let doneEvent = null;
+    let events = [];
+
+    proxyManager.requestFromChild = async (_server, _method, payload) => {
+      if (payload?.arguments?.name === 'delegate_task' || payload?.name === 'delegate_task') {
+        return { content: [{ type: 'text', text: `Delegated task: ${taskId}` }] };
+      }
+      if (payload?.arguments?.name === 'get_task_result' || payload?.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '## Agent Response',
+              'Added runtime panel.',
+              '```project-transaction-v1',
+              '{"version":"project-transaction-v1","id":"tx:integration-panel","operations":[{"type":"layout.addPanel","layout":"graph","panel":{"id":"integration-panel","component":"sn-list-item"}}]}',
+              '```',
+            ].join('\n'),
+          }],
+        };
+      }
+      return originalRequest.call(proxyManager, _server, _method, payload);
+    };
+
+    try {
+      let receivedDone = new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.done')), 10000);
+        ws.on('message', (data) => {
+          let msg = JSON.parse(data.toString());
+          events.push(msg.method);
+          if (msg.method === 'chat.delegated') {
+            delegatedChatId = msg.params.chatId;
+            proxyManager.taskRouter.route({
+              params: {
+                taskId,
+                type: 'done',
+                data: { meta: { startedAt: Date.now(), chatId: delegatedChatId } },
+              },
+            });
+          }
+          if (msg.method === 'chat.projectTransaction') {
+            projectTransactionEvent = msg;
+          }
+          if (msg.method === 'chat.done') {
+            doneEvent = msg;
+            clearTimeout(timer);
+            resolve(msg);
+          }
+        });
+      });
+
+      ws.send(JSON.stringify({
+        method: 'chat.send',
+        params: {
+          prompt: 'emit project transaction',
+          cwd: process.cwd(),
+        }
+      }));
+
+      await receivedDone;
+
+      assert.ok(projectTransactionEvent, 'Should receive chat.projectTransaction');
+      assert.equal(projectTransactionEvent.params.transaction.id, 'tx:integration-panel');
+      assert.equal(projectTransactionEvent.params.transaction.targetProject, `agent-portal:${projectTransactionEvent.params.projectId}`);
+      assert.ok(doneEvent.params.taskId, 'Done message should include taskId');
+      assert.ok(
+        events.indexOf('chat.projectTransaction') < events.indexOf('chat.done'),
+        'chat.projectTransaction must arrive before chat.done',
+      );
+
+      let res = await fetch(`http://127.0.0.1:${port}/api/chats/get`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: delegatedChatId }),
+      });
+      let chat = await res.json();
+      assert.equal(chat.projectTransactions?.[0]?.id, 'tx:integration-panel');
+    } finally {
+      proxyManager.requestFromChild = originalRequest;
+      ws.close();
+    }
+  });
+
   await teardown();
   console.log(`\n${passed + failed} tests: ${passed} pass, ${failed} fail`);
   process.exit(failed > 0 ? 1 : 0);
