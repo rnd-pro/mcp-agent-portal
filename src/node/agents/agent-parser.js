@@ -28,11 +28,12 @@ function parseFrontmatter(raw) {
 import { statSync } from 'fs';
 
 let _skillCache = null;
+let _skillCacheDir = null;
 let _skillCacheTime = 0;
 
 function getSkillMap(skillsDir) {
   const now = Date.now();
-  if (_skillCache && (now - _skillCacheTime < 2000)) return _skillCache;
+  if (_skillCache && _skillCacheDir === skillsDir && (now - _skillCacheTime < 2000)) return _skillCache;
 
   let map = new Map();
   if (!existsSync(skillsDir)) return map;
@@ -54,6 +55,7 @@ function getSkillMap(skillsDir) {
   
   scan(skillsDir);
   _skillCache = map;
+  _skillCacheDir = skillsDir;
   _skillCacheTime = now;
   return map;
 }
@@ -85,13 +87,15 @@ function resolveSkills(body, skillNames, skillsDir) {
   // 1. Prepend frontmatter skills
   for (let name of skillNames) {
     let content = loadSkill(skillsDir, name);
-    if (content) parts.push(content);
+    if (!content) throw new Error(`Required skill '${name}' not found`);
+    parts.push(content);
   }
 
   // 2. Resolve inline {{skill:name}} references
   let resolvedBody = body.replace(/\{\{skill:(\w[\w-]*)\}\}/g, (_, name) => {
     let content = loadSkill(skillsDir, name);
-    return content || `<!-- skill "${name}" not found -->`;
+    if (!content) throw new Error(`Required inline skill '${name}' not found`);
+    return content;
   });
 
   parts.push(resolvedBody);
