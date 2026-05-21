@@ -61,9 +61,9 @@ describe('workspace-registration', () => {
   });
 
   it('file:// URI is correctly stripped to path', () => {
-    let uri = 'file:///Users/v/Documents/my-project';
+    let uri = 'file:///workspace/my-project';
     let rootPath = uri.replace(/^file:\/\//, '');
-    assert.equal(rootPath, '/Users/v/Documents/my-project');
+    assert.equal(rootPath, '/workspace/my-project');
   });
 
   it('activeProjectIds tracks opened projects', () => {
@@ -92,8 +92,8 @@ describe('workspace-registration', () => {
         capabilities: {},
         clientInfo: { name: 'test-ide' },
         roots: [
-          { uri: 'file:///Users/v/Documents/project-a' },
-          { uri: 'file:///Users/v/Documents/project-b' },
+          { uri: 'file:///workspace/project-a' },
+          { uri: 'file:///workspace/project-b' },
         ],
       },
     };
@@ -103,8 +103,8 @@ describe('workspace-registration', () => {
 
     let paths = roots.map(r => r.uri?.replace(/^file:\/\//, '') || r.uri);
     assert.deepEqual(paths, [
-      '/Users/v/Documents/project-a',
-      '/Users/v/Documents/project-b',
+      '/workspace/project-a',
+      '/workspace/project-b',
     ]);
   });
 
@@ -120,8 +120,8 @@ describe('workspace-registration', () => {
 
       // Simulate what multiplexer does on initialize
       let roots = [
-        { uri: 'file:///Users/v/project-alpha' },
-        { uri: 'file:///Users/v/project-beta' },
+        { uri: 'file:///workspace/project-alpha' },
+        { uri: 'file:///workspace/project-beta' },
       ];
 
       for (let root of roots) {
@@ -145,7 +145,7 @@ describe('workspace-registration', () => {
     let data = JSON.parse(output);
     assert.equal(data.projectCount, 2, 'should register 2 projects');
     assert.equal(data.activeCount, 2, 'both should be active');
-    assert.ok(data.paths.includes('/Users/v/project-alpha'));
-    assert.ok(data.paths.includes('/Users/v/project-beta'));
+    assert.ok(data.paths.includes('/workspace/project-alpha'));
+    assert.ok(data.paths.includes('/workspace/project-beta'));
   });
 });

@@ -1,14 +1,11 @@
 // @ctx mcp-http-transport tests
-// Tests for Streamable HTTP MCP endpoint at /mcp
-// TDD: write tests first, then implement
+// Streamable HTTP MCP endpoint at /mcp
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { mcpCall } from '../../web/common/mcp-call.js';
 
-/**
- * Helper: make HTTP request to test server
- */
 function mcpRequest(port, body, { method = 'POST', headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     let data = typeof body === 'string' ? body : JSON.stringify(body);
@@ -82,9 +79,7 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     server?.close();
   });
 
-  // ── T1: Initialize ──────────────────────────────────────
-
-  it('T1: POST /mcp with initialize returns capabilities and session ID', async () => {
+  it('POST /mcp with initialize returns capabilities and session ID', async () => {
     let res = await mcpRequest(port, {
       jsonrpc: '2.0',
       id: 1,
@@ -103,15 +98,11 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.ok(res.json.result.capabilities, 'Should have capabilities');
     assert.ok(res.json.result.serverInfo, 'Should have serverInfo');
     assert.equal(res.json.result.serverInfo.name, 'mcp-agent-portal');
-    // Session ID header
     let sessionId = res.headers['mcp-session-id'];
     assert.ok(sessionId, 'Should return Mcp-Session-Id header');
   });
 
-  // ── T2: Tools List ──────────────────────────────────────
-
-  it('T2: POST /mcp with tools/list returns tool list', async () => {
-    // First initialize to get session
+  it('POST /mcp with tools/list returns tool list', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -130,9 +121,7 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.ok(names.includes('test_add'), 'Should include test_add');
   });
 
-  // ── T3: Tools Call ──────────────────────────────────────
-
-  it('T3: POST /mcp with tools/call routes to handler and returns result', async () => {
+  it('POST /mcp with tools/call routes to handler and returns result', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -149,9 +138,7 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.equal(res.json.result.content[0].text, 'hello world');
   });
 
-  // ── T4: Math tool call ──────────────────────────────────
-
-  it('T4: tools/call with test_add returns sum', async () => {
+  it('tools/call with test_add returns sum', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -167,9 +154,7 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.equal(res.json.result.content[0].text, '10');
   });
 
-  // ── T5: Unknown tool ───────────────────────────────────
-
-  it('T5: tools/call with unknown tool returns error', async () => {
+  it('tools/call with unknown tool returns error', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -182,13 +167,10 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     }, { headers: { 'mcp-session-id': sessionId } });
 
     assert.equal(res.status, 200);
-    // MCP error is in the JSON-RPC response, not HTTP status
     assert.ok(res.json.error || res.json.result?.isError, 'Should return error for unknown tool');
   });
 
-  // ── T6: Invalid JSON ───────────────────────────────────
-
-  it('T6: POST /mcp with invalid JSON returns 400', async () => {
+  it('POST /mcp with invalid JSON returns 400', async () => {
     let res = await mcpRequest(port, 'not json at all {{{', {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -196,27 +178,20 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.ok([400, 415].includes(res.status), `Should return 400 or 415, got ${res.status}`);
   });
 
-  // ── T7: Wrong method (PUT) ─────────────────────────────
-
-  it('T7: PUT /mcp returns 405', async () => {
+  it('PUT /mcp returns 405', async () => {
     let res = await mcpRequest(port, '{}', { method: 'PUT' });
     assert.equal(res.status, 405, 'PUT should return 405 Method Not Allowed');
   });
 
-  // ── T8: No session for non-init request ────────────────
-
-  it('T8: tools/list without session returns 400', async () => {
+  it('tools/list without session returns 400', async () => {
     let res = await mcpRequest(port, {
       jsonrpc: '2.0', id: 8, method: 'tools/list', params: {},
     });
 
-    // MCP spec: non-init request without session → 400
     assert.ok([400, 404].includes(res.status), `Should reject sessionless non-init request, got ${res.status}`);
   });
 
-  // ── T9: DELETE session ─────────────────────────────────
-
-  it('T9: DELETE /mcp closes session', async () => {
+  it('DELETE /mcp closes session', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -230,5 +205,41 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     });
 
     assert.ok([200, 204].includes(res.status), `DELETE should return 200 or 204, got ${res.status}`);
+  });
+});
+
+let oldFetch = global.fetch;
+
+describe('mcpCall response parsing', () => {
+  afterEach(() => {
+    global.fetch = oldFetch;
+  });
+
+  it('preserves empty string result content instead of falling through', async () => {
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        result: { content: [{ text: '' }] },
+        text: 'fallback',
+      }),
+    });
+
+    let result = await mcpCall('agent-pool', 'empty_result', {});
+
+    assert.equal(result, '');
+  });
+
+  it('preserves zero text payloads instead of replacing them', async () => {
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        text: 0,
+        response: 'fallback',
+      }),
+    });
+
+    let result = await mcpCall('agent-pool', 'zero_result', {});
+
+    assert.equal(result, 0);
   });
 });

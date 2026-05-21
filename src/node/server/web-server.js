@@ -67,7 +67,6 @@ function serveStaticFile(reqPath, res) {
   }
 
   if (!fs.existsSync(targetPath)) {
-    console.error(`🔴 404: reqPath=${reqPath}, targetPath=${targetPath}`);
     res.writeHead(404);
     res.end('Not Found');
     return;
@@ -222,20 +221,11 @@ export function startWebServer(projectRoot) {
       projectName,
       projectPath: projectRoot,
     });
-
-    setTimeout(() => {
-      console.error(`\n  ⬡ mcp-agent-portal`);
-      console.error('  ─────────────────────────────');
-      console.error(`  → ${gateway.url}`);
-      console.error(`  → ${gateway.directUrl}  (direct)\n`);
-    }, 200);
-
     // Fire-and-forget: populate OpenCode model cache
     discoverOpenCodeModels().catch(() => {});
   });
 
   function shutdown() {
-    console.error('\n🟡 Shutting down mcp-agent-portal...');
     proxyManager.stopAll();
     server.close();
     process.exit(0);
@@ -260,6 +250,8 @@ const TOOL_CACHE_TTL = 10_000; // 10s
 /**
  * Collect all tools from all child MCP servers.
  * Returns a flat array of MCP tool definitions.
+ * @param {MCPProxyManager} proxyManager
+ * @returns {Promise<Array<object>>}
  */
 async function _collectAllTools(proxyManager) {
   let allTools = [...META_TOOLS];
@@ -288,20 +280,19 @@ async function _refreshToolCache(proxyManager) {
   for (let serverName of proxyManager.servers.keys()) {
     try {
       let result = await proxyManager.requestFromChild(serverName, 'tools/list', {});
-      // console.log(`[DEBUG] tools/list from ${serverName}:`, result ? Object.keys(result) : 'null');
       if (result?.tools) {
         _toolCache.set(serverName, { tools: result.tools, ts: Date.now() });
-      } else {
-        console.warn(`[MCP Gateway] no tools array returned from ${serverName}`);
       }
-    } catch (e) { 
-      console.error(`[MCP Gateway] failed to refresh tools for ${serverName}:`, e.message); 
-    }
+    } catch {}
   }
 }
 
 /**
  * Route a tool call to the correct child MCP server.
+ * @param {MCPProxyManager} proxyManager
+ * @param {string} toolName
+ * @param {object} args
+ * @returns {Promise<object>}
  */
 async function _routeToolCall(proxyManager, toolName, args) {
   if (META_TOOLS.some(t => t.name === toolName)) {
@@ -458,6 +449,8 @@ async function _collectChildTools(proxyManager) {
 
 /**
  * Aggregate resources from all child MCP servers.
+ * @param {MCPProxyManager} proxyManager
+ * @returns {Promise<{ resources: Array<object> }>}
  */
 async function _aggregateResources(proxyManager) {
   let allResources = [];
