@@ -26,8 +26,22 @@ pg-agent-chat {
   flex: 1;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   position: relative;
+}
+
+.chat-view:not([empty]) chat-transcript {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-view:not([empty]) chat-composer {
+  flex: 0 0 auto;
 }
 
 .chat-view::before {

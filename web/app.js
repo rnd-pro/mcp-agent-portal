@@ -191,6 +191,21 @@ let _currentSection = '';
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
+function waitForElementApi(element, methodName, timeoutMs = 2000) {
+  if (!element || typeof element[methodName] === 'function') return Promise.resolve(element);
+  return new Promise((resolve) => {
+    let startedAt = Date.now();
+    function check() {
+      if (typeof element[methodName] === 'function' || Date.now() - startedAt >= timeoutMs) {
+        resolve(element);
+        return;
+      }
+      requestAnimationFrame(check);
+    }
+    check();
+  });
+}
+
 /**
  * Pre-calculate subPanels for a section based on its layout tree.
  * This ensures the sidebar correctly shows expand chevrons for sections with multiple panels
@@ -339,9 +354,13 @@ async function u() {
     // Register all panel types on the single layout
     let layout = document.getElementById('app-layout');
     let sidebar = document.getElementById('app-sidebar');
+    await Promise.all([
+      waitForElementApi(layout, 'registerPanelType'),
+      waitForElementApi(sidebar, 'setSections'),
+    ]);
     if (layout) {
       for (const [e, t] of Object.entries(panelTypes)) {
-        layout.registerPanelType(e, t);
+        layout.registerPanelType?.(e, t);
       }
       
       // Sync layout changes to sidebar sub-panels
