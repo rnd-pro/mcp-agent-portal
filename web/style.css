@@ -82,11 +82,11 @@ html, body {
 .compression-stats {
   font-size: 10px;
   font-weight: 500;
-  color: #64b5f6;
+  color: var(--sn-node-selected);
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(100, 181, 246, 0.1);
-  border: 1px solid rgba(100, 181, 246, 0.15);
+  background: var(--sn-accent-bg-subtle);
+  border: 1px solid var(--sn-accent-border);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
@@ -118,37 +118,37 @@ html, body {
 }
 
 .follow-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--sn-node-hover);
   color: var(--sn-text, #f0f0f0);
 }
 
 .follow-btn.active {
-  background: rgba(76, 139, 245, 0.15);
-  color: #4c8bf5;
-  border-color: rgba(76, 139, 245, 0.3);
+  background: var(--sn-accent-bg);
+  color: var(--sn-node-selected);
+  border-color: var(--sn-accent-border);
   animation: follow-btn-glow 2s ease-in-out infinite;
 }
 
 @keyframes follow-btn-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(76, 139, 245, 0.1); }
-  50% { box-shadow: 0 0 12px rgba(76, 139, 245, 0.4); }
+  0%, 100% { box-shadow: 0 0 4px color-mix(in srgb, var(--sn-node-selected) 10%, transparent); }
+  50% { box-shadow: var(--sn-accent-glow); }
 }
 
 /* Agent badge */
 .agent-badge {
   font-size: 11px;
   font-weight: 500;
-  color: #4caf50;
+  color: var(--sn-success-color);
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(76, 175, 80, 0.1);
-  border: 1px solid rgba(76, 175, 80, 0.2);
+  background: color-mix(in srgb, var(--sn-success-color) 12%, transparent);
+  border: 1px solid var(--sn-success-border);
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(76, 175, 80, 0.1); }
-  50% { box-shadow: 0 0 8px rgba(76, 175, 80, 0.3); }
+  0%, 100% { box-shadow: 0 0 4px color-mix(in srgb, var(--sn-success-color) 10%, transparent); }
+  50% { box-shadow: 0 0 8px color-mix(in srgb, var(--sn-success-color) 30%, transparent); }
 }
 
 /* Status indicator */
@@ -160,12 +160,12 @@ html, body {
 }
 
 .status.connected {
-  background: #4caf50;
-  box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+  background: var(--sn-success-color);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--sn-success-color) 50%, transparent);
 }
 
 .status.disconnected {
-  background: #f44336;
+  background: var(--sn-danger-color);
 }
 
 /* === Workspace: sidebar + content area === */
@@ -194,11 +194,11 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--sn-scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--sn-scrollbar-thumb-hover);
 }
 
 /* Layout panels: hide scrollbars by default, show on hover */
@@ -206,10 +206,10 @@ layout-node[node-type="panel"] ::-webkit-scrollbar-thumb {
   background: transparent;
 }
 layout-node[node-type="panel"]:hover ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--sn-scrollbar-thumb);
 }
 layout-node[node-type="panel"]:hover ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--sn-scrollbar-thumb-hover);
 }
 
 /* Split resizer: invisible by default, visible on hover */
@@ -218,15 +218,15 @@ layout-node .split-resizer {
 }
 layout-node .split-resizer:hover,
 layout-node[resizing] .split-resizer {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: var(--sn-layout-resizer-hover-bg) !important;
 }
 
 /* Action zones (split corners): match scrollbar color */
 action-zone .zone-icon {
-  color: #4e4e4e !important;
+  color: var(--sn-scrollbar-thumb) !important;
 }
 action-zone:hover .zone-icon {
-  color: #6e6e6e !important;
+  color: var(--sn-scrollbar-thumb-hover) !important;
 }
 
 /* Markdown details / summary */
