@@ -14,7 +14,6 @@ import "./panels/GraphFlows/GraphFlows.js";
 import "./panels/HealthPanel/HealthPanel.js";
 import "./panels/OpsPanel/OpsPanel.js";
 import "./components/QuickOpen/QuickOpen.js";
-import "./components/CanvasGraph/CanvasGraph.js";
 import "./panels/ActiveContext/ActiveContext.js";
 
 // Dashboard panels

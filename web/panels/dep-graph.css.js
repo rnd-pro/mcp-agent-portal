@@ -141,7 +141,7 @@ pg-dep-graph {
 }
 
 .pcb-icon-btn:focus-visible {
-  outline: 2px solid var(--sn-node-selected, #d4a04a);
+  outline: 2px solid var(--sn-node-selected, #4c8bf5);
   outline-offset: 2px;
 }
 
@@ -210,7 +210,7 @@ pg-dep-graph {
   top: 50%;
   width: 4px;
   height: 4px;
-  background: var(--sn-conn-color, #c87533);
+  background: var(--sn-conn-color, #4c8bf5);
   border-radius: 50%;
   transform: translateY(-50%);
 }
@@ -238,7 +238,7 @@ pg-dep-graph {
 }
 
 .pcb-pin[data-kind="class"] {
-  color: var(--sn-cat-control, #d4a04a);
+  color: var(--sn-cat-control, #ff9800);
   font-weight: 600;
 }
 
@@ -247,8 +247,8 @@ pg-dep-graph {
 }
 
 .pcb-pin:hover {
-  color: var(--sn-node-selected, #d4a04a) !important;
-  text-shadow: 0 0 4px var(--sn-warning-glow, rgba(212, 160, 74, 0.4));
+  color: var(--sn-node-selected, #4c8bf5);
+  text-shadow: var(--sn-accent-glow, 0 0 4px rgba(76, 139, 245, 0.4));
 }
 
 .pcb-pin[style*="cursor: pointer"]:hover::after {

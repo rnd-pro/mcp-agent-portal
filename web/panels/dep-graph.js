@@ -1,8 +1,8 @@
 /**
- * dep-graph.js — Visual Project Graph (PCB Board Style)
+ * dep-graph.js — Visual Project Graph
  *
  * Renders the project dependency graph as an interactive
- * node-canvas visualization styled like a printed circuit board.
+ * symbiote-node graph visualization.
  * Uses symbiote-node's NodeCanvas with orthogonal routing,
  * readonly mode, and auto-layout.
  *
@@ -15,14 +15,12 @@ import {
   computeTreeLayout,
   computeInitialGraphPositions,
   createForceLayoutPayload,
-  applyTheme,
   getDrillableFiles,
   getGraphCacheKey,
   getOrBuildGraph,
   SubgraphRouter,
   PinExpansion,
   ForceLayout,
-  PCB_DARK,
 } from 'symbiote-node/ui';
 import { api, state, events, emit, resolveProjectPath } from '../app.js';
 import { emit as dashEmit } from '../dashboard-state.js';
@@ -108,7 +106,7 @@ export class DepGraph extends Symbiote {
     mountDepGraphTemplate(this, DEP_GRAPH_TEMPLATE);
 
     this._canvas = this.querySelector('node-canvas');
-    this._pgCanvasGraph = this.querySelector('pg-canvas-graph');
+    this._pgCanvasGraph = this.querySelector('canvas-graph');
 
     // Toolbar handlers
     this.querySelector('[data-action="fit"]').addEventListener('click', () => {
@@ -272,8 +270,6 @@ export class DepGraph extends Symbiote {
       });
     }
 
-    // Apply PCB theme
-    applyTheme(this._canvas, PCB_DARK);
     this._loadProjectGraphMetadata();
 
     // Setup ResizeObserver to gracefully handle "Layout preserved" (display: none) hidden panels.

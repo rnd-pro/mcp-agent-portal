@@ -73,8 +73,8 @@ pg-graph-flows {
 }
 
 .flows-btn.primary {
-  border-color: var(--sn-node-selected, #d4a04a);
-  color: var(--sn-node-selected, #d4a04a);
+  border-color: var(--sn-node-selected, #4c8bf5);
+  color: var(--sn-node-selected, #4c8bf5);
 }
 
 .flows-list {
@@ -109,8 +109,8 @@ pg-graph-flows {
 }
 
 .flows-story[data-active] {
-  border-color: var(--sn-node-selected, #d4a04a);
-  background: rgba(212,160,74,0.1);
+  border-color: var(--sn-node-selected, #4c8bf5);
+  background: var(--sn-accent-bg-subtle, rgba(76, 139, 245, 0.1));
 }
 
 .flows-story-title {

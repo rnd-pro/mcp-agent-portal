@@ -80,13 +80,9 @@ export default `
       </footer>
     </form>
   </dialog>
-  <sn-loading-overlay
-    slot="overlay"
-    ref="loader"
-    style="--sn-loading-bar-bg: linear-gradient(90deg, #c87533, #d4a04a); --sn-loading-bar-shadow: 0 0 8px rgba(212, 160, 74, 0.5);"
-  ></sn-loading-overlay>
+  <sn-loading-overlay slot="overlay" ref="loader"></sn-loading-overlay>
   <node-canvas slot="canvas" connection-engine="canvas"></node-canvas>
-  <pg-canvas-graph slot="canvas"></pg-canvas-graph>
+  <canvas-graph slot="canvas"></canvas-graph>
   <div slot="stats" class="graph-explorer-stats pcb-stats"></div>
   </graph-explorer-shell>
 `;
