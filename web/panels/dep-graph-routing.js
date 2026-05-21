@@ -1,5 +1,11 @@
 export function getGraphSearchString(locationObj = window.location) {
-  return locationObj.search || (locationObj.hash.includes('?') ? locationObj.hash.split('?')[1] : '');
+  const params = new URLSearchParams(locationObj.search || '');
+  const hashQuery = locationObj.hash.includes('?') ? locationObj.hash.split('?')[1] : '';
+  const hashParams = new URLSearchParams(hashQuery);
+  for (let [key, value] of hashParams) {
+    params.set(key, value);
+  }
+  return params.toString();
 }
 
 export function getGraphUrlParams(locationObj = window.location) {

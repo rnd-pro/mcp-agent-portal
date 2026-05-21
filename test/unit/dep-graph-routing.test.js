@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGraphHash, updateHashParam } from '../../web/panels/dep-graph-routing.js';
+import { getGraphUrlParams, parseGraphHash, updateHashParam } from '../../web/panels/dep-graph-routing.js';
 
 describe('dep-graph-routing', () => {
   it('parseGraphHash returns drill path and query params', () => {
@@ -9,6 +9,18 @@ describe('dep-graph-routing', () => {
     assert.equal(parsed.path, 'src/core/');
     assert.equal(parsed.params.get('focus'), 'src/core/index.js');
     assert.equal(parsed.params.get('mode'), 'flat');
+  });
+
+  it('getGraphUrlParams merges URL search with graph hash params', () => {
+    let params = getGraphUrlParams({
+      search: '?server=main&project=root&mode=tree',
+      hash: '#graph/scripts?project=graph-project&focus=scripts%2Fdiagnostics%2Fopencode-e2e.js&mode=flat',
+    });
+
+    assert.equal(params.get('server'), 'main');
+    assert.equal(params.get('project'), 'graph-project');
+    assert.equal(params.get('focus'), 'scripts/diagnostics/opencode-e2e.js');
+    assert.equal(params.get('mode'), 'flat');
   });
 
   it('updateHashParam preserves path and unrelated params', () => {
