@@ -149,11 +149,13 @@ export class StateGraph extends EventEmitter {
    * @param {object} [opts]
    * @param {string} [opts.snapshotPath]
    * @param {string} [opts.walPath]
+   * @param {string} [opts.chatsDir]
    */
   constructor(opts = {}) {
     super();
     this._snapshotPath = opts.snapshotPath || SNAPSHOT_PATH;
     this._walPath = opts.walPath || WAL_PATH;
+    this._chatsDir = opts.chatsDir || CHATS_DIR;
     this._state = defaultState();
     this._version = 0;
 
@@ -168,6 +170,10 @@ export class StateGraph extends EventEmitter {
     this._walQueue = [];
     this._walTimer = null;
     this._walFlushing = false;
+    this._chatCache = new Map();
+    this._chatFileQueue = Promise.resolve();
+    this._dirtyChats = new Set();
+    this._deletedChats = new Set();
 
     // ── Snapshot compaction tracking ──
     this._commitsSinceSnapshot = 0;
@@ -363,9 +369,6 @@ export class StateGraph extends EventEmitter {
             }
           } catch { /* skip corrupt line */ }
         }
-        if (replayed > 0) {
-          console.log(`[StateGraph] Replayed ${replayed} WAL entries → v${this._version}`);
-        }
       } catch (err) {
         console.error('[StateGraph] WAL replay failed:', err.message);
       }
@@ -373,7 +376,6 @@ export class StateGraph extends EventEmitter {
 
     // 3. Migrate from old config if no snapshot exists
     if (!snapshotLoaded && this._version === 0 && fs.existsSync(OLD_CONFIG_PATH)) {
-      console.log('[StateGraph] Migrating from agent-portal.json...');
       this._migrateFromOldConfig();
       this._writeSnapshotSync();
     }
@@ -397,13 +399,13 @@ export class StateGraph extends EventEmitter {
             chat.pendingTaskId = null;
             chat.lastTaskStatus = 'error';
             // Update the FULL chat file (not just metadata — that would erase messages)
-            let chatFile = path.join(CHATS_DIR, `${chatId}.json`);
+            let chatFile = path.join(this._chatsDir, `${chatId}.json`);
             if (fs.existsSync(chatFile)) {
               try {
                 let fullChat = JSON.parse(fs.readFileSync(chatFile, 'utf8'));
                 fullChat.pendingTaskId = null;
                 fullChat.lastTaskStatus = 'error';
-                fs.writeFileSync(chatFile, JSON.stringify(fullChat, null, 2));
+                this._queueChatWrite(chatId, fullChat);
               } catch (e) { console.warn(`[StateGraph] Failed to update chat file ${chatId}:`, e.message); }
             }
           }
@@ -413,10 +415,7 @@ export class StateGraph extends EventEmitter {
     if (cleaned > 0) {
       this._version++;
       this._state._v = this._version;
-      console.log(`[StateGraph] Cleaned ${cleaned} stale running task(s)`);
     }
-
-    console.log(`[StateGraph] Ready — v${this._version}, ${Object.keys(this._state.projects || {}).length} projects, ${Object.keys(this._state.chats || {}).length} chats`);
   }
 
   // ── Persistence: WAL (Async Group Commit) ──────────────
@@ -475,7 +474,6 @@ export class StateGraph extends EventEmitter {
       await fsp.writeFile(this._walPath, '');
 
       this._snapshotVersion = v;
-      console.log(`[StateGraph] Snapshot v${v} written, WAL truncated`);
     } catch (err) {
       console.error('[StateGraph] Snapshot write failed:', err.message);
     }
@@ -496,6 +494,7 @@ export class StateGraph extends EventEmitter {
       fs.writeFileSync(this._walPath, '');
       this._snapshotVersion = this._version;
       this._commitsSinceSnapshot = 0;
+      this._flushChatFilesSync();
     } catch (err) {
       console.error('[StateGraph] Sync snapshot failed:', err.message);
     }
@@ -508,6 +507,10 @@ export class StateGraph extends EventEmitter {
       this._walTimer = null;
     }
     this._writeSnapshotSync();
+  }
+
+  async flushChatWrites() {
+    await this._chatFileQueue;
   }
 
   // ── Migration ──────────────────────────────────────────
@@ -544,11 +547,11 @@ export class StateGraph extends EventEmitter {
       }
 
       // Chats (metadata only)
-      if (fs.existsSync(CHATS_DIR)) {
-        let files = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
+      if (fs.existsSync(this._chatsDir)) {
+        let files = fs.readdirSync(this._chatsDir).filter(f => f.endsWith('.json'));
         for (let f of files) {
           try {
-            let data = JSON.parse(fs.readFileSync(path.join(CHATS_DIR, f), 'utf8'));
+            let data = JSON.parse(fs.readFileSync(path.join(this._chatsDir, f), 'utf8'));
             ops.push({ op: 'set', path: `chats/${data.id}`, value: {
               name: data.name || 'Untitled',
               projectId: data.projectId || null,
@@ -566,7 +569,6 @@ export class StateGraph extends EventEmitter {
 
       if (ops.length > 0) {
         this.commit(ops, 'migration');
-        console.log(`[StateGraph] Migrated: ${projects.length} projects, ${Object.keys(this._state.chats || {}).length} chats`);
       }
     } catch (err) {
       console.error('[StateGraph] Migration failed:', err.message);
@@ -574,6 +576,52 @@ export class StateGraph extends EventEmitter {
   }
 
   // ── Helpers ────────────────────────────────────────────
+
+  _cloneChat(chat) {
+    return JSON.parse(JSON.stringify(chat));
+  }
+
+  _queueChatWrite(chatId, chat) {
+    this._deletedChats.delete(chatId);
+    this._dirtyChats.add(chatId);
+    this._chatCache.set(chatId, this._cloneChat(chat));
+    this._chatFileQueue = this._chatFileQueue.then(async () => {
+      await fsp.mkdir(this._chatsDir, { recursive: true });
+      await fsp.writeFile(path.join(this._chatsDir, `${chatId}.json`), JSON.stringify(chat, null, 2));
+    }).catch((err) => {
+      console.warn(`[StateGraph] Failed to write chat file ${chatId}:`, err.message);
+    });
+  }
+
+  _queueChatDelete(chatId) {
+    this._chatCache.delete(chatId);
+    this._dirtyChats.delete(chatId);
+    this._deletedChats.add(chatId);
+    this._chatFileQueue = this._chatFileQueue.then(async () => {
+      await fsp.rm(path.join(this._chatsDir, `${chatId}.json`), { force: true });
+    }).catch((err) => {
+      console.warn(`[StateGraph] Failed to delete chat file ${chatId}:`, err.message);
+    });
+  }
+
+  _flushChatFilesSync() {
+    try {
+      if (!fs.existsSync(this._chatsDir)) fs.mkdirSync(this._chatsDir, { recursive: true });
+      for (let chatId of this._dirtyChats) {
+        let chat = this._chatCache.get(chatId);
+        if (!chat) continue;
+        fs.writeFileSync(path.join(this._chatsDir, `${chatId}.json`), JSON.stringify(chat, null, 2));
+      }
+      for (let chatId of this._deletedChats) {
+        let file = path.join(this._chatsDir, `${chatId}.json`);
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+      this._dirtyChats.clear();
+      this._deletedChats.clear();
+    } catch (err) {
+      console.warn('[StateGraph] Failed to flush chat files:', err.message);
+    }
+  }
 
   // Deep merge (target shape preserved, source values applied).
   _deepMerge(target, source) {
@@ -649,7 +697,7 @@ export class StateGraph extends EventEmitter {
 
   /**
    * Create a new chat.
-   * @param {{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, agent?: string, agent_slug?: string, approval_mode?: string, chatType?: string }} opts
+   * @param {Object|{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, agent?: string, agent_slug?: string, approval_mode?: string, chatType?: string }} opts
    * @param {string} [source]
    * @returns {{ id: string }}
    */
@@ -695,17 +743,22 @@ export class StateGraph extends EventEmitter {
       createdAt: now,
       updatedAt: now,
     };
-    if (!fs.existsSync(CHATS_DIR)) fs.mkdirSync(CHATS_DIR, { recursive: true });
-    fs.writeFileSync(path.join(CHATS_DIR, `${id}.json`), JSON.stringify(chatData, null, 2));
+    this._queueChatWrite(id, chatData);
 
     return { id };
   }
 
   // Get full chat data (with messages) from file.
   getChat(chatId) {
-    let file = path.join(CHATS_DIR, `${chatId}.json`);
+    if (this._deletedChats.has(chatId)) return null;
+    if (this._chatCache.has(chatId)) return this._cloneChat(this._chatCache.get(chatId));
+    let file = path.join(this._chatsDir, `${chatId}.json`);
     if (!fs.existsSync(file)) return null;
-    try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+    try {
+      let chat = JSON.parse(fs.readFileSync(file, 'utf8'));
+      this._chatCache.set(chatId, this._cloneChat(chat));
+      return chat;
+    }
     catch { return null; }
   }
 
@@ -715,7 +768,7 @@ export class StateGraph extends EventEmitter {
     if (!chat) return;
     chat.messages.push({ ...msg, ts: Date.now() });
     chat.updatedAt = Date.now();
-    fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+    this._queueChatWrite(chatId, chat);
 
     this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
       messageCount: chat.messages.length,
@@ -730,7 +783,7 @@ export class StateGraph extends EventEmitter {
     if (!chat) return;
     chat.messages = messages;
     chat.updatedAt = Date.now();
-    fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+    this._queueChatWrite(chatId, chat);
 
     this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
       messageCount: messages.length,
@@ -742,8 +795,7 @@ export class StateGraph extends EventEmitter {
   // Delete a chat (graph + file).
   deleteChat(chatId, source = 'system') {
     this.commit([{ op: 'delete', path: `chats/${chatId}` }], source);
-    let file = path.join(CHATS_DIR, `${chatId}.json`);
-    if (fs.existsSync(file)) fs.unlinkSync(file);
+    this._queueChatDelete(chatId);
   }
 
   // Update chat metadata fields.
@@ -763,7 +815,7 @@ export class StateGraph extends EventEmitter {
     let chat = this.getChat(chatId);
     if (chat) {
       Object.assign(chat, filtered);
-      fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+      this._queueChatWrite(chatId, chat);
     }
   }
 
@@ -773,7 +825,7 @@ export class StateGraph extends EventEmitter {
     if (!chat) return;
     chat.sessionId = sessionId;
     chat.updatedAt = Date.now();
-    fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+    this._queueChatWrite(chatId, chat);
     this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
       sessionId,
       updatedAt: chat.updatedAt,
@@ -787,7 +839,7 @@ export class StateGraph extends EventEmitter {
     if (taskId) chat.pendingTaskId = taskId;
     else delete chat.pendingTaskId;
     chat.updatedAt = Date.now();
-    fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+    this._queueChatWrite(chatId, chat);
 
     this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
       pendingTaskId: taskId || null,

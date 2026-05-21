@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -11,22 +11,27 @@ import os from 'node:os';
 
 let testDir;
 let originalConfigPath;
+let originalChatsDir;
 
 async function importConfigStore() {
   return import(`../../src/node/config-store.js?test=${Date.now()}-${Math.random()}`);
 }
 
 describe('config-store', () => {
-  beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-store-test-'));
+  beforeEach(async () => {
+    testDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'config-store-test-'));
     originalConfigPath = process.env.PORTAL_CONFIG_PATH;
+    originalChatsDir = process.env.PORTAL_CHATS_DIR;
     process.env.PORTAL_CONFIG_PATH = path.join(testDir, 'agent-portal.json');
+    process.env.PORTAL_CHATS_DIR = path.join(testDir, 'agent-portal-chats');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
     else process.env.PORTAL_CONFIG_PATH = originalConfigPath;
-    fs.rmSync(testDir, { recursive: true, force: true });
+    if (originalChatsDir === undefined) delete process.env.PORTAL_CHATS_DIR;
+    else process.env.PORTAL_CHATS_DIR = originalChatsDir;
+    await fsp.rm(testDir, { recursive: true, force: true });
   });
 
   it('readConfig returns default when file missing', async () => {
@@ -82,14 +87,39 @@ describe('config-store', () => {
 
     setAgentPortalConfig({
       openLibraryPath: '/tmp/open-memory',
-      teamLibraryRepo: 'git@github.com:org/team-memory.git',
+      teamLibraryRepo: '<private-agent-portal-skills-remote>',
       teamLibraryBranch: 'main',
     });
 
     assert.deepEqual(getAgentPortalConfig(), {
       openLibraryPath: '/tmp/open-memory',
-      teamLibraryRepo: 'git@github.com:org/team-memory.git',
+      teamLibraryRepo: '<private-agent-portal-skills-remote>',
       teamLibraryBranch: 'main',
     });
+  });
+
+  it('caches chat writes while persisting them asynchronously', async () => {
+    let {
+      appendChatMessage,
+      createChat,
+      flushChatWrites,
+      getChat,
+      listChats,
+      deleteChat,
+    } = await importConfigStore();
+
+    let { id } = createChat({ name: 'Async chat' });
+    appendChatMessage(id, { role: 'user', text: 'hello' });
+
+    assert.equal(getChat(id).messages[0].text, 'hello');
+    assert.equal(listChats()[0].id, id);
+
+    await flushChatWrites();
+    let raw = await fsp.readFile(path.join(process.env.PORTAL_CHATS_DIR, `${id}.json`), 'utf8');
+    assert.equal(JSON.parse(raw).messages[0].text, 'hello');
+
+    deleteChat(id);
+    assert.equal(getChat(id), null);
+    await flushChatWrites();
   });
 });

@@ -1,17 +1,41 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
 const MEMORY_PATH = process.env.PORTAL_MEMORY_PATH || path.join(os.homedir(), '.agent-portal', 'global-memory.json');
+let memoryCache = null;
+let writeQueue = Promise.resolve();
+
+function cloneMemory(memory) {
+  return JSON.parse(JSON.stringify(memory));
+}
+
+function queueMemoryWrite(memory) {
+  let pending = cloneMemory(memory);
+  writeQueue = writeQueue.then(async () => {
+    let dir = path.dirname(MEMORY_PATH);
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(MEMORY_PATH, JSON.stringify(pending, null, 2), 'utf8');
+  }).catch((err) => {
+    console.error('[MemoryStore] Failed to write memory:', err.message);
+  });
+}
+
+export async function flushMemoryWrites() {
+  await writeQueue;
+}
 
 /**
  * Reads the entire memory store.
  * @returns {Record<string, any>}
  */
 export function readMemory() {
+  if (memoryCache) return cloneMemory(memoryCache);
   if (!fs.existsSync(MEMORY_PATH)) return {};
   try {
-    return JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+    memoryCache = JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8'));
+    return cloneMemory(memoryCache);
   } catch {
     return {};
   }
@@ -22,19 +46,15 @@ export function readMemory() {
  * @param {Record<string, any>} memory 
  */
 export function writeMemory(memory) {
-  try {
-    const dir = path.dirname(MEMORY_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[MemoryStore] Failed to write memory:', err.message);
-  }
+  memoryCache = cloneMemory(memory);
+  queueMemoryWrite(memoryCache);
 }
 
 /**
  * Remembers a specific key-value pair in global memory.
  * @param {string} key 
  * @param {any} value 
+ * @returns {string}
  */
 export function remember(key, value) {
   const mem = readMemory();

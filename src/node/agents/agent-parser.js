@@ -13,7 +13,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
-import { parseMarkdownFrontmatter } from '../../../packages/agent-pool-mcp/src/tools/frontmatter.js';
+import { parseMarkdownFrontmatter } from './frontmatter.js';
 
 /**
  * Parse YAML-like frontmatter from markdown. Handles simple key-value and arrays.

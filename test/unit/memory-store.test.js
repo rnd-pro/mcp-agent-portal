@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -8,10 +8,10 @@ const TEST_DIR = path.join(os.tmpdir(), `agent-portal-memory-test-${Date.now()}`
 const MEMORY_FILE = path.join(TEST_DIR, 'global-memory.json');
 
 describe('memory-store.js', () => {
-  let remember, recall, readMemory, writeMemory;
+  let remember, recall, readMemory, writeMemory, flushMemoryWrites;
 
   before(async () => {
-    if (!fs.existsSync(TEST_DIR)) fs.mkdirSync(TEST_DIR, { recursive: true });
+    await fsp.mkdir(TEST_DIR, { recursive: true });
     
     // Set env var before importing
     process.env.PORTAL_MEMORY_PATH = MEMORY_FILE;
@@ -21,12 +21,12 @@ describe('memory-store.js', () => {
     recall = mod.recall;
     readMemory = mod.readMemory;
     writeMemory = mod.writeMemory;
+    flushMemoryWrites = mod.flushMemoryWrites;
   });
 
-  after(() => {
-    if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true, force: true });
-    }
+  after(async () => {
+    await flushMemoryWrites();
+    await fsp.rm(TEST_DIR, { recursive: true, force: true });
     delete process.env.PORTAL_MEMORY_PATH;
   });
 
@@ -34,12 +34,13 @@ describe('memory-store.js', () => {
     assert.deepStrictEqual(readMemory(), {});
   });
 
-  it('writeMemory writes JSON to disk, handling nonexistent directories', () => {
+  it('writeMemory writes JSON to disk, handling nonexistent directories', async () => {
     const mem = { testKey: { value: 42, updatedAt: Date.now() } };
     writeMemory(mem);
+    await flushMemoryWrites();
     
-    assert.ok(fs.existsSync(MEMORY_FILE));
-    const loaded = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
+    await fsp.access(MEMORY_FILE);
+    const loaded = JSON.parse(await fsp.readFile(MEMORY_FILE, 'utf-8'));
     assert.deepStrictEqual(loaded, mem);
   });
 

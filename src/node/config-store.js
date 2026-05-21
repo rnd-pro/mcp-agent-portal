@@ -12,12 +12,45 @@
  * @module config-store
  */
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
 let CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
 let CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(os.homedir(), '.agent-portal', 'agent-portal-chats');
+let chatCache = new Map();
+let deletedChats = new Set();
+let chatFileQueue = Promise.resolve();
+
+function cloneChat(chat) {
+  return JSON.parse(JSON.stringify(chat));
+}
+
+function queueChatWrite(chatId, chat) {
+  deletedChats.delete(chatId);
+  chatCache.set(chatId, cloneChat(chat));
+  chatFileQueue = chatFileQueue.then(async () => {
+    await fsp.mkdir(CHATS_DIR, { recursive: true });
+    await fsp.writeFile(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  }).catch((err) => {
+    console.warn(`[config-store] Failed to write chat ${chatId}: ${err.message}`);
+  });
+}
+
+function queueChatDelete(chatId) {
+  chatCache.delete(chatId);
+  deletedChats.add(chatId);
+  chatFileQueue = chatFileQueue.then(async () => {
+    await fsp.rm(path.join(CHATS_DIR, `${chatId}.json`), { force: true });
+  }).catch((err) => {
+    console.warn(`[config-store] Failed to delete chat ${chatId}: ${err.message}`);
+  });
+}
+
+export async function flushChatWrites() {
+  await chatFileQueue;
+}
 
 /** @returns {object} */
 export function readConfig() {
@@ -119,7 +152,10 @@ export function getAnthropicGatewayConfig() {
   return config.anthropicGateway || config.settings?.anthropicGateway || {};
 }
 
-/** @param {object} gateway */
+/**
+ * @param {object} gateway
+ * @returns {object}
+ */
 export function setAnthropicGatewayConfig(gateway) {
   let config = readConfig();
   config.anthropicGateway = gateway || {};
@@ -150,7 +186,10 @@ export function getAgentPortalConfig() {
   return config.agentPortal || {};
 }
 
-/** @param {object} agentPortal */
+/**
+ * @param {object} agentPortal
+ * @returns {object}
+ */
 export function setAgentPortalConfig(agentPortal) {
   let config = readConfig();
   config.agentPortal = agentPortal || {};
@@ -201,11 +240,12 @@ function ensureChatsDir() {
 export function listChats() {
   ensureChatsDir();
   let files = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
-  let chats = [];
+  let chatsById = new Map();
   for (let f of files) {
     try {
       let data = JSON.parse(fs.readFileSync(path.join(CHATS_DIR, f), 'utf8'));
-      chats.push({
+      if (deletedChats.has(data.id)) continue;
+      chatsById.set(data.id, {
         id: data.id,
         projectId: data.projectId || null,
         parentChatId: data.parentChatId || null,
@@ -218,6 +258,21 @@ export function listChats() {
       });
     } catch { /* skip corrupt */ }
   }
+  for (let [id, data] of chatCache) {
+    if (deletedChats.has(id)) continue;
+    chatsById.set(id, {
+      id: data.id,
+      projectId: data.projectId || null,
+      parentChatId: data.parentChatId || null,
+      name: data.name || 'Untitled',
+      adapter: data.adapter || 'pool',
+      model: data.model || null,
+      lastMessage: data.messages?.length ? data.messages[data.messages.length - 1].text?.slice(0, 80) : '',
+      messageCount: data.messages?.length || 0,
+      updatedAt: data.updatedAt || 0,
+    });
+  }
+  let chats = [...chatsById.values()];
   return chats.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -227,15 +282,21 @@ export function listChats() {
  * @returns {object|null}
  */
 export function getChat(chatId) {
+  if (deletedChats.has(chatId)) return null;
+  if (chatCache.has(chatId)) return cloneChat(chatCache.get(chatId));
   let file = path.join(CHATS_DIR, `${chatId}.json`);
   if (!fs.existsSync(file)) return null;
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  try {
+    let chat = JSON.parse(fs.readFileSync(file, 'utf8'));
+    chatCache.set(chatId, cloneChat(chat));
+    return chat;
+  }
   catch { return null; }
 }
 
 /**
  * Create a new chat.
- * @param {{ projectId?: string, parentChatId?: string, name?: string, adapter?: string, model?: string }} opts
+ * @param {Object|{ projectId?: string, parentChatId?: string, name?: string, adapter?: string, model?: string }} opts
  * @returns {{ id: string }}
  */
 export function createChat(opts = {}) {
@@ -252,7 +313,7 @@ export function createChat(opts = {}) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  fs.writeFileSync(path.join(CHATS_DIR, `${id}.json`), JSON.stringify(chat, null, 2));
+  queueChatWrite(id, chat);
   return { id };
 }
 
@@ -266,7 +327,7 @@ export function appendChatMessage(chatId, msg) {
   if (!chat) return;
   chat.messages.push({ ...msg, ts: Date.now() });
   chat.updatedAt = Date.now();
-  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  queueChatWrite(chatId, chat);
 }
 
 /**
@@ -279,7 +340,7 @@ export function replaceChatMessages(chatId, messages) {
   if (!chat) return;
   chat.messages = messages;
   chat.updatedAt = Date.now();
-  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  queueChatWrite(chatId, chat);
 }
 
 /**
@@ -287,8 +348,7 @@ export function replaceChatMessages(chatId, messages) {
  * @param {string} chatId
  */
 export function deleteChat(chatId) {
-  let file = path.join(CHATS_DIR, `${chatId}.json`);
-  if (fs.existsSync(file)) fs.unlinkSync(file);
+  queueChatDelete(chatId);
 }
 
 /**
@@ -312,7 +372,7 @@ export function updateChat(chatId, updates) {
   }
 
   chat.updatedAt = Date.now();
-  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  queueChatWrite(chatId, chat);
 }
 
 /**
@@ -325,7 +385,7 @@ export function updateChatSession(chatId, sessionId) {
   if (!chat) return;
   chat.sessionId = sessionId;
   chat.updatedAt = Date.now();
-  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  queueChatWrite(chatId, chat);
 }
 
 /**
@@ -343,7 +403,7 @@ export function updateChatTask(chatId, taskId) {
     delete chat.pendingTaskId;
   }
   chat.updatedAt = Date.now();
-  fs.writeFileSync(path.join(CHATS_DIR, `${chatId}.json`), JSON.stringify(chat, null, 2));
+  queueChatWrite(chatId, chat);
 }
 
 // ── Provider Models ─────────────────────────────────────
