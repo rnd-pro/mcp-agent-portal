@@ -24,21 +24,11 @@ export default`
   gap: 8px;
 }
 
-.stg-label {
-  min-width: 150px;
-}
-
-.stg-input {
-  flex: 1;
-  padding: 4px 8px;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 4px;
-  background: var(--sn-bg);
-  color: var(--sn-text);
+.stg-instance-section {
+  margin-block-end: 16px;
 }
 
 .stg-save-btn {
-  margin-left: 8px;
   align-self: flex-start;
 }
 
@@ -90,24 +80,10 @@ export default`
   gap: 10px;
 }
 
-.pg-library-settings label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--sn-text-dim);
-}
-
-.pg-library-settings input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 5px 8px;
-  border: 1px solid var(--sn-border);
-  border-radius: 4px;
-  background: var(--sn-bg-level-1);
-  color: var(--sn-text-main);
-  font: 12px var(--sn-font-mono, monospace);
+.pg-library-settings input,
+.pg-gateway-grid input,
+.pg-gateway-grid select {
+  font-family: var(--sn-font-mono, monospace);
 }
 
 .pg-library-note {
@@ -140,27 +116,6 @@ export default`
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 1fr));
   gap: 8px 12px;
-}
-
-.pg-gateway-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--sn-text-dim);
-}
-
-.pg-gateway-grid input,
-.pg-gateway-grid select {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 5px 8px;
-  border: 1px solid var(--sn-border);
-  border-radius: 4px;
-  background: var(--sn-bg-level-1);
-  color: var(--sn-text-main);
-  font: 12px var(--sn-font-mono, monospace);
 }
 
 .pg-gateway-wide {

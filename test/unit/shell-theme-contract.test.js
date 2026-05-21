@@ -68,6 +68,7 @@ describe('portal shell theme contract', () => {
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
       'web/panels/ProjectItem/ProjectItem.tpl.js',
+      'web/panels/SettingsPanel/SettingsPanel.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(source.includes('<sn-card'), `${relative} must compose the library card surface`);
@@ -80,6 +81,7 @@ describe('portal shell theme contract', () => {
       'web/panels/ActiveTasks/TaskCard.js',
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
+      'web/panels/SettingsPanel/SettingsPanel.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(source.includes('<sn-button'), `${relative} must compose the library action control`);
@@ -91,6 +93,7 @@ describe('portal shell theme contract', () => {
     for (let relative of [
       'web/panels/Marketplace/Marketplace.tpl.js',
       'web/panels/PeerReview/PeerReview.tpl.js',
+      'web/panels/SettingsPanel/SettingsPanel.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(source.includes('<sn-field'), `${relative} must compose the library field wrapper`);

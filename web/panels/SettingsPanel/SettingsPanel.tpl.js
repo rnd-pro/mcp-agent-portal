@@ -1,120 +1,126 @@
 export default`
-<div class="ui-card-title">Actions</div>
-<div class="stg-actions">
-<button class="ui-btn" ref="refreshBtn">↻ Refresh</button>
-<button class="ui-btn danger" ref="restartBtn">⟳ Restart</button>
-<button class="ui-btn danger" ref="stopBtn">⏹ Stop</button>
-</div>
+<sn-card>
+  <span slot="title">Actions</span>
+  <div class="stg-actions">
+    <sn-button ref="refreshBtn"><span class="material-symbols-outlined">refresh</span>Refresh</sn-button>
+    <sn-button variant="danger" ref="restartBtn"><span class="material-symbols-outlined">restart_alt</span>Restart</sn-button>
+    <sn-button variant="danger" ref="stopBtn"><span class="material-symbols-outlined">stop</span>Stop</sn-button>
+  </div>
+</sn-card>
 <div ref="restartStatus" class="stg-status"></div>
 
-<div class="ui-card-title">Backend</div>
-<div class="ui-card" ref="backendCard"></div>
+<sn-card>
+  <span slot="title">Backend</span>
+  <div ref="backendCard"></div>
+</sn-card>
 
-<div class="ui-card-title">Active Instances</div>
-<div ref="instanceList"></div>
+<sn-card variant="flat" class="stg-instance-section">
+  <span slot="title">Active Instances</span>
+  <div ref="instanceList"></div>
+</sn-card>
 
-<div class="ui-card-title">Server Lifecycle</div>
-<div class="ui-card" ref="lifecycleCard">
+<sn-card ref="lifecycleCard">
+  <span slot="title">Server Lifecycle</span>
   <div class="pg-stg-metric"><span>Auto-shutdown</span><span class="pg-stg-val" ref="shutdownTimer">—</span></div>
   <div class="pg-stg-metric"><span>Uptime</span><span class="pg-stg-val" ref="uptimeVal">—</span></div>
-</div>
+</sn-card>
 
-<div class="ui-card-title">Integrations</div>
-<div class="ui-card stg-integrations" ref="integrationsCard">
-  <div class="pg-stg-metric">
-    <span class="stg-label">Telegram Token</span>
-    <input type="password" ref="telegramTokenInput" placeholder="123456:ABC-DEF..." class="stg-input">
-  </div>
-  <div class="pg-stg-metric">
-    <span class="stg-label">Authorized Chat ID</span>
-    <input type="text" ref="telegramChatIdInput" placeholder="-100123456789" class="stg-input">
-    <button class="ui-btn primary stg-save-btn" ref="saveSettingsBtn">Save</button>
-  </div>
-</div>
+<sn-card class="stg-integrations" ref="integrationsCard">
+  <span slot="title">Integrations</span>
+  <sn-field variant="compact">
+    <span slot="label">Telegram Token</span>
+    <input type="password" ref="telegramTokenInput" placeholder="123456:ABC-DEF...">
+  </sn-field>
+  <sn-field variant="compact">
+    <span slot="label">Authorized Chat ID</span>
+    <input type="text" ref="telegramChatIdInput" placeholder="-100123456789">
+  </sn-field>
+  <sn-button variant="primary" class="stg-save-btn" ref="saveSettingsBtn">Save</sn-button>
+</sn-card>
 
-<div class="ui-card-title">Agent Portal Libraries</div>
-<div class="ui-card pg-library-settings" ref="agentPortalCard">
-  <label>
-    <span>Open Library Path</span>
+<sn-card class="pg-library-settings" ref="agentPortalCard">
+  <span slot="title">Agent Portal Libraries</span>
+  <sn-field variant="compact">
+    <span slot="label">Open Library Path</span>
     <input type="text" ref="openLibraryPathInput" placeholder="/path/to/public-agent-portal-library">
-  </label>
-  <label>
-    <span>Team Library Repository</span>
-    <input type="url" ref="teamLibraryRepoInput" placeholder="git@github.com:org/private-agent-portal.git">
-  </label>
-  <label>
-    <span>Team Library Branch</span>
+  </sn-field>
+  <sn-field variant="compact">
+    <span slot="label">Team Library Repository</span>
+    <input type="url" ref="teamLibraryRepoInput" placeholder="git@example.com:org/agent-portal-library.git">
+  </sn-field>
+  <sn-field variant="compact">
+    <span slot="label">Team Library Branch</span>
     <input type="text" ref="teamLibraryBranchInput" placeholder="main">
-  </label>
+  </sn-field>
   <div class="pg-library-note">Public items are installed into the private team library before project use. Secrets and runtime state stay outside .agent-portal.</div>
-</div>
+</sn-card>
 
-<div class="ui-card-title">Claude Gateway</div>
-<div class="ui-card pg-gateway" ref="gatewayCard">
+<sn-card class="pg-gateway" ref="gatewayCard">
+  <span slot="title">Claude Gateway</span>
   <div class="pg-gateway-head">
     <label class="pg-gateway-toggle">
       <input type="checkbox" ref="gatewayEnabledInput">
       <span>Enable Gateway</span>
     </label>
-    <button class="ui-btn" ref="gatewayTestBtn">Test</button>
+    <sn-button ref="gatewayTestBtn">Test</sn-button>
   </div>
   <div class="pg-gateway-grid">
-    <label>
-      <span>Provider</span>
+    <sn-field variant="compact">
+      <span slot="label">Provider</span>
       <select ref="gatewayProviderInput">
         <option value="deepseek">DeepSeek</option>
       </select>
-    </label>
-    <label>
-      <span>Type</span>
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Type</span>
       <select ref="gatewayProviderTypeInput">
         <option value="anthropic-compatible">Anthropic compatible</option>
         <option value="openai-compatible">OpenAI compatible</option>
       </select>
-    </label>
-    <label>
-      <span>Base URL</span>
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Base URL</span>
       <input type="url" ref="gatewayBaseUrlInput" placeholder="https://api.deepseek.com/anthropic">
-    </label>
-    <label>
-      <span>API Key Env</span>
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">API Key Env</span>
       <input type="text" ref="gatewayApiKeyEnvInput" placeholder="DEEPSEEK_API_KEY">
-    </label>
-    <label>
-      <span>Default Model</span>
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Default Model</span>
       <input type="text" ref="gatewayDefaultModelInput" list="gatewayModelHints" placeholder="deepseek-v4-flash">
-    </label>
-    <label>
-      <span>Planner Model</span>
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Planner Model</span>
       <input type="text" ref="gatewayPlannerModelInput" list="gatewayModelHints" placeholder="deepseek-v4-pro">
-    </label>
-    <label class="pg-gateway-wide">
-      <span>Auth Token</span>
+    </sn-field>
+    <sn-field variant="compact" class="pg-gateway-wide">
+      <span slot="label">Auth Token</span>
       <input type="password" ref="gatewayAuthTokenInput" placeholder="Optional gateway bearer token">
-    </label>
+    </sn-field>
   </div>
   <datalist id="gatewayModelHints">
     <option value="deepseek-v4-flash"></option>
     <option value="deepseek-v4-pro"></option>
   </datalist>
   <div class="pg-gateway-status" ref="gatewayStatus">Only the environment variable name is saved for provider API keys.</div>
-</div>
+</sn-card>
 
-<div class="ui-card-title">Provider Models</div>
-<div class="ui-card" ref="modelsCard">
+<sn-card ref="modelsCard">
+  <span slot="title">Provider Models</span>
   <div class="pm-provider-tabs" ref="providerTabs"></div>
   <div class="pm-model-list" ref="modelList"></div>
   <div class="pm-actions">
-    <button class="ui-btn" ref="syncCliBtn">⟳ Discover & Update</button>
-    <button class="ui-btn primary" ref="saveModelsBtn">Save Favorites</button>
+    <sn-button ref="syncCliBtn"><span class="material-symbols-outlined">sync</span>Discover & Update</sn-button>
+    <sn-button variant="primary" ref="saveModelsBtn">Save Favorites</sn-button>
     <span class="pm-status" ref="modelStatus"></span>
   </div>
   
   <div class="pm-directory" ref="directoryEl">
-    <div class="pm-search">
+    <sn-field variant="compact" class="pm-search">
       <span class="material-symbols-outlined stg-search-icon">search</span>
       <input type="text" ref="searchInput" placeholder="Search models by name or ID...">
-    </div>
+    </sn-field>
     <div class="pm-grid-header" ref="sortHeaders">
       <div></div>
       <div class="sortable" data-sort="name">Model <span class="s-icon"></span></div>
@@ -125,5 +131,5 @@ export default`
     </div>
     <div class="pm-grid-body" ref="directoryList"></div>
   </div>
-</div>
+</sn-card>
 `;

@@ -105,7 +105,6 @@ export class SettingsPanel extends Symbiote {
       this._settings = { ...this._settings, telegramToken, telegramChatId, agentPortal, anthropicGateway };
       let btn = this.ref.saveSettingsBtn;
       btn.textContent = "Saved! Please click Restart.";
-      btn.className = "ui-btn primary";
       setTimeout(() => {
         btn.textContent = "Save";
       }, 4000);
@@ -304,8 +303,7 @@ export class SettingsPanel extends Symbiote {
       if (Array.isArray(instances) && instances.length > 0) {
         for (let inst of instances) {
           let uptimeStr = inst.startedAt ? Math.round((Date.now() - inst.startedAt) / 60000) : "?";
-          let s = document.createElement("div");
-          s.className = "ui-card";
+          let s = document.createElement("sn-card");
           s.replaceChildren(
             renderMetric("Name", inst.name || "unknown"),
             renderMetric("Path", inst.project || "—"),
