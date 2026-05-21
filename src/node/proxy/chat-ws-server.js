@@ -243,7 +243,7 @@ export class ChatWsServer {
     let clients = this.chatSubscriptions.get(taskId);
     if (clients) {
       // Include chatId so the client can filter events by chat ownership
-      let chatId = this.taskChatMap.get(taskId);
+      let chatId = params.chatId ?? this.taskChatMap.get(taskId);
       let payload = JSON.stringify({ method, params: { ...params, chatId } });
       for (let client of clients) {
         if (client.readyState === 1) {

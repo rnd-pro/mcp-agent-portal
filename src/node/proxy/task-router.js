@@ -1,5 +1,9 @@
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
+import {
+  createPortalTransactionKey,
+  extractPortalProjectTransactions,
+} from '../project-transactions.js';
 
 const TERMINAL_TYPES = new Set(['done', 'error', 'cancelled']);
 
@@ -112,7 +116,7 @@ export class TaskRouter {
             let text = result.content?.[0]?.text ?? '';
             let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
             let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
-            this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt, parsedResult);
+            this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
             getStateGraph().updateChatTask(chatId, null);
           }).catch(err => {
             console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
@@ -149,7 +153,7 @@ export class TaskRouter {
         let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
 
         if (chatId) {
-          this._persistFinalTaskResult(chatId, text, data?.meta?.startedAt, parsedResult);
+          this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
           getStateGraph().updateChatTask(chatId, null);
         }
       }).catch(err => {
@@ -339,11 +343,12 @@ export class TaskRouter {
 
   /**
    * @param {string} chatId 
-   * @param {string} text 
-   * @param {number} startedAt 
+   * @param {string} taskId
+   * @param {string} text
+   * @param {number} startedAt
    * @param {object} parsedResult
    */
-  _persistFinalTaskResult(chatId, text, startedAt, parsedResult) {
+  _persistFinalTaskResult(chatId, taskId, text, startedAt, parsedResult) {
     let sg = getStateGraph();
     let chat = sg.getChat(chatId);
     if (!chat) return;
@@ -424,6 +429,7 @@ export class TaskRouter {
     msgs = msgs.map(m => m.streaming ? { ...m, streaming: false } : m);
 
     sg.replaceChatMessages(chatId, msgs);
+    this._persistProjectTransactions(chat, taskId, text, parsedResult);
     sg.updateChatTask(chatId, null);
     
 
@@ -435,6 +441,35 @@ export class TaskRouter {
 
 
     this.mcpProxy.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
+  }
+
+  _persistProjectTransactions(chat, taskId, text, parsedResult) {
+    let projectId = chat.projectId || null;
+    let applied = new Set(
+      (chat.projectTransactions || []).map((transaction) => createPortalTransactionKey(projectId, transaction)),
+    );
+    let { accepted, rejected } = extractPortalProjectTransactions({
+      text,
+      parsedResult,
+      projectId,
+      applied,
+    });
+
+    for (let rejection of rejected) {
+      console.warn('[TaskRouter] Rejected project transaction:', rejection);
+    }
+
+    let saved = getStateGraph().appendChatProjectTransactions(chat.id, accepted);
+    if (saved.length === 0) return;
+
+    for (let transaction of saved) {
+      this.mcpProxy.chatWsServer?.broadcastTaskEvent(taskId, 'chat.projectTransaction', {
+        taskId,
+        chatId: chat.id,
+        projectId,
+        transaction,
+      });
+    }
   }
 }
 

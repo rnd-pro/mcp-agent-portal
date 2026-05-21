@@ -792,6 +792,35 @@ export class StateGraph extends EventEmitter {
     }}], 'chat');
   }
 
+  appendChatProjectTransactions(chatId, transactions) {
+    let chat = this.getChat(chatId);
+    if (!chat || !Array.isArray(transactions) || transactions.length === 0) return [];
+
+    let existing = Array.isArray(chat.projectTransactions) ? chat.projectTransactions : [];
+    let seen = new Set(existing.map((transaction) => `${transaction.targetProject || ''}:${transaction.id}`));
+    let nextTransactions = [];
+
+    for (let transaction of transactions) {
+      let key = `${transaction.targetProject || ''}:${transaction.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nextTransactions.push(transaction);
+    }
+
+    if (nextTransactions.length === 0) return [];
+
+    chat.projectTransactions = [...existing, ...nextTransactions];
+    chat.updatedAt = Date.now();
+    this._queueChatWrite(chatId, chat);
+
+    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
+      projectTransactionCount: chat.projectTransactions.length,
+      updatedAt: chat.updatedAt,
+    }}], 'chat');
+
+    return nextTransactions;
+  }
+
   // Delete a chat (graph + file).
   deleteChat(chatId, source = 'system') {
     this.commit([{ op: 'delete', path: `chats/${chatId}` }], source);

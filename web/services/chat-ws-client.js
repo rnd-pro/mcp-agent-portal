@@ -14,6 +14,7 @@ import { emit as dashEmit } from '../dashboard-state.js';
  *   → chat.cancel  { chatId, taskId }
  *   ← chat.delegated  { chatId, taskId }
  *   ← chat.meta       { chatId, phase, messageCount, lastToolName }
+ *   ← chat.projectTransaction { chatId, projectId, transaction }
  *   ← chat.done       { chatId, taskId }
  *   ← chat.error      { chatId, error }
  */
@@ -30,6 +31,7 @@ export class ChatWsClient {
       onDone: () => void
       onError: (errText) => void
       onMeta: ({ phase, messageCount, lastToolName, thinkingStatus }) => void
+      onProjectTransaction: ({ chatId, projectId, transaction }) => void
       buildSessionMetaHtml: (text) => string
     */
     this._chatWs = null;
@@ -150,6 +152,11 @@ export class ChatWsClient {
               if (this.opts.onMeta) {
                 this.opts.onMeta({ phase, messageCount, lastToolName, thinkingStatus });
               }
+              break;
+            }
+
+            case 'chat.projectTransaction': {
+              this.opts.onProjectTransaction?.(msg.params);
               break;
             }
 
@@ -278,6 +285,11 @@ export class ChatWsClient {
             if (this.opts.onMeta) {
               this.opts.onMeta({ phase, messageCount, lastToolName, thinkingStatus });
             }
+            break;
+          }
+
+          case 'chat.projectTransaction': {
+            this.opts.onProjectTransaction?.(msg.params);
             break;
           }
 

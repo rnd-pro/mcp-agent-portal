@@ -18,6 +18,10 @@ import {
   mergeAttachedContext,
   removeAttachedContext,
 } from '../../services/chat-context.js';
+import {
+  applyProjectTransactions,
+  applyProjectTransactionsFromMessages,
+} from '../../services/project-transaction-messages.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
@@ -90,6 +94,7 @@ export class AgentChat extends Symbiote {
       onBackgroundToggle: (isActive) => this.ref.cellBg?.toggle(isActive),
       onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
       onMeta: (meta) => this._renderLiveStatus(meta),
+      onProjectTransaction: (detail) => this._applyProjectTransactionEvent(detail),
       onDone: () => {
         this._setSending(false);
         this._renderLiveStatus(null);
@@ -117,6 +122,7 @@ export class AgentChat extends Symbiote {
     // Re-render messages when they change
     this.sub('messages', (_msgs) => {
       this._renderMessages();
+      this._applyProjectTransactions(_msgs);
       this._updateEmptyState();
       // Re-evaluate adapter options to lock provider when messages appear.
       queueMicrotask(() => this._updateComposerFooter());
@@ -444,6 +450,30 @@ export class AgentChat extends Symbiote {
     });
   }
 
+  _applyProjectTransactions(messages) {
+    this._appliedProjectTransactions ??= new Set();
+    let route = getRoute();
+    let globals = parseQuery(route.query);
+    let projectId = globals.project || dashState.activeProjectId || null;
+    applyProjectTransactionsFromMessages({
+      messages,
+      projectId,
+      applied: this._appliedProjectTransactions,
+    });
+  }
+
+  _applyProjectTransactionEvent(detail = {}) {
+    this._appliedProjectTransactions ??= new Set();
+    let route = getRoute();
+    let globals = parseQuery(route.query);
+    let projectId = detail.projectId || globals.project || dashState.activeProjectId || null;
+    applyProjectTransactions({
+      transactions: detail.transaction ? [detail.transaction] : detail.transactions,
+      projectId,
+      applied: this._appliedProjectTransactions,
+    });
+  }
+
   _hasActiveChatTask() {
     let chatId = this._loadedChatId || dashState.activeChatId;
     let chat = dashState.chats?.find(c => c.id === chatId);
@@ -645,11 +675,15 @@ export class AgentChat extends Symbiote {
         return !t.startsWith(ICONS.WAIT) && !t.startsWith(ICONS.OK) && !t.startsWith(ICONS.WARN) && t !== 'Processing...';
       });
       this.$.messages = msgs;
+      this._applyProjectTransactionEvent({
+        projectId: chat.projectId || null,
+        transactions: chat.projectTransactions || [],
+      });
       this._sessionId = chat.sessionId || null;
       
       // Load saved params — collect all non-base keys that have values
       let params = {};
-      let baseProps = ['id', 'projectId', 'name', 'adapter', 'messages', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
+      let baseProps = ['id', 'projectId', 'name', 'adapter', 'messages', 'projectTransactions', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
       for (let key in chat) {
         if (!baseProps.includes(key) && chat[key] != null) {
           params[key] = chat[key];
