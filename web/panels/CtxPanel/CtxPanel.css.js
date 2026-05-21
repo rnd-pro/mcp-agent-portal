@@ -15,7 +15,7 @@ export default `
   .pg-ctx-outline { padding: 0; }
   .pg-ctx-body { padding: 8px; }
   .pg-outline-section {
-    border-bottom: 1px solid var(--sn-node-border, hsl(228, 10%, 28%));
+    border-bottom: 1px solid var(--sn-node-border);
     padding: 8px;
   }
   .pg-outline-title {
@@ -38,21 +38,21 @@ export default `
     border-radius: 4px;
     font-family: 'SF Mono', 'Fira Code', monospace;
     font-size: 11px;
-    color: var(--sn-cat-server, hsl(210, 45%, 45%));
+    color: var(--sn-cat-server);
     transition: background 80ms ease;
   }
   .pg-outline-item:hover {
-    background: var(--sn-node-hover, hsl(228, 14%, 22%));
+    background: var(--sn-node-hover);
   }
   .pg-ctx-sig {
     font-family: 'SF Mono', monospace;
     font-size: 11px;
     padding: 6px 8px;
     margin: 4px 0;
-    background: var(--sn-bg, hsl(37, 30%, 91%));
+    background: var(--sn-bg);
     border-radius: 4px;
-    border-left: 3px solid var(--sn-cat-server, hsl(210, 45%, 45%));
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    border-left: 3px solid var(--sn-cat-server);
+    color: var(--sn-text-dim);
   }
   .pg-ctx-desc { padding: 4px 0; color: var(--sn-text); }
   .pg-ctx-test { padding: 3px 0; font-size: 12px; }

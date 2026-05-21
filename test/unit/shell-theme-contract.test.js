@@ -30,4 +30,21 @@ describe('portal shell theme contract', () => {
       assert.ok(css.includes(token), `web/style.css must consume ${token}`);
     }
   });
+
+  it('keeps tree and skill panels on provider theme tokens', () => {
+    for (let relative of [
+      'web/panels/FileTree/FileTree.css.js',
+      'web/panels/SkillManager/AgentPortalTree.css.js',
+      'web/panels/SkillManager/OpenLibraryTree.css.js',
+      'web/panels/SkillManager/SkillManager.css.js',
+      'web/panels/SkillManager/SkillMetadata.js',
+      'web/panels/CtxPanel/CtxPanel.css.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.equal(source.includes('hsl(35, 18%, 80%)'), false, `${relative} must not copy provider border fallback`);
+      assert.equal(source.includes('hsl(37, 30%'), false, `${relative} must not copy provider surface fallback`);
+      assert.equal(source.includes('hsl(30, 10%, 45%)'), false, `${relative} must not copy provider muted text fallback`);
+      assert.equal(source.includes('hsl(30, 15%, 18%)'), false, `${relative} must not copy provider text fallback`);
+    }
+  });
 });

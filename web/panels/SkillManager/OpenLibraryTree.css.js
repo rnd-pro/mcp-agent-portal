@@ -12,8 +12,8 @@ export default `
     align-items: center;
     gap: 5px;
     padding: 6px 8px;
-    border-bottom: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    border-bottom: 1px solid var(--sn-node-border);
+    color: var(--sn-text-dim);
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -24,16 +24,16 @@ export default `
   }
   .pg-panel-toolbar {
     padding: 6px 8px;
-    border-bottom: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+    border-bottom: 1px solid var(--sn-node-border);
     display: flex;
     gap: 6px;
   }
   .pg-panel-toolbar input {
     flex: 1;
     min-width: 0;
-    background: var(--sn-bg, hsl(37, 30%, 91%));
-    border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
-    color: var(--sn-text, hsl(30, 15%, 18%));
+    background: var(--sn-bg);
+    border: 1px solid var(--sn-node-border);
+    color: var(--sn-text);
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 11px;
@@ -41,9 +41,9 @@ export default `
     outline: none;
   }
   .pg-collapse-all {
-    background: var(--sn-bg, hsl(37, 30%, 91%));
-    border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
-    color: var(--sn-text, hsl(30, 15%, 18%));
+    background: var(--sn-bg);
+    border: 1px solid var(--sn-node-border);
+    color: var(--sn-text);
     border-radius: 4px;
     cursor: pointer;
     display: flex;
@@ -61,10 +61,10 @@ export default `
     --sn-tree-indent: 16px;
     --sn-tree-row-min-height: 24px;
     --sn-tree-row-radius: 4px;
-    --sn-tree-row-hover-bg: var(--sn-node-hover, hsl(36, 22%, 88%));
+    --sn-tree-row-hover-bg: var(--sn-node-hover);
     --sn-tree-row-selected-bg: var(--sn-node-selected-soft, var(--sn-node-hover));
     --sn-tree-row-selected-border: transparent;
-    --sn-tree-label-color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    --sn-tree-label-color: var(--sn-text-dim);
     --sn-tree-label-size: 12px;
     --sn-tree-label-weight: 400;
     --sn-tree-icon-size: 15px;
@@ -74,7 +74,7 @@ export default `
   }
   .pg-placeholder {
     padding: 12px;
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    color: var(--sn-text-dim);
   }
   .pg-placeholder[hidden] {
     display: none;

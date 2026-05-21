@@ -172,7 +172,7 @@ SkillMetadata.rootStyles = `
     display: block;
     height: 100%;
     overflow: hidden;
-    background: var(--sn-bg, hsl(37, 30%, 96%));
+    background: var(--sn-bg);
   }
   pg-skill-metadata .sm-content {
     height: 100%;
@@ -182,7 +182,7 @@ SkillMetadata.rootStyles = `
   }
   pg-skill-metadata .pg-placeholder {
     padding: 12px;
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    color: var(--sn-text-dim);
     font-size: 12px;
   }
   pg-skill-metadata .sm-field {
@@ -195,17 +195,17 @@ SkillMetadata.rootStyles = `
     font-size: 10px;
     font-weight: 650;
     text-transform: uppercase;
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    color: var(--sn-text-dim);
   }
   pg-skill-metadata input,
   pg-skill-metadata select,
   pg-skill-metadata textarea {
     width: 100%;
     box-sizing: border-box;
-    border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+    border: 1px solid var(--sn-node-border);
     border-radius: 4px;
-    background: var(--sn-node-bg, hsl(37, 25%, 93%));
-    color: var(--sn-text, hsl(30, 15%, 18%));
+    background: var(--sn-node-bg);
+    color: var(--sn-text);
     font: inherit;
     font-size: 12px;
     padding: 6px 7px;

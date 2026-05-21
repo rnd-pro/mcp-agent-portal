@@ -16,9 +16,9 @@ export default `
     padding: 6px 12px;
     font-family: 'SF Mono', 'Fira Code', monospace;
     font-size: 11px;
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
-    border-bottom: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
-    background: var(--sn-node-header-bg, hsl(37, 25%, 93%));
+    color: var(--sn-text-dim);
+    border-bottom: 1px solid var(--sn-node-border);
+    background: var(--sn-node-header-bg);
     gap: 8px;
   }
   pg-skill-manager .pg-code-filename {
@@ -35,7 +35,7 @@ export default `
   }
   pg-skill-manager .pg-code-stats {
     font-size: 10px;
-    color: var(--sn-cat-server, hsl(210, 45%, 45%));
+    color: var(--sn-cat-server);
     white-space: nowrap;
   }
   pg-skill-manager .pg-mode-toggle {
@@ -43,10 +43,10 @@ export default `
     align-items: center;
     gap: 3px;
     padding: 2px 8px;
-    border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+    border: 1px solid var(--sn-node-border);
     border-radius: 4px;
-    background: var(--sn-bg, hsl(37, 30%, 91%));
-    color: var(--sn-text-dim, hsl(30, 10%, 45%));
+    background: var(--sn-bg);
+    color: var(--sn-text-dim);
     font-family: inherit;
     font-size: 10px;
     cursor: pointer;

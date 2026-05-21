@@ -12,24 +12,24 @@ export default `
   display: flex;
   gap: 6px;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+  border-bottom: 1px solid var(--sn-node-border);
 }
 
 .pg-panel-toolbar input {
   flex: 1;
   min-width: 0;
   padding: 4px 8px;
-  border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+  border: 1px solid var(--sn-node-border);
   border-radius: 4px;
   outline: none;
-  background: var(--sn-bg, hsl(37, 30%, 91%));
-  color: var(--sn-text, hsl(30, 15%, 18%));
+  background: var(--sn-bg);
+  color: var(--sn-text);
   font-family: inherit;
   font-size: 11px;
 }
 
 .pg-panel-toolbar input:focus {
-  border-color: var(--sn-node-selected, hsl(210, 55%, 42%));
+  border-color: var(--sn-node-selected);
 }
 
 .pg-collapse-all {
@@ -37,16 +37,16 @@ export default `
   align-items: center;
   justify-content: center;
   padding: 0 6px;
-  border: 1px solid var(--sn-node-border, hsl(35, 18%, 80%));
+  border: 1px solid var(--sn-node-border);
   border-radius: 4px;
-  background: var(--sn-bg, hsl(37, 30%, 91%));
-  color: var(--sn-text, hsl(30, 15%, 18%));
+  background: var(--sn-bg);
+  color: var(--sn-text);
   cursor: pointer;
   transition: background 100ms ease;
 }
 
 .pg-collapse-all:hover {
-  background: var(--sn-node-hover, hsl(36, 22%, 88%));
+  background: var(--sn-node-hover);
 }
 
 .pg-tree-content {
@@ -57,7 +57,7 @@ export default `
 
 .pg-placeholder {
   padding: 8px;
-  color: var(--sn-text-dim, hsl(30, 10%, 45%));
+  color: var(--sn-text-dim);
   font-size: 12px;
 }
 
@@ -73,13 +73,13 @@ sn-tree-view {
   --sn-tree-row-radius: 4px;
   --sn-tree-row-selected-bg: var(--sn-node-selected-soft, var(--sn-node-hover));
   --sn-tree-row-selected-border: transparent;
-  --sn-tree-label-color: var(--sn-text-dim, hsl(30, 10%, 45%));
+  --sn-tree-label-color: var(--sn-text-dim);
   --sn-tree-label-size: 12px;
   --sn-tree-label-weight: 500;
   --sn-tree-muted-color: var(--sn-text-dim);
   --sn-tree-badge-radius: 8px;
-  --sn-tree-badge-bg: var(--sn-node-hover, hsl(36, 22%, 88%));
-  --sn-tree-badge-color: var(--sn-text-dim, hsl(30, 10%, 45%));
+  --sn-tree-badge-bg: var(--sn-node-hover);
+  --sn-tree-badge-color: var(--sn-text-dim);
   --sn-tree-badge-size: 10px;
 }
 
