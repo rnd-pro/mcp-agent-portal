@@ -93,6 +93,15 @@ export function resolveFlatHashChange(hash) {
   };
 }
 
+export function getFlatFocusRestoreKey({ path = '', focus = null } = {}) {
+  return `${path || ''}::${focus || ''}`;
+}
+
+export function shouldRestoreFlatFocus({ lastKey = null, path = '', focus = null } = {}) {
+  if (!focus) return false;
+  return getFlatFocusRestoreKey({ path, focus }) !== lastKey;
+}
+
 export function getGraphHashNavigationState(hash = '') {
   const hasPath = /^#graph\//.test(hash);
   const hasParams = hash.includes('?');

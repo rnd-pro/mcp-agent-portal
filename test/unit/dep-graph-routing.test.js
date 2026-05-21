@@ -39,4 +39,16 @@ describe('dep-graph-routing', () => {
     updateHashParam('focus', null, locationObj, historyObj);
     assert.equal(nextUrl, '#graph/src?mode=flat');
   });
+
+  it('updateHashParam skips history writes when hash is unchanged', () => {
+    let replaceCount = 0;
+    updateHashParam(
+      'focus',
+      'src/app.js',
+      { hash: '#graph?focus=src%2Fapp.js' },
+      { replaceState() { replaceCount++; } },
+    );
+
+    assert.equal(replaceCount, 0);
+  });
 });

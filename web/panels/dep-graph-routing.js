@@ -32,5 +32,6 @@ export function updateHashParam(key, value, locationObj = window.location, histo
   }
   const newQuery = params.toString();
   const newHash = newQuery ? `${basePath}?${newQuery}` : basePath;
+  if (locationObj.hash === newHash) return;
   historyObj.replaceState(null, '', newHash);
 }

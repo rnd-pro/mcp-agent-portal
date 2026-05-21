@@ -49,6 +49,7 @@ import {
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
+  getFlatFocusRestoreKey,
   getGraphHashNavigationState,
   resolveFlatHashChange,
   resolveGraphNodeClick,
@@ -56,6 +57,7 @@ import {
   selectLabelMode,
   shouldClearFocusOnSelection,
   shouldFitForceLayoutInitialTick,
+  shouldRestoreFlatFocus,
 } from './dep-graph-ui.js';
 export class DepGraph extends Symbiote {
   init$ = {};
@@ -220,6 +222,7 @@ export class DepGraph extends Symbiote {
       // Rebuild graph in new mode
       this._graphBuilt = false;
       this._initialViewRestored = false;
+      this._lastFlatFocusRestoreKey = null;
       if (this._failsafeTimer) { clearTimeout(this._failsafeTimer); this._failsafeTimer = null; }
       this._showLoader();
       if (state.skeleton) {
@@ -405,7 +408,14 @@ export class DepGraph extends Symbiote {
         const flatHash = resolveFlatHashChange(hash);
         if (flatHash && this._pgCanvasGraph) {
           this._pgCanvasGraph.setPath(flatHash.path);
-          if (flatHash.focus) this._pgCanvasGraph.flyToNode(flatHash.focus);
+          if (shouldRestoreFlatFocus({
+            lastKey: this._lastFlatFocusRestoreKey,
+            path: flatHash.path,
+            focus: flatHash.focus,
+          })) {
+            this._lastFlatFocusRestoreKey = getFlatFocusRestoreKey(flatHash);
+            this._pgCanvasGraph.flyToNode(flatHash.focus);
+          }
         }
         return;
       }
@@ -470,6 +480,9 @@ export class DepGraph extends Symbiote {
       const focusParam = params.get('focus');
       if (focusParam && this._pgCanvasGraph) {
         const decoded = decodeURIComponent(focusParam);
+        const focusKey = getFlatFocusRestoreKey({ path: pathStr, focus: decoded });
+        if (this._lastFlatFocusRestoreKey === focusKey) return;
+        this._lastFlatFocusRestoreKey = focusKey;
         // Skip if focus target is the same group we just drilled into
         const focusClean = decoded.replace(/\/$/, '');
         if (focusClean === pathStr) {

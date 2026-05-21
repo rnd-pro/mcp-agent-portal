@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildFlatPathHash,
   getFileSelectionNodeId,
+  getFlatFocusRestoreKey,
   getGraphHashNavigationState,
   resolveFlatHashChange,
   resolveGraphNodeClick,
@@ -11,6 +12,7 @@ import {
   selectLabelMode,
   shouldClearFocusOnSelection,
   shouldFitForceLayoutInitialTick,
+  shouldRestoreFlatFocus,
 } from '../../web/panels/dep-graph-ui.js';
 import {
   mountDepGraphTemplate,
@@ -271,6 +273,32 @@ test('resolveFlatHashChange returns path and decoded focus for graph hashes', ()
     { path: '', focus: 'src/app.js' },
   );
   assert.equal(resolveFlatHashChange('#dashboard'), null);
+});
+
+test('shouldRestoreFlatFocus rejects repeated flat focus restore keys', () => {
+  const key = getFlatFocusRestoreKey({
+    path: '',
+    focus: 'src/node/mlops/flywheel.js',
+  });
+
+  assert.equal(key, '::src/node/mlops/flywheel.js');
+  assert.equal(
+    shouldRestoreFlatFocus({
+      lastKey: key,
+      path: '',
+      focus: 'src/node/mlops/flywheel.js',
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRestoreFlatFocus({
+      lastKey: key,
+      path: 'src/node',
+      focus: 'mlops/flywheel.js',
+    }),
+    true,
+  );
+  assert.equal(shouldRestoreFlatFocus({ lastKey: null, path: '', focus: null }), false);
 });
 
 test('getGraphHashNavigationState detects graph paths and query params', () => {
