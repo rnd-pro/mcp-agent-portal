@@ -250,6 +250,7 @@ function auditSymbioteImportMaps() {
   const requiredImportMapEntries = [
     '"symbiote-node":',
     '"symbiote-node/ui":',
+    '"symbiote-node/graph":',
     '"symbiote-node/layout":',
     '"symbiote-node/display/highlight":',
     '"symbiote-node/display/markdown-formatter":',

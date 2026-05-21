@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { getRoute, navigate } from 'symbiote-node/ui';
-import { panelTypes, getHomeSections, getProjectSections, getLayout, hasSection } from '../../router-registry.js';
+import { panelTypes, getHomeSections, getProjectSections, hasSection } from '../../router-registry.js';
+import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import { layoutMatchesSection } from '../../layout-policy.js';
 import { emit as dashEmit } from '../../dashboard-state.js';
 import { persistLayout, readLayout } from '../../common/ui-state.js';
@@ -156,7 +157,7 @@ export class PgWorkspace extends Symbiote {
   }
 
   _fallbackLayout(section) {
-    let layout = getLayout(section);
+    let layout = getPortalRuntimeLayout(section, this._projectId === 'global' ? null : this._projectId);
     if (layout) this.ref.layout.setLayout(layout);
   }
 }

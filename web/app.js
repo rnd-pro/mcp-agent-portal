@@ -1,7 +1,9 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
 import { LayoutTree as t, applyTheme as n, DEFAULT_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
-import { panelTypes, getSectionsForScope, getLayout, hasSection } from "./router-registry.js";
+import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
+import { applyPortalProjectTransaction, getPortalProjectRuntime, getPortalRuntimeLayout } from "./services/portal-runtime.js";
+import { getTransactionLayoutRoots } from "./services/project-runtime-package.js";
 import { layoutMatchesSection } from "./layout-policy.js";
 import { followController } from "./follow-controller.js";
 import "./components/FollowRibbon/FollowRibbon.js";
@@ -215,7 +217,7 @@ function waitForElementApi(element, methodName, timeoutMs = 2000) {
  */
 function getSubPanelsForSection(sectionId, projectId) {
   let storageKey = `pg-layout-v4-${projectId || 'global'}-${sectionId}`;
-  let fallback = getLayout(sectionId);
+  let fallback = getPortalRuntimeLayout(sectionId, projectId);
   let tree = readLayout(storageKey);
   if (!layoutMatchesSection(sectionId, tree, fallback)) tree = fallback;
   
@@ -315,7 +317,7 @@ function handleRoute() {
     let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
     layout.$['@storage-key'] = storageKey;
 
-    let fallback = getLayout(section);
+    let fallback = getPortalRuntimeLayout(section, projectId);
     let saved = readLayout(storageKey);
     if (!layoutMatchesSection(section, saved, fallback)) saved = null;
 
@@ -343,8 +345,40 @@ function handleRoute() {
   }
 }
 
+function applyRuntimeTransaction(projectId, transaction) {
+  let project = applyPortalProjectTransaction(projectId, transaction);
+  for (let [layoutId, root] of getTransactionLayoutRoots(project, transaction)) {
+    let storageKey = `pg-layout-v4-${projectId || 'global'}-${layoutId}`;
+    persistLayout(storageKey, root);
+  }
+  let route = getRoute();
+  let globals = parseQuery(route.query);
+  if ((globals.project || null) === (projectId || null)) {
+    _currentSection = '';
+    handleRoute();
+  }
+  document.documentElement.setAttribute('data-project-runtime-updated', transaction.id || 'transaction');
+  document.dispatchEvent(new CustomEvent('agent-portal-project-runtime-updated', {
+    detail: { projectId, project },
+  }));
+  return project;
+}
+
 async function u() {
   n(document.documentElement, o);
+  let runtimeApi = {
+    getProject: (projectId = null) => getPortalProjectRuntime(projectId).getProject(),
+    applyTransaction: applyRuntimeTransaction,
+  };
+  try {
+    window.agentPortalProjectRuntime = runtimeApi;
+  } catch {}
+  document.documentElement.agentPortalProjectRuntime = runtimeApi;
+  document.documentElement.setAttribute('data-project-runtime', 'ready');
+  document.addEventListener('agent-portal-project-transaction', (event) => {
+    let { projectId = null, transaction } = event.detail || {};
+    if (transaction) applyRuntimeTransaction(projectId, transaction);
+  });
 
   requestAnimationFrame(async () => {
     // Register project & chat as global params — they persist across section switches

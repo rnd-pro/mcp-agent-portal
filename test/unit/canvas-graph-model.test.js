@@ -1,7 +1,26 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { register } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { buildCanvasGraphModelFromSkeleton } from '../../web/services/project-graph-canvas-model.js';
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const symbioteNodeGraphUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'graph', 'index.js')).href;
+const loaderSource = `
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'symbiote-node/graph') {
+    return { url: ${JSON.stringify(symbioteNodeGraphUrl)}, shortCircuit: true };
+  }
+  return nextResolve(specifier, context);
+}
+`;
+
+register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url);
+
+const {
+  buildCanvasGraphModelFromSkeleton,
+  buildGraphModelFromSkeleton,
+} = await import('../../web/services/project-graph-canvas-model.js?unit-test');
 import {
   baseName,
   collectSkeletonFiles,
@@ -45,7 +64,27 @@ describe('canvas graph project model adapter', () => {
     assert.equal(nodes.get('src/app.js').lines, 48);
     assert.equal(nodes.get('src/style.css').type, 'style');
     assert.equal(nodes.get('assets/logo.svg').type, 'asset');
-    assert.deepEqual(model.edges, [{ from: 'src/app.js', to: 'src/lib/util.js' }]);
+    assert.equal(model.edges.length, 1);
+    assert.equal(model.edges[0].from, 'src/app.js');
+    assert.equal(model.edges[0].to, 'src/lib/util.js');
+    assert.equal(model.edges[0].type, 'project.import');
+  });
+
+  it('builds the universal graph-model-v1 before projecting to canvas', () => {
+    const graph = buildGraphModelFromSkeleton({
+      f: {
+        'src/': ['app.js', 'util.js'],
+      },
+      I: {
+        'src/app.js': ['./util'],
+      },
+    });
+
+    assert.equal(graph.version, 'graph-model-v1');
+    assert.equal(graph.nodesById.get('src').kind, 'project.directory');
+    assert.equal(graph.nodesById.get('src/app.js').kind, 'project.file.action');
+    assert.equal(graph.edges[0].kind, 'project.import');
+    assert.deepEqual(graph.views.canvas.roots, ['src']);
   });
 
   it('moves matching files under semantic cluster roots', () => {
@@ -87,7 +126,9 @@ describe('canvas graph project model adapter', () => {
       },
     });
 
-    assert.deepEqual(model.edges, [{ from: 'src/app.js', to: 'src/util.js' }]);
+    assert.equal(model.edges.length, 1);
+    assert.equal(model.edges[0].from, 'src/app.js');
+    assert.equal(model.edges[0].to, 'src/util.js');
   });
 
   it('uses first matching semantic cluster when paths overlap', () => {

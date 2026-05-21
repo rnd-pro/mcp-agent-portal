@@ -153,6 +153,7 @@ let indexHtml = `<!DOCTYPE html>
         "@symbiotejs/symbiote/": "${basePath}node_modules/@symbiotejs/symbiote/",
         "symbiote-node": "${basePath}packages/symbiote-node/index.js",
         "symbiote-node/ui": "${basePath}packages/symbiote-node/ui/index.js",
+        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph/index.js",
         "symbiote-node/layout": "${basePath}packages/symbiote-node/layout/index.js",
         "symbiote-node/display/highlight": "${basePath}packages/symbiote-node/display/highlight.js",
         "symbiote-node/display/markdown-formatter": "${basePath}packages/symbiote-node/display/markdown-formatter.js",

@@ -3,6 +3,7 @@ import {
   normalizeProjectGraphMetadata,
 } from './project-graph-metadata.js';
 import { collectSkeletonFiles, dirOf, resolveImport } from './project-graph-skeleton-utils.js';
+import { graphModelToCanvasGraphModel, normalizeGraphModel } from 'symbiote-node/graph';
 
 function classifyFile(file, classFiles) {
   const name = file.split('/').pop().toLowerCase();
@@ -23,7 +24,7 @@ function classifyFile(file, classFiles) {
   return 'data';
 }
 
-export function buildCanvasGraphModelFromSkeleton(skeleton, metadata = null) {
+export function buildGraphModelFromSkeleton(skeleton, metadata = null) {
   const projectGraphMetadata = normalizeProjectGraphMetadata(metadata);
   const { files: allFiles, classFiles } = collectSkeletonFiles(skeleton);
   const nodes = [];
@@ -63,14 +64,20 @@ export function buildCanvasGraphModelFromSkeleton(skeleton, metadata = null) {
     if (files.length === 0) continue;
     addNode({
       id: clusterId,
+      kind: 'project.semanticCluster',
       label: cluster.label,
-      w: 180,
-      h: 48,
-      type: 'group',
-      color: cluster.color,
-      description: cluster.description,
-      isGroup: true,
-      isSemanticCluster: true,
+      design: {
+        component: 'graph-group',
+        variant: 'group',
+        width: 180,
+        height: 48,
+        color: cluster.color,
+        isGroup: true,
+        canvas: {
+          description: cluster.description,
+          isSemanticCluster: true,
+        },
+      },
       parentId: null,
       children: [],
     });
@@ -80,7 +87,20 @@ export function buildCanvasGraphModelFromSkeleton(skeleton, metadata = null) {
   for (const dir of [...dirs].sort()) {
     const parentDir = dir.includes('/') ? dir.substring(0, dir.lastIndexOf('/')) : null;
     const label = dir.split('/').pop();
-    addNode({ id: dir, label, w: 160, h: 40, type: 'group', isGroup: true, parentId: parentDir, children: [] });
+    addNode({
+      id: dir,
+      kind: 'project.directory',
+      label,
+      parentId: parentDir,
+      children: [],
+      design: {
+        component: 'graph-group',
+        variant: 'group',
+        width: 160,
+        height: 40,
+        isGroup: true,
+      },
+    });
     if (!parentDir || !dirs.has(parentDir)) {
       rootNodes.push(dir);
     }
@@ -101,15 +121,23 @@ export function buildCanvasGraphModelFromSkeleton(skeleton, metadata = null) {
     const label = file.split('/').pop();
     addNode({
       id: file,
+      kind: `project.file.${type}`,
       label,
-      w: 160,
-      h: 40,
-      type,
-      isGroup: false,
       parentId: actualParent,
       children: [],
-      exports: Array.isArray(skeleton.X?.[file]) ? skeleton.X[file] : undefined,
-      lines: skeleton.L?.[file],
+      design: {
+        component: 'graph-node',
+        variant: type,
+        width: 160,
+        height: 40,
+        canvas: {
+          exports: Array.isArray(skeleton.X?.[file]) ? skeleton.X[file] : undefined,
+          lines: skeleton.L?.[file],
+        },
+      },
+      params: {
+        path: file,
+      },
     });
     if (actualParent) {
       nodesById.get(actualParent).children.push(file);
@@ -128,9 +156,27 @@ export function buildCanvasGraphModelFromSkeleton(skeleton, metadata = null) {
       const key = srcFile + '>' + targetFile;
       if (edgeSet.has(key)) continue;
       edgeSet.add(key);
-      edges.push({ from: srcFile, to: targetFile });
+      edges.push({
+        kind: 'project.import',
+        source: { nodeId: srcFile, port: 'import' },
+        target: { nodeId: targetFile, port: 'export' },
+      });
     }
   }
 
-  return { nodes, edges, rootNodes };
+  return normalizeGraphModel({
+    version: 'graph-model-v1',
+    nodes,
+    edges,
+    views: {
+      canvas: {
+        kind: 'canvas-graph',
+        roots: rootNodes,
+      },
+    },
+  });
+}
+
+export function buildCanvasGraphModelFromSkeleton(skeleton, metadata = null) {
+  return graphModelToCanvasGraphModel(buildGraphModelFromSkeleton(skeleton, metadata), { view: 'canvas' });
 }
