@@ -101,17 +101,17 @@ export default /*css*/ `
   border-radius: 6px;
   padding: 10px;
   border-left: 3px solid var(--border-color);
-  box-shadow: 0 1px 3px var(--sn-bg-overlay, rgba(0,0,0,0.1));
+  box-shadow: var(--sn-shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.status-queued { border-left-color: var(--sn-text-dim, #9e9e9e); }
-.status-running { border-left-color: var(--sn-cat-server, #2196f3); }
-.status-done { border-left-color: var(--sn-success-color, #4caf50); }
-.status-error { border-left-color: var(--sn-danger-color, #f44336); }
-.status-cancelled { border-left-color: var(--sn-warning-color, #ff9800); }
+.status-queued { border-left-color: var(--sn-text-dim); }
+.status-running { border-left-color: var(--sn-cat-server); }
+.status-done { border-left-color: var(--sn-success-color); }
+.status-error { border-left-color: var(--sn-danger-color); }
+.status-cancelled { border-left-color: var(--sn-warning-color); }
 
 .card-header {
   display: flex;
@@ -127,7 +127,7 @@ export default /*css*/ `
 
 .card-header .material-symbols-outlined {
   font-size: 16px;
-  color: var(--text-color-muted, #888);
+  color: var(--sn-text-dim);
 }
 
 .spin-icon {
@@ -152,7 +152,7 @@ export default /*css*/ `
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  color: var(--text-color-muted, #888);
+  color: var(--sn-text-dim);
 }
 
 .metrics {

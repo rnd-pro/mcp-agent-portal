@@ -48,6 +48,69 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('keeps runtime event rows on provider theme tokens', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/EventItem/EventItem.css.js'), 'utf8');
+    for (let literal of [
+      '#60a5fa',
+      '#4ade80',
+      '#f87171',
+      'rgba(96, 165, 250',
+      'rgba(74, 222, 128',
+      'rgba(248, 113, 113',
+      'rgba(0,0,0',
+      'rgba(255,255,255',
+      'monospace)',
+    ]) {
+      assert.equal(source.includes(literal), false, `EventItem must not copy provider styling with ${literal}`);
+    }
+    for (let token of [
+      '--sn-font-mono',
+      '--sn-node-hover',
+      '--sn-node-selected',
+      '--sn-accent-bg-subtle',
+      '--sn-success-bg',
+      '--sn-danger-bg',
+    ]) {
+      assert.ok(source.includes(token), `EventItem must consume ${token}`);
+    }
+  });
+
+  it('keeps shared agent chrome on provider theme tokens', () => {
+    for (let relative of [
+      'web/components/AgentBoard/AgentBoard.css.js',
+      'web/components/FollowRibbon/FollowRibbon.css.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      for (let literal of [
+        '#9e9e9e',
+        '#2196f3',
+        '#4caf50',
+        '#f44336',
+        '#ff9800',
+        '#4c8bf5',
+        '#888',
+        'rgba(0,0,0',
+        'rgba(0, 0, 0',
+        'rgba(20, 20, 25',
+        'rgba(76, 139, 245',
+        'rgba(255, 255, 255',
+        '--text-color-muted',
+      ]) {
+        assert.equal(source.includes(literal), false, `${relative} must not copy provider styling with ${literal}`);
+      }
+    }
+
+    let agentBoard = fs.readFileSync(path.join(ROOT, 'web/components/AgentBoard/AgentBoard.css.js'), 'utf8');
+    for (let token of ['--sn-shadow-sm', '--sn-cat-server', '--sn-success-color', '--sn-danger-color', '--sn-warning-color']) {
+      assert.ok(agentBoard.includes(token), `AgentBoard must consume ${token}`);
+    }
+
+    let followRibbon = fs.readFileSync(path.join(ROOT, 'web/components/FollowRibbon/FollowRibbon.css.js'), 'utf8');
+    for (let token of ['--sn-bg-overlay', '--sn-shadow-lg', '--sn-accent-glow', '--sn-font-ui', '--sn-text-dim']) {
+      assert.ok(followRibbon.includes(token), `FollowRibbon must consume ${token}`);
+    }
+  });
+
   it('uses the symbiote tree panel component for project trees', () => {
     for (let relative of [
       'web/panels/FileTree/FileTree.tpl.js',
