@@ -6,8 +6,8 @@ export default `
   
   <div class="ui-split-container pr-split">
     <div class="pr-col">
-      <div class="ui-card">
-        <h3 class="ui-card-title">Initiate Consultation</h3>
+      <sn-card>
+        <h3 slot="title">Initiate Consultation</h3>
         
         <sn-field>
           <label>Context</label>
@@ -20,20 +20,20 @@ export default `
         </sn-field>
         
         <sn-button variant="primary" id="consult-btn"><span class="material-symbols-outlined">psychology</span> Request Peer Review</sn-button>
-      </div>
+      </sn-card>
       
-      <div class="ui-card">
-        <h3 class="ui-card-title">Iteration History (Previous Rounds)</h3>
+      <sn-card>
+        <h3 slot="title">Iteration History (Previous Rounds)</h3>
         <sn-field class="pr-history">
           <textarea id="pr-history" placeholder="Any previous feedback you want the peer to consider..."></textarea>
         </sn-field>
-      </div>
+      </sn-card>
     </div>
     
     <div class="pr-col-right">
-      <div class="ui-card pr-card-full">
+      <sn-card class="pr-card-full">
         <div class="pr-feedback-header">
-          <h3 class="ui-card-title">Peer Feedback</h3>
+          <h3 slot="title" class="pr-feedback-title">Peer Feedback</h3>
           <sn-button variant="icon" ref="refreshBtn" title="Refresh task status"><span class="material-symbols-outlined">refresh</span></sn-button>
         </div>
         
@@ -42,7 +42,7 @@ export default `
         <div id="pr-feedback" class="pr-feedback-body">
           <sn-empty-state>Submit a proposal to start peer review</sn-empty-state>
         </div>
-      </div>
+      </sn-card>
     </div>
   </div>
 </div>

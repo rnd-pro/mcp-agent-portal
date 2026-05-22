@@ -1,20 +1,56 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import 'symbiote-node/ui';
+import { bindListItemSelect, syncListItem } from 'symbiote-node/ui';
 
 export class PipelineItem extends Symbiote {
   init$ = {
     name: '',
-    itemClass: 'ui-item',
+    isActive: false,
   };
+
+  renderCallback() {
+    this.#syncListItem();
+    this.sub('name', () => this.#syncListItem());
+    this.sub('isActive', () => this.#syncListItem());
+  }
+
+  #syncListItem() {
+    let listItem = syncListItem(this, {
+      label: this.$.name,
+      icon: 'schema',
+      active: this.$.isActive,
+      name: this.$.name,
+    }, {
+      active: this.$.isActive,
+    });
+    if (listItem) {
+      bindListItemSelect(this, 'pipeline-item-select', (event) => ({
+        item: event.detail?.item || null,
+        name: this.$.name,
+      }));
+    }
+  }
 }
 
 PipelineItem.template = html`
-<div ${{ className: 'itemClass', '@data-pipeline-id': 'name', onclick: '^onPipelineSelect' }}>
-  <div class="ui-item-title" ${{ textContent: 'name' }}></div>
-</div>
+<sn-list-item ref="listItem"></sn-list-item>
 `;
 
-PipelineItem.rootStyles = cssShared;
+PipelineItem.rootStyles = `
+:host {
+  display: block;
+}
+sn-list-item {
+  --sn-icon-font: 'Material Symbols Outlined';
+  --sn-list-item-radius: 0;
+  --sn-list-item-padding: 10px 14px;
+  --sn-list-item-label-size: 13px;
+}
+:host([active]) sn-list-item {
+  --sn-list-item-label-color: var(--sn-node-selected);
+  --sn-list-item-padding: 10px 14px 10px 11px;
+}
+`;
 PipelineItem.reg('pm-pipeline-item');
 
 export default PipelineItem;

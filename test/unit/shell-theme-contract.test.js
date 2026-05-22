@@ -67,12 +67,18 @@ describe('portal shell theme contract', () => {
       'web/panels/ToolExplorer/ToolCard.js',
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
+      'web/panels/PeerReview/PeerReview.tpl.js',
+      'web/panels/PipelineManager/PipelineManager.js',
       'web/panels/ProjectItem/ProjectItem.tpl.js',
       'web/panels/SettingsPanel/SettingsPanel.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
-      assert.ok(source.includes('<sn-card'), `${relative} must compose the library card surface`);
+      assert.ok(
+        source.includes('<sn-card') || source.includes("createElement('sn-card')"),
+        `${relative} must compose the library card surface`
+      );
       assert.equal(source.includes('<div class="ui-card"'), false, `${relative} must not copy card shell markup`);
+      assert.equal(source.includes("className = 'ui-card'"), false, `${relative} must not create copied card shell classes`);
     }
   });
 
@@ -114,6 +120,18 @@ describe('portal shell theme contract', () => {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(source.includes('<sn-field'), `${relative} must compose the library field wrapper`);
       assert.equal(source.includes('<div class="ui-field">'), false, `${relative} must not copy field shell markup`);
+    }
+  });
+
+  it('uses symbiote list items for reusable selectable rows', () => {
+    for (let relative of [
+      'web/panels/PipelineManager/PipelineItem.js',
+      'web/panels/ToolExplorer/ToolServerItem.js',
+      'web/panels/WorkflowExplorer/WorkflowItem.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('<sn-list-item'), `${relative} must compose the library list item`);
+      assert.equal(source.includes('ui-item'), false, `${relative} must not copy list item shell classes`);
     }
   });
 

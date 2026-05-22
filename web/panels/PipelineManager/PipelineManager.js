@@ -9,14 +9,6 @@ export class PipelineManager extends Symbiote {
   init$ = {
     pipelines: [],
     selectedPipelineId: null,
-    onPipelineSelect: (e) => {
-      let pipelineId = e.currentTarget.dataset.pipelineId;
-      let pipeline = this._pipelines.find((item) => item.name === pipelineId);
-      if (!pipeline) return;
-      this.$.selectedPipelineId = pipeline.name;
-      this.renderSidebar();
-      this.showPipelineDetails(pipeline);
-    },
   };
 
   _pipelines = [];
@@ -24,6 +16,9 @@ export class PipelineManager extends Symbiote {
   initCallback() {
     this.ref.refreshBtn.onclick = () => this.loadPipelines();
     this.ref.newBtn.onclick = () => this.showCreateForm();
+    this.addEventListener('pipeline-item-select', (event) => {
+      this._selectPipeline(event.detail?.name);
+    });
     
     this.loadPipelines();
   }
@@ -63,8 +58,16 @@ export class PipelineManager extends Symbiote {
     
     this.$.pipelines = pipelines.map((pipeline) => ({
       name: pipeline.name,
-      itemClass: 'ui-item' + (this.$.selectedPipelineId === pipeline.name ? ' active' : ''),
+      isActive: this.$.selectedPipelineId === pipeline.name,
     }));
+  }
+
+  _selectPipeline(pipelineId) {
+    let pipeline = this._pipelines.find((item) => item.name === pipelineId);
+    if (!pipeline) return;
+    this.$.selectedPipelineId = pipeline.name;
+    this.renderSidebar();
+    this.showPipelineDetails(pipeline);
   }
 
   showPipelineDetails(pipeline) {
@@ -134,15 +137,11 @@ export class PipelineManager extends Symbiote {
   }
 
   _renderStepCard(step) {
-    let card = document.createElement('div');
-    card.className = 'ui-card';
+    let card = document.createElement('sn-card');
 
     let title = document.createElement('div');
-    title.className = 'ui-card-title';
-    title.style.marginBottom = '8px';
-    title.style.display = 'flex';
-    title.style.alignItems = 'center';
-    title.style.gap = '8px';
+    title.className = 'pm-step-title';
+    title.setAttribute('slot', 'title');
     title.append(document.createTextNode(step.name ?? ''));
 
     if (step.trigger) {
@@ -153,14 +152,11 @@ export class PipelineManager extends Symbiote {
     }
 
     let prompt = document.createElement('div');
-    prompt.style.fontFamily = 'monospace';
-    prompt.style.marginBottom = '12px';
-    prompt.style.whiteSpace = 'pre-wrap';
+    prompt.className = 'pm-step-prompt';
     prompt.textContent = step.prompt || '';
 
     let badges = document.createElement('div');
-    badges.style.display = 'flex';
-    badges.style.gap = '8px';
+    badges.className = 'pm-step-badges';
 
     if (step.skill) badges.append(this._badge(`Skill: ${step.skill}`, 'info'));
     if (step.timeout) badges.append(this._badge(`Timeout: ${step.timeout}s`));

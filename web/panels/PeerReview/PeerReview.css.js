@@ -34,7 +34,7 @@ export default css`
   margin-bottom: 16px;
 }
 
-.pr-feedback-header .ui-card-title {
+.pr-feedback-title {
   margin: 0;
 }
 
