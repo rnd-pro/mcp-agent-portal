@@ -245,7 +245,7 @@ class Marketplace extends Symbiote {
 
       // Hot success — update UI
       btn.textContent = '✓ Installed';
-      card.style.opacity = '0.5';
+      card.classList.add('mp-card-installed');
       this._installedNames.add(name);
       this.$.serverCount = this._installedNames.size;
       // Refresh installed tab
@@ -272,9 +272,7 @@ class Marketplace extends Symbiote {
       let data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Remove failed');
 
-      card.style.transform = 'scale(0.95)';
-      card.style.opacity = '0';
-      card.style.transition = 'all 0.3s';
+      card.classList.add('mp-card-removing');
       setTimeout(() => {
         card.remove();
         this.$.installedItems = this.$.installedItems.filter(item => item.name !== name);

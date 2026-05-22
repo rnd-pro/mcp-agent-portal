@@ -1,12 +1,38 @@
 export default /*css*/ `
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   width: 100%;
 }
 
+.rtc-header {
+  align-items: center;
+  background: var(--sn-panel-bg);
+  border-bottom: 1px solid var(--sn-node-border);
+  display: flex;
+  flex-shrink: 0;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px 20px;
+}
+
+.rtc-title {
+  align-items: center;
+  color: var(--sn-text);
+  display: flex;
+  font-size: 16px;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.rtc-title .material-symbols-outlined {
+  color: var(--sn-node-selected);
+}
+
 .rtc-main {
-  height: calc(100% - 57px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
 }

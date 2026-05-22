@@ -1,12 +1,12 @@
 import { html } from '@symbiotejs/symbiote';
 
 export default html`
-<div class="ui-main">
-  <div class="ui-details-header topo-header">
-    <div class="ui-details-title topo-title">
+<div class="topo-main">
+  <div class="topo-header">
+    <div class="topo-title">
       <span class="material-symbols-outlined">hub</span> Network Topology
     </div>
-    <div class="ui-details-desc">Connected nodes participating in the Distributed Agent Pool.</div>
+    <div class="topo-desc">Connected nodes participating in the Distributed Agent Pool.</div>
   </div>
 
   <table class="node-table">

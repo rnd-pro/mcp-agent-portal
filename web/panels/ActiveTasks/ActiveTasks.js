@@ -34,7 +34,7 @@ export class ActiveTasks extends Symbiote {
 
   /** Manual refresh — re-fetch from agent-pool AND trigger re-render from graph */
   async _forceRefresh() {
-    this.ref.refreshBtn.style.opacity = '0.5';
+    this.ref.refreshBtn.classList.add('at-refreshing');
     try {
       let res = await fetch('/api/mcp-call', {
         method: 'POST',
@@ -94,7 +94,7 @@ export class ActiveTasks extends Symbiote {
     } catch (err) {
       console.error('[ActiveTasks] refresh error:', err);
     } finally {
-      this.ref.refreshBtn.style.opacity = '1';
+      this.ref.refreshBtn.classList.remove('at-refreshing');
     }
   }
 

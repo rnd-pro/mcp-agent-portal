@@ -226,4 +226,48 @@ describe('portal shell theme contract', () => {
       assert.ok(source.includes(token), `TaskCard must consume ${token}`);
     }
   });
+
+  it('keeps active tasks panel off copied shared shell classes', () => {
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/ActiveTasks.tpl.js'), 'utf8');
+    for (let sharedClass of ['ui-container', 'ui-header', 'ui-title', 'ui-main']) {
+      assert.equal(template.includes(sharedClass), false, `ActiveTasks must not copy ${sharedClass}`);
+    }
+
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/ActiveTasks.js'), 'utf8');
+    assert.equal(source.includes('.style.'), false, 'ActiveTasks must not use inline style mutation');
+  });
+
+  it('keeps marketplace panel off copied shared shell classes', () => {
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/Marketplace/Marketplace.tpl.js'), 'utf8');
+    for (let sharedClass of ['ui-header', 'ui-title-large', 'ui-segmented-control', 'ui-field', 'ui-card-title']) {
+      assert.equal(template.includes(sharedClass), false, `Marketplace must not copy ${sharedClass}`);
+    }
+
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/Marketplace/Marketplace.js'), 'utf8');
+    assert.equal(source.includes('card.style.'), false, 'Marketplace card visual state must use classes');
+  });
+
+  it('keeps topology panel off copied detail shell classes', () => {
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/Topology/TopologyPanel.tpl.js'), 'utf8');
+    for (let sharedClass of ['ui-main', 'ui-details-header', 'ui-details-title', 'ui-details-desc']) {
+      assert.equal(template.includes(sharedClass), false, `TopologyPanel must not copy ${sharedClass}`);
+    }
+
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/Topology/TopologyPanel.js'), 'utf8');
+    assert.equal(source.includes('style.color'), false, 'TopologyPanel status color must use classes');
+    assert.equal(source.includes('Object.assign(typeBadge.style'), false, 'TopologyPanel badge styling must use variants/classes');
+    assert.equal(source.includes('#8A2BE2'), false, 'TopologyPanel must not hardcode provider colors');
+  });
+
+  it('keeps runtime and group panels off copied header classes', () => {
+    for (let relative of [
+      'web/panels/RuntimeControl/RuntimeControl.tpl.js',
+      'web/panels/GroupManager/GroupManager.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.equal(source.includes('ui-header'), false, `${relative} must not copy shared header classes`);
+      assert.equal(source.includes('ui-title'), false, `${relative} must not copy shared title classes`);
+      assert.equal(source.includes('ui-title-large'), false, `${relative} must not copy shared title classes`);
+    }
+  });
 });

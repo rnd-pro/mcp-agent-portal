@@ -1,13 +1,13 @@
 import { html } from '@symbiotejs/symbiote';
 
 export default html`
-<div class="ui-header">
-  <div class="ui-title-large mp-title-bar">
+<div class="mp-header">
+  <div class="mp-title-bar">
     <div class="mp-title-left">
       <span class="material-symbols-outlined mp-header-icon">storefront</span>
       Marketplace
     </div>
-    <div class="ui-segmented-control mp-mode-toggle" ref="modeToggle">
+    <div class="mp-mode-toggle" ref="modeToggle">
       <button class="active" data-mode="servers">MCP Servers</button>
       <button data-mode="context">Skills & Rules</button>
     </div>
@@ -23,7 +23,9 @@ export default html`
 
   <div class="mp-search-bar" ref="searchBar">
     <span class="material-symbols-outlined mp-search-icon">search</span>
-    <input type="text" class="ui-field mp-search-input" placeholder="Search servers..." ref="searchInput" />
+    <sn-field class="mp-search-field">
+      <input type="text" class="mp-search-input" placeholder="Search servers..." ref="searchInput" />
+    </sn-field>
   </div>
 
   <div class="mp-scrollable">
@@ -37,7 +39,7 @@ export default html`
 
     <div class="mp-tab-content" ref="customTab" hidden>
       <div class="mp-custom-form">
-        <div class="ui-card-title mp-custom-title">Install Custom MCP Server</div>
+        <div class="mp-custom-title">Install Custom MCP Server</div>
         <p class="mp-form-desc">Add any MCP server by specifying its command and arguments.</p>
         
         <sn-field>

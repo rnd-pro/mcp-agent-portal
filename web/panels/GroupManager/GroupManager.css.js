@@ -28,6 +28,19 @@ export default `
   margin-left: auto;
 }
 
+.gm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sn-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gm-title .material-symbols-outlined {
+  color: var(--sn-node-selected);
+}
+
 .gm-board {
   flex: 1;
   display: grid;

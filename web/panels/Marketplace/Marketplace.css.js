@@ -23,6 +23,12 @@ export default `
   opacity: 0.4;
 }
 
+.mp-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--sn-node-border);
+  background: var(--sn-panel-bg);
+}
+
 /* ── Tabs ──────────────────────────────────────────── */
 .mp-tabs {
   display: flex;
@@ -179,8 +185,38 @@ export default `
 }
 
 .mp-mode-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 8px;
+  background: var(--sn-bg);
   font-size: 13px;
   font-weight: normal;
+}
+
+.mp-mode-toggle button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--sn-text-dim);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mp-mode-toggle button:hover {
+  background: var(--sn-node-hover);
+  color: var(--sn-text);
+}
+
+.mp-mode-toggle button.active {
+  background: color-mix(in srgb, var(--sn-node-selected) 18%, transparent);
+  color: var(--sn-text);
+}
+
+.mp-search-field {
+  flex: 1;
 }
 
 .mp-search-input {
@@ -190,6 +226,8 @@ export default `
 .mp-custom-title {
   margin-bottom: 4px;
   font-size: 15px;
+  font-weight: 600;
+  color: var(--sn-text);
 }
 
 .mp-install-icon {
@@ -217,5 +255,15 @@ export default `
 
 .mp-context-body {
   padding: 16px;
+}
+
+.mp-card-installed {
+  opacity: 0.5;
+}
+
+.mp-card-removing {
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.3s, transform 0.3s;
 }
 `;

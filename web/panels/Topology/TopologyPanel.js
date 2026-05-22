@@ -34,14 +34,9 @@ export class TopologyPanel extends Symbiote {
   renderTable(instances) {
     let rows = [this.createTopologyRow({
       name: 'portal-master',
-      color: '#8A2BE2',
+      color: 'var(--sn-node-selected)',
       typeText: 'Master',
       typeClass: 'info',
-      typeStyles: {
-        background: 'hsla(280, 55%, 45%, 0.2)',
-        borderColor: 'transparent',
-        color: 'var(--sn-cat-server, hsl(280, 55%, 45%))',
-      },
       location: 'localhost',
       agentsText: '-',
       statusText: '● Active',
@@ -64,13 +59,13 @@ export class TopologyPanel extends Symbiote {
     this.ref.tableBody.replaceChildren(...rows);
   }
 
-  createTopologyRow({ name, color, typeText, typeClass, typeStyles, location, agentsText, statusText }) {
+  createTopologyRow({ name, color, typeText, typeClass, location, agentsText, statusText }) {
     let row = document.createElement('tr');
 
     let nameCell = document.createElement('td');
     let colorDot = document.createElement('span');
     colorDot.className = 'node-color';
-    colorDot.style.backgroundColor = color;
+    colorDot.style.setProperty('--topo-node-color', color);
     nameCell.append(colorDot, document.createTextNode(` ${name}`));
 
     let typeCell = document.createElement('td');
@@ -78,7 +73,6 @@ export class TopologyPanel extends Symbiote {
     if (typeClass) typeBadge.setAttribute('variant', typeClass);
     typeBadge.className = 'topology-type-badge';
     typeBadge.textContent = typeText;
-    if (typeStyles) Object.assign(typeBadge.style, typeStyles);
     typeCell.append(typeBadge);
 
     let locationCell = document.createElement('td');
@@ -89,7 +83,7 @@ export class TopologyPanel extends Symbiote {
 
     let statusCell = document.createElement('td');
     let status = document.createElement('span');
-    status.style.color = 'var(--sn-success-color)';
+    status.className = 'topology-status';
     status.textContent = statusText;
     statusCell.append(status);
 

@@ -1,8 +1,8 @@
 import { html } from '@symbiotejs/symbiote';
 
 export default html`
-<div class="ui-header">
-  <div class="ui-title-large">
+<div class="rtc-header">
+  <div class="rtc-title">
     <span class="material-symbols-outlined">monitor_heart</span>
     Runtime Control
   </div>
