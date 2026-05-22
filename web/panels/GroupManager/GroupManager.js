@@ -36,6 +36,12 @@ function makeIcon(name) {
   return makeElement('span', 'material-symbols-outlined', name);
 }
 
+function makeIconButton(className = '') {
+  let button = makeElement('sn-button', className);
+  button.setAttribute('variant', 'icon');
+  return button;
+}
+
 function makeOption(value, selected = false) {
   let option = document.createElement('option');
   option.value = value;
@@ -122,7 +128,7 @@ export class GroupManager extends Symbiote {
     if (group.policy) meta.append(makeElement('span', '', group.policy));
     titleWrap.replaceChildren(title, meta);
 
-    let saveButton = makeElement('button', 'ui-btn-icon gm-column-save');
+    let saveButton = makeIconButton('gm-column-save');
     saveButton.title = 'Save group';
     saveButton.dataset.group = group.name;
     saveButton.replaceChildren(makeIcon('save'));
@@ -169,7 +175,7 @@ export class GroupManager extends Symbiote {
     modelSelect.dataset.addModel = group.name;
     modelSelect.replaceChildren(...models.map(m => makeOption(m)));
 
-    let addButton = makeElement('button', 'ui-btn-icon');
+    let addButton = makeIconButton();
     addButton.title = 'Add profile';
     addButton.dataset.addProfile = group.name;
     addButton.replaceChildren(makeIcon('add'));
@@ -208,7 +214,7 @@ export class GroupManager extends Symbiote {
       return card;
     }
 
-    let removeButton = makeElement('button', 'ui-btn-icon gm-profile-remove');
+    let removeButton = makeIconButton('gm-profile-remove');
     removeButton.title = 'Remove profile';
     removeButton.dataset.removeGroup = group.name;
     removeButton.dataset.removeIndex = String(index);

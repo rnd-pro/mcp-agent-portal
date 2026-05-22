@@ -86,8 +86,8 @@ export class PipelineManager extends Symbiote {
     desc.textContent = `Steps: ${pipeline.steps.length} | On Error: ${pipeline.on_error || 'stop'}`;
     titleWrap.append(title, desc);
 
-    let runBtn = document.createElement('button');
-    runBtn.className = 'ui-btn primary';
+    let runBtn = document.createElement('sn-button');
+    runBtn.setAttribute('variant', 'primary');
     runBtn.id = 'run-btn';
     let runIcon = document.createElement('span');
     runIcon.className = 'material-symbols-outlined';

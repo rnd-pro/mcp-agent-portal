@@ -5,9 +5,9 @@ export default html`
   <div class="ui-sidebar">
     <div class="ui-sidebar-header">
       <div class="ui-title">Workflows</div>
-      <button class="ui-btn-icon" ref="refreshBtn" title="Refresh">
+      <sn-button variant="icon" ref="refreshBtn" title="Refresh">
         <span class="material-symbols-outlined">refresh</span>
-      </button>
+      </sn-button>
     </div>
     <div class="ui-sidebar-content">
       <div class="ui-list" ref="workflowList" ${{ itemize: 'workflows', 'item-tag': 'we-workflow-item' }}></div>

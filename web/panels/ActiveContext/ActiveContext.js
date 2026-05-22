@@ -56,10 +56,9 @@ function makeFileRow(file) {
     fontFamily: 'monospace',
   });
 
-  let button = document.createElement('button');
-  button.className = 'ui-btn-icon';
+  let button = document.createElement('sn-button');
+  button.setAttribute('variant', 'icon');
   button.dataset.untrack = file;
-  button.style.padding = '2px';
 
   let closeIcon = document.createElement('span');
   closeIcon.className = 'material-symbols-outlined';

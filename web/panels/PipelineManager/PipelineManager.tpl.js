@@ -5,8 +5,8 @@ export default html`
   <div class="ui-sidebar">
     <div class="ui-sidebar-header">
       <div class="ui-title"><span class="material-symbols-outlined">schema</span> Pipelines</div>
-      <button class="ui-btn-icon" title="New Pipeline" ref="newBtn"><span class="material-symbols-outlined">add</span></button>
-      <button class="ui-btn-icon" title="Refresh" ref="refreshBtn"><span class="material-symbols-outlined">refresh</span></button>
+      <sn-button variant="icon" title="New Pipeline" ref="newBtn"><span class="material-symbols-outlined">add</span></sn-button>
+      <sn-button variant="icon" title="Refresh" ref="refreshBtn"><span class="material-symbols-outlined">refresh</span></sn-button>
     </div>
     <div class="ui-sidebar-content">
       <sn-empty-state ref="pipelineState">Loading...</sn-empty-state>

@@ -79,13 +79,29 @@ describe('portal shell theme contract', () => {
   it('uses symbiote action buttons inside reusable card shells', () => {
     for (let relative of [
       'web/panels/ActiveTasks/TaskCard.js',
+      'web/panels/ActiveTasks/ActiveTasks.tpl.js',
+      'web/panels/ActiveContext/ActiveContext.js',
+      'web/panels/ActiveContext/ActiveContext.tpl.js',
+      'web/panels/GroupManager/GroupManager.js',
+      'web/panels/GroupManager/GroupManager.tpl.js',
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
+      'web/panels/PipelineManager/PipelineManager.js',
+      'web/panels/PipelineManager/PipelineManager.tpl.js',
+      'web/panels/RuntimeControl/RuntimeControl.tpl.js',
       'web/panels/SettingsPanel/SettingsPanel.tpl.js',
+      'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
+      'packages/symbiote-node/chat/ChatList/ChatList.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
-      assert.ok(source.includes('<sn-button'), `${relative} must compose the library action control`);
+      assert.ok(
+        source.includes('<sn-button') ||
+          source.includes("createElement('sn-button')") ||
+          source.includes("makeElement('sn-button'"),
+        `${relative} must compose the library action control`,
+      );
       assert.equal(source.includes('class="ui-btn'), false, `${relative} must not copy button shell classes`);
+      assert.equal(source.includes('ui-btn-icon'), false, `${relative} must not copy icon button shell classes`);
     }
   });
 

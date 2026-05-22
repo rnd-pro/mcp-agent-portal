@@ -6,10 +6,10 @@ export default html`
     <span class="material-symbols-outlined">monitor_heart</span>
     Runtime Control
   </div>
-  <button class="ui-btn" ref="refreshBtn" title="Refresh runtime status">
+  <sn-button ref="refreshBtn" title="Refresh runtime status">
     <span class="material-symbols-outlined rtc-btn-icon">refresh</span>
     Refresh
-  </button>
+  </sn-button>
 </div>
 
 <div class="rtc-main">
