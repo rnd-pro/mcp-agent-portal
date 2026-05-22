@@ -42,7 +42,7 @@ PipelineStep.rootStyles = `
 .pm-step-prompt {
   margin-block-end: 12px;
   color: var(--sn-text);
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   white-space: pre-wrap;
 }
 

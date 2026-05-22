@@ -52,15 +52,15 @@ export default`
 
 .pg-stg-val {
   font-weight: 600;
-  font-family: var(--sn-font-mono, 'JetBrains Mono', 'Fira Code', monospace);
+  font-family: var(--sn-font-mono);
 }
 
 .pg-stg-ok {
-  color: var(--sn-success-color, #4caf50);
+  color: var(--sn-success-color);
 }
 
 .pg-stg-warn {
-  color: var(--sn-warning-color, #ff9800);
+  color: var(--sn-warning-color);
 }
 
 .pg-stg-pulse {
@@ -83,7 +83,7 @@ export default`
 .pg-library-settings input,
 .pg-gateway-grid input,
 .pg-gateway-grid select {
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
 }
 
 .pg-library-note {
@@ -146,7 +146,7 @@ export default`
   background: var(--sn-node-bg);
   color: var(--sn-text);
   cursor: pointer;
-  font: 11px var(--sn-font-mono, monospace);
+  font: 11px var(--sn-font-mono);
   padding: 3px 9px;
 }
 
@@ -186,7 +186,7 @@ export default`
 .pm-provider-tab.active {
   background: var(--sn-node-selected);
   border-color: var(--sn-node-selected);
-  color: var(--sn-text, #fff);
+  color: var(--sn-text);
 }
 
 .pm-model-list {
@@ -208,7 +208,7 @@ export default`
   padding: 3px 10px;
   border-radius: 12px;
   font-size: 11px;
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   background: var(--sn-node-bg);
   border: 1px solid var(--sn-node-border);
   color: var(--sn-text);
@@ -325,7 +325,7 @@ export default`
 }
 
 .pm-col-star.active {
-  color: var(--sn-warning-color, #ffb300);
+  color: var(--sn-warning-color);
 }
 
 .pm-col-name {
@@ -344,7 +344,7 @@ export default`
 }
 
 .pm-model-id {
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   font-size: 10px;
   color: var(--sn-text-dim);
   white-space: nowrap;
@@ -368,13 +368,13 @@ export default`
 }
 
 .pm-col-ctx {
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   font-size: 11px;
   color: var(--sn-text-dim);
 }
 
 .pm-col-price {
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   font-size: 11px;
   color: var(--sn-success-color);
 }

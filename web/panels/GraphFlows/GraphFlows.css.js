@@ -7,10 +7,10 @@ pg-graph-flows {
   display: block;
   height: 100%;
   min-width: 0;
-  background: var(--sn-panel-bg, #181818);
-  color: var(--sn-text, #e0e0e0);
-  border-left: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
-  font-family: var(--sn-font, system-ui, sans-serif);
+  background: var(--sn-panel-bg);
+  color: var(--sn-text);
+  border-left: 1px solid var(--sn-node-border);
+  font-family: var(--sn-font);
 }
 
 .flows-shell {
@@ -24,7 +24,7 @@ pg-graph-flows {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
+  border-bottom: 1px solid var(--sn-node-border);
 }
 
 .flows-title {
@@ -48,10 +48,10 @@ pg-graph-flows {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
+  border: 1px solid var(--sn-node-border);
   border-radius: 4px;
-  background: var(--sn-node-bg, #222);
-  color: var(--sn-text, #e0e0e0);
+  background: var(--sn-node-bg);
+  color: var(--sn-text);
   cursor: pointer;
 }
 
@@ -69,12 +69,12 @@ pg-graph-flows {
 .flows-icon-btn:hover,
 .flows-btn:hover,
 .flows-story:hover {
-  background: var(--sn-node-hover, #2d2d2d);
+  background: var(--sn-node-hover);
 }
 
 .flows-btn.primary {
-  border-color: var(--sn-node-selected, #4c8bf5);
-  color: var(--sn-node-selected, #4c8bf5);
+  border-color: var(--sn-node-selected);
+  color: var(--sn-node-selected);
 }
 
 .flows-list {
@@ -85,13 +85,13 @@ pg-graph-flows {
 .flows-empty,
 .flows-error {
   padding: 16px;
-  color: var(--sn-text-dim, #888);
+  color: var(--sn-text-dim);
   font-size: 12px;
   line-height: 1.5;
 }
 
 .flows-error {
-  color: var(--sn-danger-color, #f08f8f);
+  color: var(--sn-danger-color);
 }
 
 .flows-story {
@@ -100,17 +100,17 @@ pg-graph-flows {
   gap: 4px;
   padding: 9px 10px;
   margin-bottom: 6px;
-  border: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
+  border: 1px solid var(--sn-node-border);
   border-radius: 4px;
-  background: rgba(255,255,255,0.03);
+  background: var(--sn-node-bg);
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .flows-story[data-active] {
-  border-color: var(--sn-node-selected, #4c8bf5);
-  background: var(--sn-accent-bg-subtle, rgba(76, 139, 245, 0.1));
+  border-color: var(--sn-node-selected);
+  background: var(--sn-accent-bg-subtle);
 }
 
 .flows-story-title {
@@ -123,7 +123,7 @@ pg-graph-flows {
 .flows-beat-kicker,
 .flows-beat p,
 .flows-tag {
-  color: var(--sn-text-dim, #888);
+  color: var(--sn-text-dim);
   font-size: 11px;
 }
 
@@ -135,8 +135,8 @@ pg-graph-flows {
 
 .flows-beat {
   padding: 12px;
-  border-top: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
-  background: var(--sn-bg-overlay, rgba(0,0,0,0.18));
+  border-top: 1px solid var(--sn-node-border);
+  background: var(--sn-bg-overlay);
 }
 
 .flows-beat h3 {
@@ -161,7 +161,7 @@ pg-graph-flows {
   max-width: 100%;
   padding: 2px 6px;
   border-radius: 3px;
-  border: 1px solid var(--sn-node-border, rgba(255,255,255,0.12));
+  border: 1px solid var(--sn-node-border);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -35,7 +35,7 @@ const css = `
 }
 
 .mp-card-desc {
-  font-family: monospace;
+  font-family: var(--sn-font-mono);
   font-size: 11px;
   margin-bottom: 12px;
   opacity: 0.6;

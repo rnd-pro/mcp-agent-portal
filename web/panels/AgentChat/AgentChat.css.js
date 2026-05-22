@@ -7,13 +7,13 @@ pg-agent-chat {
   display: block;
   height: 100%;
   overflow: hidden;
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
+  font-family: var(--sn-font);
 }
 
 .chat-shell {
   display: flex;
   height: 100%;
-  background: var(--sn-bg, #1a1a1a);
+  background: var(--sn-bg);
   color: var(--sn-text);
   font-size: 13px;
 }
@@ -51,7 +51,7 @@ pg-agent-chat {
   left: 0;
   right: 0;
   height: 20px;
-  background: linear-gradient(to bottom, var(--sn-bg, #1a1a1a) 0%, transparent 100%);
+  background: linear-gradient(to bottom, var(--sn-bg) 0%, transparent 100%);
   z-index: 2;
   pointer-events: none;
 }

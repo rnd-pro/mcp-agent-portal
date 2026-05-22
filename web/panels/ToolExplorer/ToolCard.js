@@ -28,7 +28,7 @@ ToolCard.rootStyles = `
   font-weight: 600;
   font-size: 14px;
   color: var(--sn-node-selected);
-  font-family: var(--sn-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-family: var(--sn-font-mono);
 }
 .te-tool-desc {
   font-size: 12px;
@@ -41,7 +41,7 @@ ToolCard.rootStyles = `
   background: var(--sn-bg);
   padding: 10px;
   border-radius: 6px;
-  font-family: var(--sn-font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-family: var(--sn-font-mono);
   font-size: 11px;
   overflow-x: auto;
   color: var(--sn-text);

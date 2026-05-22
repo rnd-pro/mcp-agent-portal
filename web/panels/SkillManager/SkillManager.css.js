@@ -14,7 +14,7 @@ export default `
     align-items: center;
     justify-content: space-between;
     padding: 6px 12px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: var(--sn-font-mono);
     font-size: 11px;
     color: var(--sn-text-dim);
     border-bottom: 1px solid var(--sn-node-border);

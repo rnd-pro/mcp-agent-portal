@@ -75,6 +75,82 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('keeps graph flow surfaces on provider theme tokens', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/GraphFlows/GraphFlows.css.js'), 'utf8');
+    for (let literal of [
+      '#181818',
+      '#e0e0e0',
+      '#222',
+      '#2d2d2d',
+      '#4c8bf5',
+      '#888',
+      '#f08f8f',
+      'rgba(255,255,255',
+      'rgba(76, 139, 245',
+      'rgba(0,0,0',
+      'system-ui, sans-serif',
+    ]) {
+      assert.equal(source.includes(literal), false, `GraphFlows must not copy provider styling with ${literal}`);
+    }
+    for (let token of [
+      '--sn-panel-bg',
+      '--sn-node-bg',
+      '--sn-node-hover',
+      '--sn-node-border',
+      '--sn-node-selected',
+      '--sn-accent-bg-subtle',
+      '--sn-bg-overlay',
+      '--sn-danger-color',
+      '--sn-text',
+      '--sn-text-dim',
+      '--sn-font',
+    ]) {
+      assert.ok(source.includes(token), `GraphFlows must consume ${token}`);
+    }
+  });
+
+  it('keeps dependency graph chrome on provider theme tokens', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/dep-graph.css.js'), 'utf8');
+    for (let literal of [
+      '#1a1a1a',
+      '#4c8bf5',
+      '#4caf50',
+      '#f44336',
+      '#ff9800',
+      '#888',
+      '#e0e0e0',
+      'rgba(',
+      'var(--sn-border-subtle,',
+      'var(--sn-bg-overlay,',
+      'var(--sn-shadow-lg,',
+      'var(--sn-text,',
+      'var(--sn-font,',
+      'var(--sn-node-selected,',
+      'var(--sn-node-hover,',
+      'var(--sn-danger-color,',
+      'var(--sn-success-color,',
+      'var(--sn-conn-color,',
+      'var(--sn-cat-control,',
+      'var(--sn-accent-glow,',
+      'SF Mono',
+      'JetBrains Mono',
+      'monospace)',
+    ]) {
+      assert.equal(source.includes(literal), false, `dep-graph chrome must not copy provider styling with ${literal}`);
+    }
+    for (let token of [
+      '--sn-node-border',
+      '--sn-bg-overlay',
+      '--sn-shadow-lg',
+      '--sn-accent-bg-subtle',
+      '--sn-font-mono',
+      '--sn-conn-color',
+      '--sn-cat-control',
+    ]) {
+      assert.ok(source.includes(token), `dep-graph chrome must consume ${token}`);
+    }
+  });
+
   it('keeps shared agent chrome on provider theme tokens', () => {
     for (let relative of [
       'web/components/AgentBoard/AgentBoard.css.js',
@@ -323,6 +399,30 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('keeps workflow utility panels on provider theme tokens', () => {
+    for (let relative of [
+      'web/panels/WorkflowExplorer/WorkflowStep.js',
+      'web/panels/ActionBoard/ActionBoard.css.js',
+      'web/panels/SkillLibraryPanel/SkillListItem.css.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      for (let literal of [
+        'rgba(0,0,0',
+        'rgba(0, 0, 0',
+        'rgba(255,255,255',
+        'hsl(30, 80%, 60%)',
+        "var(--sn-font,",
+        "var(--sn-font-mono,",
+        "var(--sn-node-bg,",
+        "var(--sn-node-border,",
+        "var(--sn-warning-color,",
+        'font-family: monospace',
+      ]) {
+        assert.equal(source.includes(literal), false, `${relative} must not copy provider styling with ${literal}`);
+      }
+    }
+  });
+
   it('keeps chat sidebar status icons on CSS classes and tokens', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/components/ChatSidebar/ChatSidebar.js'), 'utf8');
     assert.equal(source.includes('style="font-size'), false, 'ChatSidebar status icons must not inject inline style strings');
@@ -364,5 +464,48 @@ describe('portal shell theme contract', () => {
     assert.equal(source.includes('#4caf50'), false, 'RuntimeControl must not hardcode success green');
     assert.equal(source.includes('rgba(76, 175, 80'), false, 'RuntimeControl must not hardcode success rgba');
     assert.ok(source.includes('--sn-success-color'), 'RuntimeControl must consume --sn-success-color');
+  });
+
+  it('keeps operational panels on symbiote theme tokens without local fallbacks', () => {
+    for (let relative of [
+      'web/panels/SettingsPanel/SettingsPanel.css.js',
+      'web/panels/SettingsPanel/SettingsPanel.js',
+      'web/panels/OpsPanel/OpsPanel.css.js',
+      'web/panels/HealthPanel/HealthPanel.css.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      for (let literal of [
+        '#4caf50',
+        '#ff9800',
+        '#f44336',
+        '#ffb300',
+        '#a9b7c6',
+        '#fff',
+        'rgba(0,0,0',
+        'hsl(210, 45%, 45%)',
+        'hsl(150, 55%, 38%)',
+        'hsl(250, 35%, 50%)',
+        'hsl(38, 55%, 42%)',
+        'hsl(4, 55%, 48%)',
+        "var(--sn-font,",
+        "var(--sn-font-mono,",
+        "var(--sn-text,",
+        "var(--sn-text-dim,",
+        "var(--sn-success-color,",
+        "var(--sn-warning-color,",
+        "var(--sn-danger-color,",
+        "var(--sn-bg-overlay,",
+        "var(--sn-cat-server,",
+        "var(--sn-cat-data,",
+        'Georgia',
+        "'JetBrains Mono'",
+        "'Fira Code'",
+      ]) {
+        assert.equal(source.includes(literal), false, `${relative} must not copy provider styling with ${literal}`);
+      }
+    }
+
+    let settings = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.js'), 'utf8');
+    assert.equal(/style\.color\s*=\s*["']var\(--sn-[^)]+,/.test(settings), false, 'SettingsPanel inline status colors must be token-only');
   });
 });

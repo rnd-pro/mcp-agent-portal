@@ -14,9 +14,9 @@
 
 html, body {
   height: 100%;
-  background: var(--sn-bg, #1a1a1a);
-  color: var(--sn-text, #f0f0f0);
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
+  background: var(--sn-bg);
+  color: var(--sn-text);
+  font-family: var(--sn-font);
   font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
@@ -28,7 +28,7 @@ html, body {
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background-image: linear-gradient(to bottom, var(--sn-node-bg, #222222), var(--sn-bg, #1a1a1a));
+  background-image: linear-gradient(to bottom, var(--sn-node-bg), var(--sn-bg));
   background-size: 100% 78px;
   background-repeat: no-repeat;
 }
@@ -55,7 +55,7 @@ html, body {
 .app-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--sn-text, #f0f0f0);
+  color: var(--sn-text);
   letter-spacing: 0.5px;
 }
 
@@ -70,13 +70,13 @@ html, body {
 .project-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--project-accent, var(--sn-text, #f0f0f0));
+  color: var(--project-accent, var(--sn-text));
 }
 
 .project-files {
   font-size: 11px;
-  color: var(--sn-text-dim, #999999);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--sn-text-dim);
+  font-family: var(--sn-font-mono);
 }
 
 .compression-stats {
@@ -87,11 +87,11 @@ html, body {
   border-radius: 10px;
   background: var(--sn-accent-bg-subtle);
   border: 1px solid var(--sn-accent-border);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--sn-font-mono);
 }
 
 .topbar-sep {
-  color: var(--sn-text-dim, #555);
+  color: var(--sn-text-dim);
   font-size: 14px;
 }
 
@@ -101,7 +101,7 @@ html, body {
   align-items: center;
   gap: 6px;
   background: transparent;
-  color: var(--sn-text-dim, #999);
+  color: var(--sn-text-dim);
   border: 1px solid transparent;
   padding: 4px 10px;
   border-radius: 4px;
@@ -119,7 +119,7 @@ html, body {
 
 .follow-btn:hover {
   background: var(--sn-node-hover);
-  color: var(--sn-text, #f0f0f0);
+  color: var(--sn-text);
 }
 
 .follow-btn.active {
@@ -156,7 +156,7 @@ html, body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--sn-text-dim, #999);
+  background: var(--sn-text-dim);
 }
 
 .status.connected {

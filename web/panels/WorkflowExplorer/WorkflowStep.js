@@ -38,12 +38,12 @@ WorkflowStep.rootStyles = `
 :host {
   display: block;
   color: var(--sn-text);
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
+  font-family: var(--sn-font);
 }
 .step-card {
   margin-bottom: 12px;
-  background: var(--sn-node-bg, rgba(0,0,0,0.1));
-  border: 1px solid var(--sn-node-border, rgba(255,255,255,0.1));
+  background: var(--sn-node-bg);
+  border: 1px solid var(--sn-node-border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -54,11 +54,11 @@ WorkflowStep.rootStyles = `
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  background: rgba(0,0,0,0.05);
+  background: var(--sn-accent-bg-subtle);
   font-weight: 500;
 }
 .step-header:hover {
-  background: rgba(255,255,255,0.05);
+  background: var(--sn-node-hover);
 }
 .step-title {
   display: flex;
@@ -72,14 +72,14 @@ WorkflowStep.rootStyles = `
 }
 .step-content {
   padding: 16px;
-  border-top: 1px solid var(--sn-node-border, rgba(255,255,255,0.1));
+  border-top: 1px solid var(--sn-node-border);
   display: none;
 }
 :host([expanded]) .step-content {
   display: block;
 }
 :host([expanded]) .step-header {
-  background: rgba(255,255,255,0.05);
+  background: var(--sn-node-hover);
 }
 .step-description {
   margin-bottom: 12px;
@@ -89,14 +89,14 @@ WorkflowStep.rootStyles = `
   margin-bottom: 12px;
   font-size: 11px;
   color: var(--sn-text-dim);
-  font-family: var(--sn-font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-family: var(--sn-font-mono);
 }
 .node-id {
   flex-shrink: 0;
   font-size: 11px;
-  font-family: monospace;
+  font-family: var(--sn-font-mono);
   color: var(--sn-text-dim);
-  background: rgba(0,0,0,0.2);
+  background: var(--sn-accent-bg-subtle);
   padding: 2px 6px;
   border-radius: 4px;
 }

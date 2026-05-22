@@ -236,7 +236,7 @@ export class SettingsPanel extends Symbiote {
     try {
       await fetch("/api/stop", { method: "POST" });
       this.ref.restartStatus.textContent = "⏹ Server stopped.";
-      this.ref.restartStatus.style.color = "var(--sn-danger-color, #f44336)";
+      this.ref.restartStatus.style.color = "var(--sn-danger-color)";
     } catch (e) {
       this.ref.restartStatus.textContent = `Error: ${e.message}`;
     }
@@ -245,7 +245,7 @@ export class SettingsPanel extends Symbiote {
   async restartServer() {
     let t = this.ref.restartStatus;
     t.textContent = "Restarting server…";
-    t.style.color = "var(--sn-warning-color, #ff9800)";
+    t.style.color = "var(--sn-warning-color)";
     try {
       await fetch("/api/restart", { method: "POST" });
       t.textContent = "Server stopped. Reconnecting…";
@@ -256,7 +256,7 @@ export class SettingsPanel extends Symbiote {
           if ((await fetch("/api/project-info")).ok) {
             clearInterval(timer);
             t.textContent = "Server restarted successfully";
-            t.style.color = "var(--sn-success-color, #4caf50)";
+            t.style.color = "var(--sn-success-color)";
             this.fetchInfo();
             setTimeout(() => { t.textContent = ""; }, 3000);
             return;
@@ -265,12 +265,12 @@ export class SettingsPanel extends Symbiote {
         if (retries > 15) {
           clearInterval(timer);
           t.textContent = "Server did not come back. Refresh the page manually.";
-          t.style.color = "var(--sn-danger-color, #f44336)";
+          t.style.color = "var(--sn-danger-color)";
         }
       }, 1000);
     } catch (e) {
       t.textContent = `Error: ${e.message}`;
-      t.style.color = "var(--sn-danger-color, #f44336)";
+      t.style.color = "var(--sn-danger-color)";
     }
   }
 

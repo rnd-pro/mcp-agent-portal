@@ -53,7 +53,7 @@ function makeFileRow(file) {
   Object.assign(path.style, {
     fontSize: '10px',
     color: 'var(--sn-text-dim)',
-    fontFamily: 'monospace',
+    fontFamily: 'var(--sn-font-mono)',
   });
 
   let button = document.createElement('sn-button');
@@ -123,7 +123,7 @@ export class ActiveContext extends Symbiote {
       
     } catch (err) {
       this.ref.fileList.replaceChildren(makeEmptyState(err.message, {
-        color: '#f87171',
+        color: 'var(--sn-danger-color)',
         padding: '10px',
         fontSize: '12px',
       }));

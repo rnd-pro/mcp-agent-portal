@@ -10,7 +10,7 @@ export default `
     overflow-y: auto;
     font-size: 12px;
     padding: 0;
-    font-family: var(--sn-font, Georgia, serif);
+    font-family: var(--sn-font);
   }
   .pg-ctx-outline { padding: 0; }
   .pg-ctx-body { padding: 8px; }
@@ -36,7 +36,7 @@ export default `
     padding: 4px 8px;
     cursor: default;
     border-radius: 4px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: var(--sn-font-mono);
     font-size: 11px;
     color: var(--sn-cat-server);
     transition: background 80ms ease;
@@ -45,7 +45,7 @@ export default `
     background: var(--sn-node-hover);
   }
   .pg-ctx-sig {
-    font-family: 'SF Mono', monospace;
+    font-family: var(--sn-font-mono);
     font-size: 11px;
     padding: 6px 8px;
     margin: 4px 0;

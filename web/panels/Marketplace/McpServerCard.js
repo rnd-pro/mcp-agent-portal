@@ -55,7 +55,7 @@ sn-card {
 .mp-card-env {
   font-size: 10px;
   opacity: 0.35;
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
 }
 
 .mp-card-footer {

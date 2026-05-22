@@ -13,7 +13,7 @@ export default css`
   border-bottom: 1px solid var(--sn-node-border);
   display: flex;
   gap: 24px;
-  background: var(--sn-node-bg, rgba(0, 0, 0, 0.1));
+  background: var(--sn-node-bg);
   flex-shrink: 0;
 }
 
@@ -26,7 +26,7 @@ export default css`
 .ab-stat-value {
   font-size: 24px;
   font-weight: 600;
-  font-family: monospace;
+  font-family: var(--sn-font-mono);
 }
 
 .ab-stat-unit {

@@ -65,7 +65,7 @@ export default /*css*/ `
 
 .rtc-summary-value {
   color: var(--sn-text);
-  font-family: var(--sn-font-mono, 'JetBrains Mono', 'Fira Code', monospace);
+  font-family: var(--sn-font-mono);
   font-size: 24px;
   font-weight: 700;
   line-height: 1.1;
@@ -163,7 +163,7 @@ export default /*css*/ `
 
 .rtc-metric-value {
   color: var(--sn-text);
-  font-family: var(--sn-font-mono, 'JetBrains Mono', 'Fira Code', monospace);
+  font-family: var(--sn-font-mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;

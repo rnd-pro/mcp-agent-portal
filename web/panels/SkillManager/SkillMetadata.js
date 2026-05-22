@@ -214,7 +214,7 @@ SkillMetadata.rootStyles = `
   pg-skill-metadata textarea {
     min-height: 110px;
     resize: vertical;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: var(--sn-font-mono);
     line-height: 1.45;
   }
 `;

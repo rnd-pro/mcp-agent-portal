@@ -10,7 +10,7 @@ export class AgentListItem extends Symbiote {
     description: '',
     tier: '',
     icon: 'smart_toy',
-    color: '#888',
+    color: 'var(--sn-text-dim)',
     isActive: false,
   };
 
@@ -35,7 +35,7 @@ export class AgentListItem extends Symbiote {
       tier: this.$.tier,
     }, {
       active: this.$.isActive,
-      iconColor: this.$.color || '#888',
+      iconColor: this.$.color || 'var(--sn-text-dim)',
     });
   }
 }

@@ -6,7 +6,7 @@ export default `
   overflow: hidden;
   background: var(--sn-panel-bg);
   color: var(--sn-text);
-  font-family: var(--sn-font, 'Inter', -apple-system, sans-serif);
+  font-family: var(--sn-font);
   font-size: 13px;
 }
 

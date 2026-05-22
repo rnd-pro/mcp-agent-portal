@@ -26,7 +26,7 @@ sn-card:hover {
   border-radius: 8px;
   background: color-mix(in srgb, var(--sn-cat-server) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--sn-cat-server) 15%, transparent);
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   white-space: nowrap;
 }
 .token-badge:empty {
@@ -52,7 +52,7 @@ sn-card:hover .delete-btn {
 }
 .path {
   font-size: 11px;
-  font-family: var(--sn-font-mono, monospace);
+  font-family: var(--sn-font-mono);
   color: var(--sn-text-dim);
   word-break: break-all;
   white-space: nowrap;
