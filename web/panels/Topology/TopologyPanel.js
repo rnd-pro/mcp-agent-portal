@@ -74,8 +74,9 @@ export class TopologyPanel extends Symbiote {
     nameCell.append(colorDot, document.createTextNode(` ${name}`));
 
     let typeCell = document.createElement('td');
-    let typeBadge = document.createElement('span');
-    typeBadge.className = `ui-badge ${typeClass}`;
+    let typeBadge = document.createElement('sn-badge');
+    if (typeClass) typeBadge.setAttribute('variant', typeClass);
+    typeBadge.className = 'topology-type-badge';
     typeBadge.textContent = typeText;
     if (typeStyles) Object.assign(typeBadge.style, typeStyles);
     typeCell.append(typeBadge);

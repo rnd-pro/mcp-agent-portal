@@ -158,12 +158,12 @@ export class ActiveTasks extends Symbiote {
       let elapsed = task.startedAt ? Math.floor((Date.now() - task.startedAt) / 1000) : 0;
       let timeStr = elapsed > 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
 
-      let badgeClass = 'info';
-      if (task.status === 'running') badgeClass = 'success';
-      else if (task.status === 'error') badgeClass = 'error';
-      else if (task.status === 'cancelled') badgeClass = 'warn';
-      else if (task.status === 'stale') badgeClass = 'warn';
-      else if (task.status === 'done') badgeClass = 'info';
+      let badgeVariant = 'info';
+      if (task.status === 'running') badgeVariant = 'success';
+      else if (task.status === 'error') badgeVariant = 'error';
+      else if (task.status === 'cancelled') badgeVariant = 'warning';
+      else if (task.status === 'stale') badgeVariant = 'warning';
+      else if (task.status === 'done') badgeVariant = 'info';
 
       let promptText = (task.prompt || '').substring(0, 120);
       if ((task.prompt || '').length > 120) promptText += '…';
@@ -172,7 +172,7 @@ export class ActiveTasks extends Symbiote {
         id: taskId,
         shortId: taskId.substring(0, 8),
         status: task.status,
-        badgeClass: `ui-badge ${badgeClass}`,
+        badgeVariant,
         slug: task.slug || '',
         description: promptText,
         fullDescription: task.prompt || '',

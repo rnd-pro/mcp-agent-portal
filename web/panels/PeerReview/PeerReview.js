@@ -130,10 +130,10 @@ export class PeerReview extends Symbiote {
       
       let verdictText = text.match(/Verdict:\s*([A-Z_]+)/i)?.[1] || 'UNKNOWN';
       
-      let badge = document.createElement('span');
-      badge.className = `ui-badge ${verdictClass}`;
-      badge.style.fontSize = '14px';
-      badge.style.padding = '4px 12px';
+      let badge = document.createElement('sn-badge');
+      badge.setAttribute('variant', verdictClass);
+      badge.style.setProperty('--sn-badge-font-size', '14px');
+      badge.style.setProperty('--sn-badge-padding', '4px 12px');
       badge.textContent = `Verdict: ${verdictText}`;
 
       let badgeRow = document.createElement('div');

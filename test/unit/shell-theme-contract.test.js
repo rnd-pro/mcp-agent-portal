@@ -101,6 +101,20 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote status badges for reusable status labels', () => {
+    for (let relative of [
+      'web/panels/ActiveTasks/TaskCard.js',
+      'web/panels/Marketplace/ContextCard.js',
+      'web/panels/PeerReview/PeerReview.js',
+      'web/panels/PipelineManager/PipelineManager.js',
+      'web/panels/Topology/TopologyPanel.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('sn-badge'), `${relative} must compose the library status badge`);
+      assert.equal(source.includes('ui-badge'), false, `${relative} must not copy badge shell classes`);
+    }
+  });
+
   it('keeps active task cards off inline copied theme values', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
     for (let literal of ['#9ca3af', '#404040', 'style="']) {

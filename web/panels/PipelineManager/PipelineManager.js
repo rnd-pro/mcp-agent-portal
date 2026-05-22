@@ -146,9 +146,9 @@ export class PipelineManager extends Symbiote {
     title.append(document.createTextNode(step.name ?? ''));
 
     if (step.trigger) {
-      let trigger = document.createElement('span');
-      trigger.className = 'ui-badge warning';
-      trigger.textContent = `⚡ ${step.trigger}`;
+      let trigger = document.createElement('sn-badge');
+      trigger.setAttribute('variant', 'warning');
+      trigger.textContent = `Trigger: ${step.trigger}`;
       title.append(trigger);
     }
 
@@ -162,7 +162,7 @@ export class PipelineManager extends Symbiote {
     badges.style.display = 'flex';
     badges.style.gap = '8px';
 
-    if (step.skill) badges.append(this._badge(`Skill: ${step.skill}`, 'ui-badge info'));
+    if (step.skill) badges.append(this._badge(`Skill: ${step.skill}`, 'info'));
     if (step.timeout) badges.append(this._badge(`Timeout: ${step.timeout}s`));
     if (step.max_bounces) badges.append(this._badge(`Max Bounces: ${step.max_bounces}`));
 
@@ -170,9 +170,9 @@ export class PipelineManager extends Symbiote {
     return card;
   }
 
-  _badge(text, className = 'ui-badge') {
-    let badge = document.createElement('span');
-    badge.className = className;
+  _badge(text, variant = '') {
+    let badge = document.createElement('sn-badge');
+    if (variant) badge.setAttribute('variant', variant);
     badge.textContent = text;
     return badge;
   }

@@ -6,7 +6,7 @@ export class TaskCard extends Symbiote {
     id: '',
     shortId: '',
     status: '',
-    badgeClass: 'info',
+    badgeVariant: 'info',
     slug: '',
     description: '',
     fullDescription: '',
@@ -27,7 +27,7 @@ TaskCard.template = html`
 <sn-card>
   <div class="task-card-head">
     <div class="task-card-id" ${{ textContent: 'shortId', title: 'id' }}></div>
-    <div ${{ textContent: 'status', className: 'badgeClass' }}></div>
+    <sn-badge ${{ textContent: 'status', '@variant': 'badgeVariant' }}></sn-badge>
   </div>
   <div>
     <div class="task-card-description" ${{ textContent: 'description', title: 'fullDescription' }}></div>

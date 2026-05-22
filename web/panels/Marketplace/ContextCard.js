@@ -87,7 +87,7 @@ ContextCard.template = html`
       </span>
       <span class="mp-card-title-text" ${{ textContent: 'title' }}></span>
     </div>
-    <span class="ui-badge info mp-card-type" ${{ textContent: 'type' }}></span>
+    <sn-badge variant="info" class="mp-card-type" ${{ textContent: 'type' }}></sn-badge>
   </div>
   <div class="mp-card-desc" ${{ textContent: 'description' }}></div>
   <div class="mp-card-actions">
