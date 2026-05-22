@@ -19,13 +19,13 @@ function getCleanName(name) {
 
 function getStatusHtml(chat) {
   if (chat.pendingTaskId) {
-    return '<span class="material-symbols-outlined spin-icon" style="font-size:12px;color:var(--accent-color);margin-left:4px;" title="Running task...">hourglass_empty</span>';
+    return '<span class="material-symbols-outlined chat-status-icon chat-status-running spin-icon" title="Running task...">hourglass_empty</span>';
   }
   if (chat.lastTaskStatus === 'done') {
-    return '<span class="material-symbols-outlined" style="font-size:12px;color:hsl(140,50%,45%);margin-left:4px;" title="Completed">check_circle</span>';
+    return '<span class="material-symbols-outlined chat-status-icon chat-status-done" title="Completed">check_circle</span>';
   }
   if (chat.lastTaskStatus === 'error') {
-    return '<span class="material-symbols-outlined" style="font-size:12px;color:hsl(0,60%,50%);margin-left:4px;" title="Error">error</span>';
+    return '<span class="material-symbols-outlined chat-status-icon chat-status-error" title="Error">error</span>';
   }
   return '';
 }

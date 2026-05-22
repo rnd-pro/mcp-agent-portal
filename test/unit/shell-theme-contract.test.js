@@ -247,6 +247,31 @@ describe('portal shell theme contract', () => {
     assert.equal(source.includes('card.style.'), false, 'Marketplace card visual state must use classes');
   });
 
+  it('keeps marketplace accents on provider theme tokens', () => {
+    for (let relative of [
+      'web/panels/Marketplace/Marketplace.css.js',
+      'web/panels/Marketplace/McpCatalogSection.js',
+      'web/panels/Marketplace/Marketplace.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      for (let literal of ['#a78bfa', '#7c3aed', '#4a9eff', '#2563eb', '#34d399', '#059669', '#f59e0b', '#d97706', '#6b7280', '#4b5563']) {
+        assert.equal(source.includes(literal), false, `${relative} must consume provider tokens instead of ${literal}`);
+      }
+    }
+  });
+
+  it('keeps chat sidebar status icons on CSS classes and tokens', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/components/ChatSidebar/ChatSidebar.js'), 'utf8');
+    assert.equal(source.includes('style="font-size'), false, 'ChatSidebar status icons must not inject inline style strings');
+    assert.equal(source.includes('hsl(140'), false, 'ChatSidebar status icons must consume success tokens');
+    assert.equal(source.includes('hsl(0'), false, 'ChatSidebar status icons must consume danger tokens');
+
+    let itemCss = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.css.js'), 'utf8');
+    for (let token of ['--sn-success-color', '--sn-danger-color', '--sn-node-selected']) {
+      assert.ok(itemCss.includes(token), `ChatSidebarItem must expose status styling through ${token}`);
+    }
+  });
+
   it('keeps topology panel off copied detail shell classes', () => {
     let template = fs.readFileSync(path.join(ROOT, 'web/panels/Topology/TopologyPanel.tpl.js'), 'utf8');
     for (let sharedClass of ['ui-main', 'ui-details-header', 'ui-details-title', 'ui-details-desc']) {

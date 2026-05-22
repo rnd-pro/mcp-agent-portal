@@ -16,11 +16,11 @@ import './ContextCard.js';
  */
 
 let CATEGORY_META = {
-  'rnd-pro':   { label: 'RND-PRO',   icon: 'science', gradient: 'linear-gradient(135deg, #a78bfa, #7c3aed)' },
-  'google':    { label: 'Google',     icon: 'search', gradient: 'linear-gradient(135deg, #34d399, #059669)' },
-  'official':  { label: 'Official',   icon: 'check_circle', gradient: 'linear-gradient(135deg, #4a9eff, #2563eb)' },
-  '3rd-party': { label: '3rd Party',  icon: 'extension', gradient: 'linear-gradient(135deg, #a855f7, #7e22ce)' },
-  'community': { label: 'Community',  icon: 'public', gradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
+  'rnd-pro':   { label: 'RND-PRO',   icon: 'science', accent: 'var(--sn-provider-rnd-pro-color)' },
+  'google':    { label: 'Google',     icon: 'search', accent: 'var(--sn-provider-google-color)' },
+  'official':  { label: 'Official',   icon: 'check_circle', accent: 'var(--sn-provider-official-color)' },
+  '3rd-party': { label: '3rd Party',  icon: 'extension', accent: 'var(--sn-provider-rnd-pro-color)' },
+  'community': { label: 'Community',  icon: 'public', accent: 'var(--sn-provider-community-color)' },
 };
 
 let ICON_MAP = {
@@ -164,7 +164,8 @@ class Marketplace extends Symbiote {
   _toServerItem(key, server, isInstalled) {
     let icon = ICON_MAP[key] || 'bolt';
     let desc = server.description || `${server.command} ${(server.args || []).join(' ')}`;
-    let gradient = CATEGORY_META[server.category]?.gradient || 'linear-gradient(135deg, #6b7280, #4b5563)';
+    let accent = CATEGORY_META[server.category]?.accent || 'var(--sn-provider-default-color)';
+    let gradient = `linear-gradient(135deg, ${accent}, color-mix(in srgb, ${accent} 70%, var(--sn-bg)))`;
 
     return {
       name: key,
