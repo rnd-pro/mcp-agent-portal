@@ -100,8 +100,8 @@ export class PeerReview extends Symbiote {
   
   updateBanner(type, message) {
     let banner = this.querySelector('#pr-status-banner');
-    banner.hidden = false;
-    banner.className = 'ui-banner ' + type;
+    banner.removeAttribute('hidden');
+    banner.setAttribute('variant', type);
     
     let icon = 'info';
     if (type === 'running') icon = 'sync';
@@ -111,8 +111,7 @@ export class PeerReview extends Symbiote {
     let iconEl = document.createElement('span');
     iconEl.className = 'material-symbols-outlined';
     iconEl.textContent = icon;
-    if (type === 'running') iconEl.style.animation = 'spin 2s linear infinite';
-    banner.replaceChildren(iconEl, document.createTextNode(` ${message}`));
+    banner.replaceChildren(iconEl, document.createTextNode(message));
   }
   
   renderResult(task) {

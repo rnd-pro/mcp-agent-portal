@@ -15,27 +15,6 @@ export default /*css*/ `
   font-size: 16px;
 }
 
-.rtc-state {
-  align-items: center;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
-  color: var(--sn-text-dim);
-  display: flex;
-  font-size: 12px;
-  gap: 8px;
-  margin-bottom: 14px;
-  padding: 10px 12px;
-}
-
-.rtc-state[data-kind="error"] {
-  border-color: color-mix(in srgb, var(--sn-danger-color, #f44336) 45%, var(--sn-node-border));
-  color: var(--sn-danger-color, #f44336);
-}
-
-.rtc-state[data-kind="loading"] {
-  color: var(--sn-text-dim);
-}
-
 .rtc-summary {
   display: grid;
   gap: 12px;

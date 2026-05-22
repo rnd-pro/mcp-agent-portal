@@ -131,6 +131,30 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote status banners for reusable inline feedback', () => {
+    for (let relative of [
+      'web/panels/PeerReview/PeerReview.tpl.js',
+      'web/panels/RuntimeControl/RuntimeControl.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('sn-banner'), `${relative} must compose the library status banner`);
+      assert.equal(source.includes('ui-banner'), false, `${relative} must not copy banner shell classes`);
+      assert.equal(source.includes('rtc-state'), false, `${relative} must not copy runtime banner shell classes`);
+    }
+
+    for (let relative of [
+      'web/panels/PeerReview/PeerReview.js',
+      'web/panels/RuntimeControl/RuntimeControl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes("setAttribute('variant'"), `${relative} must drive the library status banner through variants`);
+      assert.ok(source.includes("removeAttribute('hidden'"), `${relative} must show the library status banner through attributes`);
+      assert.equal(/stateBanner\.hidden\s*=/.test(source), false, `${relative} must not drive Symbiote banner visibility through hidden property assignment`);
+      assert.equal(source.includes('ui-banner'), false, `${relative} must not copy banner shell classes`);
+      assert.equal(source.includes('dataset.kind'), false, `${relative} must not keep local banner state attributes`);
+    }
+  });
+
   it('uses symbiote empty states for reusable placeholders', () => {
     for (let relative of [
       'web/panels/ActiveContext/ActiveContext.js',

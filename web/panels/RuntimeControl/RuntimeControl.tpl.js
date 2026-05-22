@@ -13,7 +13,7 @@ export default html`
 </div>
 
 <div class="rtc-main">
-  <div class="rtc-state" ref="stateBanner" hidden></div>
+  <sn-banner ref="stateBanner" hidden></sn-banner>
 
   <div class="rtc-summary" ref="summaryGrid"></div>
 

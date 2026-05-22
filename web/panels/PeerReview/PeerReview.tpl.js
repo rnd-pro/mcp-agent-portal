@@ -37,7 +37,7 @@ export default `
           <sn-button variant="icon" ref="refreshBtn" title="Refresh task status"><span class="material-symbols-outlined">refresh</span></sn-button>
         </div>
         
-        <div id="pr-status-banner" class="ui-banner" hidden></div>
+        <sn-banner id="pr-status-banner" hidden></sn-banner>
         
         <div id="pr-feedback" class="pr-feedback-body">
           <sn-empty-state>Submit a proposal to start peer review</sn-empty-state>

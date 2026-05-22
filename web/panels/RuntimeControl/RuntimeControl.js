@@ -182,15 +182,15 @@ export class RuntimeControl extends Symbiote {
   }
 
   _setBanner(kind, message) {
-    this.ref.stateBanner.hidden = false;
-    this.ref.stateBanner.dataset.kind = kind;
+    this.ref.stateBanner.removeAttribute('hidden');
+    this.ref.stateBanner.setAttribute('variant', kind === 'loading' ? 'running' : kind);
     this.ref.stateBanner.textContent = message;
   }
 
   _clearBanner() {
-    this.ref.stateBanner.hidden = true;
+    this.ref.stateBanner.setAttribute('hidden', '');
     this.ref.stateBanner.textContent = '';
-    delete this.ref.stateBanner.dataset.kind;
+    this.ref.stateBanner.removeAttribute('variant');
   }
 }
 
