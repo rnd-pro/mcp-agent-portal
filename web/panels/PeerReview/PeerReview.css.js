@@ -2,22 +2,9 @@ import { css } from '@symbiotejs/symbiote';
 export default css`
 :host { display: block; height: 100%; }
 
-.pr-split {
-  padding: 20px;
-  gap: 20px;
-}
-
-.pr-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.pr-col-right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+sn-list-detail-shell {
+  height: 100%;
+  --sn-list-detail-sidebar-width: minmax(320px, 42%);
 }
 
 .pr-card-full {
@@ -27,15 +14,9 @@ export default css`
   margin-bottom: 0;
 }
 
-.pr-feedback-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.pr-feedback-title {
-  margin: 0;
+.pr-input-stack {
+  display: grid;
+  gap: 12px;
 }
 
 .pr-history {
@@ -50,13 +31,39 @@ export default css`
 
 .pr-feedback-body {
   flex: 1;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--sn-node-bg);
   padding: 16px;
   border-radius: 6px;
   font-size: 14px;
   line-height: 1.6;
-  border: 1px solid var(--sn-node-border, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--sn-node-border);
   white-space: pre-wrap;
   overflow-y: auto;
+}
+
+.pr-verdict-row {
+  margin-bottom: 16px;
+}
+
+.pr-verdict-badge {
+  --sn-badge-font-size: 14px;
+  --sn-badge-padding: 4px 12px;
+}
+
+.pr-result-preview {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.pr-result-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.pr-spin {
+  animation: spin 2s linear infinite;
 }
 `;

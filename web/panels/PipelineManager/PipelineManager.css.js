@@ -8,23 +8,35 @@ sn-list-detail-shell {
   height: 100%;
 }
 
-.pm-step-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-block-end: 8px;
+.pm-detail {
+  min-width: 0;
 }
 
-.pm-step-prompt {
-  margin-block-end: 12px;
+.pm-detail-section {
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.pm-detail-heading {
+  margin-block-end: 24px;
+}
+
+.pm-detail-title {
+  margin: 0 0 8px;
   color: var(--sn-text);
-  font-family: var(--sn-font-mono, monospace);
-  white-space: pre-wrap;
+  font-size: 16px;
+  font-weight: 600;
 }
 
-.pm-step-badges {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.pm-detail-desc {
+  color: var(--sn-text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pm-steps {
+  display: grid;
+  gap: 12px;
 }
 `;

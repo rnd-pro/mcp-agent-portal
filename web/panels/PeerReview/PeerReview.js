@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './PeerReview.tpl.js';
 import { sharedUiStyles as css } from 'symbiote-node/ui';
+import localCss from './PeerReview.css.js';
 
 export class PeerReview extends Symbiote {
   init$ = {
@@ -131,25 +132,19 @@ export class PeerReview extends Symbiote {
       
       let badge = document.createElement('sn-badge');
       badge.setAttribute('variant', verdictClass);
-      badge.style.setProperty('--sn-badge-font-size', '14px');
-      badge.style.setProperty('--sn-badge-padding', '4px 12px');
+      badge.className = 'pr-verdict-badge';
       badge.textContent = `Verdict: ${verdictText}`;
 
       let badgeRow = document.createElement('div');
-      badgeRow.style.marginBottom = '16px';
+      badgeRow.className = 'pr-verdict-row';
       badgeRow.append(badge);
 
       let pre = document.createElement('pre');
-      pre.style.whiteSpace = 'pre-wrap';
-      pre.style.fontSize = '13px';
-      pre.style.lineHeight = '1.6';
+      pre.className = 'pr-result-text';
       pre.textContent = text;
 
       let preview = document.createElement('div');
-      preview.className = 'sm-markdown-preview';
-      preview.style.background = 'transparent';
-      preview.style.border = 'none';
-      preview.style.padding = '0';
+      preview.className = 'sm-markdown-preview pr-result-preview';
       preview.append(pre);
 
       this.querySelector('#pr-feedback').replaceChildren(badgeRow, preview);
@@ -160,13 +155,13 @@ export class PeerReview extends Symbiote {
     let iconEl = document.createElement('span');
     iconEl.className = 'material-symbols-outlined';
     iconEl.textContent = icon;
-    if (spinning) iconEl.style.animation = 'spin 2s linear infinite';
+    iconEl.classList.toggle('pr-spin', spinning);
     button.replaceChildren(iconEl, document.createTextNode(` ${label}`));
   }
 }
 
 PeerReview.template = template;
-PeerReview.rootStyles = css;
+PeerReview.rootStyles = css + localCss;
 PeerReview.reg('pg-peer-review');
 
 export default PeerReview;

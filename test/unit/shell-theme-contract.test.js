@@ -68,7 +68,7 @@ describe('portal shell theme contract', () => {
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
       'web/panels/PeerReview/PeerReview.tpl.js',
-      'web/panels/PipelineManager/PipelineManager.js',
+      'web/panels/PipelineManager/PipelineStep.js',
       'web/panels/ProjectItem/ProjectItem.tpl.js',
       'web/panels/RuntimeControl/InstanceItem.js',
       'web/panels/RuntimeControl/RuntimeControl.js',
@@ -94,7 +94,6 @@ describe('portal shell theme contract', () => {
       'web/panels/GroupManager/GroupManager.tpl.js',
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
-      'web/panels/PipelineManager/PipelineManager.js',
       'web/panels/PipelineManager/PipelineManager.tpl.js',
       'web/panels/RuntimeControl/RuntimeControl.tpl.js',
       'web/panels/SettingsPanel/SettingsPanel.tpl.js',
@@ -142,6 +141,7 @@ describe('portal shell theme contract', () => {
       'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
       'web/panels/ToolExplorer/ToolExplorer.tpl.js',
       'web/panels/PipelineManager/PipelineManager.tpl.js',
+      'web/panels/PeerReview/PeerReview.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(source.includes('<sn-list-detail-shell'), `${relative} must compose the library list detail shell`);
@@ -149,6 +149,12 @@ describe('portal shell theme contract', () => {
       assert.equal(source.includes('ui-sidebar'), false, `${relative} must not copy sidebar shell markup`);
       assert.equal(source.includes('ui-main'), false, `${relative} must not copy main detail shell markup`);
     }
+
+    let pipelineSource = fs.readFileSync(path.join(ROOT, 'web/panels/PipelineManager/PipelineManager.js'), 'utf8');
+    assert.equal(pipelineSource.includes('ui-details'), false, 'PipelineManager must not create copied detail shell classes');
+
+    let peerSource = fs.readFileSync(path.join(ROOT, 'web/panels/PeerReview/PeerReview.tpl.js'), 'utf8');
+    assert.equal(peerSource.includes('ui-container'), false, 'PeerReview must not copy container shell markup');
   });
 
   it('uses symbiote status badges for reusable status labels', () => {
@@ -156,7 +162,7 @@ describe('portal shell theme contract', () => {
       'web/panels/ActiveTasks/TaskCard.js',
       'web/panels/Marketplace/ContextCard.js',
       'web/panels/PeerReview/PeerReview.js',
-      'web/panels/PipelineManager/PipelineManager.js',
+      'web/panels/PipelineManager/PipelineStep.js',
       'web/panels/Topology/TopologyPanel.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
