@@ -32,8 +32,7 @@ let ICON_MAP = {
 };
 
 function makeEmptyState(message, iconName = '') {
-  let node = document.createElement('div');
-  node.className = 'ui-empty-state';
+  let node = document.createElement('sn-empty-state');
 
   if (!iconName) {
     node.textContent = message;
@@ -43,7 +42,6 @@ function makeEmptyState(message, iconName = '') {
   let icon = document.createElement('span');
   icon.className = 'material-symbols-outlined';
   icon.textContent = iconName;
-  icon.style.marginRight = '8px';
 
   let text = document.createElement('span');
   text.textContent = message;

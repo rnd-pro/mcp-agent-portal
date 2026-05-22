@@ -5,8 +5,7 @@ import css from './ActiveContext.css.js';
 import { events } from '../../dashboard-state.js';
 
 function makeEmptyState(message, styles = {}) {
-  let node = document.createElement('div');
-  node.className = 'ui-empty-state';
+  let node = document.createElement('sn-empty-state');
   node.textContent = message;
   Object.assign(node.style, styles);
   return node;

@@ -115,6 +115,28 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote empty states for reusable placeholders', () => {
+    for (let relative of [
+      'web/panels/ActiveContext/ActiveContext.js',
+      'web/panels/ActiveTasks/ActiveTasks.tpl.js',
+      'web/panels/GroupManager/GroupManager.js',
+      'web/panels/GroupManager/GroupManager.tpl.js',
+      'web/panels/Marketplace/Marketplace.js',
+      'web/panels/PeerReview/PeerReview.tpl.js',
+      'web/panels/PipelineManager/PipelineManager.tpl.js',
+      'web/panels/ProjectList/ProjectList.tpl.js',
+      'web/panels/RuntimeControl/RuntimeControl.tpl.js',
+      'web/panels/SettingsPanel/SettingsPanel.js',
+      'web/panels/ToolExplorer/ToolExplorer.tpl.js',
+      'web/panels/WorkflowExplorer/WorkflowExplorer.js',
+      'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('sn-empty-state'), `${relative} must compose the library empty state`);
+      assert.equal(source.includes('ui-empty-state'), false, `${relative} must not copy placeholder shell classes`);
+    }
+  });
+
   it('keeps active task cards off inline copied theme values', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
     for (let literal of ['#9ca3af', '#404040', 'style="']) {

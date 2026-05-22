@@ -27,8 +27,8 @@ function makeElement(tagName, className = '', text = '') {
 }
 
 function makeEmptyState(message, isError = false) {
-  let node = makeElement('div', 'ui-empty-state', message);
-  if (isError) node.style.color = 'var(--sn-danger-color)';
+  let node = makeElement('sn-empty-state', '', message);
+  if (isError) node.setAttribute('variant', 'error');
   return node;
 }
 

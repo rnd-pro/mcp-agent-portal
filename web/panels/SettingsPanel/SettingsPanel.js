@@ -20,10 +20,9 @@ function renderMetric(label, value, extraClass = "") {
 }
 
 function renderEmptyState(message, color = "") {
-  let state = document.createElement("div");
-  state.className = "ui-empty-state";
+  let state = document.createElement("sn-empty-state");
   state.textContent = message;
-  if (color) state.style.color = color;
+  if (color) state.style.setProperty("--sn-empty-state-color", color);
   return state;
 }
 

@@ -147,8 +147,7 @@ export class WorkflowExplorer extends Symbiote {
   }
 
   createEmptyState(text) {
-    let emptyState = document.createElement('div');
-    emptyState.className = 'ui-empty-state';
+    let emptyState = document.createElement('sn-empty-state');
     emptyState.textContent = text;
     return emptyState;
   }

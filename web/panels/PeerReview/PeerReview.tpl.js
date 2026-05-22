@@ -40,7 +40,7 @@ export default `
         <div id="pr-status-banner" class="ui-banner" hidden></div>
         
         <div id="pr-feedback" class="pr-feedback-body">
-          <div class="ui-empty-state">Submit a proposal to start peer review</div>
+          <sn-empty-state>Submit a proposal to start peer review</sn-empty-state>
         </div>
       </div>
     </div>

@@ -24,7 +24,7 @@ export default html`
     <div class="rtc-updated" ref="updatedAt"></div>
   </div>
 
-  <div class="ui-empty-state rtc-empty" ref="instanceEmpty" hidden></div>
+  <sn-empty-state class="rtc-empty" ref="instanceEmpty" hidden></sn-empty-state>
   <div class="rtc-instance-list" ref="instanceGrid" ${{ itemize: 'instances', 'item-tag': 'rc-instance-item' }}></div>
 </div>
 `;

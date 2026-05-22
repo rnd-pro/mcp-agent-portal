@@ -9,12 +9,12 @@ export default html`
       <button class="ui-btn-icon" title="Refresh" ref="refreshBtn"><span class="material-symbols-outlined">refresh</span></button>
     </div>
     <div class="ui-sidebar-content">
-      <div class="ui-empty-state" ref="pipelineState">Loading...</div>
+      <sn-empty-state ref="pipelineState">Loading...</sn-empty-state>
       <div ref="pipelineList" ${{ itemize: 'pipelines', 'item-tag': 'pm-pipeline-item' }}></div>
     </div>
   </div>
   <div class="ui-main" ref="mainContent">
-    <div class="ui-empty-state">Select a pipeline or create a new one</div>
+    <sn-empty-state>Select a pipeline or create a new one</sn-empty-state>
   </div>
 </div>
 `;

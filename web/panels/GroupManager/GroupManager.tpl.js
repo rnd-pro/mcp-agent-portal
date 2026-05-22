@@ -7,7 +7,7 @@ export default `
     <button class="ui-btn-icon" title="Refresh" ref="refreshBtn"><span class="material-symbols-outlined">refresh</span></button>
   </div>
   <div class="gm-board" ref="board">
-    <div class="ui-empty-state">Loading...</div>
+    <sn-empty-state>Loading...</sn-empty-state>
   </div>
 </div>
 `;

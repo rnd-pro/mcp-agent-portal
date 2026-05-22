@@ -91,13 +91,6 @@ WorkflowStep.rootStyles = `
   color: var(--sn-text-dim);
   font-family: var(--sn-font-mono, ui-monospace, SFMono-Regular, monospace);
 }
-.ui-empty-state {
-  padding: 20px;
-  text-align: center;
-  color: var(--sn-text-dim);
-  font-size: 13px;
-  font-style: italic;
-}
 .node-id {
   flex-shrink: 0;
   font-size: 11px;
