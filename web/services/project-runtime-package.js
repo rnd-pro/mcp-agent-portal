@@ -16,6 +16,10 @@ function normalizeLayoutRecord(layouts) {
       id,
       {
         version: 'runtime-ui-v1',
+        componentRegistries: [
+          { id: 'symbiote-node/ui', provider: 'symbiote-node' },
+          { id: 'agent-portal/runtime-layouts', provider: 'agent-portal' },
+        ],
         root,
       },
     ])

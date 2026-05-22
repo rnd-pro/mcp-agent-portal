@@ -23,11 +23,9 @@ export default /*css*/ `
 }
 
 .rtc-summary-card {
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
+  display: block;
   min-height: 86px;
-  padding: 14px;
+  --sn-card-margin-block-end: 0;
 }
 
 .rtc-summary-label {
@@ -61,7 +59,11 @@ export default /*css*/ `
   margin-bottom: 10px;
 }
 
-.rtc-section-head .ui-card-title {
+.rtc-section-title {
+  color: var(--sn-card-title-color);
+  font-size: var(--sn-card-title-size);
+  font-weight: var(--sn-card-title-weight);
+  text-transform: uppercase;
   margin-bottom: 4px;
 }
 
@@ -76,10 +78,8 @@ export default /*css*/ `
 }
 
 .rtc-instance {
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
-  padding: 14px;
+  display: block;
+  --sn-card-margin-block-end: 0;
 }
 
 .rtc-instance-head {

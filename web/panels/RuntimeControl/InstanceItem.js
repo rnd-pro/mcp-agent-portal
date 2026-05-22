@@ -18,7 +18,7 @@ export class InstanceItem extends Symbiote {
 }
 
 InstanceItem.template = html`
-<div class="rtc-instance">
+<sn-card class="rtc-instance">
   <div class="rtc-instance-head">
     <div class="rtc-instance-name" ${{ textContent: 'name', title: 'name' }}></div>
     <div class="rtc-status"><span class="rtc-status-dot"></span><span ${{ textContent: 'status' }}></span></div>
@@ -57,7 +57,7 @@ InstanceItem.template = html`
       <div class="rtc-metric-value" ${{ textContent: 'location', title: 'location' }}></div>
     </div>
   </div>
-</div>
+</sn-card>
 `;
 
 InstanceItem.rootStyles = cssShared + css;

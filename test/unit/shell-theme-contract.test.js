@@ -70,6 +70,8 @@ describe('portal shell theme contract', () => {
       'web/panels/PeerReview/PeerReview.tpl.js',
       'web/panels/PipelineManager/PipelineManager.js',
       'web/panels/ProjectItem/ProjectItem.tpl.js',
+      'web/panels/RuntimeControl/InstanceItem.js',
+      'web/panels/RuntimeControl/RuntimeControl.js',
       'web/panels/SettingsPanel/SettingsPanel.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');

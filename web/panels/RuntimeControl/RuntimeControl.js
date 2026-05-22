@@ -47,7 +47,7 @@ async function fetchJson(path) {
 }
 
 function summaryCard(label, value, note = '') {
-  let card = document.createElement('div');
+  let card = document.createElement('sn-card');
   card.className = 'rtc-summary-card';
 
   let labelEl = document.createElement('div');

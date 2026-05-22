@@ -19,7 +19,7 @@ export default html`
 
   <div class="rtc-section-head">
     <div>
-      <div class="ui-card-title">Active Instances</div>
+      <div class="rtc-section-title">Active Instances</div>
     </div>
     <div class="rtc-updated" ref="updatedAt"></div>
   </div>

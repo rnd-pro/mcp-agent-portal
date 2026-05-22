@@ -46,6 +46,8 @@ describe('portal project runtime package adapter', () => {
     assert.equal(project.entry.graph, 'sections');
     assert.equal(project.entry.layout, 'graph');
     assert.equal(project.graphs.sections.nodes[0].kind, 'ui.section');
+    assert.equal(project.layouts.graph.componentRegistries[0].id, 'symbiote-node/ui');
+    assert.equal(project.layouts.graph.componentRegistries[1].id, 'agent-portal/runtime-layouts');
     assert.equal(project.layouts.graph.root.children[0].component, 'pg-dep-graph');
     assert.deepEqual(project.agents.allowedTransactions, [
       'graph.addNode',
