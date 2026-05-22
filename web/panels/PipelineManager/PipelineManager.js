@@ -9,6 +9,8 @@ export class PipelineManager extends Symbiote {
   init$ = {
     pipelines: [],
     selectedPipelineId: null,
+    hasDetail: false,
+    mainEmptyText: 'Select a pipeline or create a new one',
   };
 
   _pipelines = [];
@@ -66,6 +68,7 @@ export class PipelineManager extends Symbiote {
     let pipeline = this._pipelines.find((item) => item.name === pipelineId);
     if (!pipeline) return;
     this.$.selectedPipelineId = pipeline.name;
+    this.$.hasDetail = true;
     this.renderSidebar();
     this.showPipelineDetails(pipeline);
   }
@@ -119,6 +122,7 @@ export class PipelineManager extends Symbiote {
 
   showCreateForm() {
     this.$.selectedPipelineId = null;
+    this.$.hasDetail = true;
     this.renderSidebar();
 
     let details = document.createElement('div');
@@ -176,7 +180,11 @@ export class PipelineManager extends Symbiote {
   _setPipelineState(message, isError = false) {
     this.ref.pipelineState.hidden = false;
     this.ref.pipelineState.textContent = message;
-    this.ref.pipelineState.style.color = isError ? '#f87171' : '';
+    if (isError) {
+      this.ref.pipelineState.setAttribute('variant', 'error');
+    } else {
+      this.ref.pipelineState.removeAttribute('variant');
+    }
   }
 }
 

@@ -8,10 +8,12 @@ import './ToolCard.js';
 class ToolExplorer extends Symbiote {
   init$ = {
     selectedServerName: 'None',
+    hasSelectedServer: false,
     servers: [],
     tools: [],
     serversEmptyText: '',
-    toolsEmptyText: 'Select a server to view tools',
+    mainEmptyText: 'Select a server to view tools',
+    toolsEmptyText: '',
     onServerSelect: (e) => {
       let serverName = e.detail?.name
         || e.detail?.item?.name
@@ -62,6 +64,7 @@ class ToolExplorer extends Symbiote {
 
   async selectServer(name) {
     this.$.selectedServerName = name;
+    this.$.hasSelectedServer = true;
     this.$.servers = this.$.servers.map((server) => ({
       ...server,
       isActive: server.name === name,

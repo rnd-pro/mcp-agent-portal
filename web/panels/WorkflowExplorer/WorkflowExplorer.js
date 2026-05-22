@@ -141,7 +141,7 @@ export class WorkflowExplorer extends Symbiote {
       });
     } catch (err) {
       let errorElement = this.createEmptyState(`Failed to load content: ${err.message}`);
-      errorElement.style.color = '#f87171';
+      errorElement.setAttribute('variant', 'error');
       containerElement.replaceChildren(errorElement);
     }
   }

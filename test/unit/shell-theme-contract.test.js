@@ -137,6 +137,20 @@ describe('portal shell theme contract', () => {
     }
   });
 
+  it('uses symbiote list detail shells for reusable split detail panels', () => {
+    for (let relative of [
+      'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
+      'web/panels/ToolExplorer/ToolExplorer.tpl.js',
+      'web/panels/PipelineManager/PipelineManager.tpl.js',
+    ]) {
+      let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+      assert.ok(source.includes('<sn-list-detail-shell'), `${relative} must compose the library list detail shell`);
+      assert.equal(source.includes('ui-split-container'), false, `${relative} must not copy split container markup`);
+      assert.equal(source.includes('ui-sidebar'), false, `${relative} must not copy sidebar shell markup`);
+      assert.equal(source.includes('ui-main'), false, `${relative} must not copy main detail shell markup`);
+    }
+  });
+
   it('uses symbiote status badges for reusable status labels', () => {
     for (let relative of [
       'web/panels/ActiveTasks/TaskCard.js',
