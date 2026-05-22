@@ -295,4 +295,11 @@ describe('portal shell theme contract', () => {
       assert.equal(source.includes('ui-title-large'), false, `${relative} must not copy shared title classes`);
     }
   });
+
+  it('keeps runtime status colors on provider tokens', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/RuntimeControl/RuntimeControl.css.js'), 'utf8');
+    assert.equal(source.includes('#4caf50'), false, 'RuntimeControl must not hardcode success green');
+    assert.equal(source.includes('rgba(76, 175, 80'), false, 'RuntimeControl must not hardcode success rgba');
+    assert.ok(source.includes('--sn-success-color'), 'RuntimeControl must consume --sn-success-color');
+  });
 });

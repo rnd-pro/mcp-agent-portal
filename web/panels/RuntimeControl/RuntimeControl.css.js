@@ -128,7 +128,7 @@ export default /*css*/ `
 
 .rtc-status {
   align-items: center;
-  color: var(--sn-success-color, #4caf50);
+  color: var(--sn-success-color);
   display: inline-flex;
   flex-shrink: 0;
   font-size: 12px;
