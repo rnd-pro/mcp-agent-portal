@@ -1268,7 +1268,7 @@ export class DepGraph extends Symbiote {
 
     // Attach ResizeObserver to all graph-nodes
     requestAnimationFrame(() => {
-      if (!this._canvas) return;
+      if (!this._canvas || !this._nodeObserver) return;
       const nodes = this._canvas.querySelectorAll('graph-node');
       for (const el of nodes) {
         this._nodeObserver.observe(el);
