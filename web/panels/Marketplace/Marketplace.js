@@ -84,11 +84,15 @@ class Marketplace extends Symbiote {
   }
 
   _setupModeToggle() {
-    let btns = this.ref.modeToggle.querySelectorAll('button');
+    let btns = this.ref.modeToggle.querySelectorAll('sn-button');
     for (let btn of btns) {
       btn.onclick = () => {
-        for (let b of btns) b.classList.remove('active');
+        for (let b of btns) {
+          b.classList.remove('active');
+          b.removeAttribute('variant');
+        }
         btn.classList.add('active');
+        btn.setAttribute('variant', 'primary');
         
         let mode = btn.dataset.mode;
         this.ref.serversSection.hidden = mode !== 'servers';
@@ -101,8 +105,12 @@ class Marketplace extends Symbiote {
     let tabs = this.ref.tabBar.querySelectorAll('.mp-tab');
     for (let tab of tabs) {
       tab.onclick = () => {
-        for (let t of tabs) t.classList.remove('active');
+        for (let t of tabs) {
+          t.classList.remove('active');
+          t.removeAttribute('variant');
+        }
         tab.classList.add('active');
+        tab.setAttribute('variant', 'primary');
         let target = tab.dataset.tab;
         this.ref.installedTab.hidden = target !== 'installed';
         this.ref.catalogTab.hidden = target !== 'catalog';

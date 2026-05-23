@@ -1,16 +1,36 @@
 // @ctx .context/web/panels/ctx-panel.ctx
 import Symbiote from '@symbiotejs/symbiote';
+import 'symbiote-node/ui';
 import { api, events, state } from '../../app.js';
 import template from './CtxPanel.tpl.js';
 import css from './CtxPanel.css.js';
 
-export class CtxPanel extends Symbiote {
-  init$ = {
-    contentHTML: '<div class="pg-placeholder">Select a file to view documentation</div>',
-    outlineHTML: '',
-  };
+function makeEmptyState(message, className = '') {
+  let node = document.createElement('sn-empty-state');
+  node.textContent = message;
+  if (className) node.className = className;
+  return node;
+}
 
+function makeIcon(name, className = '') {
+  let icon = document.createElement('span');
+  icon.className = `material-symbols-outlined${className ? ` ${className}` : ''}`;
+  icon.textContent = name;
+  return icon;
+}
+
+function setListItem(item, data) {
+  if (typeof item.setItem === 'function') {
+    item.setItem(data);
+    return;
+  }
+  customElements.whenDefined('sn-list-item').then(() => item.setItem(data));
+}
+
+export class CtxPanel extends Symbiote {
   initCallback() {
+    this._renderContentEmpty('Select a file to view documentation');
+
     events.addEventListener('file-selected', (event) => {
       this._loadCtx(event.detail.path);
       this._loadOutline(event.detail.path);
@@ -20,7 +40,7 @@ export class CtxPanel extends Symbiote {
   _loadOutline(file) {
     const skeleton = state.skeleton;
     if (!skeleton) {
-      this.$.outlineHTML = '';
+      this._clearOutline();
       return;
     }
 
@@ -28,59 +48,103 @@ export class CtxPanel extends Symbiote {
     const labels = skeleton.L || {};
     const exports = exportsByFile[file];
     if (!exports || exports.length === 0) {
-      this.$.outlineHTML = '';
+      this._clearOutline();
       return;
     }
 
-    const items = exports.map((exportName) => `<div class="pg-outline-item" title="${exportName}">
-        <span class="material-symbols-outlined" style="font-size:13px">function</span>
-        <span>${labels[exportName] || exportName}</span>
-      </div>`).join('');
+    let section = document.createElement('div');
+    section.className = 'pg-outline-section';
 
-    this.$.outlineHTML = `
-      <div class="pg-outline-section">
-        <div class="pg-outline-title">
-          <span class="material-symbols-outlined" style="font-size:14px">account_tree</span>
-          Exports · ${exports.length}
-        </div>
-        ${items}
-      </div>
-    `;
+    let title = document.createElement('div');
+    title.className = 'pg-outline-title';
+    title.append(makeIcon('account_tree', 'pg-outline-title-icon'), document.createTextNode(`Exports · ${exports.length}`));
+
+    let items = exports.map((exportName) => {
+      let item = document.createElement('sn-list-item');
+      item.className = 'pg-outline-item';
+      item.title = exportName;
+      setListItem(item, {
+        icon: 'function',
+        label: labels[exportName] || exportName,
+        description: exportName,
+        item: { exportName },
+      });
+      return item;
+    });
+
+    section.replaceChildren(title, ...items);
+    this.ref.outline.replaceChildren(section);
   }
 
   async _loadCtx(file) {
-    this.$.contentHTML = '<div class="pg-placeholder pg-pulse">Loading docs...</div>';
+    this._renderContentEmpty('Loading docs...', 'pg-pulse');
 
     try {
       const response = await api('/api/docs', { file });
       const docs = response?.docs || response?.content || '';
       if (!docs) {
-        this.$.contentHTML = '<div class="pg-placeholder">No .ctx documentation</div>';
+        this._renderContentEmpty('No .ctx documentation');
         return;
       }
 
-      this.$.contentHTML = typeof docs === 'string'
-        ? this._formatCtx(docs)
-        : `<pre class="pg-ctx-raw">${JSON.stringify(docs, null, 2)}</pre>`;
+      if (typeof docs === 'string') {
+        this._renderCtx(docs);
+        return;
+      }
+
+      let raw = document.createElement('code-block');
+      raw.className = 'pg-ctx-raw';
+      this.ref.content.replaceChildren(raw);
+      customElements.whenDefined('code-block').then(() => {
+        raw.setContent(JSON.stringify(docs, null, 2), 'json');
+      });
     } catch (err) {
-      this.$.contentHTML = '<div class="pg-placeholder">No documentation available</div>';
+      this._renderContentEmpty('No documentation available');
     }
   }
 
-  _formatCtx(value) {
-    return value.split('\n').map((line) => {
-      const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  _clearOutline() {
+    this.ref.outline.replaceChildren();
+  }
 
-      return line.startsWith('export ') || line.match(/^\s+\w/)
-        ? `<div class="pg-ctx-sig">${escaped}</div>`
-        : line.startsWith('- [x]')
-          ? `<div class="pg-ctx-test passed"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:4px">check_circle</span>${escaped.slice(5)}</div>`
-          : line.startsWith('- [ ]')
-            ? `<div class="pg-ctx-test pending"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:4px">radio_button_unchecked</span>${escaped.slice(5)}</div>`
-            : line.trim()
-              ? `<div class="pg-ctx-desc">${escaped}</div>`
-              : '';
-    }).join('');
+  _renderContentEmpty(message, className = '') {
+    this.ref.content.replaceChildren(makeEmptyState(message, className));
+  }
+
+  _renderCtx(value) {
+    let nodes = value.split('\n').map((line) => this._lineNode(line)).filter(Boolean);
+    if (nodes.length === 0) {
+      this._renderContentEmpty('No documentation available');
+      return;
+    }
+    this.ref.content.replaceChildren(...nodes);
+  }
+
+  _lineNode(line) {
+    if (!line.trim()) return null;
+
+    if (line.startsWith('export ') || line.match(/^\s+\w/)) {
+      let sig = document.createElement('div');
+      sig.className = 'pg-ctx-sig';
+      sig.textContent = line;
+      return sig;
+    }
+
+    if (line.startsWith('- [x]') || line.startsWith('- [ ]')) {
+      let passed = line.startsWith('- [x]');
+      let test = document.createElement('div');
+      test.className = `pg-ctx-test ${passed ? 'passed' : 'pending'}`;
+      test.append(
+        makeIcon(passed ? 'check_circle' : 'radio_button_unchecked', 'pg-ctx-test-icon'),
+        document.createTextNode(line.slice(5)),
+      );
+      return test;
+    }
+
+    let desc = document.createElement('div');
+    desc.className = 'pg-ctx-desc';
+    desc.textContent = line;
+    return desc;
   }
 }
 

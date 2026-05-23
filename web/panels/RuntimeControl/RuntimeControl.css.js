@@ -52,23 +52,11 @@ export default /*css*/ `
   display: block;
   min-height: 86px;
   --sn-card-margin-block-end: 0;
-}
-
-.rtc-summary-label {
-  color: var(--sn-text-dim);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0;
-  margin-bottom: 10px;
-  text-transform: uppercase;
-}
-
-.rtc-summary-value {
-  color: var(--sn-text);
-  font-family: var(--sn-font-mono);
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.1;
+  --sn-metric-border: transparent;
+  --sn-metric-gap: 10px;
+  --sn-metric-label-size: 11px;
+  --sn-metric-value-size: 24px;
+  --sn-metric-value-weight: 700;
 }
 
 .rtc-summary-note {
@@ -146,28 +134,9 @@ export default /*css*/ `
   display: grid;
   gap: 8px 14px;
   grid-template-columns: repeat(4, minmax(120px, 1fr));
-}
-
-.rtc-metric {
-  min-width: 0;
-}
-
-.rtc-metric-label {
-  color: var(--sn-text-dim);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0;
-  margin-bottom: 4px;
-  text-transform: uppercase;
-}
-
-.rtc-metric-value {
-  color: var(--sn-text);
-  font-family: var(--sn-font-mono);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  --sn-metric-border: transparent;
+  --sn-metric-gap: 4px;
+  --sn-metric-label-size: 10px;
 }
 
 .rtc-empty {

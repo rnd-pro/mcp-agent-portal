@@ -1,82 +1,80 @@
 export default `
   <graph-explorer-shell>
   <div slot="toolbar" class="graph-explorer-toolbar">
-    <button class="graph-explorer-btn" data-action="fit" title="Fit view">
+    <sn-button class="graph-explorer-btn" data-action="fit" title="Fit view">
       <span class="material-symbols-outlined">fit_screen</span>
       FIT
-    </button>
+    </sn-button>
     <div class="graph-explorer-toolbar-sep"></div>
-    <button
+    <sn-button
       class="graph-explorer-btn label-mode-btn graph-explorer-structured-only"
       data-mode="always"
       data-active
       title="Always show labels"
-    >LBL:ALW</button>
-    <button
+    >LBL:ALW</sn-button>
+    <sn-button
       class="graph-explorer-btn label-mode-btn graph-explorer-structured-only"
       data-mode="hover"
       title="Hover labels"
-    >LBL:HOV</button>
-    <button
+    >LBL:HOV</sn-button>
+    <sn-button
       class="graph-explorer-btn label-mode-btn graph-explorer-structured-only"
       data-mode="focus"
       title="Focus labels"
-    >LBL:FOC</button>
+    >LBL:FOC</sn-button>
     <div class="graph-explorer-toolbar-sep graph-explorer-structured-only"></div>
-    <button
+    <sn-button
       class="graph-explorer-btn graph-explorer-layer-btn graph-explorer-structured-only"
       data-layer="zones"
       data-active
       title="Toggle directory zones"
-    >ZONES</button>
-    <button
+    >ZONES</sn-button>
+    <sn-button
       class="graph-explorer-btn graph-explorer-layer-btn graph-explorer-structured-only"
       data-layer="vias"
       title="Toggle via markers"
-    >VIAS</button>
+    >VIAS</sn-button>
     <div class="graph-explorer-toolbar-sep"></div>
-    <button class="graph-explorer-btn" data-action="view-mode" title="Toggle view: Flat <-> Structured">
+    <sn-button class="graph-explorer-btn" data-action="view-mode" title="Toggle view: Flat <-> Structured">
       <span class="material-symbols-outlined">account_tree</span>
       FLAT
-    </button>
-    <button class="graph-explorer-btn graph-explorer-structured-only" data-action="path-style" title="Toggle lines: PCB <-> Bezier">
+    </sn-button>
+    <sn-button class="graph-explorer-btn graph-explorer-structured-only" data-action="path-style" title="Toggle lines: PCB <-> Bezier">
       <span class="material-symbols-outlined">route</span>
       PCB
-    </button>
-    <button class="graph-explorer-btn" data-action="graph-metadata" title="Edit graph metadata">
+    </sn-button>
+    <sn-button class="graph-explorer-btn" data-action="graph-metadata" title="Edit graph metadata">
       <span class="material-symbols-outlined">edit_note</span>
       META
-    </button>
-    <button class="graph-explorer-btn graph-explorer-flat-only" data-action="cluster-legend" title="Show semantic color legend" hidden>
+    </sn-button>
+    <sn-button class="graph-explorer-btn graph-explorer-flat-only" data-action="cluster-legend" title="Show semantic color legend" hidden>
       <span class="material-symbols-outlined">palette</span>
       COLORS
-    </button>
+    </sn-button>
   </div>
   <div slot="legend" class="pcb-clusters" aria-label="Semantic color legend" hidden></div>
   <dialog slot="overlay" class="pcb-metadata-dialog" aria-labelledby="graph-metadata-title">
     <form method="dialog">
       <header>
         <h3 id="graph-metadata-title">Graph Metadata</h3>
-        <button class="pcb-icon-btn" value="cancel" type="submit" title="Close" aria-label="Close">
+        <sn-button class="pcb-icon-btn" variant="icon" data-action="close-graph-metadata" title="Close" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
-        </button>
+        </sn-button>
       </header>
       <textarea spellcheck="false" aria-label="Graph metadata JSON" autocomplete="off"></textarea>
       <footer>
         <span class="pcb-metadata-status" role="status" aria-live="polite"></span>
-        <button class="graph-explorer-btn" value="cancel" type="submit" data-action="close-graph-metadata">
+        <sn-button class="graph-explorer-btn" data-action="close-graph-metadata">
           Cancel
-        </button>
-        <button
+        </sn-button>
+        <sn-button
           class="graph-explorer-btn"
           data-action="save-graph-metadata"
-          value="save"
-          type="button"
           aria-label="Save graph metadata"
         >
           <span class="material-symbols-outlined">save</span>
           Save
-        </button>
+        </sn-button>
       </footer>
     </form>
   </dialog>

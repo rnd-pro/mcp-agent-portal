@@ -21,8 +21,8 @@ export default`
 
 <sn-card ref="lifecycleCard">
   <span slot="title">Server Lifecycle</span>
-  <div class="pg-stg-metric"><span>Auto-shutdown</span><span class="pg-stg-val" ref="shutdownTimer">—</span></div>
-  <div class="pg-stg-metric"><span>Uptime</span><span class="pg-stg-val" ref="uptimeVal">—</span></div>
+  <sn-metric ref="shutdownMetric"><span slot="label">Auto-shutdown</span><span slot="value" ref="shutdownTimer">—</span></sn-metric>
+  <sn-metric><span slot="label">Uptime</span><span slot="value" ref="uptimeVal">—</span></sn-metric>
 </sn-card>
 
 <sn-card class="stg-integrations" ref="integrationsCard">

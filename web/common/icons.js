@@ -17,16 +17,16 @@ export const ICONS = {
 };
 
 export const ICON_MAP = {
-  '[icon:ok]': { name: 'check_circle', color: 'hsl(140,40%,50%)' },
-  '[icon:error]': { name: 'cancel', color: 'hsl(0,60%,60%)' },
-  '[icon:wait]': { name: 'hourglass_empty', color: 'var(--sn-cat-user)' },
-  '[icon:warn]': { name: 'warning', color: 'hsl(40,80%,50%)' },
-  '[icon:run]': { name: 'sync', color: 'var(--sn-cat-server)' },
-  '[icon:info]': { name: 'info', color: 'var(--sn-text-dim)' },
-  '[icon:stop]': { name: 'block', color: 'hsl(0,60%,60%)' },
-  '[icon:pause]': { name: 'pause_circle', color: 'var(--sn-text-dim)' },
-  '[icon:skip]': { name: 'skip_next', color: 'var(--sn-text-dim)' },
-  '[icon:bounce]': { name: 'reply', color: 'var(--sn-cat-server)' }
+  '[icon:ok]': { name: 'check_circle', kind: 'ok' },
+  '[icon:error]': { name: 'cancel', kind: 'error' },
+  '[icon:wait]': { name: 'hourglass_empty', kind: 'wait' },
+  '[icon:warn]': { name: 'warning', kind: 'warn' },
+  '[icon:run]': { name: 'sync', kind: 'run' },
+  '[icon:info]': { name: 'info', kind: 'info' },
+  '[icon:stop]': { name: 'block', kind: 'stop' },
+  '[icon:pause]': { name: 'pause_circle', kind: 'pause' },
+  '[icon:skip]': { name: 'skip_next', kind: 'skip' },
+  '[icon:bounce]': { name: 'reply', kind: 'bounce' }
 };
 
 /**
@@ -38,7 +38,7 @@ export function renderIconHtml(marker) {
   let config = ICON_MAP[marker];
   if (!config) return '';
   let spin = marker === ICONS.RUN ? 'spin-icon' : '';
-  return `<span class="material-symbols-outlined ${spin}" style="font-size:inherit; vertical-align:-3px; margin-right:4px; color:${config.color}">${config.name}</span>`;
+  return `<span class="material-symbols-outlined portal-inline-icon portal-inline-icon-${config.kind} ${spin}">${config.name}</span>`;
 }
 
 /**

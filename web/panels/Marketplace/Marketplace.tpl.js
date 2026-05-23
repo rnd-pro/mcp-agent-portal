@@ -8,17 +8,17 @@ export default html`
       Marketplace
     </div>
     <div class="mp-mode-toggle" ref="modeToggle">
-      <button class="active" data-mode="servers">MCP Servers</button>
-      <button data-mode="context">Skills & Rules</button>
+      <sn-button variant="primary" class="active" data-mode="servers">MCP Servers</sn-button>
+      <sn-button data-mode="context">Skills & Rules</sn-button>
     </div>
   </div>
 </div>
 
 <div class="mp-mode-section" ref="serversSection">
   <div class="mp-tabs" ref="tabBar">
-    <button class="mp-tab active" data-tab="installed">Installed (<span ref="serverCountBadge">{{serverCount}}</span>)</button>
-    <button class="mp-tab" data-tab="catalog">Catalog</button>
-    <button class="mp-tab" data-tab="custom">Custom</button>
+    <sn-button variant="primary" class="mp-tab active" data-tab="installed">Installed (<span ref="serverCountBadge">{{serverCount}}</span>)</sn-button>
+    <sn-button class="mp-tab" data-tab="catalog">Catalog</sn-button>
+    <sn-button class="mp-tab" data-tab="custom">Custom</sn-button>
   </div>
 
   <div class="mp-search-bar" ref="searchBar">

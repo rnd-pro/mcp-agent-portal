@@ -4,70 +4,42 @@ import template from './ActiveContext.tpl.js';
 import css from './ActiveContext.css.js';
 import { events } from '../../dashboard-state.js';
 
-function makeEmptyState(message, styles = {}) {
+function makeEmptyState(message, variant = '') {
   let node = document.createElement('sn-empty-state');
   node.textContent = message;
-  Object.assign(node.style, styles);
+  if (variant) node.className = variant;
   return node;
 }
 
 function makeFileRow(file) {
   let row = document.createElement('div');
-  Object.assign(row.style, {
-    padding: '6px 8px',
-    borderRadius: '4px',
-    marginBottom: '4px',
-    background: 'var(--sn-node-bg)',
-    border: '1px solid var(--sn-node-border)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  });
+  row.className = 'ctx-file-row';
 
-  let icon = document.createElement('span');
-  icon.className = 'material-symbols-outlined';
-  icon.textContent = 'insert_drive_file';
-  Object.assign(icon.style, {
-    fontSize: '14px',
-    color: 'var(--sn-cat-server)',
-  });
-
-  let content = document.createElement('div');
-  content.title = file;
-  Object.assign(content.style, {
-    flex: '1',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  });
-
-  let name = document.createElement('div');
-  name.textContent = file.split('/').pop();
-  Object.assign(name.style, {
-    fontSize: '12px',
-    fontWeight: '500',
-  });
-
-  let path = document.createElement('div');
-  path.textContent = file;
-  Object.assign(path.style, {
-    fontSize: '10px',
-    color: 'var(--sn-text-dim)',
-    fontFamily: 'var(--sn-font-mono)',
-  });
+  let item = document.createElement('sn-list-item');
+  item.className = 'ctx-file-item';
+  item.title = file;
+  let listItem = {
+    icon: 'insert_drive_file',
+    label: file.split('/').pop(),
+    description: file,
+  };
+  if (typeof item.setItem === 'function') {
+    item.setItem(listItem);
+  } else {
+    customElements.whenDefined('sn-list-item').then(() => item.setItem(listItem));
+  }
 
   let button = document.createElement('sn-button');
   button.setAttribute('variant', 'icon');
+  button.setAttribute('title', 'Untrack file');
   button.dataset.untrack = file;
 
   let closeIcon = document.createElement('span');
   closeIcon.className = 'material-symbols-outlined';
   closeIcon.textContent = 'close';
-  closeIcon.style.fontSize = '14px';
 
-  content.replaceChildren(name, path);
   button.replaceChildren(closeIcon);
-  row.replaceChildren(icon, content, button);
+  row.replaceChildren(item, button);
   return row;
 }
 
@@ -99,7 +71,7 @@ export class ActiveContext extends Symbiote {
 
   async loadContext() {
     try {
-      this.ref.fileList.replaceChildren(makeEmptyState('Loading...', { padding: '10px' }));
+      this.ref.fileList.replaceChildren(makeEmptyState('Loading...', 'ctx-empty-loading'));
       let res = await mcpCall('agent-pool', 'get_tracked_files', {});
       
       let data = res;
@@ -110,23 +82,14 @@ export class ActiveContext extends Symbiote {
       
       let files = data.tracked_files || [];
       if (files.length === 0) {
-        this.ref.fileList.replaceChildren(makeEmptyState('No files tracked.', {
-          padding: '20px',
-          fontSize: '12px',
-          color: 'var(--sn-text-dim)',
-          textAlign: 'center',
-        }));
+        this.ref.fileList.replaceChildren(makeEmptyState('No files tracked.', 'ctx-empty-muted'));
         return;
       }
       
       this.ref.fileList.replaceChildren(...files.map(f => makeFileRow(f)));
       
     } catch (err) {
-      this.ref.fileList.replaceChildren(makeEmptyState(err.message, {
-        color: 'var(--sn-danger-color)',
-        padding: '10px',
-        fontSize: '12px',
-      }));
+      this.ref.fileList.replaceChildren(makeEmptyState(err.message, 'ctx-empty-error'));
     }
   }
 

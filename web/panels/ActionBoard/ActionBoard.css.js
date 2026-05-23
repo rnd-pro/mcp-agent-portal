@@ -15,18 +15,9 @@ export default css`
   gap: 24px;
   background: var(--sn-node-bg);
   flex-shrink: 0;
-}
-
-.ab-stat-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  color: var(--sn-text-dim);
-}
-
-.ab-stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  font-family: var(--sn-font-mono);
+  --sn-metric-border: transparent;
+  --sn-metric-label-size: 11px;
+  --sn-metric-value-size: 24px;
 }
 
 .ab-stat-unit {
@@ -34,8 +25,8 @@ export default css`
   color: var(--sn-text-dim);
 }
 
-.ab-events {
+sn-event-feed {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
 }
 `;

@@ -411,8 +411,6 @@ export const skeleton = {
     "CG": "CanvasGraph",
     "CB1": "CodeBlock",
     "CS3": "CbSquiggle",
-    "CW": "CodeWidget",
-    "EW": "EventWidget",
     "FR": "FollowRibbon",
     "QO": "QuickOpen",
     "FC": "FollowController",
@@ -422,7 +420,6 @@ export const skeleton = {
     "AC2": "AgentChat",
     "ALI": "AgentListItem",
     "CL": "ChatList",
-    "EI": "EventItem",
     "GM": "GroupManager",
     "mM1": "Marketplace",
     "PR": "PeerReview",
@@ -846,7 +843,6 @@ export const skeleton = {
     "oE": "onEvent",
     "ca": "call",
     "fS1": "formatStats",
-    "DC1": "compactDisconnectedComponents",
     "eH": "escapeHtml",
     "fM": "formatMarkdown"
   },
@@ -1358,18 +1354,6 @@ export const skeleton = {
       "f": "packages/symbiote-node/display/CodeBlock/CodeBlock.js",
       "l": 46
     },
-    "CW": {
-      "m": 1,
-      "$": 3,
-      "f": "web/components/event-feed/CodeWidget.js",
-      "l": 3
-    },
-    "EW": {
-      "m": 4,
-      "$": 7,
-      "f": "web/components/event-feed/EventWidget.js",
-      "l": 3
-    },
     "FR": {
       "m": 2,
       "$": 2,
@@ -1422,12 +1406,6 @@ export const skeleton = {
       "$": 1,
       "f": "web/panels/ChatList/ChatList.js",
       "l": 9
-    },
-    "EI": {
-      "m": 1,
-      "$": 13,
-      "f": "web/panels/EventItem/EventItem.js",
-      "l": 6
     },
     "GM": {
       "m": 6,
@@ -2213,9 +2191,6 @@ export const skeleton = {
     ],
     "web/stats-format.js": [
       "fS1"
-    ],
-    "web/utils/graph-layout.js": [
-      "DC1"
     ]
   },
   "e": 586,
@@ -2812,14 +2787,6 @@ export const skeleton = {
       "AgentListItem.tpl.js"
     ],
     "web/panels/ChatList/": [
-    ],
-    "web/panels/EventItem/": [
-      "EventItem.css.ctx",
-      "EventItem.css.js",
-      "EventItem.ctx",
-      "EventItem.ctx.md",
-      "EventItem.tpl.ctx",
-      "EventItem.tpl.js"
     ],
     "web/panels/GroupManager/": [
       "GroupManager.tpl.js"
@@ -4053,12 +4020,6 @@ export const skeleton = {
       "../highlight.js",
       "../app.js"
     ],
-    "web/components/event-feed/CodeWidget.js": [
-      "@symbiotejs/symbiote"
-    ],
-    "web/components/event-feed/EventWidget.js": [
-      "@symbiotejs/symbiote"
-    ],
     "web/components/FollowRibbon/FollowRibbon.js": [
       "@symbiotejs/symbiote",
       "../app.js"
@@ -4071,8 +4032,8 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
       "symbiote-node/ui",
-      "./ActionBoard.tpl.js",
-      "../EventItem/EventItem.js"
+      "../../common/tool-event-feed-adapter.js",
+      "./ActionBoard.tpl.js"
     ],
     "web/panels/ActiveContext/ActiveContext.js": [
       "@symbiotejs/symbiote",
@@ -4111,11 +4072,6 @@ export const skeleton = {
       "symbiote-node",
       "symbiote-node/ui",
       "symbiote-node/ui"
-    ],
-    "web/panels/EventItem/EventItem.js": [
-      "@symbiotejs/symbiote",
-      "./EventItem.css.js",
-      "./EventItem.tpl.js"
     ],
     "web/panels/GroupManager/GroupManager.js": [
       "@symbiotejs/symbiote",
@@ -4220,9 +4176,7 @@ export const skeleton = {
     ],
     "web/panels/OpsPanel/OpsPanel.js": [
       "@symbiotejs/symbiote",
-      "../app.js",
-      "../components/event-feed/CodeWidget.js",
-      "../components/event-feed/EventWidget.js"
+      "../app.js"
     ],
     "web/router-registry.js": [
       "symbiote-node"

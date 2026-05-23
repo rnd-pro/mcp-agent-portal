@@ -1,12 +1,7 @@
-const DEFAULT_COLORS = [
-  '#7cc7ff',
-  '#8fd6a5',
-  '#f2c66d',
-  '#f08f8f',
-  '#b79cff',
-  '#67d4d1',
-  '#d7dce2',
-];
+import {
+  isGraphColorReference,
+  normalizeGraphColorReference,
+} from 'symbiote-node/graph';
 
 export const EMPTY_PROJECT_GRAPH_METADATA = Object.freeze({
   version: 1,
@@ -135,9 +130,7 @@ export function normalizeProjectGraphMetadata(input = {}) {
       return {
         id,
         label,
-        color: /^#?[0-9a-f]{3}([0-9a-f]{3})?$/i.test(String(cluster.color || '').trim())
-          ? String(cluster.color).trim()
-          : DEFAULT_COLORS[index % DEFAULT_COLORS.length],
+        color: normalizeGraphColorReference(cluster.color, index),
         description: String(cluster.description || '').trim(),
         paths: normalizePatterns(cluster),
       };
@@ -177,8 +170,8 @@ export function validateProjectGraphMetadata(input = {}) {
     if (paths.length === 0) {
       throw new Error(`Invalid project graph metadata: clusters[${index}] must define at least one path`);
     }
-    if (cluster.color !== undefined && !/^#?[0-9a-f]{3}([0-9a-f]{3})?$/i.test(String(cluster.color).trim())) {
-      throw new Error(`Invalid project graph metadata: clusters[${index}].color must be a hex color`);
+    if (cluster.color !== undefined && !isGraphColorReference(cluster.color)) {
+      throw new Error(`Invalid project graph metadata: clusters[${index}].color must be a hex color or symbiote-node CSS token reference`);
     }
   }
 

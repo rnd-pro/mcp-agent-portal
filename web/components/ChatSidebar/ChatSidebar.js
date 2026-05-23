@@ -17,17 +17,17 @@ function getCleanName(name) {
   return (name || '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '').trim();
 }
 
-function getStatusHtml(chat) {
+function getStatusMeta(chat) {
   if (chat.pendingTaskId) {
-    return '<span class="material-symbols-outlined chat-status-icon chat-status-running spin-icon" title="Running task...">hourglass_empty</span>';
+    return { statusKind: 'running', statusIcon: 'hourglass_empty', statusTitle: 'Running task...' };
   }
   if (chat.lastTaskStatus === 'done') {
-    return '<span class="material-symbols-outlined chat-status-icon chat-status-done" title="Completed">check_circle</span>';
+    return { statusKind: 'done', statusIcon: 'check_circle', statusTitle: 'Completed' };
   }
   if (chat.lastTaskStatus === 'error') {
-    return '<span class="material-symbols-outlined chat-status-icon chat-status-error" title="Error">error</span>';
+    return { statusKind: 'error', statusIcon: 'error', statusTitle: 'Error' };
   }
-  return '';
+  return { statusKind: '', statusIcon: '', statusTitle: '' };
 }
 
 export class ChatSidebar extends ChatSidebarShell {
@@ -172,8 +172,8 @@ export class ChatSidebar extends ChatSidebarShell {
           ...chat,
           cleanName: getCleanName(chat.name),
           icon: chat.agentIcon || 'subdirectory_arrow_right',
-          iconStyle: chat.agentColor ? `color:${chat.agentColor}` : '',
-          statusHtml: getStatusHtml(chat),
+          agentColor: chat.agentColor || '',
+          ...getStatusMeta(chat),
           agentType: chat.adapter,
           isActive: chat.id === dashState.activeChatId,
         });
@@ -192,8 +192,8 @@ export class ChatSidebar extends ChatSidebarShell {
         ...chat,
         cleanName: getCleanName(chat.name),
         icon: chat.agentIcon || 'chat',
-        iconStyle: chat.agentColor ? `color:${chat.agentColor}` : '',
-        statusHtml: getStatusHtml(chat),
+        agentColor: chat.agentColor || '',
+        ...getStatusMeta(chat),
         isActive: chat.id === dashState.activeChatId,
         isExpanded: shouldExpand,
         subChats: children,

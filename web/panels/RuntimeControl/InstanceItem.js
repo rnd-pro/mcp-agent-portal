@@ -24,38 +24,14 @@ InstanceItem.template = html`
     <div class="rtc-status"><span class="rtc-status-dot"></span><span ${{ textContent: 'status' }}></span></div>
   </div>
   <div class="rtc-metrics">
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">PID</div>
-      <div class="rtc-metric-value" ${{ textContent: 'pid', title: 'pid' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Port</div>
-      <div class="rtc-metric-value" ${{ textContent: 'port', title: 'port' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Agents</div>
-      <div class="rtc-metric-value" ${{ textContent: 'agents', title: 'agents' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Uptime</div>
-      <div class="rtc-metric-value" ${{ textContent: 'uptime', title: 'uptime' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Project</div>
-      <div class="rtc-metric-value" ${{ textContent: 'project', title: 'project' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Command</div>
-      <div class="rtc-metric-value" ${{ textContent: 'command', title: 'command' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Prefix</div>
-      <div class="rtc-metric-value" ${{ textContent: 'prefix', title: 'prefix' }}></div>
-    </div>
-    <div class="rtc-metric">
-      <div class="rtc-metric-label">Location</div>
-      <div class="rtc-metric-value" ${{ textContent: 'location', title: 'location' }}></div>
-    </div>
+    <sn-metric variant="stacked"><span slot="label">PID</span><span slot="value" ${{ textContent: 'pid', title: 'pid' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Port</span><span slot="value" ${{ textContent: 'port', title: 'port' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Agents</span><span slot="value" ${{ textContent: 'agents', title: 'agents' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Uptime</span><span slot="value" ${{ textContent: 'uptime', title: 'uptime' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Project</span><span slot="value" ${{ textContent: 'project', title: 'project' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Command</span><span slot="value" ${{ textContent: 'command', title: 'command' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Prefix</span><span slot="value" ${{ textContent: 'prefix', title: 'prefix' }}></span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Location</span><span slot="value" ${{ textContent: 'location', title: 'location' }}></span></sn-metric>
   </div>
 </sn-card>
 `;

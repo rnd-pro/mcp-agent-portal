@@ -23,7 +23,17 @@ describe('project graph metadata', () => {
     assert.equal(metadata.clusters.length, 2);
     assert.equal(metadata.clusters[0].id, 'web-ui');
     assert.equal(metadata.clusters[0].color, '#7cc7ff');
-    assert.match(metadata.clusters[1].color, /^#[0-9a-f]{6}$/i);
+    assert.equal(metadata.clusters[1].color, 'var(--sn-graph-cluster-2)');
+  });
+
+  it('accepts symbiote-node graph theme token references for cluster colors', () => {
+    const metadata = normalizeProjectGraphMetadata({
+      clusters: [
+        { label: 'Theme Token', color: 'var(--sn-graph-cluster-4)', paths: ['packages/'] },
+      ],
+    });
+
+    assert.equal(metadata.clusters[0].color, 'var(--sn-graph-cluster-4)');
   });
 
   it('matches exact paths, directories, and globs', () => {

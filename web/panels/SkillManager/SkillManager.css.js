@@ -38,28 +38,6 @@ export default `
     color: var(--sn-cat-server);
     white-space: nowrap;
   }
-  pg-skill-manager .pg-mode-toggle {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px 8px;
-    border: 1px solid var(--sn-node-border);
-    border-radius: 4px;
-    background: var(--sn-bg);
-    color: var(--sn-text-dim);
-    font-family: inherit;
-    font-size: 10px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  pg-skill-manager .pg-mode-toggle:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-  pg-skill-manager .pg-mode-toggle[hidden] {
-    display: none;
-  }
   pg-skill-manager code-block {
     flex: 1;
     min-height: 0;

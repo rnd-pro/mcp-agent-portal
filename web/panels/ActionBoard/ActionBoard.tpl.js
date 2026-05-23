@@ -1,19 +1,10 @@
 export default`
 <div class="ab-shell">
   <div class="ab-stats">
-    <div>
-      <div class="ab-stat-label">Flywheel Invocations</div>
-      <div class="ab-stat-value" bind="textContent: fwTotal">--</div>
-    </div>
-    <div>
-      <div class="ab-stat-label">Avg Duration</div>
-      <div class="ab-stat-value"><span bind="textContent: fwDuration">--</span><span class="ab-stat-unit">ms</span></div>
-    </div>
-    <div>
-      <div class="ab-stat-label">Skills Created</div>
-      <div class="ab-stat-value" style="color:var(--sn-success-color);" bind="textContent: fwSkills">--</div>
-    </div>
+    <sn-metric variant="stacked"><span slot="label">Flywheel Invocations</span><span slot="value" bind="textContent: fwTotal">--</span></sn-metric>
+    <sn-metric variant="stacked"><span slot="label">Avg Duration</span><span slot="value"><span bind="textContent: fwDuration">--</span><span class="ab-stat-unit">ms</span></span></sn-metric>
+    <sn-metric variant="stacked" status="success"><span slot="label">Skills Created</span><span slot="value" bind="textContent: fwSkills">--</span></sn-metric>
   </div>
-  <div class="ab-events" itemize="eventsItems" item-tag="pg-event-item"></div>
+  <sn-event-feed ref="eventFeed"></sn-event-feed>
 </div>
 `;

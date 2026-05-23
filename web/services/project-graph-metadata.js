@@ -1,12 +1,4 @@
-const DEFAULT_COLORS = [
-  '#7cc7ff',
-  '#8fd6a5',
-  '#f2c66d',
-  '#f08f8f',
-  '#b79cff',
-  '#67d4d1',
-  '#d7dce2',
-];
+import { normalizeGraphColorReference } from 'symbiote-node/graph';
 
 export const EMPTY_PROJECT_GRAPH_METADATA = Object.freeze({
   version: 1,
@@ -93,9 +85,7 @@ export function normalizeProjectGraphMetadata(input = {}) {
       return {
         id,
         label,
-        color: /^#?[0-9a-f]{3}([0-9a-f]{3})?$/i.test(String(cluster.color || '').trim())
-          ? String(cluster.color).trim()
-          : DEFAULT_COLORS[index % DEFAULT_COLORS.length],
+        color: normalizeGraphColorReference(cluster.color, index),
         description: String(cluster.description || '').trim(),
         paths: normalizePatterns(cluster),
       };

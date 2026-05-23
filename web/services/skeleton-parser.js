@@ -17,9 +17,9 @@ import {
 
 // ── Socket types (for wire coloring) ──
 const S_IMPORT = new Socket('import');
-S_IMPORT.color = '#c87533';   // copper
+S_IMPORT.color = 'var(--sn-dot-input)';
 const S_EXPORT = new Socket('export');
-S_EXPORT.color = '#d4a04a';   // gold
+S_EXPORT.color = 'var(--sn-dot-output)';
 
 /**
  * Build a file-level graph from skeleton data.

@@ -28,5 +28,41 @@ export default `
       overflow-y: auto;
       padding: 8px;
     }
+
+    & .ctx-file-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-block-end: 4px;
+    }
+
+    & .ctx-file-item {
+      flex: 1 1 auto;
+      min-width: 0;
+      --sn-list-item-bg: var(--sn-node-bg);
+      --sn-list-item-active-bg: var(--sn-node-bg);
+      --sn-list-item-padding: 6px 8px;
+      --sn-list-item-icon-color: var(--sn-cat-server);
+      --sn-list-item-icon-font-size: 14px;
+      --sn-list-item-description-size: 10px;
+      --sn-list-item-description-color: var(--sn-text-dim);
+    }
+
+    & .ctx-empty-loading {
+      padding: 10px;
+    }
+
+    & .ctx-empty-muted {
+      padding: 20px;
+      color: var(--sn-text-dim);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    & .ctx-empty-error {
+      padding: 10px;
+      color: var(--sn-danger-color);
+      font-size: 12px;
+    }
   }
 `;

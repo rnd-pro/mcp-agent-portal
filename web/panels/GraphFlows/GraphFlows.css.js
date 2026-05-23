@@ -37,44 +37,8 @@ pg-graph-flows {
 }
 
 .flows-title .material-symbols-outlined,
-.flows-icon-btn .material-symbols-outlined,
-.flows-btn .material-symbols-outlined {
+sn-button .material-symbols-outlined {
   font-size: 16px;
-}
-
-.flows-icon-btn,
-.flows-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 4px;
-  background: var(--sn-node-bg);
-  color: var(--sn-text);
-  cursor: pointer;
-}
-
-.flows-icon-btn {
-  width: 28px;
-  height: 28px;
-}
-
-.flows-btn {
-  min-height: 28px;
-  padding: 4px 8px;
-  font-size: 11px;
-}
-
-.flows-icon-btn:hover,
-.flows-btn:hover,
-.flows-story:hover {
-  background: var(--sn-node-hover);
-}
-
-.flows-btn.primary {
-  border-color: var(--sn-node-selected);
-  color: var(--sn-node-selected);
 }
 
 .flows-list {
@@ -84,10 +48,7 @@ pg-graph-flows {
 
 .flows-empty,
 .flows-error {
-  padding: 16px;
-  color: var(--sn-text-dim);
-  font-size: 12px;
-  line-height: 1.5;
+  min-height: var(--sn-empty-state-min-height);
 }
 
 .flows-error {
@@ -98,19 +59,14 @@ pg-graph-flows {
   width: 100%;
   display: grid;
   gap: 4px;
-  padding: 9px 10px;
   margin-bottom: 6px;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 4px;
-  background: var(--sn-node-bg);
-  color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .flows-story[data-active] {
-  border-color: var(--sn-node-selected);
-  background: var(--sn-accent-bg-subtle);
+  --sn-list-item-bg: var(--sn-list-item-active-bg);
+  --sn-list-item-border: var(--sn-list-item-active-border);
 }
 
 .flows-story-title {
@@ -122,7 +78,7 @@ pg-graph-flows {
 .flows-story-count,
 .flows-beat-kicker,
 .flows-beat p,
-.flows-tag {
+.flows-beat p {
   color: var(--sn-text-dim);
   font-size: 11px;
 }
@@ -159,12 +115,8 @@ pg-graph-flows {
 
 .flows-tag {
   max-width: 100%;
-  padding: 2px 6px;
-  border-radius: 3px;
-  border: 1px solid var(--sn-node-border);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .flows-beat footer {

@@ -6,14 +6,14 @@ import template from './GraphFlows.tpl.js';
 import css from './GraphFlows.css.js';
 
 function makeMessage(className, message) {
-  let node = document.createElement('div');
+  let node = document.createElement('sn-empty-state');
   node.className = className;
   node.textContent = message;
   return node;
 }
 
 function makeStoryButton(story, index, isActive) {
-  let button = document.createElement('button');
+  let button = document.createElement('sn-list-item');
   button.className = 'flows-story';
   button.dataset.storyIndex = String(index);
   if (isActive) button.dataset.active = '';
@@ -35,7 +35,7 @@ function makeStoryButton(story, index, isActive) {
 }
 
 function makeTag(tag) {
-  let node = document.createElement('span');
+  let node = document.createElement('sn-badge');
   node.className = 'flows-tag';
   node.title = tag;
   node.textContent = tag;

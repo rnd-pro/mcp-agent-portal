@@ -4,35 +4,39 @@ import cssLocal from "./SettingsPanel.css.js";
 import template from "./SettingsPanel.tpl.js";
 import { uiConfirm } from 'symbiote-node/ui';
 
-function renderMetric(label, value, extraClass = "") {
-  let metric = document.createElement("div");
-  metric.className = "pg-stg-metric";
+function renderMetric(label, value, status = "") {
+  let metric = document.createElement("sn-metric");
+  if (status) metric.setAttribute("status", status);
 
   let labelEl = document.createElement("span");
+  labelEl.slot = "label";
   labelEl.textContent = String(label);
 
   let valueEl = document.createElement("span");
-  valueEl.className = `pg-stg-val ${extraClass}`.trim();
-  valueEl.textContent = String(value);
+  valueEl.slot = "value";
+  valueEl.textContent = String(value ?? "—");
 
   metric.append(labelEl, valueEl);
   return metric;
 }
 
-function renderEmptyState(message, color = "") {
+function renderEmptyState(message, variant = "") {
   let state = document.createElement("sn-empty-state");
   state.textContent = message;
-  if (color) state.style.setProperty("--sn-empty-state-color", color);
+  if (variant) state.classList.add(`stg-empty-${variant}`);
   return state;
 }
 
-function renderIconTextButton(button, icon, label, options = {}) {
+function renderIconTextButton(button, icon, label, spinning = false) {
   let iconEl = document.createElement("span");
-  iconEl.className = "material-symbols-outlined";
+  iconEl.className = `material-symbols-outlined${spinning ? ' stg-spin' : ''}`;
   iconEl.textContent = icon;
-  if (options.animation) iconEl.style.animation = options.animation;
-  if (options.fontSize) iconEl.style.fontSize = options.fontSize;
   button.replaceChildren(iconEl, document.createTextNode(` ${label}`));
+}
+
+function setStatus(el, message, kind = "muted") {
+  el.textContent = message;
+  el.dataset.status = kind;
 }
 
 function _fmtTime(s) {
@@ -175,12 +179,10 @@ export class SettingsPanel extends Symbiote {
     let t = this.ref.gatewayStatus;
     let gateway = this._readGatewaySettings();
     if (!gateway.enabled) {
-      t.textContent = 'Enable and save the gateway before testing.';
-      t.style.color = 'var(--sn-warning-color)';
+      setStatus(t, 'Enable and save the gateway before testing.', 'warning');
       return;
     }
-    t.textContent = 'Testing gateway...';
-    t.style.color = 'var(--sn-text-dim)';
+    setStatus(t, 'Testing gateway...', 'muted');
     let headers = gateway.authToken ? { Authorization: `Bearer ${gateway.authToken}` } : {};
     try {
       let [healthRes, modelsRes] = await Promise.all([
@@ -192,11 +194,9 @@ export class SettingsPanel extends Symbiote {
       let health = await healthRes.json();
       let models = await modelsRes.json();
       let count = Array.isArray(models.data) ? models.data.length : 0;
-      t.textContent = `OK: ${health.defaultModel || gateway.defaultModel}; ${count} model${count === 1 ? '' : 's'}`;
-      t.style.color = 'var(--sn-success-color)';
+      setStatus(t, `OK: ${health.defaultModel || gateway.defaultModel}; ${count} model${count === 1 ? '' : 's'}`, 'success');
     } catch (e) {
-      t.textContent = `Test failed: ${e.message}`;
-      t.style.color = 'var(--sn-danger-color)';
+      setStatus(t, `Test failed: ${e.message}`, 'error');
     }
   }
 
@@ -219,15 +219,16 @@ export class SettingsPanel extends Symbiote {
       this.ref.uptimeVal.textContent = _fmtTime(r.uptime);
       if (r.shutdownAt !== null && r.shutdownAt > 0) {
         this.ref.shutdownTimer.textContent = _fmtTime(r.shutdownAt);
-        this.ref.shutdownTimer.className = "pg-stg-val pg-stg-warn";
+        this.ref.shutdownMetric.setAttribute("status", "warning");
       } else {
         let clients = r.agents + r.monitors;
         this.ref.shutdownTimer.textContent = `Active (${clients} client${clients !== 1 ? "s" : ""})`;
-        this.ref.shutdownTimer.className = "pg-stg-val pg-stg-ok";
+        this.ref.shutdownMetric.setAttribute("status", "success");
       }
     } catch {
       this.ref.shutdownTimer.textContent = "—";
       this.ref.uptimeVal.textContent = "—";
+      this.ref.shutdownMetric.removeAttribute("status");
     }
   }
 
@@ -235,42 +236,37 @@ export class SettingsPanel extends Symbiote {
     if (!(await uiConfirm("Stop the server? It will not restart automatically."))) return;
     try {
       await fetch("/api/stop", { method: "POST" });
-      this.ref.restartStatus.textContent = "⏹ Server stopped.";
-      this.ref.restartStatus.style.color = "var(--sn-danger-color)";
+      setStatus(this.ref.restartStatus, "Server stopped.", "error");
     } catch (e) {
-      this.ref.restartStatus.textContent = `Error: ${e.message}`;
+      setStatus(this.ref.restartStatus, `Error: ${e.message}`, "error");
     }
   }
 
   async restartServer() {
     let t = this.ref.restartStatus;
-    t.textContent = "Restarting server…";
-    t.style.color = "var(--sn-warning-color)";
+    setStatus(t, "Restarting server...", "warning");
     try {
       await fetch("/api/restart", { method: "POST" });
-      t.textContent = "Server stopped. Reconnecting…";
+      setStatus(t, "Server stopped. Reconnecting...", "warning");
       let retries = 0;
       let timer = setInterval(async () => {
         retries++;
         try {
           if ((await fetch("/api/project-info")).ok) {
             clearInterval(timer);
-            t.textContent = "Server restarted successfully";
-            t.style.color = "var(--sn-success-color)";
+            setStatus(t, "Server restarted successfully", "success");
             this.fetchInfo();
-            setTimeout(() => { t.textContent = ""; }, 3000);
+            setTimeout(() => { setStatus(t, "", "muted"); }, 3000);
             return;
           }
         } catch (e) { /* expected — server is restarting */ }
         if (retries > 15) {
           clearInterval(timer);
-          t.textContent = "Server did not come back. Refresh the page manually.";
-          t.style.color = "var(--sn-danger-color)";
+          setStatus(t, "Server did not come back. Refresh the page manually.", "error");
         }
       }, 1000);
     } catch (e) {
-      t.textContent = `Error: ${e.message}`;
-      t.style.color = "var(--sn-danger-color)";
+      setStatus(t, `Error: ${e.message}`, "error");
     }
   }
 
@@ -290,7 +286,7 @@ export class SettingsPanel extends Symbiote {
       this._renderProviderTabs();
       
       this.ref.backendCard.replaceChildren(
-        renderMetric("Status", "Running", "pg-stg-ok"),
+        renderMetric("Status", "Running", "success"),
         renderMetric("Project", info.name || "—"),
         renderMetric("Path", info.path || "—"),
         renderMetric("PID", info.pid || "—"),
@@ -307,7 +303,7 @@ export class SettingsPanel extends Symbiote {
             renderMetric("Name", inst.name || "unknown"),
             renderMetric("Path", inst.project || "—"),
             renderMetric("PID", inst.pid),
-            renderMetric("Port", inst.port),
+            renderMetric("Port", inst.port ?? "—"),
             renderMetric("Uptime", `${uptimeStr} min`),
           );
           n.appendChild(s);
@@ -318,7 +314,7 @@ export class SettingsPanel extends Symbiote {
     } catch (t) {
       console.error("[SettingsPanel] fetch error:", t);
       this.ref.backendCard.replaceChildren(
-        renderEmptyState(`Error: ${t.message}`, "var(--sn-danger-color)"),
+        renderEmptyState(`Error: ${t.message}`, "error"),
       );
     }
   }
@@ -344,8 +340,9 @@ export class SettingsPanel extends Symbiote {
     if (!providers.includes(this._activeProvider)) this._activeProvider = providers[0];
 
     let buttons = providers.map(p => {
-      let button = document.createElement('button');
+      let button = document.createElement('sn-button');
       button.className = `pm-provider-tab ${p === this._activeProvider ? 'active' : ''}`.trim();
+      if (p === this._activeProvider) button.setAttribute('variant', 'primary');
       button.dataset.p = p;
       button.textContent = p;
       return button;
@@ -384,7 +381,7 @@ export class SettingsPanel extends Symbiote {
       suggestions.append(label);
       for (let defaultModel of DEFAULT_GATEWAY.providers.deepseek.models) {
         let model = `deepseek/${defaultModel}`;
-        let button = document.createElement('button');
+        let button = document.createElement('sn-button');
         button.className = 'pm-suggest-model';
         button.dataset.m = model;
         button.textContent = model;
@@ -395,11 +392,11 @@ export class SettingsPanel extends Symbiote {
 
     if (models.length === 0) {
       let state = renderEmptyState('No custom models. Showing defaults.');
-      state.style.padding = '4px';
+      state.classList.add('pm-model-empty');
       children.push(state);
     } else {
       for (let model of models) {
-        let chip = document.createElement('div');
+        let chip = document.createElement('sn-badge');
         chip.className = 'pm-model-chip';
         chip.append(document.createTextNode(`${model} `));
 
@@ -601,14 +598,11 @@ export class SettingsPanel extends Symbiote {
   }
 
   _modelTag(icon, label) {
-    let tag = document.createElement('span');
+    let tag = document.createElement('sn-badge');
     tag.className = 'pm-tag';
 
     let iconEl = document.createElement('span');
     iconEl.className = 'material-symbols-outlined';
-    iconEl.style.fontSize = '12px';
-    iconEl.style.verticalAlign = 'middle';
-    iconEl.style.marginRight = '2px';
     iconEl.textContent = icon;
 
     tag.append(iconEl, document.createTextNode(` ${label}`));
@@ -616,42 +610,38 @@ export class SettingsPanel extends Symbiote {
   }
 
   async _saveProviderModels() {
-    this._setStatus("Saving...", "var(--sn-text-dim)");
+    this._setModelStatus("Saving...", "muted");
     try {
       await fetch('/api/settings/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: this._activeProvider, models: this._userModels[this._activeProvider] || [] })
       });
-      this._setStatus("Saved successfully", "var(--sn-success-color)");
+      this._setModelStatus("Saved successfully", "success");
     } catch (e) {
-      this._setStatus(`Error: ${e.message}`, "var(--sn-danger-color)");
+      this._setModelStatus(`Error: ${e.message}`, "error");
     }
   }
 
   async _syncFromCli() {
     let btn = this.ref.syncCliBtn;
-    renderIconTextButton(btn, "sync", "Discovering...", {
-      animation: "spin 1s linear infinite",
-      fontSize: "14px",
-    });
+    renderIconTextButton(btn, "sync", "Discovering...", true);
     btn.disabled = true;
     try {
       let r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
       this._cliModels = r.models || [];
       this._renderDirectory();
-      this._setStatus(`Discovered ${r.count} models`, "var(--sn-node-selected)");
+      this._setModelStatus(`Discovered ${r.count} models`, "accent");
     } catch (e) {
-      this._setStatus(`Sync failed: ${e.message}`, "var(--sn-danger-color)");
+      this._setModelStatus(`Sync failed: ${e.message}`, "error");
     } finally {
-      btn.textContent = "⟳ Discover & Update";
+      renderIconTextButton(btn, "sync", "Discover & Update");
       btn.disabled = false;
     }
   }
   
-  _setStatus(msg, color) {
-    this.ref.modelStatus.textContent = msg;
-    this.ref.modelStatus.style.color = color;
+  _setModelStatus(msg, kind) {
+    setStatus(this.ref.modelStatus, msg, kind);
     setTimeout(() => { if (this.ref.modelStatus.textContent === msg) this.ref.modelStatus.textContent = ''; }, 3000);
   }
 }

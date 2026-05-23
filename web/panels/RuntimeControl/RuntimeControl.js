@@ -50,15 +50,19 @@ function summaryCard(label, value, note = '') {
   let card = document.createElement('sn-card');
   card.className = 'rtc-summary-card';
 
-  let labelEl = document.createElement('div');
-  labelEl.className = 'rtc-summary-label';
+  let metric = document.createElement('sn-metric');
+  metric.setAttribute('variant', 'stacked');
+
+  let labelEl = document.createElement('span');
+  labelEl.slot = 'label';
   labelEl.textContent = label;
 
-  let valueEl = document.createElement('div');
-  valueEl.className = 'rtc-summary-value';
+  let valueEl = document.createElement('span');
+  valueEl.slot = 'value';
   valueEl.textContent = value;
 
-  card.append(labelEl, valueEl);
+  metric.append(labelEl, valueEl);
+  card.append(metric);
 
   if (note) {
     let noteEl = document.createElement('div');

@@ -1,15 +1,8 @@
 import { Symbiote } from '@symbiotejs/symbiote';
+import 'symbiote-node/ui';
 import { events } from '../../app.js';
 
 const FRONTMATTER_KEYS = ['name', 'description', 'category', 'tags', 'applies_to', 'token_cost', 'autoload', 'resource_group'];
-
-function esc(value = '') {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
 
 function parseFrontmatter(content) {
   let match = String(content || '').match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
@@ -65,12 +58,57 @@ function isMarkdown(path) {
   return /\.(md|markdown)$/i.test(path || '');
 }
 
-export class SkillMetadata extends Symbiote {
-  init$ = {
-    contentHTML: '<div class="pg-placeholder">Select a markdown file</div>'
-  };
+function makeEmptyState(message) {
+  let node = document.createElement('sn-empty-state');
+  node.textContent = message;
+  return node;
+}
 
+function makeField(key, label, value) {
+  let field = document.createElement('sn-field');
+  let labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  let input = document.createElement('input');
+  input.dataset.metaKey = key;
+  input.value = value == null ? '' : String(value);
+  field.replaceChildren(labelEl, input);
+  return field;
+}
+
+function makeAutoloadField(value) {
+  let field = document.createElement('sn-field');
+  let label = document.createElement('label');
+  label.textContent = 'Autoload';
+
+  let select = document.createElement('select');
+  select.dataset.metaKey = 'autoload';
+  for (let [optionValue, text] of [['', 'unset'], ['true', 'true'], ['false', 'false']]) {
+    let option = document.createElement('option');
+    option.value = optionValue;
+    option.textContent = text;
+    select.append(option);
+  }
+  select.value = value === true ? 'true' : value === false ? 'false' : '';
+
+  field.replaceChildren(label, select);
+  return field;
+}
+
+function makeRawField(rawValue) {
+  let field = document.createElement('sn-field');
+  let label = document.createElement('label');
+  label.textContent = 'Raw Frontmatter';
+  let textarea = document.createElement('textarea');
+  textarea.dataset.rawFrontmatter = '';
+  textarea.value = rawValue || '';
+  field.replaceChildren(label, textarea);
+  return field;
+}
+
+export class SkillMetadata extends Symbiote {
   initCallback() {
+    this._renderEmpty('Select a markdown file');
+
     events.addEventListener('agent-portal-file-loaded', event => {
       this._current = event.detail;
       this.renderMetadata();
@@ -80,48 +118,34 @@ export class SkillMetadata extends Symbiote {
   renderMetadata() {
     let current = this._current;
     if (!current?.path) {
-      this.$.contentHTML = '<div class="pg-placeholder">Select a markdown file</div>';
+      this._renderEmpty('Select a markdown file');
       return;
     }
     if (!isMarkdown(current.path)) {
-      this.$.contentHTML = '<div class="pg-placeholder">Frontmatter is available for markdown files.</div>';
+      this._renderEmpty('Frontmatter is available for markdown files.');
       return;
     }
     let fm = parseFrontmatter(current.content);
     let meta = parseYaml(fm.raw);
-    this.$.contentHTML = `
-      <div class="sm-fields">
-        ${this._field('name', 'Name', meta.name || '')}
-        ${this._field('description', 'Description', meta.description || '')}
-        ${this._field('category', 'Category', meta.category || '')}
-        ${this._field('tags', 'Tags', Array.isArray(meta.tags) ? meta.tags.join(', ') : (meta.tags || ''))}
-        ${this._field('applies_to', 'Applies To', meta.applies_to || '')}
-        ${this._field('token_cost', 'Token Cost', meta.token_cost || '')}
-        ${this._field('resource_group', 'Resource Group', meta.resource_group || '')}
-        <label class="sm-field">
-          <span>Autoload</span>
-          <select data-meta-key="autoload">
-            <option value="" ${meta.autoload === undefined ? 'selected' : ''}>unset</option>
-            <option value="true" ${meta.autoload === true ? 'selected' : ''}>true</option>
-            <option value="false" ${meta.autoload === false ? 'selected' : ''}>false</option>
-          </select>
-        </label>
-        <label class="sm-field">
-          <span>Raw Frontmatter</span>
-          <textarea data-raw-frontmatter>${esc(fm.raw)}</textarea>
-        </label>
-      </div>
-    `;
+    let fields = document.createElement('div');
+    fields.className = 'sm-fields';
+    fields.replaceChildren(
+      makeField('name', 'Name', meta.name || ''),
+      makeField('description', 'Description', meta.description || ''),
+      makeField('category', 'Category', meta.category || ''),
+      makeField('tags', 'Tags', Array.isArray(meta.tags) ? meta.tags.join(', ') : (meta.tags || '')),
+      makeField('applies_to', 'Applies To', meta.applies_to || ''),
+      makeField('token_cost', 'Token Cost', meta.token_cost || ''),
+      makeField('resource_group', 'Resource Group', meta.resource_group || ''),
+      makeAutoloadField(meta.autoload),
+      makeRawField(fm.raw),
+    );
+    this.ref.content.replaceChildren(fields);
     requestAnimationFrame(() => this._bindInputs());
   }
 
-  _field(key, label, value) {
-    return `
-      <label class="sm-field">
-        <span>${esc(label)}</span>
-        <input data-meta-key="${esc(key)}" value="${esc(value)}">
-      </label>
-    `;
+  _renderEmpty(message) {
+    this.ref.content.replaceChildren(makeEmptyState(message));
   }
 
   _bindInputs() {
@@ -165,7 +189,7 @@ export class SkillMetadata extends Symbiote {
   }
 }
 
-SkillMetadata.template = `<div class="sm-content" bind="innerHTML: contentHTML"></div>`;
+SkillMetadata.template = `<div class="sm-content" ref="content"></div>`;
 
 SkillMetadata.rootStyles = `
   pg-skill-metadata {
@@ -180,42 +204,11 @@ SkillMetadata.rootStyles = `
     padding: 12px;
     box-sizing: border-box;
   }
-  pg-skill-metadata .pg-placeholder {
+  pg-skill-metadata sn-empty-state {
     padding: 12px;
-    color: var(--sn-text-dim);
-    font-size: 12px;
-  }
-  pg-skill-metadata .sm-field {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-bottom: 12px;
-  }
-  pg-skill-metadata .sm-field span {
-    font-size: 10px;
-    font-weight: 650;
-    text-transform: uppercase;
-    color: var(--sn-text-dim);
-  }
-  pg-skill-metadata input,
-  pg-skill-metadata select,
-  pg-skill-metadata textarea {
-    width: 100%;
-    box-sizing: border-box;
-    border: 1px solid var(--sn-node-border);
-    border-radius: 4px;
-    background: var(--sn-node-bg);
-    color: var(--sn-text);
-    font: inherit;
-    font-size: 12px;
-    padding: 6px 7px;
-    outline: 0;
   }
   pg-skill-metadata textarea {
-    min-height: 110px;
-    resize: vertical;
     font-family: var(--sn-font-mono);
-    line-height: 1.45;
   }
 `;
 

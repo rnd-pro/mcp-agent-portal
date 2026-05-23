@@ -245,6 +245,11 @@ export class DepGraph extends Symbiote {
     this.querySelector('[data-action="save-graph-metadata"]')?.addEventListener('click', () => {
       this._saveGraphMetadataFromEditor();
     });
+    this.querySelectorAll('[data-action="close-graph-metadata"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this._closeGraphMetadataEditor();
+      });
+    });
     events.addEventListener('graph-story-beat-selected', (e) => {
       this._applyStoryBeat(e.detail);
     });
@@ -661,6 +666,12 @@ export class DepGraph extends Symbiote {
     this._setMetadataSaving(false);
     dialog.showModal();
     requestAnimationFrame(() => textarea.focus());
+  }
+
+  _closeGraphMetadataEditor() {
+    let dialog = this.querySelector('.pcb-metadata-dialog');
+    if (!dialog || dialog.hasAttribute('data-saving')) return;
+    dialog.close('cancel');
   }
 
   _rebuildWithGraphMetadata() {

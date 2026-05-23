@@ -7,8 +7,36 @@ import { fileURLToPath } from 'node:url';
 let ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 
 describe('portal shell theme contract', () => {
+  it('applies the symbiote-node default theme at the document root', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
+    assert.ok(source.includes('DEFAULT_THEME'), 'web/app.js must import DEFAULT_THEME from symbiote-node/ui');
+    assert.ok(source.includes('applyTheme'), 'web/app.js must import applyTheme from symbiote-node/ui');
+    assert.match(
+      source,
+      /\b[a-zA-Z_$][\w$]*\(document\.documentElement,\s*[a-zA-Z_$][\w$]*\)/,
+      'web/app.js must apply the provider theme to document.documentElement so tokens cascade into every layout',
+    );
+
+    let theme = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/themes/default-dark.js'), 'utf8');
+    for (let token of [
+      '--sn-theme-hue',
+      '--sn-theme-chroma',
+      '--sn-theme-bg-lightness',
+      '--sn-theme-density',
+      '--sn-bg',
+      '--sn-panel-bg',
+      '--sn-layout-gap-bg',
+      '--sn-node-selected',
+      '--sn-text',
+    ]) {
+      assert.ok(theme.includes(token), `default symbiote-node theme must provide ${token}`);
+    }
+  });
+
   it('consumes symbiote-node theme tokens instead of copying provider colors', () => {
     let css = fs.readFileSync(path.join(ROOT, 'web/style.css'), 'utf8');
+    let index = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
+    let icons = fs.readFileSync(path.join(ROOT, 'web/common/icons.js'), 'utf8');
     for (let literal of [
       '#4c8bf5',
       '#4caf50',
@@ -19,6 +47,9 @@ describe('portal shell theme contract', () => {
     ]) {
       assert.equal(css.includes(literal), false, `web/style.css must not copy provider color ${literal}`);
     }
+    assert.equal(index.includes('style='), false, 'web/index.html must not carry inline visual styles');
+    assert.equal(icons.includes('style='), false, 'markdown icon rendering must use theme classes');
+    assert.equal(icons.includes('hsl('), false, 'markdown icon rendering must not hard-code colors');
     for (let token of [
       '--sn-node-selected',
       '--sn-success-color',
@@ -48,35 +79,31 @@ describe('portal shell theme contract', () => {
     }
   });
 
-  it('keeps runtime event rows on provider theme tokens', () => {
-    let source = fs.readFileSync(path.join(ROOT, 'web/panels/EventItem/EventItem.css.js'), 'utf8');
-    for (let literal of [
-      '#60a5fa',
-      '#4ade80',
-      '#f87171',
-      'rgba(96, 165, 250',
-      'rgba(74, 222, 128',
-      'rgba(248, 113, 113',
-      'rgba(0,0,0',
-      'rgba(255,255,255',
-      'monospace)',
-    ]) {
-      assert.equal(source.includes(literal), false, `EventItem must not copy provider styling with ${literal}`);
-    }
+  it('keeps runtime event rows on the provider event feed primitive', () => {
+    let actionTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.tpl.js'), 'utf8');
+    let actionLogic = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.js'), 'utf8');
+    let opsTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.tpl.js'), 'utf8');
+    let eventFeedCss = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/display/EventFeed/EventFeed.css.js'), 'utf8');
+
+    assert.ok(actionTemplate.includes('<sn-event-feed'), 'ActionBoard must compose the provider event feed');
+    assert.ok(opsTemplate.includes('<sn-event-feed'), 'OpsPanel must compose the provider event feed');
+    assert.ok(actionLogic.includes('toToolEventFeedItems'), 'ActionBoard must adapt portal events into provider event feed data');
+    assert.equal(actionTemplate.includes('pg-event-item'), false, 'ActionBoard must not render local event item widgets');
     for (let token of [
       '--sn-font-mono',
       '--sn-node-hover',
-      '--sn-node-selected',
-      '--sn-accent-bg-subtle',
-      '--sn-success-bg',
-      '--sn-danger-bg',
+      '--sn-cat-server',
+      '--sn-success-color',
+      '--sn-danger-color',
     ]) {
-      assert.ok(source.includes(token), `EventItem must consume ${token}`);
+      assert.ok(eventFeedCss.includes(token), `EventFeed must consume ${token}`);
     }
   });
 
   it('keeps graph flow surfaces on provider theme tokens', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/GraphFlows/GraphFlows.css.js'), 'utf8');
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/GraphFlows/GraphFlows.tpl.js'), 'utf8');
+    let logic = fs.readFileSync(path.join(ROOT, 'web/panels/GraphFlows/GraphFlows.js'), 'utf8');
     for (let literal of [
       '#181818',
       '#e0e0e0',
@@ -94,11 +121,11 @@ describe('portal shell theme contract', () => {
     }
     for (let token of [
       '--sn-panel-bg',
-      '--sn-node-bg',
-      '--sn-node-hover',
       '--sn-node-border',
-      '--sn-node-selected',
-      '--sn-accent-bg-subtle',
+      '--sn-list-item-bg',
+      '--sn-list-item-border',
+      '--sn-list-item-active-bg',
+      '--sn-list-item-active-border',
       '--sn-bg-overlay',
       '--sn-danger-color',
       '--sn-text',
@@ -106,6 +133,30 @@ describe('portal shell theme contract', () => {
       '--sn-font',
     ]) {
       assert.ok(source.includes(token), `GraphFlows must consume ${token}`);
+    }
+    assert.ok(template.includes('<sn-button'), 'GraphFlows action controls must compose library buttons');
+    assert.ok(logic.includes("createElement('sn-list-item')"), 'GraphFlows stories must compose library list items');
+    assert.ok(logic.includes("createElement('sn-badge')"), 'GraphFlows tags must compose library badges');
+    assert.ok(logic.includes("createElement('sn-empty-state')"), 'GraphFlows empty/error states must compose library empty states');
+    assert.equal(template.includes('<button'), false, 'GraphFlows template must not own raw button shells');
+    assert.equal(logic.includes("createElement('button')"), false, 'GraphFlows logic must not own raw button shells');
+    assert.equal(source.includes('.flows-btn'), false, 'GraphFlows CSS must not copy button styling');
+    assert.equal(source.includes('.flows-icon-btn'), false, 'GraphFlows CSS must not copy icon button styling');
+  });
+
+  it('keeps topology tables on the provider data table primitive', () => {
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/Topology/TopologyPanel.tpl.js'), 'utf8');
+    let logic = fs.readFileSync(path.join(ROOT, 'web/panels/Topology/TopologyPanel.js'), 'utf8');
+    let styles = fs.readFileSync(path.join(ROOT, 'web/panels/Topology/TopologyPanel.css.js'), 'utf8');
+
+    assert.ok(template.includes('<sn-data-table'), 'TopologyPanel must compose the reusable provider data table');
+    assert.ok(logic.includes('setRows(rows)'), 'TopologyPanel must feed rows into the provider data table');
+    assert.ok(logic.includes('badge: { label:'), 'TopologyPanel must pass structured badge data instead of rendered HTML');
+    assert.equal(logic.includes('html:'), false, 'TopologyPanel must not pass rendered HTML into the data table');
+    assert.equal(template.includes('<table'), false, 'TopologyPanel must not own raw table markup');
+    assert.equal(styles.includes('.node-table'), false, 'TopologyPanel must not keep local table shell styling');
+    for (let token of ['--sn-panel-bg', '--sn-text', '--sn-text-dim', '--sn-node-selected']) {
+      assert.ok(styles.includes(token), `TopologyPanel must consume ${token}`);
     }
   });
 
@@ -153,7 +204,6 @@ describe('portal shell theme contract', () => {
 
   it('keeps shared agent chrome on provider theme tokens', () => {
     for (let relative of [
-      'web/components/AgentBoard/AgentBoard.css.js',
       'web/components/FollowRibbon/FollowRibbon.css.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
@@ -174,11 +224,6 @@ describe('portal shell theme contract', () => {
       ]) {
         assert.equal(source.includes(literal), false, `${relative} must not copy provider styling with ${literal}`);
       }
-    }
-
-    let agentBoard = fs.readFileSync(path.join(ROOT, 'web/components/AgentBoard/AgentBoard.css.js'), 'utf8');
-    for (let token of ['--sn-shadow-sm', '--sn-cat-server', '--sn-success-color', '--sn-danger-color', '--sn-warning-color']) {
-      assert.ok(agentBoard.includes(token), `AgentBoard must consume ${token}`);
     }
 
     let followRibbon = fs.readFileSync(path.join(ROOT, 'web/components/FollowRibbon/FollowRibbon.css.js'), 'utf8');
@@ -234,6 +279,7 @@ describe('portal shell theme contract', () => {
       'web/panels/Marketplace/McpServerCard.js',
       'web/panels/Marketplace/ContextCard.js',
       'web/panels/PipelineManager/PipelineManager.tpl.js',
+      'web/panels/ProjectItem/ProjectItem.tpl.js',
       'web/panels/RuntimeControl/RuntimeControl.tpl.js',
       'web/panels/SettingsPanel/SettingsPanel.tpl.js',
       'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
@@ -248,6 +294,18 @@ describe('portal shell theme contract', () => {
       );
       assert.equal(source.includes('class="ui-btn'), false, `${relative} must not copy button shell classes`);
       assert.equal(source.includes('ui-btn-icon'), false, `${relative} must not copy icon button shell classes`);
+      if (relative === 'web/panels/ProjectItem/ProjectItem.tpl.js') {
+        assert.equal(source.includes('<button'), false, `${relative} must not own raw button markup`);
+      }
+    }
+  });
+
+  it('uses symbiote action buttons inside graph explorer controls', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/dep-graph-template.js'), 'utf8');
+    assert.ok(source.includes('<sn-button'), 'dep graph template must compose the library action control');
+    assert.equal(source.includes('<button'), false, 'dep graph template must not own raw button markup');
+    for (let action of ['fit', 'view-mode', 'path-style', 'graph-metadata', 'cluster-legend']) {
+      assert.ok(source.includes(`data-action="${action}"`), `dep graph template must preserve ${action} action`);
     }
   });
 
@@ -265,14 +323,22 @@ describe('portal shell theme contract', () => {
 
   it('uses symbiote list items for reusable selectable rows', () => {
     for (let relative of [
+      'web/panels/ActiveContext/ActiveContext.js',
       'web/panels/PipelineManager/PipelineItem.js',
       'web/panels/ToolExplorer/ToolServerItem.js',
       'web/panels/WorkflowExplorer/WorkflowItem.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
-      assert.ok(source.includes('<sn-list-item'), `${relative} must compose the library list item`);
+      assert.ok(
+        source.includes('<sn-list-item') || source.includes("createElement('sn-list-item')"),
+        `${relative} must compose the library list item`
+      );
       assert.equal(source.includes('ui-item'), false, `${relative} must not copy list item shell classes`);
     }
+
+    let activeContext = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveContext/ActiveContext.js'), 'utf8');
+    assert.equal(activeContext.includes('Object.assign(row.style'), false, 'ActiveContext must not hand-style list rows');
+    assert.equal(activeContext.includes('closeIcon.style.fontSize'), false, 'ActiveContext must not hand-style action icons');
   });
 
   it('uses symbiote list detail shells for reusable split detail panels', () => {
@@ -302,12 +368,14 @@ describe('portal shell theme contract', () => {
       'web/panels/Marketplace/ContextCard.js',
       'web/panels/PeerReview/PeerReview.js',
       'web/panels/PipelineManager/PipelineStep.js',
-      'web/panels/Topology/TopologyPanel.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(source.includes('sn-badge'), `${relative} must compose the library status badge`);
       assert.equal(source.includes('ui-badge'), false, `${relative} must not copy badge shell classes`);
     }
+
+    let dataTableSource = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/display/DataTable/DataTable.js'), 'utf8');
+    assert.ok(dataTableSource.includes('sn-badge'), 'sn-data-table must compose the library status badge for structured badge cells');
   });
 
   it('uses symbiote status banners for reusable inline feedback', () => {
@@ -340,12 +408,15 @@ describe('portal shell theme contract', () => {
       'web/panels/ActiveTasks/ActiveTasks.tpl.js',
       'web/panels/GroupManager/GroupManager.js',
       'web/panels/GroupManager/GroupManager.tpl.js',
+      'web/panels/HealthPanel/HealthPanel.js',
       'web/panels/Marketplace/Marketplace.js',
       'web/panels/PeerReview/PeerReview.tpl.js',
       'web/panels/PipelineManager/PipelineManager.tpl.js',
       'web/panels/ProjectList/ProjectList.tpl.js',
+      'web/panels/CtxPanel/CtxPanel.js',
       'web/panels/RuntimeControl/RuntimeControl.tpl.js',
       'web/panels/SettingsPanel/SettingsPanel.js',
+      'web/panels/SkillManager/SkillMetadata.js',
       'web/panels/ToolExplorer/ToolExplorer.tpl.js',
       'web/panels/WorkflowExplorer/WorkflowExplorer.js',
       'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
@@ -384,6 +455,9 @@ describe('portal shell theme contract', () => {
 
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/Marketplace/Marketplace.js'), 'utf8');
     assert.equal(source.includes('card.style.'), false, 'Marketplace card visual state must use classes');
+
+    let contextCard = fs.readFileSync(path.join(ROOT, 'web/panels/Marketplace/ContextCard.js'), 'utf8');
+    assert.equal(contextCard.includes('style.color'), false, 'Marketplace context status color must use attributes and CSS tokens');
   });
 
   it('keeps marketplace accents on provider theme tokens', () => {
@@ -507,5 +581,78 @@ describe('portal shell theme contract', () => {
 
     let settings = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.js'), 'utf8');
     assert.equal(/style\.color\s*=\s*["']var\(--sn-[^)]+,/.test(settings), false, 'SettingsPanel inline status colors must be token-only');
+    assert.equal(settings.includes('.style.'), false, 'SettingsPanel visual state must use CSS classes or attributes');
+
+    let healthPanel = fs.readFileSync(path.join(ROOT, 'web/panels/HealthPanel/HealthPanel.js'), 'utf8');
+    assert.ok(healthPanel.includes("createElement('sn-card')"), 'HealthPanel must compose library cards');
+    assert.ok(healthPanel.includes("createElement('sn-metric')"), 'HealthPanel must compose library metrics');
+    assert.equal(healthPanel.includes('pg-health-card'), false, 'HealthPanel must not copy card shell classes');
+    assert.equal(healthPanel.includes('pg-placeholder'), false, 'HealthPanel must not copy placeholder shell classes');
+    assert.equal(healthPanel.includes('pg-metric'), false, 'HealthPanel must not copy metric shell classes');
+    assert.equal(healthPanel.includes('style="font-size'), false, 'HealthPanel must not inject inline icon styles');
+
+    let ctxPanel = fs.readFileSync(path.join(ROOT, 'web/panels/CtxPanel/CtxPanel.js'), 'utf8');
+    assert.ok(ctxPanel.includes("createElement('sn-list-item')"), 'CtxPanel must compose library list items for outline rows');
+    assert.ok(ctxPanel.includes("createElement('code-block')"), 'CtxPanel must compose the library code block for raw docs');
+    assert.equal(ctxPanel.includes('contentHTML'), false, 'CtxPanel must not render docs through HTML strings');
+    assert.equal(ctxPanel.includes('outlineHTML'), false, 'CtxPanel must not render outline through HTML strings');
+    assert.equal(ctxPanel.includes('pg-placeholder'), false, 'CtxPanel must not copy placeholder shell classes');
+    assert.equal(ctxPanel.includes('style="font-size'), false, 'CtxPanel must not inject inline icon styles');
+
+    let skillMetadata = fs.readFileSync(path.join(ROOT, 'web/panels/SkillManager/SkillMetadata.js'), 'utf8');
+    assert.ok(skillMetadata.includes("createElement('sn-field')"), 'SkillMetadata must compose library field wrappers');
+    assert.ok(skillMetadata.includes("createElement('sn-empty-state')"), 'SkillMetadata must compose library empty states');
+    assert.equal(skillMetadata.includes('contentHTML'), false, 'SkillMetadata must not render metadata through HTML strings');
+    assert.equal(skillMetadata.includes('pg-placeholder'), false, 'SkillMetadata must not copy placeholder shell classes');
+
+    let agentChat = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.js'), 'utf8');
+    assert.equal(agentChat.includes('style="color'), false, 'AgentChat composer adapter must not inject inline colors');
+    assert.equal(agentChat.includes('font-weight:500'), false, 'AgentChat composer adapter must leave typography to chat-composer CSS');
+
+    let opsTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.tpl.js'), 'utf8');
+    let opsCss = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.css.js'), 'utf8');
+    assert.ok(opsTemplate.includes('<sn-event-feed'), 'OpsPanel must compose the library event feed');
+    assert.equal(opsTemplate.includes('pg-placeholder'), false, 'OpsPanel must not copy placeholder markup');
+    assert.equal(opsCss.includes('pg-placeholder'), false, 'OpsPanel must not copy placeholder shell classes');
+
+    let actionBoardTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.tpl.js'), 'utf8');
+    assert.ok(actionBoardTemplate.includes('<sn-metric'), 'ActionBoard must compose library metrics');
+    assert.equal(actionBoardTemplate.includes('style="'), false, 'ActionBoard template must keep visual styling in CSS');
+    assert.equal(actionBoardTemplate.includes('ab-stat-value'), false, 'ActionBoard must not copy metric value shell classes');
+    assert.equal(actionBoardTemplate.includes('ab-stat-label'), false, 'ActionBoard must not copy metric label shell classes');
+
+    let settingsTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.tpl.js'), 'utf8');
+    let settingsSource = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.js'), 'utf8');
+    assert.ok(settingsTemplate.includes('<sn-metric'), 'SettingsPanel template metrics must compose library metrics');
+    assert.ok(settingsSource.includes('createElement("sn-metric")'), 'SettingsPanel runtime metrics must compose library metrics');
+    assert.equal(settingsTemplate.includes('pg-stg-metric'), false, 'SettingsPanel template must not copy metric shell classes');
+    assert.equal(settingsSource.includes('pg-stg-metric'), false, 'SettingsPanel runtime metrics must not copy metric shell classes');
+
+    let runtimeItem = fs.readFileSync(path.join(ROOT, 'web/panels/RuntimeControl/InstanceItem.js'), 'utf8');
+    let runtimeSource = fs.readFileSync(path.join(ROOT, 'web/panels/RuntimeControl/RuntimeControl.js'), 'utf8');
+    let runtimeCss = fs.readFileSync(path.join(ROOT, 'web/panels/RuntimeControl/RuntimeControl.css.js'), 'utf8');
+    assert.ok(runtimeItem.includes('<sn-metric'), 'Runtime instance metrics must compose library metrics');
+    assert.ok(runtimeSource.includes("createElement('sn-metric')"), 'Runtime summary metrics must compose library metrics');
+    assert.equal(runtimeItem.includes('rtc-metric-label'), false, 'Runtime instance metrics must not copy metric label shell classes');
+    assert.equal(runtimeItem.includes('rtc-metric-value'), false, 'Runtime instance metrics must not copy metric value shell classes');
+    assert.equal(runtimeSource.includes('rtc-summary-label'), false, 'Runtime summary metrics must not copy metric label shell classes');
+    assert.equal(runtimeSource.includes('rtc-summary-value'), false, 'Runtime summary metrics must not copy metric value shell classes');
+    assert.equal(runtimeCss.includes('.rtc-metric '), false, 'RuntimeControl CSS must not keep local metric shells');
+
+    let skillManager = fs.readFileSync(path.join(ROOT, 'web/panels/SkillManager/SkillManager.tpl.js'), 'utf8');
+    let skillManagerCss = fs.readFileSync(path.join(ROOT, 'web/panels/SkillManager/SkillManager.css.js'), 'utf8');
+    assert.ok(skillManager.includes('<sn-button'), 'SkillManager controls must compose library buttons');
+    assert.equal(skillManager.includes('pg-mode-toggle'), false, 'SkillManager controls must not copy button shell classes');
+    assert.equal(skillManagerCss.includes('pg-mode-toggle'), false, 'SkillManager CSS must not keep local button shells');
+  });
+
+  it('keeps project graph socket colors token-driven', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/services/skeleton-parser.js'), 'utf8');
+
+    for (let literal of ['#c87533', '#d4a04a']) {
+      assert.equal(source.includes(literal), false, `skeleton-parser must not hard-code socket color ${literal}`);
+    }
+    assert.ok(source.includes('var(--sn-dot-input)'), 'import sockets must inherit the provider input token');
+    assert.ok(source.includes('var(--sn-dot-output)'), 'export sockets must inherit the provider output token');
   });
 });

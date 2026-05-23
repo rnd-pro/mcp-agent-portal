@@ -52,11 +52,67 @@ html, body {
   gap: 8px;
 }
 
+.app-title-icon {
+  font-size: 20px;
+  color: var(--project-accent, var(--sn-node-selected));
+}
+
 .app-title {
   font-size: 13px;
   font-weight: 700;
   color: var(--sn-text);
   letter-spacing: 0.5px;
+}
+
+.topbar-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--sn-font-mono);
+  font-size: 11px;
+  color: var(--sn-text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40vw;
+}
+
+.topbar-project-icon {
+  font-size: 14px;
+}
+
+.portal-inline-icon {
+  font-size: inherit;
+  vertical-align: -3px;
+  margin-right: 4px;
+}
+
+.portal-inline-icon-ok {
+  color: var(--sn-success-color);
+}
+
+.portal-inline-icon-error,
+.portal-inline-icon-stop {
+  color: var(--sn-danger-color);
+}
+
+.portal-inline-icon-wait,
+.portal-inline-icon-warn {
+  color: var(--sn-warning-color);
+}
+
+.portal-inline-icon-run,
+.portal-inline-icon-bounce {
+  color: var(--sn-cat-server);
+}
+
+.portal-inline-icon-info,
+.portal-inline-icon-pause,
+.portal-inline-icon-skip {
+  color: var(--sn-text-dim);
 }
 
 .topbar-right {

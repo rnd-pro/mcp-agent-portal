@@ -9,19 +9,6 @@ export default html`
     <div class="topo-desc">Connected nodes participating in the Distributed Agent Pool.</div>
   </div>
 
-  <table class="node-table">
-    <thead>
-      <tr>
-        <th>Node ID</th>
-        <th>Type</th>
-        <th>Location</th>
-        <th>Agents</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody ref="tableBody">
-      <!-- Generated rows go here -->
-    </tbody>
-  </table>
+  <sn-data-table ref="dataTable"></sn-data-table>
 </div>
 `;

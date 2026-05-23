@@ -4,12 +4,26 @@ import template from './TopologyPanel.tpl.js';
 import cssLocal from './TopologyPanel.css.js';
 import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
+const TOPOLOGY_COLUMNS = [
+  { key: 'name', label: 'Node ID' },
+  { key: 'type', label: 'Type' },
+  { key: 'location', label: 'Location' },
+  { key: 'agents', label: 'Agents', align: 'end' },
+  { key: 'status', label: 'Status' },
+];
+
+function normalizeMarkerToken(value) {
+  let token = String(value ?? '').trim();
+  return /^var\(--sn-[a-z0-9-]+\)$/i.test(token) ? token : 'var(--sn-node-selected)';
+}
+
 export class TopologyPanel extends Symbiote {
   init$ = {
     instances: [],
   };
 
   async initCallback() {
+    this.ref.dataTable.setColumns(TOPOLOGY_COLUMNS);
     this.refreshInterval = setInterval(() => this.fetchTopology(), 2000);
     this.fetchTopology();
   }
@@ -39,12 +53,12 @@ export class TopologyPanel extends Symbiote {
       typeClass: 'info',
       location: 'localhost',
       agentsText: '-',
-      statusText: '● Active',
+      statusText: 'Active',
     })];
 
     for (let inst of instances) {
       let isRemote = inst.command === 'remote-client';
-      let location = isRemote ? inst.args[0] : 'localhost';
+      let location = isRemote ? inst.args?.[0] : 'localhost';
       rows.push(this.createTopologyRow({
         name: inst.name,
         color: inst.color,
@@ -52,43 +66,24 @@ export class TopologyPanel extends Symbiote {
         typeClass: isRemote ? 'info' : 'success',
         location,
         agentsText: inst.agents || 0,
-        statusText: '● Connected',
+        statusText: 'Connected',
       }));
     }
 
-    this.ref.tableBody.replaceChildren(...rows);
+    this.ref.dataTable.setRows(rows);
   }
 
   createTopologyRow({ name, color, typeText, typeClass, location, agentsText, statusText }) {
-    let row = document.createElement('tr');
-
-    let nameCell = document.createElement('td');
-    let colorDot = document.createElement('span');
-    colorDot.className = 'node-color';
-    colorDot.style.setProperty('--topo-node-color', color);
-    nameCell.append(colorDot, document.createTextNode(` ${name}`));
-
-    let typeCell = document.createElement('td');
-    let typeBadge = document.createElement('sn-badge');
-    if (typeClass) typeBadge.setAttribute('variant', typeClass);
-    typeBadge.className = 'topology-type-badge';
-    typeBadge.textContent = typeText;
-    typeCell.append(typeBadge);
-
-    let locationCell = document.createElement('td');
-    locationCell.textContent = location;
-
-    let agentsCell = document.createElement('td');
-    agentsCell.textContent = String(agentsText);
-
-    let statusCell = document.createElement('td');
-    let status = document.createElement('span');
-    status.className = 'topology-status';
-    status.textContent = statusText;
-    statusCell.append(status);
-
-    row.append(nameCell, typeCell, locationCell, agentsCell, statusCell);
-    return row;
+    return {
+      id: name,
+      cells: {
+        name: { text: name, marker: normalizeMarkerToken(color) },
+        type: { badge: { label: typeText, variant: typeClass } },
+        location: { text: location || 'localhost' },
+        agents: { text: String(agentsText), align: 'end' },
+        status: { badge: { label: statusText, variant: 'success' } },
+      },
+    };
   }
 }
 

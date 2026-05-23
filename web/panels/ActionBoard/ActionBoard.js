@@ -1,8 +1,8 @@
 import { Symbiote } from "@symbiotejs/symbiote";
 import { state, events } from "../../dashboard-state.js";
 import { sharedUiStyles as cssShared } from "symbiote-node/ui";
+import { toToolEventFeedItems } from "../../common/tool-event-feed-adapter.js";
 import template from "./ActionBoard.tpl.js";
-import "../EventItem/EventItem.js";
 
 export class ActionBoard extends Symbiote {
   init$ = { 
@@ -14,10 +14,14 @@ export class ActionBoard extends Symbiote {
   
   initCallback() {
     events.addEventListener("global-tool-event", () => {
-      this.$.eventsItems = [...state.events].reverse();
+      this._renderEvents();
     });
-    this.$.eventsItems = [...state.events].reverse();
+    this._renderEvents();
     this._loadFlywheelStats();
+  }
+
+  _renderEvents() {
+    this.ref.eventFeed?.setEvents(toToolEventFeedItems([...state.events].reverse()), { maxItems: 100 });
   }
   
   async _loadFlywheelStats() {

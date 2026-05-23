@@ -6,7 +6,6 @@ import css from './HealthPanel.css.js';
 
 export class HealthPanel extends Symbiote {
   init$ = {
-    contentHTML: '<div class="pg-placeholder">Loading health analysis...</div>',
     loaded: false,
   };
 
@@ -17,7 +16,7 @@ export class HealthPanel extends Symbiote {
 
   async _loadHealth() {
     if (!this.$.loaded) {
-      this.$.contentHTML = '<div class="pg-placeholder pg-pulse">Analyzing project health...</div>';
+      this._renderEmpty('Analyzing project health...', 'pg-pulse');
 
       try {
         const data = await api('/api/analysis-summary');
@@ -32,51 +31,90 @@ export class HealthPanel extends Symbiote {
         const classes = skeletonStats.classes || 0;
         const exportsCount = Object.values(state.skeleton?.X || {}).reduce((sum, exports) => sum + exports.length, 0);
 
-        this.$.contentHTML = `
-        <div class="pg-health-grid">
-          <div class="pg-health-card pg-health-score-card">
-            <div class="pg-health-score ${scoreClass}">${score}</div>
-            <div class="pg-health-score-label">Health Score · ${grade}</div>
-          </div>
-          <div class="pg-health-card">
-            <div class="pg-health-card-title">
-              <span class="material-symbols-outlined" style="font-size:16px">code</span>
-              Code
-            </div>
-            ${this._metric('Source files', files)}
-            ${this._metric('Functions', functions)}
-            ${this._metric('Classes', classes)}
-            ${this._metric('Exports', exportsCount)}
-          </div>
-          <div class="pg-health-card">
-            <div class="pg-health-card-title">
-              <span class="material-symbols-outlined" style="font-size:16px">bug_report</span>
-              Issues
-            </div>
-            ${this._metric('Complexity', data.complexity || 0, data.complexity > 200)}
-            ${this._metric('JSDoc issues', data.jsdocIssues || 0, data.jsdocIssues > 10)}
-            ${this._metric('Undocumented', data.undocumented || 0, data.undocumented > 5)}
-          </div>
-          <div class="pg-health-card">
-            <div class="pg-health-card-title">
-              <span class="material-symbols-outlined" style="font-size:16px">speed</span>
-              Cache Performance
-            </div>
-            ${this._metric('Cache hits', data.cache?.hits ?? '—')}
-            ${this._metric('Cache misses', data.cache?.misses ?? '—')}
-            ${this._metric('Hit rate', data.cache ? `${Math.round(data.cache.hits / (data.cache.hits + data.cache.misses) * 100)}%` : '—')}
-          </div>
-        </div>
-        ${data.note ? `<div class="pg-health-note"><span class="material-symbols-outlined" style="font-size:14px">info</span> ${data.note}</div>` : ''}
-      `;
+        let grid = document.createElement('div');
+        grid.className = 'pg-health-grid';
+        grid.replaceChildren(
+          this._scoreCard(score, scoreClass, grade),
+          this._metricCard('code', 'Code', [
+            this._metric('Source files', files),
+            this._metric('Functions', functions),
+            this._metric('Classes', classes),
+            this._metric('Exports', exportsCount),
+          ]),
+          this._metricCard('bug_report', 'Issues', [
+            this._metric('Complexity', data.complexity || 0, data.complexity > 200),
+            this._metric('JSDoc issues', data.jsdocIssues || 0, data.jsdocIssues > 10),
+            this._metric('Undocumented', data.undocumented || 0, data.undocumented > 5),
+          ]),
+          this._metricCard('speed', 'Cache Performance', [
+            this._metric('Cache hits', data.cache?.hits ?? '—'),
+            this._metric('Cache misses', data.cache?.misses ?? '—'),
+            this._metric('Hit rate', data.cache ? `${Math.round(data.cache.hits / (data.cache.hits + data.cache.misses) * 100)}%` : '—'),
+          ]),
+        );
+
+        let children = [grid];
+        if (data.note) children.push(this._note(data.note));
+        this.ref.content.replaceChildren(...children);
       } catch (err) {
-        this.$.contentHTML = `<div class="pg-placeholder" style="color:var(--sn-danger-color)">Error: ${err.message}</div>`;
+        this._renderEmpty(`Error: ${err.message}`, 'pg-health-error');
       }
     }
   }
 
   _metric(label, value, isWarning = false) {
-    return `<div class="pg-metric${isWarning ? ' pg-metric-warn' : ''}"><span>${label}</span><span class="pg-metric-val">${value}</span></div>`;
+    let metric = document.createElement('sn-metric');
+    if (isWarning) metric.setAttribute('status', 'warning');
+    let labelEl = document.createElement('span');
+    labelEl.slot = 'label';
+    labelEl.textContent = label;
+    let valueEl = document.createElement('span');
+    valueEl.slot = 'value';
+    valueEl.textContent = String(value);
+    metric.replaceChildren(labelEl, valueEl);
+    return metric;
+  }
+
+  _renderEmpty(message, className = '') {
+    let empty = document.createElement('sn-empty-state');
+    empty.textContent = message;
+    if (className) empty.className = className;
+    this.ref.content.replaceChildren(empty);
+  }
+
+  _scoreCard(score, scoreClass, grade) {
+    let card = document.createElement('sn-card');
+    card.className = 'pg-health-score-card';
+    let scoreEl = document.createElement('div');
+    scoreEl.className = `pg-health-score ${scoreClass}`;
+    scoreEl.textContent = String(score);
+    let label = document.createElement('div');
+    label.className = 'pg-health-score-label';
+    label.textContent = `Health Score · ${grade}`;
+    card.replaceChildren(scoreEl, label);
+    return card;
+  }
+
+  _metricCard(iconName, title, metrics) {
+    let card = document.createElement('sn-card');
+    let header = document.createElement('div');
+    header.className = 'pg-health-title';
+    let icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = iconName;
+    header.append(icon, document.createTextNode(title));
+    card.replaceChildren(header, ...metrics);
+    return card;
+  }
+
+  _note(text) {
+    let note = document.createElement('sn-banner');
+    note.setAttribute('variant', 'info');
+    let icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'info';
+    note.replaceChildren(icon, document.createTextNode(text));
+    return note;
   }
 }
 

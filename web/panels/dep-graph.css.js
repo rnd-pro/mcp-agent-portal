@@ -129,28 +129,15 @@ pg-dep-graph {
 }
 
 .pcb-icon-btn {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 3px;
-  background: var(--sn-accent-bg-subtle);
+  --sn-button-icon-size: 28px;
+  --sn-button-icon-font-size: 16px;
+  --sn-button-border: var(--sn-node-border);
+  --sn-button-radius: 3px;
+  --sn-button-bg: var(--sn-accent-bg-subtle);
+  --sn-button-bg-hover: var(--sn-node-hover);
+  --sn-button-color: var(--sn-text);
+  --sn-button-focus: var(--sn-node-selected);
   color: var(--sn-text);
-  cursor: pointer;
-}
-
-.pcb-icon-btn:focus-visible {
-  outline: 2px solid var(--sn-node-selected);
-  outline-offset: 2px;
-}
-
-.pcb-icon-btn:hover {
-  background: var(--sn-node-hover);
-}
-
-.pcb-icon-btn .material-symbols-outlined {
-  font-size: 16px;
 }
 
 .pcb-metadata-status {

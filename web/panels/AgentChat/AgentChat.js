@@ -69,8 +69,8 @@ export class AgentChat extends Symbiote {
       }
     });
 
-    this.ref.chatTranscript?.addEventListener('delegation-card-open', (event) => {
-      let chatId = event.detail?.chatId;
+    this.ref.chatTranscript?.addEventListener('status-card-open', (event) => {
+      let chatId = event.detail?.linkId;
       if (!chatId) return;
       dashState.activeChatId = chatId;
       setGlobalParam('chat', chatId);
@@ -373,13 +373,11 @@ export class AgentChat extends Symbiote {
             paramsChanged = true;
           }
           let checked = paramValue ? 'checked' : '';
-          let iconColor = paramValue ? 'var(--sn-text-dim)' : 'var(--sn-text-dim)';
-          let textColor = paramValue ? 'var(--sn-text-dim)' : 'var(--sn-text-dim)';
           
           return `<label class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(p.label)}">
             <input type="checkbox" class="composer-footer-checkbox" data-param="${escapeHtml(p.id)}" ${checked} hidden>
-            <span class="material-symbols-outlined composer-toggle-icon" style="color:${iconColor};">${paramValue ? 'toggle_on' : 'toggle_off'}</span>
-            <span class="composer-footer-label" style="color:${textColor}; font-weight:500;">${escapeHtml(p.label)}</span>
+            <span class="material-symbols-outlined composer-toggle-icon">${paramValue ? 'toggle_on' : 'toggle_off'}</span>
+            <span class="composer-footer-label">${escapeHtml(p.label)}</span>
           </label>`;
         }
         return '';
@@ -431,7 +429,7 @@ export class AgentChat extends Symbiote {
     if (!transcript) return;
     let isAtBottom = transcript.isAtBottom?.(10) ?? true;
 
-    let messages = this.$.messages || [];
+    let messages = this._toTranscriptMessages(this.$.messages || []);
     let hasActiveStream = this._hasActiveChatTask();
     let { items, streamingBoards } = buildChatMessageItems(messages, { hasActiveStream });
 
@@ -440,13 +438,28 @@ export class AgentChat extends Symbiote {
 
     requestAnimationFrame(() => {
       for (let taskIds of streamingBoards) {
-        let board = transcript.findDelegationBoard?.(taskIds);
+        let board = transcript.findStatusBoard?.(taskIds);
         if (board) this._startDelegationPolling(taskIds, board);
       }
       if (isAtBottom) {
         transcript.scrollToBottom?.();
       }
       transcript.updateScrollBottomButton?.();
+    });
+  }
+
+  _toTranscriptMessages(messages) {
+    return messages.map((msg) => {
+      if (msg?.role !== 'board' || !Array.isArray(msg.taskIds)) return msg;
+      return {
+        ...msg,
+        cardItems: msg.taskIds.map((taskId) => ({
+          id: taskId,
+          title: `${String(taskId).substring(0, 8)}...`,
+          status: msg.streaming ? 'running' : 'idle',
+          statusText: msg.streaming ? 'Running...' : 'Queued',
+        })),
+      };
     });
   }
 
@@ -743,7 +756,13 @@ export class AgentChat extends Symbiote {
           let status = task.status || 'running';
           let isDone = status === 'done' || status === 'error' || status === 'cancelled' || status === 'lost';
 
-          this.ref.chatTranscript?.updateDelegationTask?.(taskId, task, { board: boardEl });
+          this.ref.chatTranscript?.updateStatusCard?.(taskId, {
+            status,
+            startedAt: task.startedAt,
+            updatedAt: task.updatedAt,
+            linkId: task.chatId || '',
+            title: task.chatName || '',
+          }, { board: boardEl });
 
           if (isDone) allDone.add(taskId);
         }

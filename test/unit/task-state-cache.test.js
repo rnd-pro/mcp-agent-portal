@@ -10,19 +10,28 @@ import os from 'node:os';
 describe('Task State Cache — StateGraph integration', () => {
   let tmpDir;
   let StateGraph;
+  let graphs;
 
   before(async () => {
     tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'task-cache-test-'));
+    graphs = [];
     let mod = await import('../../src/node/state-graph.js');
     StateGraph = mod.StateGraph;
   });
 
   after(async () => {
+    for (let graph of graphs) graph.flush();
     await fsp.rm(tmpDir, { recursive: true, force: true });
   });
 
+  function createStateGraph(options) {
+    let graph = new StateGraph(options);
+    graphs.push(graph);
+    return graph;
+  }
+
   it('stores full task metadata in StateGraph', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't1-snap.json'),
       walPath: path.join(tmpDir, 't1-wal.log'),
     });
@@ -47,7 +56,7 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   it('pushes task events to the ring buffer', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't2-snap.json'),
       walPath: path.join(tmpDir, 't2-wal.log'),
     });
@@ -67,7 +76,7 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   it('updates task status and result on completion', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't3-snap.json'),
       walPath: path.join(tmpDir, 't3-wal.log'),
     });
@@ -88,7 +97,7 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   it('returns task events for delta sync', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't4-snap.json'),
       walPath: path.join(tmpDir, 't4-wal.log'),
     });
@@ -120,7 +129,7 @@ describe('Task State Cache — StateGraph integration', () => {
       ui: {},
     }));
 
-    let sg = new StateGraph({ snapshotPath: snapPath, walPath });
+    let sg = createStateGraph({ snapshotPath: snapPath, walPath });
     sg.load();
 
     let task = sg.get('tasks/task-lost');
@@ -129,7 +138,7 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   it('links child tasks to parent tasks', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't6-snap.json'),
       walPath: path.join(tmpDir, 't6-wal.log'),
     });
@@ -148,7 +157,7 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   it('preserves task event history in StateGraph', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't7-snap.json'),
       walPath: path.join(tmpDir, 't7-wal.log'),
     });
@@ -165,7 +174,7 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   it('preserves agent and approval mode in chat metadata updates', () => {
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 'chat-meta-snap.json'),
       walPath: path.join(tmpDir, 'chat-meta-wal.log'),
     });
@@ -195,7 +204,7 @@ describe('Task State Cache — StateGraph integration', () => {
 
   it('keeps chat reads current while chat files persist asynchronously', async () => {
     let chatDir = path.join(tmpDir, 'chat-files');
-    let sg = new StateGraph({
+    let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 'chat-file-snap.json'),
       walPath: path.join(tmpDir, 'chat-file-wal.log'),
       chatsDir: chatDir,

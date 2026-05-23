@@ -40,27 +40,7 @@ export default `
 }
 
 .mp-tab {
-  background: none;
-  border: none;
-  color: inherit;
-  font-size: 12px;
-  padding: 6px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.15s, background 0.15s;
-}
-
-.mp-tab:hover {
-  opacity: 0.8;
-  background: var(--sn-node-hover);
-}
-
-.mp-tab.active {
-  opacity: 1;
-  background: color-mix(in srgb, var(--sn-node-selected) 15%, transparent);
-  font-weight: 600;
-  color: var(--sn-node-selected);
+  flex: 0 0 auto;
 }
 
 /* ── Search ────────────────────────────────────────── */
@@ -188,31 +168,11 @@ export default `
   display: flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
+  border: 1px solid var(--sn-layout-border);
+  border-radius: var(--sn-button-radius);
   background: var(--sn-bg);
   font-size: 13px;
   font-weight: normal;
-}
-
-.mp-mode-toggle button {
-  border: 0;
-  border-radius: 6px;
-  padding: 6px 10px;
-  color: var(--sn-text-dim);
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.mp-mode-toggle button:hover {
-  background: var(--sn-node-hover);
-  color: var(--sn-text);
-}
-
-.mp-mode-toggle button.active {
-  background: color-mix(in srgb, var(--sn-node-selected) 18%, transparent);
-  color: var(--sn-text);
 }
 
 .mp-search-field {

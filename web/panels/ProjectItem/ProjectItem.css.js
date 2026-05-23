@@ -19,36 +19,37 @@ sn-card:hover {
   gap: 8px;
 }
 .token-badge {
-  font-size: 10px;
-  font-weight: 500;
+  --sn-badge-font-size: 10px;
+  --sn-badge-font-weight: 500;
+  --sn-badge-padding: 1px 6px;
+  --sn-badge-radius: 8px;
+  --sn-badge-color: var(--sn-cat-server);
+  --sn-badge-bg: color-mix(in srgb, var(--sn-cat-server) 10%, transparent);
+  --sn-badge-border: color-mix(in srgb, var(--sn-cat-server) 15%, transparent);
   color: var(--sn-cat-server);
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--sn-cat-server) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--sn-cat-server) 15%, transparent);
   font-family: var(--sn-font-mono);
-  white-space: nowrap;
 }
 .token-badge:empty {
   display: none;
 }
-.delete-btn {
+sn-button[variant="icon"] {
+  --sn-button-size: 24px;
+  --sn-button-padding: 0;
+  --sn-button-bg: transparent;
+  --sn-button-border: transparent;
+  --sn-button-color: var(--sn-text-dim);
   margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--sn-text-dim);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
   opacity: 0;
-  transition: opacity 0.2s, color 0.2s;
+  transition: opacity 0.2s;
 }
-sn-card:hover .delete-btn {
+sn-button[variant="icon"] .material-symbols-outlined {
+  font-size: 16px;
+}
+sn-card:hover sn-button[variant="icon"] {
   opacity: 1;
 }
-.delete-btn:hover {
-  color: var(--sn-danger-color);
+sn-button[variant="icon"]:hover {
+  --sn-button-color: var(--sn-danger-color);
 }
 .path {
   font-size: 11px;

@@ -1,1 +1,1 @@
-export default `<div bind="innerHTML: contentHTML"></div>`;
+export default `<div class="pg-health-content" ref="content"></div>`;

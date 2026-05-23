@@ -51,9 +51,14 @@ const css = `
 }
 
 .mp-form-status {
+  color: var(--sn-text-dim);
   margin-top: 8px;
   font-size: 11px;
   min-height: 14px;
+}
+
+:host([status-error]) .mp-form-status {
+  color: var(--sn-danger-color);
 }
 
 .material-symbols-outlined {
@@ -73,7 +78,7 @@ export class ContextCard extends Symbiote {
 
   renderCallback() {
     this.sub('isError', (isError) => {
-      this.ref.status.style.color = isError ? 'var(--sn-danger-color)' : 'inherit';
+      this.toggleAttribute('status-error', Boolean(isError));
     });
   }
 }
