@@ -1,8 +1,12 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { sharedUiStyles as cssShared, getRoute, parseQuery } from 'symbiote-node/ui';
 import {
+  WEBXR_FEATURES,
+  WEBXR_MODES,
+  createXRSceneController,
   createXRSpatialPreview,
   createXRSpatialScene,
+  createXRThemeSnapshot,
   createXRPointerEvent,
   getWebXRSupport,
   hitTestXRPanels,
@@ -29,11 +33,18 @@ export class SpatialLayout extends Symbiote {
   _projectId = null;
   _targetSection = null;
   _spatialLayout = null;
+  _themeSnapshot = null;
+  _controller = null;
+  _xrState = null;
   _activeHit = null;
   _support = { supported: false, fallback: 'dom-canvas' };
   _refreshHandler = () => this._refresh();
 
   initCallback() {
+    this._controller = createXRSceneController({
+      globalThis,
+      referenceSpaceType: WEBXR_FEATURES.localFloor,
+    });
     this._projectId = readProjectId();
     this._targetSection = defaultTargetSection(this._projectId);
     this.ref.sectionSelect.addEventListener('change', () => {
@@ -42,6 +53,7 @@ export class SpatialLayout extends Symbiote {
     });
     this.ref.scaleInput.addEventListener('input', () => this._renderProjection());
     this.ref.depthInput.addEventListener('input', () => this._renderProjection());
+    this.ref.enterButton.addEventListener('click', () => this._enterXR());
     this.ref.stage.addEventListener('pointermove', (event) => this._updatePointer(event));
     this.ref.stage.addEventListener('pointerleave', () => {
       this._activeHit = null;
@@ -55,6 +67,7 @@ export class SpatialLayout extends Symbiote {
 
   disconnectedCallback() {
     super.disconnectedCallback && super.disconnectedCallback();
+    this._controller?.stop();
     window.removeEventListener('hashchange', this._refreshHandler);
     document.removeEventListener('agent-portal-project-runtime-updated', this._refreshHandler);
   }
@@ -93,6 +106,9 @@ export class SpatialLayout extends Symbiote {
 
   _renderProjection() {
     let root = getPortalRuntimeLayout(this._targetSection, this._projectId);
+    this._themeSnapshot = createXRThemeSnapshot(document.documentElement, {
+      themeScope: `section.${this._targetSection}`,
+    });
     this._spatialLayout = root
       ? createXRSpatialScene(root, {
         themeScope: `section.${this._targetSection}`,
@@ -100,12 +116,15 @@ export class SpatialLayout extends Symbiote {
         preview: { pixelsPerMeter: Number(this.ref.scaleInput.value || 118) },
       })
       : null;
+    this._xrState = this._controller?.setScene(this._spatialLayout, {
+      themeSnapshot: this._themeSnapshot,
+    }) || null;
     this._activeHit = this._activeHit && this._spatialLayout?.panels.some((panel) => panel.id === this._activeHit.panelId)
       ? this._activeHit
       : null;
 
     this.ref.space.replaceChildren();
-    for (let panel of this._spatialLayout?.panels || []) {
+    for (let panel of this._xrState?.scene?.panels || this._spatialLayout?.panels || []) {
       let node = this._createPanelNode(panel);
       this._positionPanel(node, panel);
       this.ref.space.append(node);
@@ -118,6 +137,12 @@ export class SpatialLayout extends Symbiote {
     node.className = 'psl-panel';
     node.dataset.panelId = panel.id;
     node.dataset.hit = String(this._activeHit?.panelId === panel.id);
+    if (panel.material) {
+      node.style.setProperty('--psl-panel-bg', panel.material.background);
+      node.style.setProperty('--psl-panel-border', panel.material.border);
+      node.style.setProperty('--psl-panel-radius', panel.material.radius);
+      node.style.setProperty('--psl-panel-shadow', panel.material.shadow);
+    }
 
     let head = document.createElement('header');
     head.className = 'psl-panel-head';
@@ -182,6 +207,8 @@ export class SpatialLayout extends Symbiote {
   _renderStatus() {
     let panels = this._spatialLayout?.panels || [];
     let support = this._support.supported ? 'available' : this._support.fallback;
+    let controllerState = this._controller?.getState();
+    let tokenCount = Object.values(this._themeSnapshot?.tokens || {}).filter(Boolean).length;
     let hit = this._activeHit
       ? `${this._activeHit.panelId} ${this._activeHit.point.x.toFixed(2)}, ${this._activeHit.point.y.toFixed(2)}`
       : 'none';
@@ -190,9 +217,27 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Source', this._targetSection || '-'),
       this._statusItem('Panels', String(panels.length)),
       this._statusItem('Space', this._spatialLayout?.coordinateSystem || '-'),
+      this._statusItem('Mode', controllerState?.renderMode || 'dom-fallback'),
+      this._statusItem('Theme', this._themeSnapshot?.themeScope || '-'),
+      this._statusItem('Tokens', `${tokenCount}/${Object.keys(this._themeSnapshot?.tokens || {}).length}`),
       this._statusItem('XR', support),
       this._statusItem('Pointer', hit),
     );
+  }
+
+  async _enterXR() {
+    if (!this._spatialLayout) {
+      this._renderProjection();
+    }
+    let mode = this._support.modes?.immersiveAr
+      ? WEBXR_MODES.immersiveAr
+      : WEBXR_MODES.immersiveVr;
+    let result = await this._controller.start(mode, {
+      optionalFeatures: [WEBXR_FEATURES.localFloor, WEBXR_FEATURES.boundedFloor, WEBXR_FEATURES.domOverlay],
+      domOverlayRoot: this,
+    });
+    this._xrState = result.state;
+    this._renderStatus();
   }
 
   _statusItem(label, value) {

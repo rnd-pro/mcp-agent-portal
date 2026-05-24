@@ -64,9 +64,9 @@ pg-spatial-layout {
 }
 
 .psl-control select {
-  background: var(--sn-input-bg);
+  background: var(--sn-field-control-bg);
   border: 1px solid var(--sn-node-border);
-  border-radius: var(--sn-control-radius);
+  border-radius: var(--sn-card-radius);
   color: var(--sn-text);
   font: inherit;
   min-width: 132px;
@@ -76,6 +76,30 @@ pg-spatial-layout {
 
 .psl-control input {
   width: 112px;
+}
+
+.psl-enter {
+  align-items: center;
+  background: var(--sn-button-primary-bg);
+  border: 1px solid var(--sn-button-primary-bg);
+  border-radius: var(--sn-card-radius);
+  color: var(--sn-button-color);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.psl-enter:hover {
+  border-color: var(--sn-button-hover-border);
+}
+
+.psl-enter .material-symbols-outlined {
+  font-size: 18px;
 }
 
 .psl-stage {
@@ -111,10 +135,10 @@ pg-spatial-layout {
 
 .psl-panel {
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--sn-panel-bg) 86%, white 4%), var(--sn-panel-bg));
-  border: 1px solid var(--sn-node-border);
-  border-radius: var(--sn-panel-radius);
-  box-shadow: var(--sn-panel-shadow);
+    linear-gradient(180deg, color-mix(in oklch, var(--psl-panel-bg, var(--sn-xr-panel-bg)) 86%, white 4%), var(--psl-panel-bg, var(--sn-xr-panel-bg)));
+  border: 1px solid var(--psl-panel-border, var(--sn-xr-panel-border));
+  border-radius: var(--psl-panel-radius, var(--sn-xr-panel-radius));
+  box-shadow: var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
   display: grid;
   grid-template-rows: auto 1fr;
   left: 50%;
@@ -133,7 +157,7 @@ pg-spatial-layout {
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--sn-node-selected) 72%, transparent),
     0 0 38px color-mix(in oklch, var(--sn-node-selected) 30%, transparent),
-    var(--sn-panel-shadow);
+    var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
 }
 
 .psl-panel-head {
@@ -185,7 +209,7 @@ pg-spatial-layout {
 }
 
 .psl-ray {
-  background: linear-gradient(var(--sn-node-selected), transparent);
+  background: linear-gradient(var(--sn-xr-pointer-color), transparent);
   height: 42%;
   left: 50%;
   opacity: 0.72;

@@ -20,6 +20,10 @@ export default html`
         <span>Depth</span>
         <input ref="depthInput" type="range" min="80" max="180" value="120">
       </label>
+      <button class="psl-enter" ref="enterButton" type="button">
+        <span class="material-symbols-outlined">view_in_ar</span>
+        Enter VR/AR
+      </button>
     </div>
   </div>
 

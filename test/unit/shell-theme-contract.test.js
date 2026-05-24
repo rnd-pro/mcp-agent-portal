@@ -662,8 +662,10 @@ describe('portal shell theme contract', () => {
     let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
 
     assert.ok(logic.includes("from 'symbiote-node/xr'"), 'SpatialLayout must consume public symbiote-node/xr exports');
+    assert.ok(logic.includes('createXRSceneController'), 'SpatialLayout must use provider XR session controller');
     assert.ok(logic.includes('createXRSpatialScene'), 'SpatialLayout must use provider human-space scene projection');
     assert.ok(logic.includes('createXRSpatialPreview'), 'SpatialLayout must use provider DOM preview projection');
+    assert.ok(logic.includes('createXRThemeSnapshot'), 'SpatialLayout must snapshot provider theme tokens through symbiote-node/xr');
     assert.ok(logic.includes('hitTestXRPanels'), 'SpatialLayout must use provider pointer hit testing');
     assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');
     assert.ok(router.includes("'spatial-layout'"), 'Spatial route panel type must be registered');
@@ -674,6 +676,9 @@ describe('portal shell theme contract', () => {
       '--sn-panel-bg',
       '--sn-node-border',
       '--sn-node-selected',
+      '--sn-xr-panel-bg',
+      '--sn-xr-panel-border',
+      '--sn-xr-pointer-color',
       '--sn-text',
       '--sn-text-dim',
     ]) {
