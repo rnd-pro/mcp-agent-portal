@@ -159,6 +159,14 @@ pg-spatial-layout {
     var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
 }
 
+.psl-panel[data-gesture="dragging"] {
+  border-color: var(--sn-node-selected);
+  box-shadow:
+    0 0 0 2px color-mix(in oklch, var(--sn-node-selected) 80%, transparent),
+    0 0 46px color-mix(in oklch, var(--sn-node-selected) 36%, transparent),
+    var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
+}
+
 .psl-panel-live {
   display: block;
   height: var(--sn-xr-content-height);
@@ -259,7 +267,8 @@ pg-spatial-layout {
 
 .psl-geometry-row:hover,
 .psl-geometry-row:focus-visible,
-.psl-geometry-row[data-active="true"] {
+.psl-geometry-row[data-active="true"],
+.psl-geometry-row[data-gesture="dragging"] {
   background: color-mix(in oklch, var(--sn-panel-bg) 78%, var(--sn-node-selected));
   border-color: var(--sn-node-selected);
   color: var(--sn-text);

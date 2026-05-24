@@ -671,7 +671,13 @@ describe('portal shell theme contract', () => {
     assert.equal(logic.includes('contentViewport ='), false, 'SpatialLayout must not calculate XR content viewport locally');
     assert.ok(logic.includes('createXRThemeSnapshot'), 'SpatialLayout must snapshot provider theme tokens through symbiote-node/xr');
     assert.ok(logic.includes('hitTestXRPanels'), 'SpatialLayout must use provider pointer hit testing');
+    assert.ok(logic.includes('createXRPointerHitFromDomEvent'), 'SpatialLayout must normalize DOM fallback hits through symbiote-node/xr');
     assert.ok(logic.includes('dispatchPointerEvent'), 'SpatialLayout must relay XR pointer events through the provider panel host');
+    assert.ok(logic.includes('createXRPanelGestureState'), 'SpatialLayout must create XR gesture state through symbiote-node/xr');
+    assert.ok(logic.includes('updateXRPanelGesture'), 'SpatialLayout must update XR gestures through symbiote-node/xr');
+    assert.ok(logic.includes('createXRLayoutTransactionFromGesture'), 'SpatialLayout must create layout transactions through symbiote-node/xr');
+    assert.equal(logic.includes('patch: { layout: { rect'), false, 'SpatialLayout must not build XR geometry patches locally');
+    assert.ok(logic.includes('setPointerCapture'), 'SpatialLayout must keep DOM fallback drags captured until finish or cancel');
     assert.equal(logic.includes("createElement('article')"), false, 'SpatialLayout must not render placeholder spatial cards');
     assert.equal(css.includes('.psl-line'), false, 'SpatialLayout must not keep placeholder line styling');
     assert.ok(css.includes('.psl-geometry'), 'SpatialLayout must expose XR geometry diagnostics with provider tokens');

@@ -60,7 +60,7 @@ export function buildPortalProjectPackage({
       },
     },
     agents: {
-      allowedTransactions: ['graph.addNode', 'graph.addEdge', 'layout.addPanel', 'layout.setRoot', 'theme.setModifier'],
+      allowedTransactions: ['graph.addNode', 'graph.addEdge', 'layout.addPanel', 'layout.setRoot', 'layout.updateNode', 'theme.setModifier'],
     },
   };
 }

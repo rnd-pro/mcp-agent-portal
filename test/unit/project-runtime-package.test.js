@@ -54,6 +54,7 @@ describe('portal project runtime package adapter', () => {
       'graph.addEdge',
       'layout.addPanel',
       'layout.setRoot',
+      'layout.updateNode',
       'theme.setModifier',
     ]);
   });
@@ -71,6 +72,27 @@ describe('portal project runtime package adapter', () => {
 
     assert.equal(runtime.getLayout('dashboard').root.children[1].component, 'pg-agent-chat');
     assert.equal(runtime.getTheme('default').modifiers.density, 0.9);
+  });
+
+  it('applies layout.updateNode transactions through the runtime package', () => {
+    const runtime = createPortalProjectRuntime({
+      id: 'agent-portal:test',
+      sections,
+      layouts: {
+        dashboard: {
+          id: 'root',
+          component: 'panel-layout',
+          children: [{ id: 'main', component: 'pg-project-list', layout: { rect: { x: 0, y: 0, width: 1, height: 1 } } }],
+        },
+      },
+      entryLayout: 'dashboard',
+    });
+
+    runtime.updateLayoutNode('dashboard', 'main', {
+      layout: { rect: { x: 0.1, y: 0, width: 0.9, height: 1 } },
+    }, { id: 'tx:update-main' });
+
+    assert.deepEqual(runtime.getLayout('dashboard').root.children[0].layout.rect, { x: 0.1, y: 0, width: 0.9, height: 1 });
   });
 
   it('selects updated layout roots for product persistence after transactions', () => {

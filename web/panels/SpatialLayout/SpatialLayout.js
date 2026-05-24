@@ -11,9 +11,14 @@ import {
   createXRSpatialScene,
   createXRThemeSnapshot,
   createXRPointerEvent,
+  createXRPointerHitFromDomEvent,
+  createXRPanelGestureState,
+  updateXRPanelGesture,
+  createXRLayoutTransactionFromGesture,
   getWebXRSupport,
   hitTestXRPanels,
 } from 'symbiote-node/xr';
+import { createProjectTransactionEvent } from '../../services/project-transaction-messages.js';
 import { getSectionsForScope, panelTypes } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import cssLocal from './SpatialLayout.css.js';
@@ -42,6 +47,8 @@ export class SpatialLayout extends Symbiote {
   _htmlCanvasSupport = { supported: false, preferredMode: null };
   _geometrySummaries = [];
   _activeGeometryPanelId = null;
+  _gestureState = null;
+  _lastTransactionId = null;
   _refreshHandler = () => this._refresh();
 
   initCallback() {
@@ -65,8 +72,12 @@ export class SpatialLayout extends Symbiote {
     this.ref.scaleInput.addEventListener('input', () => this._renderProjection());
     this.ref.depthInput.addEventListener('input', () => this._renderProjection());
     this.ref.enterButton.addEventListener('click', () => this._enterXR());
+    this.ref.stage.addEventListener('pointerdown', (event) => this._startGesture(event));
     this.ref.stage.addEventListener('pointermove', (event) => this._updatePointer(event));
+    this.ref.stage.addEventListener('pointerup', (event) => this._finishGesture(event));
+    this.ref.stage.addEventListener('pointercancel', (event) => this._cancelGesture(event));
     this.ref.stage.addEventListener('pointerleave', () => {
+      if (this._gestureState) return;
       this._activeHit = null;
       this._activeGeometryPanelId = null;
       this._syncHitState();
@@ -144,6 +155,7 @@ export class SpatialLayout extends Symbiote {
     this._activeGeometryPanelId = this._activeGeometryPanelId && this._spatialLayout?.panels.some((panel) => panel.id === this._activeGeometryPanelId)
       ? this._activeGeometryPanelId
       : null;
+    this._gestureState = null;
 
     this.ref.space.replaceChildren();
     this._geometrySummaries = [];
@@ -164,6 +176,7 @@ export class SpatialLayout extends Symbiote {
     node.dataset.panelId = panel.id;
     node.dataset.component = panel.component || panel.panelType || 'panel';
     node.dataset.hit = String(this._activePanelId() === panel.id);
+    node.dataset.gesture = 'read-only';
     if (panel.material) {
       node.style.setProperty('--psl-panel-bg', panel.material.background);
       node.style.setProperty('--psl-panel-border', panel.material.border);
@@ -198,22 +211,93 @@ export class SpatialLayout extends Symbiote {
     if (!this._spatialLayout) return;
     let ray = this._rayFromPointer(event);
     this._activeHit = hitTestXRPanels(ray, this._spatialLayout.panels);
+    if (!this._activeHit) {
+      this._activeHit = this._domFallbackHit(event);
+    }
     let pointerEvent = createXRPointerEvent(this._activeHit, {
       source: 'mouse-fallback',
       primary: event.buttons === 1,
       ray,
     });
     this._panelHost?.dispatchPointerEvent(pointerEvent);
+    if (this._gestureState && pointerEvent) {
+      this._gestureState = updateXRPanelGesture(this._gestureState, pointerEvent, {
+        active: event.buttons === 1,
+        mode: this._gestureState.mode,
+      });
+    }
     this._activeGeometryPanelId = null;
     this._syncHitState();
     this._renderStatus();
     this._renderGeometryDiagnostics();
   }
 
+  _domFallbackHit(event) {
+    let panelNode = event.target.closest?.('.psl-panel') ||
+      (this._gestureState?.panelId
+        ? [...this.ref.space.querySelectorAll('.psl-panel')].find((node) => node.dataset.panelId === this._gestureState.panelId)
+        : null);
+    if (!panelNode) return null;
+    let panel = this._spatialLayout.panels.find((item) => item.id === panelNode.dataset.panelId);
+    if (!panel) return null;
+    return createXRPointerHitFromDomEvent(panel, panelNode, event);
+  }
+
+  _startGesture(event) {
+    if (!this._spatialLayout) return;
+    this._updatePointer(event);
+    if (!this._activeHit) return;
+    let panel = this._activeHit.panel;
+    let pointerEvent = createXRPointerEvent(this._activeHit, {
+      source: 'mouse-fallback',
+      primary: true,
+      ray: this._rayFromPointer(event),
+    }, 'pointerdown');
+    this.ref.stage.setPointerCapture?.(event.pointerId);
+    this._gestureState = createXRPanelGestureState({
+      panel,
+      layoutId: this._targetSection,
+      mode: event.shiftKey ? 'resize' : 'move',
+      pointerEvent,
+    });
+    this._syncHitState();
+    this._renderStatus();
+    this._renderGeometryDiagnostics();
+  }
+
+  _finishGesture(event) {
+    if (!this._gestureState) return;
+    let transaction = createXRLayoutTransactionFromGesture(this._gestureState, {
+      id: `tx:xr-layout:${this._targetSection}:${this._gestureState.nodeId}:${Date.now().toString(36)}`,
+      targetProject: `agent-portal:${this._projectId || 'global'}`,
+    });
+    if (transaction) {
+      this._lastTransactionId = transaction.id;
+      document.dispatchEvent(createProjectTransactionEvent(this._projectId, transaction));
+    }
+    this._gestureState = null;
+    this._releasePointerCapture(event);
+    this._syncHitState();
+    this._renderStatus();
+    this._renderGeometryDiagnostics();
+  }
+
+  _cancelGesture(event) {
+    this._gestureState = null;
+    this._releasePointerCapture(event);
+  }
+
+  _releasePointerCapture(event) {
+    if (event?.pointerId != null && this.ref.stage.hasPointerCapture?.(event.pointerId)) {
+      this.ref.stage.releasePointerCapture?.(event.pointerId);
+    }
+  }
+
   _syncHitState() {
     let activePanelId = this._activePanelId();
     for (let node of this.ref.space.querySelectorAll('.psl-panel')) {
       node.dataset.hit = String(activePanelId === node.dataset.panelId);
+      node.dataset.gesture = this._gestureState?.panelId === node.dataset.panelId ? this._gestureState.status : 'read-only';
     }
   }
 
@@ -245,6 +329,7 @@ export class SpatialLayout extends Symbiote {
     let hit = this._activeHit
       ? `${this._activeHit.panelId} ${this._activeHit.point.x.toFixed(2)}, ${this._activeHit.point.y.toFixed(2)}`
       : 'none';
+    let gesture = this._gestureState?.status || (this._activeHit ? 'select' : 'read-only');
 
     this.ref.status.replaceChildren(
       this._statusItem('Source', this._targetSection || '-'),
@@ -257,6 +342,8 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Tokens', `${tokenCount}/${Object.keys(this._themeSnapshot?.tokens || {}).length}`),
       this._statusItem('XR', support),
       this._statusItem('Pointer', hit),
+      this._statusItem('Gesture', gesture),
+      this._statusItem('Last tx', this._lastTransactionId || '-'),
     );
   }
 
@@ -312,6 +399,7 @@ export class SpatialLayout extends Symbiote {
       row.type = 'button';
       row.dataset.panelId = summary.panelId;
       row.dataset.active = String(activePanelId === summary.panelId);
+      row.dataset.gesture = this._gestureState?.panelId === summary.panelId ? this._gestureState.status : 'read-only';
       row.setAttribute('aria-pressed', String(activePanelId === summary.panelId));
       row.replaceChildren(
         this._geometryCell(summary.component || summary.panelId, 'component'),
