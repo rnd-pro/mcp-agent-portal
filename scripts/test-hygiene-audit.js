@@ -247,15 +247,20 @@ function auditSymbioteConsumerImports() {
 }
 
 function auditSymbioteImportMaps() {
-  const requiredImportMapEntries = [
-    '"symbiote-node":',
-    '"symbiote-node/ui":',
-    '"symbiote-node/graph":',
-    '"symbiote-node/layout":',
-    '"symbiote-node/display/highlight":',
-    '"symbiote-node/display/markdown-formatter":',
-    '"symbiote-node/":',
-  ];
+	  const requiredImportMapEntries = [
+	    '"symbiote-node":',
+	    '"symbiote-node/core":',
+	    '"symbiote-node/core/base-path.js":',
+	    '"symbiote-node/ui":',
+	    '"symbiote-node/graph":',
+	    '"symbiote-node/layout":',
+	    '"symbiote-node/chat/chat-context.js":',
+	    '"symbiote-node/display/highlight":',
+	    '"symbiote-node/display/markdown-formatter":',
+	    '"symbiote-node/display/format-utils":',
+	    '"symbiote-node/display/icons":',
+	    '"symbiote-node/display/event-feed-adapter":',
+	  ];
 
   const importMapFiles = [
     'web/index.html',
@@ -273,17 +278,24 @@ function auditSymbioteImportMaps() {
       throw error;
     }
 
-    for (const entry of requiredImportMapEntries) {
-      if (!content.includes(entry)) {
-        addViolation(
-          'symbiote-importmap-entry',
-          repoPath,
-          `browser import maps must include exact ${entry} mapping before the symbiote-node/ prefix fallback`,
-        );
-      }
-    }
-  }
-}
+	    for (const entry of requiredImportMapEntries) {
+	      if (!content.includes(entry)) {
+	        addViolation(
+	          'symbiote-importmap-entry',
+	          repoPath,
+	          `browser import maps must include exact package-export-shaped ${entry} mapping`,
+	        );
+	      }
+	    }
+	    if (content.includes('"symbiote-node/":')) {
+	      addViolation(
+	        'symbiote-importmap-prefix',
+	        repoPath,
+	        'browser import maps must not include a broad symbiote-node/ prefix fallback',
+	      );
+	    }
+	  }
+	}
 
 auditTrackedPaths();
 auditUntrackedPermanentTests();

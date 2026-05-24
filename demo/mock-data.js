@@ -2234,12 +2234,11 @@ export const skeleton = {
       "backend-lifecycle.js",
       "server.js"
     ],
-    "packages/project-graph-mcp/tests/": [
-      "check_canvas.js",
-      "check_errors.js",
-      "perf-graph-scale.js",
-      "temp_debug.js"
-    ],
+	    "packages/project-graph-mcp/tests/": [
+	      "check_canvas.js",
+	      "check_errors.js",
+	      "temp_debug.js"
+	    ],
     "packages/symbiote-node/canvas/": [
       "ForceWorker.js"
     ],
@@ -3406,13 +3405,6 @@ export const skeleton = {
       "fs",
       "path",
       "node:assert/strict"
-    ],
-    "packages/project-graph-mcp/tests/perf-graph-scale.js": [
-      "../vendor/symbiote-node/core/Editor.js",
-      "../vendor/symbiote-node/core/Node.js",
-      "../vendor/symbiote-node/core/Connection.js",
-      "../vendor/symbiote-node/core/Socket.js",
-      "../vendor/symbiote-node/canvas/AutoLayout.js"
     ],
     "packages/symbiote-node/canvas/Breadcrumb/Breadcrumb.js": [
       "@symbiotejs/symbiote",

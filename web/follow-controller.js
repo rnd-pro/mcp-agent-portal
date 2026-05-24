@@ -1,4 +1,4 @@
-import { FocusController } from 'symbiote-node/engine';
+import { FocusController } from 'symbiote-node/ui';
 
 class FollowController extends FocusController {
   constructor() {
@@ -94,4 +94,3 @@ class FollowController extends FocusController {
 }
 
 export const followController = new FollowController();
-

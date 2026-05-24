@@ -52,9 +52,9 @@ function _checkVersion(serverVersion) {
 
       banner.replaceChildren(icon, message, link, document.createTextNode('.'));
       Object.assign(banner.style, {
-        position: 'fixed', top: '0', left: '0', width: '100%', background: 'rgba(220, 38, 38, 0.95)', color: '#fff',
+        position: 'fixed', top: '0', left: '0', width: '100%', background: 'color-mix(in srgb, var(--sn-danger-color) 92%, var(--sn-bg))', color: 'var(--sn-text)',
         textAlign: 'center', padding: '8px', zIndex: '999999', fontWeight: 'bold', cursor: 'pointer',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+        boxShadow: 'var(--sn-shadow-md)'
       });
       banner.onclick = () => location.reload();
       document.body.prepend(banner);

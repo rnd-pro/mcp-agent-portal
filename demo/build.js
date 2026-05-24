@@ -143,22 +143,28 @@ let indexHtml = `<!DOCTYPE html>
 <meta property="og:title" content="Agent Portal — Live Demo">
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
-<link rel="stylesheet" href="${basePath}web/style.css">
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+	<link rel="stylesheet" href="${basePath}packages/symbiote-node/themes/default-provider.css">
+	<link rel="stylesheet" href="${basePath}web/style.css">
 <script type="importmap">
     {
       "imports": {
         "@symbiotejs/symbiote": "${basePath}node_modules/@symbiotejs/symbiote/core/index.js",
-        "@symbiotejs/symbiote/": "${basePath}node_modules/@symbiotejs/symbiote/",
-        "symbiote-node": "${basePath}packages/symbiote-node/index.js",
-        "symbiote-node/ui": "${basePath}packages/symbiote-node/ui/index.js",
-        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph/index.js",
-        "symbiote-node/layout": "${basePath}packages/symbiote-node/layout/index.js",
-        "symbiote-node/display/highlight": "${basePath}packages/symbiote-node/display/highlight.js",
-        "symbiote-node/display/markdown-formatter": "${basePath}packages/symbiote-node/display/markdown-formatter.js",
-        "symbiote-node/": "${basePath}packages/symbiote-node/"
-      }
+	        "@symbiotejs/symbiote/": "${basePath}node_modules/@symbiotejs/symbiote/",
+	        "symbiote-node": "${basePath}packages/symbiote-node/index.js",
+	        "symbiote-node/core": "${basePath}packages/symbiote-node/core/index.js",
+	        "symbiote-node/core/base-path.js": "${basePath}packages/symbiote-node/core/base-path.js",
+	        "symbiote-node/ui": "${basePath}packages/symbiote-node/ui/index.js",
+	        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph/index.js",
+	        "symbiote-node/layout": "${basePath}packages/symbiote-node/layout/index.js",
+	        "symbiote-node/chat/chat-context.js": "${basePath}packages/symbiote-node/chat/chat-context.js",
+	        "symbiote-node/display/highlight": "${basePath}packages/symbiote-node/display/highlight.js",
+	        "symbiote-node/display/markdown-formatter": "${basePath}packages/symbiote-node/display/markdown-formatter.js",
+	        "symbiote-node/display/format-utils": "${basePath}packages/symbiote-node/display/format-utils.js",
+	        "symbiote-node/display/icons": "${basePath}packages/symbiote-node/display/icons.js",
+	        "symbiote-node/display/event-feed-adapter": "${basePath}packages/symbiote-node/display/event-feed-adapter.js"
+	      }
     }
   </script>
 <script type="module" src="${basePath}demo/demo-adapter.js"></script>
