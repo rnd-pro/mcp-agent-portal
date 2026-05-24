@@ -50,8 +50,8 @@ IDE Window 3 (~/project-c) ──stdio──┘      │ (detached process)    �
 ## Features
 
 - **MCP Aggregation** — unified `tools/list`, `resources/list`, `prompts/list` from all child servers
-- **Web Dashboard** — 10 panels: Marketplace, AI Chat, Graph, Code Explorer, Topology, Monitor, and more
-- **Agent Pool** — heterogeneous CLI adapters (Gemini, Claude, OpenCode) running in parallel
+- **Web Dashboard** — extensible project and home sections for Agent Chat, Skills, Graph, Runtime, Settings, Marketplace, Topology, and workflow operations
+- **Agent Pool** — heterogeneous CLI adapters (Gemini, Claude, Codex, OpenCode) running in parallel
 - **Plugin System** — external integrations (Telegram, Slack, GitHub) with alert dispatch
 - **Distributed Mode** — master/client topology via WebSocket for multi-machine tool sharing
 - **Auto-Restart** — crashed child processes respawn with exponential backoff
@@ -167,15 +167,14 @@ npx mcp-agent-portal --connect wss://...   # client — joins a master node
 
 ## MCP Ecosystem
 
-Agent Portal aggregates the RND-PRO MCP ecosystem:
+Agent Portal aggregates the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal` are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration.
 
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |
 | `.agent-portal` skills | Project-local skills, agents, and workflows | ✅ Production |
-| browser-x-mcp | Browser automation, form testing | 🟡 Beta |
-| terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
+| Optional marketplace MCP servers | Browser, terminal, SaaS, and domain tools configured per workspace | Configurable |
 
 ### Local Development
 
@@ -210,7 +209,7 @@ See `.agent-portal/README.md` when project-local skills are installed.
 ## Related Projects
 
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
-- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration via Gemini CLI
+- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration across CLI providers
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
 - [symbiote-node](https://github.com/RND-PRO/symbiote-node) — Studio UX framework with node graph editor
 

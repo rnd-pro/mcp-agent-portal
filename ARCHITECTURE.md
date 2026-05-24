@@ -186,30 +186,44 @@ IDE ──stdio──→ Portal (master)
 
 ## Web Dashboard
 
-Built-in SPA with extensible section registry (`RouterRegistry` + `LayoutTree` from `symbiote-node`):
+Built-in SPA with extensible section registry (`RouterRegistry` + `LayoutTree` from the public `symbiote-node/ui` provider entrypoint):
 
 | Section | Hash | Panel Components |
 |---------|------|-----------------|
-| Dashboard | `#dashboard` | project-list, action-board, agent-chat, monitor |
+| Dashboard | `#dashboard` | project-list with global agent-chat |
 | Agent Chat | `#agent-chat` | Full-screen agent chat with adapter/model selection |
+| Action Board | `#action-board` | action-board with global agent-chat |
 | Marketplace | `#marketplace` | MCP server management — install, remove, status |
-| Explorer | `#explorer` | file-tree, code-viewer, ctx-panel, dep-graph |
-| Analysis | `#analysis` | health-panel (code quality dashboard) |
 | Topology | `#topology` | Network visualization of connected nodes |
+| Tool Explorer | `#tool-explorer` | Per-server tool schema browser |
+| Active Tasks | `#orchestration` | Running agent task monitor |
+| Workflows | `#workflows` | Workflow discovery and execution |
+| Pipelines | `#pipelines` | Multi-step pipeline orchestration |
+| Resource Groups | `#resource-groups` | Agent group management |
+| Skills | `#skills` | `.agent-portal` tree, open library, editor, metadata |
+| Peer Review | `#peer-review` | Agent peer review interface |
+| Explorer | `#explorer` | file-tree, active-context, code-viewer, ctx-panel |
+| Graph | `#graph` | file-tree, dependency graph, graph flows |
+| Follow | `#follow` | file-tree, graph, code-viewer, monitor |
+| Analysis | `#analysis` | health-panel (code quality dashboard) |
+| Monitor | `#monitor` | Live operations/event monitor |
+| Runtime | `#runtime` | Runtime control and status |
 | Settings | `#settings` | Portal configuration, Telegram token, model management |
 
 Additional panels registered but composed within sections:
-- `ToolExplorer` — browse `tools/list` per server with input schema viewer
 - `ActiveContext` — live context tracking data
-- `ActiveTasks` — running agent tasks monitor
-- `PipelineManager` — multi-step pipeline orchestration
-- `GroupManager` — agent group management
-- `SkillManager` — workflow/skill discovery and management
-- `PeerReview` — agent peer review interface
-- `WorkflowExplorer` — workflow discovery and execution
+- `GraphFlows` — workflow and media-flow views for graph-backed project data
+- `RuntimeControl` — local runtime controls and health
+- `SkillManager` / `SkillMetadata` — skill editing and metadata views
 - `ChatList` — chat session management
 
 New sections are registered via `registerSection()`. MCP servers can inject their own UI panels at runtime via `registerPanelType()`.
+
+### UI Provider Boundary
+
+Agent Portal is a product adapter over `symbiote-node` provider contracts. Reusable graph, layout, theme, display, chat, list, tree, and runtime UI primitives are consumed through public package exports such as `symbiote-node/ui`, `symbiote-node/layout`, `symbiote-node/graph`, `symbiote-node/manifest`, `symbiote-node/tokens/*`, `symbiote-node/rules/*`, `symbiote-node/schemas/*`, and `symbiote-node/custom-elements.json`. Portal code must not deep-import `packages/symbiote-node/**` implementation paths.
+
+Host-level product policy remains in `web/` and `src/`: route composition, project selection, adapter orchestration, API endpoints, persistence, and MCP proxying. Provider metadata is discoverable with `cd packages/symbiote-node && node engine/cli.js discover`; `node engine/cli.js list --json` is only the runtime graph node-driver menu.
 
 ## Plugin Architecture
 
@@ -279,14 +293,13 @@ Portal configuration is stored at `~/.agent-portal/agent-portal.json`:
 
 ## MCP Ecosystem
 
-Agent Portal aggregates the full RND-PRO MCP ecosystem:
+Agent Portal aggregates the RND-PRO MCP ecosystem. The core workspace owns `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal`; optional servers are added through marketplace or local configuration.
 
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review, file tracking, workflow discovery | ✅ Production |
-| browser-x-mcp | Browser automation, form testing | 🟡 Beta |
-| terminal-x-mcp | Multi-terminal automation with security validation | 🔴 Alpha |
+| Optional marketplace MCP servers | Browser, terminal, SaaS, and domain tools configured per workspace | Configurable |
 
 > [!IMPORTANT]
 > Each child server runs as an independent process. The singleton backend manages their lifecycle — auto-start on boot, auto-restart on crash (exponential backoff: 1s → 2s → 4s → ... → 30s max), graceful shutdown on exit.
@@ -375,9 +388,7 @@ mcp-agent-portal/
 ├── packages/                         # Git submodules
 │   ├── symbiote-node/                # UI framework (layout, canvas, themes)
 │   ├── project-graph-mcp/            # Codebase analysis MCP server
-│   ├── agent-pool-mcp/               # Agent orchestration MCP server
-│   ├── browser-x-mcp/                # Browser automation MCP server
-│   └── terminal-x-mcp/               # Terminal sessions MCP server
+│   └── agent-pool-mcp/               # Agent orchestration MCP server
 ├── src/node/
 │   ├── config-store.js               # Config read/write (projects, chats, settings)
 │   ├── state-graph.js                # Reactive state graph with version tracking
@@ -426,7 +437,7 @@ mcp-agent-portal/
 │   ├── components/
 │   │   ├── ProjectTabs/              # Multi-project tab bar
 │   │   └── ...                       # code-block, canvas-graph, etc.
-│   └── panels/                       # 21 panel directories + 6 standalone
+│   └── panels/                       # Product panel adapters and section surfaces
 │       ├── ActionBoard/              # Dashboard action cards
 │       ├── ActiveContext/            # Live context tracking
 │       ├── ActiveTasks/              # Running agent tasks
@@ -487,8 +498,6 @@ mcp-agent-portal/
 
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
 - [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration, file tracking, and workflow discovery
-- [browser-x-mcp](https://github.com/nicholasgriffintn/browser-x-mcp) — Browser automation MCP server
-- [terminal-x-mcp](https://github.com/nicholasgriffintn/terminal-x-mcp) — Terminal sessions MCP server
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
 - [symbiote-node](https://github.com/RND-PRO/symbiote-node) — Studio UX framework with node graph editor
 
