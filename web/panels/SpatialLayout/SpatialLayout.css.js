@@ -10,7 +10,7 @@ pg-spatial-layout {
   background: var(--sn-bg);
   color: var(--sn-text);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   height: 100%;
   min-height: 0;
 }
@@ -211,6 +211,69 @@ pg-spatial-layout {
   padding: 8px 16px;
 }
 
+.psl-geometry {
+  background: var(--sn-panel-bg);
+  border-top: 1px solid var(--sn-node-border);
+  color: var(--sn-text-dim);
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  max-height: 168px;
+  overflow: auto;
+  padding: 8px 16px 10px;
+}
+
+.psl-geometry:empty {
+  display: none;
+}
+
+.psl-geometry-header {
+  color: var(--sn-text);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.psl-geometry-row {
+  align-items: center;
+  background: color-mix(in oklch, var(--sn-panel-bg) 82%, var(--sn-node-border));
+  border: 1px solid var(--sn-node-border);
+  border-radius: var(--sn-card-radius);
+  color: var(--sn-text-dim);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  font-size: 11px;
+  gap: 8px;
+  grid-template-columns: minmax(92px, 1fr) minmax(86px, 0.9fr) minmax(112px, 1.2fr) minmax(86px, 0.8fr) minmax(86px, 0.8fr);
+  min-height: 30px;
+  padding: 5px 8px;
+  text-align: left;
+  transition: border-color var(--sn-duration-fast) var(--sn-ease-standard),
+    color var(--sn-duration-fast) var(--sn-ease-standard),
+    background var(--sn-duration-fast) var(--sn-ease-standard);
+}
+
+.psl-geometry-row:hover,
+.psl-geometry-row:focus-visible,
+.psl-geometry-row[data-active="true"] {
+  background: color-mix(in oklch, var(--sn-panel-bg) 78%, var(--sn-node-selected));
+  border-color: var(--sn-node-selected);
+  color: var(--sn-text);
+}
+
+.psl-geometry-row:focus-visible {
+  outline: 2px solid var(--sn-node-selected);
+  outline-offset: 2px;
+}
+
+.psl-geometry-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .psl-header {
     align-items: flex-start;
@@ -219,6 +282,14 @@ pg-spatial-layout {
 
   .psl-controls {
     justify-content: flex-start;
+  }
+
+  .psl-geometry-row {
+    grid-template-columns: minmax(92px, 1fr) minmax(86px, 1fr);
+  }
+
+  .psl-geometry-row span:nth-child(n + 3) {
+    display: none;
   }
 }
 `;

@@ -34,5 +34,6 @@ export default html`
   </div>
 
   <div class="psl-status" ref="status"></div>
+  <div class="psl-geometry" ref="geometry" aria-label="XR panel geometry diagnostics"></div>
 </div>
 `;

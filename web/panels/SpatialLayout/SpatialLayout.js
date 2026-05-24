@@ -5,6 +5,7 @@ import {
   WEBXR_MODES,
   createXRHtmlCanvasRenderer,
   createXRPanelHost,
+  createXRPanelGeometrySummary,
   createXRSceneController,
   createXRSpatialPreview,
   createXRSpatialScene,
@@ -39,6 +40,8 @@ export class SpatialLayout extends Symbiote {
   _activeHit = null;
   _support = { supported: false, fallback: 'dom-canvas' };
   _htmlCanvasSupport = { supported: false, preferredMode: null };
+  _geometrySummaries = [];
+  _activeGeometryPanelId = null;
   _refreshHandler = () => this._refresh();
 
   initCallback() {
@@ -65,9 +68,13 @@ export class SpatialLayout extends Symbiote {
     this.ref.stage.addEventListener('pointermove', (event) => this._updatePointer(event));
     this.ref.stage.addEventListener('pointerleave', () => {
       this._activeHit = null;
+      this._activeGeometryPanelId = null;
       this._syncHitState();
       this._renderStatus();
+      this._renderGeometryDiagnostics();
     });
+    this.ref.geometry.addEventListener('pointerover', (event) => this._activateGeometryRow(event));
+    this.ref.geometry.addEventListener('pointerout', (event) => this._deactivateGeometryRow(event));
     this._loadSupport();
     this._refresh();
     window.addEventListener('hashchange', this._refreshHandler);
@@ -134,22 +141,29 @@ export class SpatialLayout extends Symbiote {
     this._activeHit = this._activeHit && this._spatialLayout?.panels.some((panel) => panel.id === this._activeHit.panelId)
       ? this._activeHit
       : null;
+    this._activeGeometryPanelId = this._activeGeometryPanelId && this._spatialLayout?.panels.some((panel) => panel.id === this._activeGeometryPanelId)
+      ? this._activeGeometryPanelId
+      : null;
 
     this.ref.space.replaceChildren();
+    this._geometrySummaries = [];
     for (let panel of this._xrState?.scene?.panels || this._spatialLayout?.panels || []) {
       let node = this._createPanelNode(panel);
-      this._positionPanel(node, panel);
+      let preview = this._positionPanel(node, panel);
+      this._geometrySummaries.push(createXRPanelGeometrySummary(panel, preview));
       this.ref.space.append(node);
     }
     this._syncHitState();
     this._renderStatus();
+    this._renderGeometryDiagnostics();
   }
 
   _createPanelNode(panel) {
     let node = document.createElement('section');
     node.className = 'psl-panel';
     node.dataset.panelId = panel.id;
-    node.dataset.hit = String(this._activeHit?.panelId === panel.id);
+    node.dataset.component = panel.component || panel.panelType || 'panel';
+    node.dataset.hit = String(this._activePanelId() === panel.id);
     if (panel.material) {
       node.style.setProperty('--psl-panel-bg', panel.material.background);
       node.style.setProperty('--psl-panel-border', panel.material.border);
@@ -177,6 +191,7 @@ export class SpatialLayout extends Symbiote {
     element.style.setProperty('height', `${preview.height}px`);
     element.style.setProperty('opacity', String(preview.opacity));
     element.style.setProperty('transform', preview.transform);
+    return preview;
   }
 
   _updatePointer(event) {
@@ -188,14 +203,21 @@ export class SpatialLayout extends Symbiote {
       primary: event.buttons === 1,
       ray,
     });
+    this._activeGeometryPanelId = null;
     this._syncHitState();
     this._renderStatus();
+    this._renderGeometryDiagnostics();
   }
 
   _syncHitState() {
+    let activePanelId = this._activePanelId();
     for (let node of this.ref.space.querySelectorAll('.psl-panel')) {
-      node.dataset.hit = String(this._activeHit?.panelId === node.dataset.panelId);
+      node.dataset.hit = String(activePanelId === node.dataset.panelId);
     }
+  }
+
+  _activePanelId() {
+    return this._activeGeometryPanelId || this._activeHit?.panelId || null;
   }
 
   _rayFromPointer(event) {
@@ -270,6 +292,90 @@ export class SpatialLayout extends Symbiote {
     let item = document.createElement('span');
     item.textContent = `${label}: ${value}`;
     return item;
+  }
+
+  _renderGeometryDiagnostics() {
+    let activePanelId = this._activePanelId();
+    if (!this._geometrySummaries.length) {
+      this.ref.geometry.replaceChildren();
+      return;
+    }
+
+    let header = document.createElement('div');
+    header.className = 'psl-geometry-header';
+    header.textContent = 'Geometry';
+
+    let rows = this._geometrySummaries.map((summary) => {
+      let row = document.createElement('button');
+      row.className = 'psl-geometry-row';
+      row.type = 'button';
+      row.dataset.panelId = summary.panelId;
+      row.dataset.active = String(activePanelId === summary.panelId);
+      row.setAttribute('aria-pressed', String(activePanelId === summary.panelId));
+      row.replaceChildren(
+        this._geometryCell(summary.component || summary.panelId, 'component'),
+        this._geometryCell(summary.sizeSource, 'source'),
+        this._geometryCell(this._formatRect(summary.relativeRect), 'relative rect'),
+        this._geometryCell(this._formatMeters(summary.meters), 'meters'),
+        this._geometryCell(this._formatPixels(summary.previewPixels), 'preview pixels'),
+      );
+      return row;
+    });
+
+    this.ref.geometry.replaceChildren(header, ...rows);
+  }
+
+  _activateGeometryRow(event) {
+    let row = event.target.closest?.('.psl-geometry-row');
+    if (!row || row.dataset.panelId === this._activeGeometryPanelId) return;
+    this._activeGeometryPanelId = row.dataset.panelId;
+    this._syncHitState();
+    this._syncGeometryRows();
+  }
+
+  _deactivateGeometryRow(event) {
+    let row = event.target.closest?.('.psl-geometry-row');
+    if (!row || row.contains(event.relatedTarget)) return;
+    this._activeGeometryPanelId = null;
+    this._syncHitState();
+    this._syncGeometryRows();
+  }
+
+  _syncGeometryRows() {
+    let activePanelId = this._activePanelId();
+    for (let row of this.ref.geometry.querySelectorAll('.psl-geometry-row')) {
+      let active = activePanelId === row.dataset.panelId;
+      row.dataset.active = String(active);
+      row.setAttribute('aria-pressed', String(active));
+    }
+  }
+
+  _geometryCell(value, label) {
+    let cell = document.createElement('span');
+    cell.dataset.label = label;
+    cell.textContent = value || '-';
+    return cell;
+  }
+
+  _formatRect(rect) {
+    if (!rect) return '-';
+    return `${this._formatNumber(rect.x)},${this._formatNumber(rect.y)} ${this._formatNumber(rect.width)}x${this._formatNumber(rect.height)}`;
+  }
+
+  _formatMeters(meters) {
+    if (!meters) return '-';
+    return `${this._formatNumber(meters.width)}m x ${this._formatNumber(meters.height)}m`;
+  }
+
+  _formatPixels(previewPixels) {
+    if (!previewPixels) return '-';
+    return `${Math.round(previewPixels.width)}x${Math.round(previewPixels.height)}px`;
+  }
+
+  _formatNumber(value) {
+    let number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    return number.toFixed(2).replace(/\.?0+$/, '');
   }
 }
 
