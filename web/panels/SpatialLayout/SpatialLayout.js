@@ -198,11 +198,12 @@ export class SpatialLayout extends Symbiote {
     if (!this._spatialLayout) return;
     let ray = this._rayFromPointer(event);
     this._activeHit = hitTestXRPanels(ray, this._spatialLayout.panels);
-    createXRPointerEvent(this._activeHit, {
+    let pointerEvent = createXRPointerEvent(this._activeHit, {
       source: 'mouse-fallback',
       primary: event.buttons === 1,
       ray,
     });
+    this._panelHost?.dispatchPointerEvent(pointerEvent);
     this._activeGeometryPanelId = null;
     this._syncHitState();
     this._renderStatus();

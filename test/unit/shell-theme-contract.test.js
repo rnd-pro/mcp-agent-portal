@@ -671,6 +671,7 @@ describe('portal shell theme contract', () => {
     assert.equal(logic.includes('contentViewport ='), false, 'SpatialLayout must not calculate XR content viewport locally');
     assert.ok(logic.includes('createXRThemeSnapshot'), 'SpatialLayout must snapshot provider theme tokens through symbiote-node/xr');
     assert.ok(logic.includes('hitTestXRPanels'), 'SpatialLayout must use provider pointer hit testing');
+    assert.ok(logic.includes('dispatchPointerEvent'), 'SpatialLayout must relay XR pointer events through the provider panel host');
     assert.equal(logic.includes("createElement('article')"), false, 'SpatialLayout must not render placeholder spatial cards');
     assert.equal(css.includes('.psl-line'), false, 'SpatialLayout must not keep placeholder line styling');
     assert.ok(css.includes('.psl-geometry'), 'SpatialLayout must expose XR geometry diagnostics with provider tokens');
