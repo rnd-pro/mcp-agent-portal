@@ -161,10 +161,13 @@ pg-spatial-layout {
 
 .psl-panel-live {
   display: block;
-  height: 100%;
+  height: var(--sn-xr-content-height);
   min-height: 0;
   overflow: hidden;
+  transform: scale(var(--sn-xr-content-scale));
+  transform-origin: 0 0;
   width: 100%;
+  width: var(--sn-xr-content-width);
 }
 
 .psl-panel-live > * {
@@ -245,7 +248,7 @@ pg-spatial-layout {
   font: inherit;
   font-size: 11px;
   gap: 8px;
-  grid-template-columns: minmax(92px, 1fr) minmax(86px, 0.9fr) minmax(112px, 1.2fr) minmax(86px, 0.8fr) minmax(86px, 0.8fr);
+  grid-template-columns: minmax(92px, 1fr) minmax(86px, 0.85fr) minmax(112px, 1.1fr) minmax(86px, 0.75fr) minmax(86px, 0.75fr) minmax(104px, 0.9fr);
   min-height: 30px;
   padding: 5px 8px;
   text-align: left;

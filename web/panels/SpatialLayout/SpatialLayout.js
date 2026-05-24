@@ -318,6 +318,7 @@ export class SpatialLayout extends Symbiote {
         this._geometryCell(this._formatRect(summary.relativeRect), 'relative rect'),
         this._geometryCell(this._formatMeters(summary.meters), 'meters'),
         this._geometryCell(this._formatPixels(summary.previewPixels), 'preview pixels'),
+        this._geometryCell(this._formatViewport(summary.contentViewport), 'content viewport'),
       );
       return row;
     });
@@ -370,6 +371,11 @@ export class SpatialLayout extends Symbiote {
   _formatPixels(previewPixels) {
     if (!previewPixels) return '-';
     return `${Math.round(previewPixels.width)}x${Math.round(previewPixels.height)}px`;
+  }
+
+  _formatViewport(viewport) {
+    if (!viewport) return '-';
+    return `${Math.round(viewport.width)}x${Math.round(viewport.height)} @ ${this._formatNumber(viewport.scale)}`;
   }
 
   _formatNumber(value) {

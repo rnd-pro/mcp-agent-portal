@@ -668,11 +668,14 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRSpatialScene'), 'SpatialLayout must use provider human-space scene projection');
     assert.ok(logic.includes('createXRSpatialPreview'), 'SpatialLayout must use provider DOM preview projection');
     assert.ok(logic.includes('createXRPanelGeometrySummary'), 'SpatialLayout must display provider-owned XR geometry summaries');
+    assert.equal(logic.includes('contentViewport ='), false, 'SpatialLayout must not calculate XR content viewport locally');
     assert.ok(logic.includes('createXRThemeSnapshot'), 'SpatialLayout must snapshot provider theme tokens through symbiote-node/xr');
     assert.ok(logic.includes('hitTestXRPanels'), 'SpatialLayout must use provider pointer hit testing');
     assert.equal(logic.includes("createElement('article')"), false, 'SpatialLayout must not render placeholder spatial cards');
     assert.equal(css.includes('.psl-line'), false, 'SpatialLayout must not keep placeholder line styling');
     assert.ok(css.includes('.psl-geometry'), 'SpatialLayout must expose XR geometry diagnostics with provider tokens');
+    assert.ok(css.includes('--sn-xr-content-width'), 'SpatialLayout fallback must use provider XR content width');
+    assert.ok(css.includes('--sn-xr-content-scale'), 'SpatialLayout fallback must use provider XR content scale');
     assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');
     assert.ok(router.includes("'spatial-layout'"), 'Spatial route panel type must be registered');
     assert.ok(router.includes("registerSection('spatial'"), 'Spatial section must be registered');
