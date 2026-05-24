@@ -3,6 +3,8 @@ import { sharedUiStyles as cssShared, getRoute, parseQuery } from 'symbiote-node
 import {
   WEBXR_FEATURES,
   WEBXR_MODES,
+  createXRHtmlCanvasRenderer,
+  createXRPanelHost,
   createXRSceneController,
   createXRSpatialPreview,
   createXRSpatialScene,
@@ -11,7 +13,7 @@ import {
   getWebXRSupport,
   hitTestXRPanels,
 } from 'symbiote-node/xr';
-import { getSectionsForScope } from '../../router-registry.js';
+import { getSectionsForScope, panelTypes } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import cssLocal from './SpatialLayout.css.js';
 import template from './SpatialLayout.tpl.js';
@@ -25,19 +27,18 @@ function defaultTargetSection(projectId) {
   return projectId ? 'graph' : 'dashboard';
 }
 
-function panelLabel(panel) {
-  return panel.panelType || panel.component || panel.id || 'panel';
-}
-
 export class SpatialLayout extends Symbiote {
   _projectId = null;
   _targetSection = null;
   _spatialLayout = null;
   _themeSnapshot = null;
   _controller = null;
+  _panelHost = null;
+  _htmlCanvasRenderer = null;
   _xrState = null;
   _activeHit = null;
   _support = { supported: false, fallback: 'dom-canvas' };
+  _htmlCanvasSupport = { supported: false, preferredMode: null };
   _refreshHandler = () => this._refresh();
 
   initCallback() {
@@ -45,6 +46,13 @@ export class SpatialLayout extends Symbiote {
       globalThis,
       referenceSpaceType: WEBXR_FEATURES.localFloor,
     });
+    this._panelHost = createXRPanelHost({
+      document,
+      componentResolver: (name, node, panel) => this._resolveComponent(name, node, panel),
+      propsResolver: (node, panel) => this._resolveProps(node, panel),
+    });
+    this._htmlCanvasRenderer = createXRHtmlCanvasRenderer({ globalThis });
+    this._htmlCanvasSupport = this._htmlCanvasRenderer.getSupport();
     this._projectId = readProjectId();
     this._targetSection = defaultTargetSection(this._projectId);
     this.ref.sectionSelect.addEventListener('change', () => {
@@ -57,7 +65,8 @@ export class SpatialLayout extends Symbiote {
     this.ref.stage.addEventListener('pointermove', (event) => this._updatePointer(event));
     this.ref.stage.addEventListener('pointerleave', () => {
       this._activeHit = null;
-      this._renderProjection();
+      this._syncHitState();
+      this._renderStatus();
     });
     this._loadSupport();
     this._refresh();
@@ -119,6 +128,9 @@ export class SpatialLayout extends Symbiote {
     this._xrState = this._controller?.setScene(this._spatialLayout, {
       themeSnapshot: this._themeSnapshot,
     }) || null;
+    this._panelHost?.setScene(this._xrState?.scene || this._spatialLayout, {
+      themeSnapshot: this._themeSnapshot,
+    });
     this._activeHit = this._activeHit && this._spatialLayout?.panels.some((panel) => panel.id === this._activeHit.panelId)
       ? this._activeHit
       : null;
@@ -129,11 +141,12 @@ export class SpatialLayout extends Symbiote {
       this._positionPanel(node, panel);
       this.ref.space.append(node);
     }
+    this._syncHitState();
     this._renderStatus();
   }
 
   _createPanelNode(panel) {
-    let node = document.createElement('article');
+    let node = document.createElement('section');
     node.className = 'psl-panel';
     node.dataset.panelId = panel.id;
     node.dataset.hit = String(this._activeHit?.panelId === panel.id);
@@ -144,27 +157,11 @@ export class SpatialLayout extends Symbiote {
       node.style.setProperty('--psl-panel-shadow', panel.material.shadow);
     }
 
-    let head = document.createElement('header');
-    head.className = 'psl-panel-head';
-
-    let name = document.createElement('span');
-    name.className = 'psl-panel-name';
-    name.textContent = panelLabel(panel);
-
-    let anchor = document.createElement('span');
-    anchor.className = 'psl-panel-anchor';
-    anchor.textContent = panel.anchor;
-
-    let body = document.createElement('div');
-    body.className = 'psl-panel-body';
-    for (let index = 0; index < 3; index++) {
-      let line = document.createElement('span');
-      line.className = 'psl-line';
-      body.append(line);
-    }
-
-    head.append(name, anchor);
-    node.append(head, body);
+    let content = document.createElement('div');
+    content.className = 'psl-panel-live';
+    node.append(content);
+    let liveElement = this._panelHost.mountPanel(panel, content);
+    this._htmlCanvasRenderer.preparePanel(liveElement, panel);
     return node;
   }
 
@@ -191,7 +188,14 @@ export class SpatialLayout extends Symbiote {
       primary: event.buttons === 1,
       ray,
     });
-    this._renderProjection();
+    this._syncHitState();
+    this._renderStatus();
+  }
+
+  _syncHitState() {
+    for (let node of this.ref.space.querySelectorAll('.psl-panel')) {
+      node.dataset.hit = String(this._activeHit?.panelId === node.dataset.panelId);
+    }
   }
 
   _rayFromPointer(event) {
@@ -208,7 +212,13 @@ export class SpatialLayout extends Symbiote {
     let panels = this._spatialLayout?.panels || [];
     let support = this._support.supported ? 'available' : this._support.fallback;
     let controllerState = this._controller?.getState();
+    let rendererState = this._htmlCanvasRenderer?.getState();
+    let panelHostState = this._panelHost?.getState();
     let tokenCount = Object.values(this._themeSnapshot?.tokens || {}).filter(Boolean).length;
+    let mode = controllerState?.renderMode === 'webxr-session'
+      ? 'webxr-session'
+      : this._htmlCanvasSupport.supported ? 'html-in-canvas' : 'dom-live-fallback';
+    let renderer = this._htmlCanvasSupport.preferredMode || 'unsupported';
     let hit = this._activeHit
       ? `${this._activeHit.panelId} ${this._activeHit.point.x.toFixed(2)}, ${this._activeHit.point.y.toFixed(2)}`
       : 'none';
@@ -216,13 +226,29 @@ export class SpatialLayout extends Symbiote {
     this.ref.status.replaceChildren(
       this._statusItem('Source', this._targetSection || '-'),
       this._statusItem('Panels', String(panels.length)),
+      this._statusItem('Panels live', `${panelHostState?.mounted || 0}/${panels.length}`),
       this._statusItem('Space', this._spatialLayout?.coordinateSystem || '-'),
-      this._statusItem('Mode', controllerState?.renderMode || 'dom-fallback'),
+      this._statusItem('Mode', mode),
+      this._statusItem('Renderer', rendererState?.preferredMode || renderer),
       this._statusItem('Theme', this._themeSnapshot?.themeScope || '-'),
       this._statusItem('Tokens', `${tokenCount}/${Object.keys(this._themeSnapshot?.tokens || {}).length}`),
       this._statusItem('XR', support),
       this._statusItem('Pointer', hit),
     );
+  }
+
+  _resolveComponent(name, node, panel) {
+    let requested = node?.component || panel?.component || name;
+    let definition = panelTypes[requested] || panelTypes[panel?.panelType] || panelTypes[node?.panelType];
+    return definition?.component || requested;
+  }
+
+  _resolveProps(node, panel) {
+    return {
+      ...(panel?.state || {}),
+      ...(node?.panelState || {}),
+      ...(node?.props || {}),
+    };
   }
 
   async _enterXR() {

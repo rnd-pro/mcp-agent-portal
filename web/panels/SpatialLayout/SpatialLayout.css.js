@@ -139,8 +139,7 @@ pg-spatial-layout {
   border: 1px solid var(--psl-panel-border, var(--sn-xr-panel-border));
   border-radius: var(--psl-panel-radius, var(--sn-xr-panel-radius));
   box-shadow: var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: block;
   left: 50%;
   min-height: 34px;
   min-width: 42px;
@@ -160,52 +159,30 @@ pg-spatial-layout {
     var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
 }
 
-.psl-panel-head {
-  align-items: center;
-  background: color-mix(in oklch, var(--sn-node-hover) 76%, transparent);
-  border-bottom: 1px solid var(--sn-node-border);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 8px 10px;
-}
-
-.psl-panel-name {
-  color: var(--sn-text);
-  font-size: 12px;
-  font-weight: 650;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.psl-panel-anchor {
-  color: var(--sn-text-dim);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.psl-panel-body {
-  color: var(--sn-text-dim);
-  display: grid;
-  gap: 7px;
-  padding: 10px;
-}
-
-.psl-line {
-  background: color-mix(in oklch, var(--sn-node-selected) 18%, transparent);
-  border-radius: 999px;
+.psl-panel-live {
   display: block;
-  height: 7px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
 }
 
-.psl-line:nth-child(2) {
-  width: 72%;
+.psl-panel-live > * {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
 }
 
-.psl-line:nth-child(3) {
-  width: 48%;
+.sn-xr-panel-fallback {
+  align-items: center;
+  color: var(--sn-text-dim);
+  display: flex;
+  font-size: 12px;
+  height: 100%;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
 }
 
 .psl-ray {
