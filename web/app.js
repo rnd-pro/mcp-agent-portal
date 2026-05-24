@@ -1,6 +1,7 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
 import { LayoutTree as t, applyTheme as n, DEFAULT_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
+import { waitForElementApi } from "symbiote-node/core";
 import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
 import { applyPortalProjectTransaction, getPortalProjectRuntime, getPortalRuntimeLayout } from "./services/portal-runtime.js";
 import { getTransactionLayoutRoots } from "./services/project-runtime-package.js";
@@ -42,7 +43,7 @@ import { stateSync } from "./state-sync.js";
 import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
 
 export const state = { skeleton: null, activeFile: null, ws: null, monitorEvents: [] };
-export { formatStats } from "./stats-format.js";
+export { formatStats } from "symbiote-node/display/format-utils";
 import { uiAlert } from "symbiote-node/ui";
 window.alert = (msg) => uiAlert(msg);
 export const baseUrl = new URL(".", import.meta.url).href;
@@ -192,20 +193,6 @@ let _currentSection = '';
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
-function waitForElementApi(element, methodName, timeoutMs = 2000) {
-  if (!element || typeof element[methodName] === 'function') return Promise.resolve(element);
-  return new Promise((resolve) => {
-    let startedAt = Date.now();
-    function check() {
-      if (typeof element[methodName] === 'function' || Date.now() - startedAt >= timeoutMs) {
-        resolve(element);
-        return;
-      }
-      requestAnimationFrame(check);
-    }
-    check();
-  });
-}
 
 /**
  * Pre-calculate subPanels for a section based on its layout tree.

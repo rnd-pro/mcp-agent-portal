@@ -647,10 +647,10 @@ describe('portal shell theme contract', () => {
   });
 
   it('keeps project graph socket colors token-driven', () => {
-    let source = fs.readFileSync(path.join(ROOT, 'web/services/skeleton-parser.js'), 'utf8');
+    let source = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/canvas/project-graph-builder.js'), 'utf8');
 
     for (let literal of ['#c87533', '#d4a04a']) {
-      assert.equal(source.includes(literal), false, `skeleton-parser must not hard-code socket color ${literal}`);
+      assert.equal(source.includes(literal), false, `project-graph-builder must not hard-code socket color ${literal}`);
     }
     assert.ok(source.includes('var(--sn-dot-input)'), 'import sockets must inherit the provider input token');
     assert.ok(source.includes('var(--sn-dot-output)'), 'export sockets must inherit the provider output token');

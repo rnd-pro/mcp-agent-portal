@@ -16,14 +16,12 @@ export const sectionLayoutMigrations = {
 
 export function layoutMatchesSection(sectionId, layoutTree, fallbackTree = getLayout(sectionId)) {
   if (!layoutTree) return false;
-  let migration = sectionLayoutMigrations[sectionId];
-  if (migration?.disallowedPanelTypes) {
-    if (LayoutTree.hasAnyPanelType(layoutTree, migration.disallowedPanelTypes)) return false;
-  }
-  if (migration?.requiredPanelTypes) {
-    if (!LayoutTree.hasEveryPanelType(layoutTree, migration.requiredPanelTypes)) return false;
-  }
-  let expectedPrimary = LayoutTree.getPrimaryPanelType(fallbackTree);
-  if (!expectedPrimary) return true;
-  return LayoutTree.collectPanelTypes(layoutTree, { includeGlobal: false }).includes(expectedPrimary);
+  let migration = sectionLayoutMigrations[sectionId] || {};
+  let expectedPrimary = fallbackTree ? LayoutTree.getPrimaryPanelType(fallbackTree) : null;
+  return LayoutTree.matchesSection(layoutTree, {
+    disallowedPanelTypes: migration.disallowedPanelTypes,
+    requiredPanelTypes: migration.requiredPanelTypes,
+    expectedPrimary: expectedPrimary || undefined,
+  });
 }
+
