@@ -38,6 +38,7 @@ export const panelTypes = {
   'health':       { title: 'Health',        icon: 'analytics',     component: 'pg-health-panel' },
   'monitor':      { title: 'Live Monitor',  icon: 'monitor_heart', component: 'pg-ops-panel' },
   'runtime-control': { title: 'Runtime',    icon: 'memory',        component: 'pg-runtime-control' },
+  'spatial-layout': { title: 'Spatial',     icon: 'view_in_ar',    component: 'pg-spatial-layout' },
   'settings':     { title: 'Settings',      icon: 'settings',      component: 'pg-settings-panel' },
   'project-list': { title: 'Servers',       icon: 'dashboard',     component: 'pg-project-list' },
   'action-board': { title: 'Action Board',  icon: 'monitor_heart', component: 'pg-action-board' },
@@ -193,6 +194,11 @@ registerSection('monitor', {
 registerSection('runtime', {
   icon: 'memory', label: 'Runtime', order: 75, scope: 'both',
   layout: withChat(() => LayoutTree.createPanel('runtime-control'), false)
+});
+
+registerSection('spatial', {
+  icon: 'view_in_ar', label: 'Spatial', order: 77, scope: 'both',
+  layout: withChat(() => LayoutTree.createPanel('spatial-layout'), false)
 });
 
 registerSection('settings', {

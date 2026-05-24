@@ -655,4 +655,32 @@ describe('portal shell theme contract', () => {
     assert.ok(source.includes('var(--sn-dot-input)'), 'import sockets must inherit the provider input token');
     assert.ok(source.includes('var(--sn-dot-output)'), 'export sockets must inherit the provider output token');
   });
+
+  it('keeps spatial layout as a thin symbiote-node XR consumer', () => {
+    let logic = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.js'), 'utf8');
+    let css = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.css.js'), 'utf8');
+    let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
+
+    assert.ok(logic.includes("from 'symbiote-node/xr'"), 'SpatialLayout must consume public symbiote-node/xr exports');
+    assert.ok(logic.includes('createXRSpatialScene'), 'SpatialLayout must use provider human-space scene projection');
+    assert.ok(logic.includes('createXRSpatialPreview'), 'SpatialLayout must use provider DOM preview projection');
+    assert.ok(logic.includes('hitTestXRPanels'), 'SpatialLayout must use provider pointer hit testing');
+    assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');
+    assert.ok(router.includes("'spatial-layout'"), 'Spatial route panel type must be registered');
+    assert.ok(router.includes("registerSection('spatial'"), 'Spatial section must be registered');
+
+    for (let token of [
+      '--sn-bg',
+      '--sn-panel-bg',
+      '--sn-node-border',
+      '--sn-node-selected',
+      '--sn-text',
+      '--sn-text-dim',
+    ]) {
+      assert.ok(css.includes(token), `SpatialLayout CSS must consume ${token}`);
+    }
+    for (let literal of ['#4c8bf5', '#181818', '#222', 'rgba(', 'hsl(']) {
+      assert.equal(css.includes(literal), false, `SpatialLayout CSS must not hard-code ${literal}`);
+    }
+  });
 });

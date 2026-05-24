@@ -24,6 +24,7 @@ import "./panels/ProjectList/ProjectList.js";
 import "./panels/ActionBoard/ActionBoard.js";
 import "./panels/SettingsPanel/SettingsPanel.js";
 import "./panels/RuntimeControl/RuntimeControl.js";
+import "./panels/SpatialLayout/SpatialLayout.js";
 import "./panels/AgentChat/AgentChat.js";
 import "./panels/Marketplace/Marketplace.js";
 import "./panels/Topology/TopologyPanel.js";
