@@ -665,6 +665,8 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRSceneController'), 'SpatialLayout must use provider XR session controller');
     assert.ok(logic.includes('createXRPanelHost'), 'SpatialLayout must mount live runtime UI through the provider XR panel host');
     assert.ok(logic.includes('createXRHtmlCanvasRenderer'), 'SpatialLayout must use the provider HTML-in-Canvas bridge');
+    assert.ok(logic.includes('renderPanelPreview'), 'SpatialLayout must use provider-owned HTML-in-Canvas preview rendering');
+    assert.equal(/\.drawElementImage\s*\(/.test(logic), false, 'SpatialLayout must not call experimental canvas APIs directly');
     assert.ok(logic.includes('createXRSpatialScene'), 'SpatialLayout must use provider human-space scene projection');
     assert.ok(logic.includes('createXRSpatialPreview'), 'SpatialLayout must use provider DOM preview projection');
     assert.ok(logic.includes('createXRPanelGeometrySummary'), 'SpatialLayout must display provider-owned XR geometry summaries');
@@ -681,6 +683,7 @@ describe('portal shell theme contract', () => {
     assert.equal(logic.includes("createElement('article')"), false, 'SpatialLayout must not render placeholder spatial cards');
     assert.equal(css.includes('.psl-line'), false, 'SpatialLayout must not keep placeholder line styling');
     assert.ok(css.includes('.psl-geometry'), 'SpatialLayout must expose XR geometry diagnostics with provider tokens');
+    assert.ok(css.includes('.psl-html-canvas'), 'SpatialLayout must expose HTML-in-Canvas diagnostics with provider tokens');
     assert.ok(css.includes('--sn-xr-content-width'), 'SpatialLayout fallback must use provider XR content width');
     assert.ok(css.includes('--sn-xr-content-scale'), 'SpatialLayout fallback must use provider XR content scale');
     assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');

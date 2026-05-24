@@ -45,6 +45,8 @@ export class SpatialLayout extends Symbiote {
   _activeHit = null;
   _support = { supported: false, fallback: 'dom-canvas' };
   _htmlCanvasSupport = { supported: false, preferredMode: null };
+  _htmlCanvasDiagnostics = null;
+  _canvasPreviewResult = null;
   _geometrySummaries = [];
   _activeGeometryPanelId = null;
   _gestureState = null;
@@ -63,6 +65,7 @@ export class SpatialLayout extends Symbiote {
     });
     this._htmlCanvasRenderer = createXRHtmlCanvasRenderer({ globalThis });
     this._htmlCanvasSupport = this._htmlCanvasRenderer.getSupport();
+    this._htmlCanvasDiagnostics = this._htmlCanvasSupport.diagnostics;
     this._projectId = readProjectId();
     this._targetSection = defaultTargetSection(this._projectId);
     this.ref.sectionSelect.addEventListener('change', () => {
@@ -159,8 +162,11 @@ export class SpatialLayout extends Symbiote {
 
     this.ref.space.replaceChildren();
     this._geometrySummaries = [];
+    let previewRendered = false;
+    this._canvasPreviewResult = null;
     for (let panel of this._xrState?.scene?.panels || this._spatialLayout?.panels || []) {
-      let node = this._createPanelNode(panel);
+      let node = this._createPanelNode(panel, { renderCanvasPreview: !previewRendered });
+      previewRendered = true;
       let preview = this._positionPanel(node, panel);
       this._geometrySummaries.push(createXRPanelGeometrySummary(panel, preview));
       this.ref.space.append(node);
@@ -170,7 +176,7 @@ export class SpatialLayout extends Symbiote {
     this._renderGeometryDiagnostics();
   }
 
-  _createPanelNode(panel) {
+  _createPanelNode(panel, options = {}) {
     let node = document.createElement('section');
     node.className = 'psl-panel';
     node.dataset.panelId = panel.id;
@@ -187,8 +193,31 @@ export class SpatialLayout extends Symbiote {
     let content = document.createElement('div');
     content.className = 'psl-panel-live';
     node.append(content);
-    let liveElement = this._panelHost.mountPanel(panel, content);
-    this._htmlCanvasRenderer.preparePanel(liveElement, panel);
+    let canvas = document.createElement('canvas');
+    canvas.className = 'psl-panel-canvas';
+    canvas.width = Math.round(panel.contentViewport?.width || 960);
+    canvas.height = Math.round(panel.contentViewport?.height || 540);
+    canvas.hidden = true;
+    node.append(canvas);
+    let useCanvasSubtree = Boolean(this._htmlCanvasSupport.supported);
+    if (useCanvasSubtree) {
+      canvas.dataset.live = 'true';
+      canvas.hidden = false;
+      content.hidden = true;
+    }
+    let liveElement = this._panelHost.mountPanel(panel, useCanvasSubtree ? canvas : content);
+    let prepared = this._htmlCanvasRenderer.preparePanel(liveElement, panel, { canvas });
+    node.dataset.canvas = prepared.supported ? 'prepared' : 'fallback';
+    if (options.renderCanvasPreview) {
+      this._canvasPreviewResult = this._htmlCanvasRenderer.renderPanelPreview(panel.id, canvas, {
+        width: canvas.width,
+        height: canvas.height,
+      });
+      if (this._canvasPreviewResult.rendered) {
+        canvas.hidden = false;
+        node.dataset.canvas = 'rendered';
+      }
+    }
     return node;
   }
 
@@ -321,6 +350,7 @@ export class SpatialLayout extends Symbiote {
     let controllerState = this._controller?.getState();
     let rendererState = this._htmlCanvasRenderer?.getState();
     let panelHostState = this._panelHost?.getState();
+    let htmlDiagnostics = this._htmlCanvasSupport.diagnostics || this._htmlCanvasDiagnostics || {};
     let tokenCount = Object.values(this._themeSnapshot?.tokens || {}).filter(Boolean).length;
     let mode = controllerState?.renderMode === 'webxr-session'
       ? 'webxr-session'
@@ -338,6 +368,8 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Space', this._spatialLayout?.coordinateSystem || '-'),
       this._statusItem('Mode', mode),
       this._statusItem('Renderer', rendererState?.preferredMode || renderer),
+      this._statusItem('HTML Canvas', htmlDiagnostics.supported ? 'supported' : htmlDiagnostics.recommendation || 'unsupported'),
+      this._statusItem('Canvas preview', this._canvasPreviewResult?.rendered ? this._canvasPreviewResult.panelId : this._canvasPreviewResult?.reason || '-'),
       this._statusItem('Theme', this._themeSnapshot?.themeScope || '-'),
       this._statusItem('Tokens', `${tokenCount}/${Object.keys(this._themeSnapshot?.tokens || {}).length}`),
       this._statusItem('XR', support),
@@ -393,6 +425,8 @@ export class SpatialLayout extends Symbiote {
     header.className = 'psl-geometry-header';
     header.textContent = 'Geometry';
 
+    let htmlCanvas = this._renderHtmlCanvasDiagnostics();
+
     let rows = this._geometrySummaries.map((summary) => {
       let row = document.createElement('button');
       row.className = 'psl-geometry-row';
@@ -412,7 +446,31 @@ export class SpatialLayout extends Symbiote {
       return row;
     });
 
-    this.ref.geometry.replaceChildren(header, ...rows);
+    this.ref.geometry.replaceChildren(header, htmlCanvas, ...rows);
+  }
+
+  _renderHtmlCanvasDiagnostics() {
+    let diagnostics = this._htmlCanvasSupport.diagnostics || this._htmlCanvasDiagnostics || {};
+    let row = document.createElement('div');
+    row.className = 'psl-html-canvas';
+    row.replaceChildren(
+      this._htmlCanvasChip('layoutsubtree', diagnostics.apis?.layoutsubtree),
+      this._htmlCanvasChip('drawElementImage', diagnostics.apis?.drawElementImage),
+      this._htmlCanvasChip('paint', diagnostics.apis?.paintEvent),
+      this._htmlCanvasChip('WebGL texture', diagnostics.apis?.webglTextureUpload),
+      this._htmlCanvasChip('WebGPU texture', diagnostics.apis?.webgpuTextureCopy),
+      this._htmlCanvasChip('Preview', this._canvasPreviewResult?.rendered),
+    );
+    row.dataset.supported = String(Boolean(diagnostics.supported));
+    row.dataset.recommendation = diagnostics.recommendation || 'unknown';
+    return row;
+  }
+
+  _htmlCanvasChip(label, active) {
+    let chip = document.createElement('span');
+    chip.dataset.active = String(Boolean(active));
+    chip.textContent = `${label}: ${active ? 'yes' : 'no'}`;
+    return chip;
   }
 
   _activateGeometryRow(event) {
