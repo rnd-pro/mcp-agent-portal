@@ -62,6 +62,24 @@ describe('network auth', () => {
   assert.equal(auth.listPending().length, 1);
   });
 
+  it('allows configured public diagnostic and asset paths without creating approval requests', () => {
+    let auth = createNetworkAuthController({
+      publicPaths: ['/xr-diagnostics.html', '/packages/'],
+    });
+    let diagnosticsRes = makeRes();
+    let assetRes = makeRes();
+
+    assert.equal(
+      auth.requireNetworkAuthorization(makeReq('GET', '/xr-diagnostics.html'), diagnosticsRes),
+      true,
+    );
+    assert.equal(
+      auth.requireNetworkAuthorization(makeReq('GET', '/packages/symbiote-node/xr/index.js'), assetRes),
+      true,
+    );
+    assert.equal(auth.listPending().length, 0);
+  });
+
   it('approves a pending LAN request from a local route and issues a session cookie', async () => {
     let auth = createNetworkAuthController();
     let denied = makeRes();

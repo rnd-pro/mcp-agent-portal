@@ -59,7 +59,23 @@ function renderPendingPage(item) {
   });
 }
 
-export function createNetworkAuthController() {
+function normalizePublicPaths(value) {
+  let raw = Array.isArray(value) ? value : String(value || '').split(',');
+  return raw
+    .map((item) => String(item).trim())
+    .filter((item) => item.startsWith('/'));
+}
+
+function isPublicPath(pathname, publicPaths) {
+  return publicPaths.some((item) => {
+    if (item.endsWith('/*')) return pathname.startsWith(item.slice(0, -1));
+    if (item.endsWith('/')) return pathname.startsWith(item);
+    return pathname === item;
+  });
+}
+
+export function createNetworkAuthController(options = {}) {
+  let publicPaths = normalizePublicPaths(options.publicPaths || process.env.AGENT_PORTAL_NETWORK_AUTH_PUBLIC_PATHS);
   let pending = new Map();
   let sessions = new Map();
 
@@ -97,6 +113,7 @@ export function createNetworkAuthController() {
     if (isAuthorized(req)) return true;
     let url = new URL(req.url || '/', 'http://localhost');
     if (url.pathname === '/api/network-auth/wait') return true;
+    if (isPublicPath(url.pathname, publicPaths)) return true;
     let item = createPending(req);
     if (url.pathname.startsWith('/api/')) {
       json(res, { error: 'network approval required', request: serializePublicRequest(item) }, 401);
