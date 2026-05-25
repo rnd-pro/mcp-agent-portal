@@ -286,7 +286,6 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
         let chat = chatMap.get(body.chatId);
         if (chat && body.text) {
           chat.messages.push({ role: body.role || 'user', text: body.text });
-          chat.messages.push({ role: 'agent', text: rndProReply(body.text) });
           chat.updatedAt = Date.now();
         }
         json(res, { ok: true, demo: true });
@@ -361,7 +360,6 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
           let { chatId, prompt } = message.params || {};
           let chat = chatMap.get(chatId);
           if (chat) {
-            chat.messages.push({ role: 'user', text: prompt });
             chat.messages.push({ role: 'thinking', elapsed: 1, done: true, status: 'Preparing RND PRO demo response...' });
             chat.messages.push({ role: 'agent', text: rndProReply(prompt) });
             chat.updatedAt = Date.now();

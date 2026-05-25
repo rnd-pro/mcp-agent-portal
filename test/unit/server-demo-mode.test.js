@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
+import { WebSocket } from 'ws';
 
 import { createServerDemoMode, isServerDemoMode } from '../../src/node/server/demo-mode.js';
 
@@ -35,6 +37,12 @@ function makeRes() {
   };
 }
 
+function listen(server) {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+  });
+}
+
 describe('server demo mode', () => {
   it('is controlled by AGENT_PORTAL_DEMO_MODE', () => {
     assert.equal(isServerDemoMode({ AGENT_PORTAL_DEMO_MODE: '1' }), true);
@@ -59,7 +67,7 @@ describe('server demo mode', () => {
     assert.equal('messages' in chats[0], false);
   });
 
-  it('returns RND PRO service copy when a demo chat receives a message', async () => {
+  it('stores REST chat messages without generating a duplicate demo reply', async () => {
     let demo = createServerDemoMode({
       projectRoot: process.cwd(),
       env: { AGENT_PORTAL_DEMO_MODE: '1' },
@@ -78,8 +86,58 @@ describe('server demo mode', () => {
     let chatRes = makeRes();
     await demo.routes['POST /api/chats/get'](makeReq('POST', '/api/chats/get', { id }), chatRes);
     let chat = chatRes.json();
-    assert.match(chat.messages.at(-1).text, /https:\/\/rnd-pro\.com\//);
-    assert.match(chat.messages.at(-1).text, /WebXR/);
+    assert.equal(chat.messages.at(-1).role, 'user');
+    assert.equal(chat.messages.at(-1).text, 'Need a WebXR demo');
+    assert.equal(chat.messages.filter((message) => message.role === 'agent').length, 1);
+  });
+
+  it('adds exactly one websocket demo reply after the persisted user message', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+    let server = createServer();
+    server.on('upgrade', (req, socket, head) => {
+      if (!demo.handleUpgrade(req, socket, head)) socket.destroy();
+    });
+    let port = await listen(server);
+    try {
+      let createRes = makeRes();
+      await demo.routes['POST /api/chats'](makeReq('POST', '/api/chats', {}), createRes);
+      let { id } = createRes.json();
+
+      let prompt = 'Need a public WebXR demo';
+      let messageRes = makeRes();
+      await demo.routes['POST /api/chats/message'](
+        makeReq('POST', '/api/chats/message', { chatId: id, role: 'user', text: prompt }),
+        messageRes,
+      );
+
+      let ws = new WebSocket(`ws://127.0.0.1:${port}/ws/chat`);
+      await new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for demo chat.done')), 2000);
+        ws.on('open', () => {
+          ws.send(JSON.stringify({ method: 'chat.send', params: { chatId: id, prompt } }));
+        });
+        ws.on('message', (buffer) => {
+          let msg = JSON.parse(String(buffer));
+          if (msg.method === 'chat.done') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        ws.on('error', reject);
+      });
+      ws.close();
+
+      let chatRes = makeRes();
+      await demo.routes['POST /api/chats/get'](makeReq('POST', '/api/chats/get', { id }), chatRes);
+      let chat = chatRes.json();
+      assert.equal(chat.messages.filter((message) => message.role === 'user' && message.text === prompt).length, 1);
+      assert.equal(chat.messages.filter((message) => message.role === 'agent' && message.text?.includes(prompt)).length, 1);
+    } finally {
+      server.close();
+    }
   });
 
   it('reads only public repository files through mocked MCP compact calls', async () => {
