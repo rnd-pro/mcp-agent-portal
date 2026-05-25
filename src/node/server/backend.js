@@ -28,7 +28,7 @@ process.on('SIGINT', () => { cleanup(); process.exit(); });
 process.on('SIGTERM', () => { cleanup(); process.exit(); });
 
 // Start the web server and MCP Proxy Manager
-const { server, proxyManager } = startWebServer(projectRoot);
+const { server, proxyManager, networkAccess } = startWebServer(projectRoot);
 proxyManager.startAllServers();
 
 // Start Telegram Gateway (will naturally skip if no token)
@@ -43,6 +43,6 @@ const checkInterval = setInterval(() => {
   const addr = server.address();
   if (addr) {
     clearInterval(checkInterval);
-    writePortFile(projectRoot, addr.port);
+    writePortFile(projectRoot, addr.port, networkAccess);
   }
 }, 50);

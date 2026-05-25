@@ -14,7 +14,7 @@ let __dirname = path.dirname(fileURLToPath(import.meta.url));
  * @returns {Record<string, (req: any, res: any) => void | Promise<void>>}
  */
 export function createOperationRoutes(ctx) {
-  let { proxyManager, projectRoot } = ctx;
+  let { proxyManager, projectRoot, getServerAddress } = ctx;
 
   return {
     'POST /api/stop': (_req, res) => {
@@ -27,6 +27,8 @@ export function createOperationRoutes(ctx) {
       setTimeout(async () => {
         let { removePortFile } = await import('../backend-lifecycle.js');
         let backendScript = path.join(__dirname, '..', 'backend.js');
+        let currentAddress = typeof getServerAddress === 'function' ? getServerAddress() : null;
+        let currentPort = currentAddress?.port || null;
         proxyManager.stopAll();
         removePortFile(projectRoot);
         let gwDir = path.join(homedir(), '.local-gateway');
@@ -42,7 +44,11 @@ export function createOperationRoutes(ctx) {
         spawn('/bin/sh', ['-c', restartCommand], {
           detached: true,
           stdio: ['ignore', logFd, logFd],
-          env: { ...process.env, PORTAL_BACKEND: '1' },
+          env: {
+            ...process.env,
+            PORTAL_BACKEND: '1',
+            ...(currentPort ? { AGENT_PORTAL_PORT: String(currentPort) } : {}),
+          },
         }).unref();
         setTimeout(() => process.exit(0), 300);
       }, 200);

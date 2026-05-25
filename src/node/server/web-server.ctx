@@ -1,6 +1,6 @@
 web-server.js — HTTP API + static file serving for mcp-agent-portal
 
-startWebServer(projectRoot)→{server,proxyManager}|boot HTTP server, spawn MCP children, register gateway
+startWebServer(projectRoot)→{server,proxyManager,networkAccess}|boot HTTP server, spawn MCP children, register gateway
 serveStaticFile(reqPath,res)→void|serve static files from web/ or packages/ dirs
 
 ROUTES:
@@ -8,9 +8,16 @@ ROUTES:
   GET /api/instances|list all registered MCP servers
   GET /api/project-info|portal metadata (name,path,agents,pid)
   GET /api/server-status|uptime,agents,monitors
+  GET /api/network-auth/pending|local-only list of LAN browser approvals
+  POST /api/network-auth/approve|local-only approve LAN browser session
+  POST /api/network-auth/reject|local-only reject LAN browser session
+  GET /api/network-auth/wait|LAN browser pending approval poll
   POST /api/stop|graceful shutdown exit(0)
   POST /api/restart|config-change restart exit(2)
   GET /api/*|fallback HTTP proxy to local-gateway backends
 
 PATTERNS: fail-fast config|exit(2) restart|raw http.createServer|no framework
-DEPS: local-gateway.js|mcp-proxy.js
+ENV:
+  AGENT_PORTAL_PORT|optional fixed port used by restart to preserve the current direct UI URL
+  AGENT_PORTAL_NETWORK_AUTH|set 0 only behind a trusted gateway that owns access policy
+DEPS: local-gateway.js|mcp-proxy.js|network-access.js|network-auth.js

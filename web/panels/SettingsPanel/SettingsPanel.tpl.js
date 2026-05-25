@@ -14,6 +14,17 @@ export default`
   <div ref="backendCard"></div>
 </sn-card>
 
+<sn-card class="pg-network-settings" ref="networkCard">
+  <span slot="title">Network Access</span>
+  <label class="pg-settings-toggle">
+    <input type="checkbox" ref="lanAccessInput">
+    <span>Expose Agent Portal on the local network</span>
+  </label>
+  <div class="pg-network-status" ref="networkStatus">Restart is required after changing LAN access.</div>
+  <div class="pg-network-links" ref="networkLinks"></div>
+  <div class="pg-network-approvals" ref="networkApprovals"></div>
+</sn-card>
+
 <sn-card variant="flat" class="stg-instance-section">
   <span slot="title">Active Instances</span>
   <div ref="instanceList"></div>
@@ -58,7 +69,7 @@ export default`
 <sn-card class="pg-gateway" ref="gatewayCard">
   <span slot="title">Claude Gateway</span>
   <div class="pg-gateway-head">
-    <label class="pg-gateway-toggle">
+    <label class="pg-settings-toggle">
       <input type="checkbox" ref="gatewayEnabledInput">
       <span>Enable Gateway</span>
     </label>

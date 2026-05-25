@@ -40,18 +40,25 @@ function readPortFile(rootPath) {
   }
 }
 
-export function writePortFile(rootPath, port) {
+export function writePortFile(rootPath, port, networkAccess = {}) {
   mkdirSync(LOCAL_GATEWAY_DIR, { recursive: true });
   const absPath = resolve(rootPath);
+  const localUrl = networkAccess.localUrl || `http://127.0.0.1:${port}/`;
+  const mcpDirect = `${localUrl.replace(/\/$/, '')}/mcp`;
   const data = {
     port,
+    host: networkAccess.bindHost || '127.0.0.1',
+    lanEnabled: networkAccess.lanEnabled === true,
+    localUrl,
+    lanUrls: networkAccess.lanUrls || [],
     pid: process.pid,
     project: absPath,
     name: 'mcp-agent-portal',
     version: _getVersion(),
     startedAt: Date.now(),
     mcpUrl: `http://portal.local/mcp`,
-    mcpDirect: `http://localhost:${port}/mcp`,
+    mcpDirect,
+    webDirect: localUrl,
   };
   writeFileSync(getPortFilePath(rootPath), JSON.stringify(data, null, 2));
 }
@@ -77,16 +84,8 @@ export function listBackends() {
   }
   return active;
 }
-
-
-
-import { syncWorkspaceRules } from './context-injector.js';
-
 export async function ensureBackend(rootPath, { force } = {}) {
   const absPath = resolve(rootPath);
-  
-  // Synchronize team rules to the workspace before starting backend
-  syncWorkspaceRules(absPath);
   
   const existing = readPortFile(absPath);
   

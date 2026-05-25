@@ -78,6 +78,56 @@ describe('api-routes', () => {
     assert.equal(handled, false, 'unknown route should not be handled');
   });
 
+  it('GET /api/project-info exposes effective network access status', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let routes = createRoutes({
+      ...makeRoutes('/tmp/project'),
+      getNetworkAccessStatus: () => ({
+        lanEnabled: true,
+        bindHost: '0.0.0.0',
+        localUrl: 'http://127.0.0.1:57580/',
+        lanUrls: ['http://192.168.1.10:57580/'],
+      }),
+    });
+
+    let res = makeRes();
+    routes['GET /api/project-info'](makeReq('GET', '/api/project-info'), res);
+
+    assert.equal(res.status, 200);
+    assert.equal(res.json().networkAccess.lanEnabled, true);
+    assert.equal(res.json().networkAccess.lanUrls[0], 'http://192.168.1.10:57580/');
+  });
+
+  it('records XR diagnostics posted by browser clients', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let routes = createRoutes(makeRoutes('/tmp/project'));
+
+    let req = makeReq('POST', '/api/xr-diagnostics/log', {
+      event: 'support-detected',
+      pageUrl: 'http://192.168.1.20:51615/xr-diagnostics.html',
+      secureContext: false,
+      navigatorXr: true,
+      modes: { inline: true, immersiveVr: false, immersiveAr: false },
+      launch: { canLaunch: false, reason: 'insecure-context' },
+    });
+    req.headers = {
+      host: '192.168.1.20:51615',
+      'user-agent': 'Quest Browser',
+    };
+    req.socket = { remoteAddress: '192.168.1.55' };
+    let postRes = makeRes();
+    await routes['POST /api/xr-diagnostics/log'](req, postRes);
+
+    let getRes = makeRes();
+    routes['GET /api/xr-diagnostics/logs'](makeReq('GET', '/api/xr-diagnostics/logs'), getRes);
+
+    assert.equal(postRes.status, 200);
+    assert.equal(postRes.json().entry.address, '192.168.1.55');
+    assert.equal(getRes.status, 200);
+    assert.equal(getRes.json().logs.at(-1).event, 'support-detected');
+    assert.equal(getRes.json().logs.at(-1).launch.reason, 'insecure-context');
+  });
+
   it('POST /api/ui rejects non-UI state paths', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
 

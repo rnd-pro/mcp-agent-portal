@@ -89,12 +89,14 @@ describe('config-store', () => {
       openLibraryPath: '/tmp/open-memory',
       teamLibraryRepo: '<private-agent-portal-skills-remote>',
       teamLibraryBranch: 'main',
+      networkAccess: { lanEnabled: true },
     });
 
     assert.deepEqual(getAgentPortalConfig(), {
       openLibraryPath: '/tmp/open-memory',
       teamLibraryRepo: '<private-agent-portal-skills-remote>',
       teamLibraryBranch: 'main',
+      networkAccess: { lanEnabled: true },
     });
   });
 

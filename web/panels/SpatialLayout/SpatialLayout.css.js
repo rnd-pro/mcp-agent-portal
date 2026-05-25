@@ -98,6 +98,13 @@ pg-spatial-layout {
   border-color: var(--sn-button-hover-border);
 }
 
+.psl-enter:disabled {
+  background: var(--sn-field-control-bg);
+  border-color: var(--sn-node-border);
+  color: var(--sn-text-dim);
+  cursor: default;
+}
+
 .psl-enter .material-symbols-outlined {
   font-size: 18px;
 }

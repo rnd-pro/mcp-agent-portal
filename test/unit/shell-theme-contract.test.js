@@ -666,6 +666,11 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRPanelHost'), 'SpatialLayout must mount live runtime UI through the provider XR panel host');
     assert.ok(logic.includes('createXRHtmlCanvasRenderer'), 'SpatialLayout must use the provider HTML-in-Canvas bridge');
     assert.ok(logic.includes('renderPanelPreview'), 'SpatialLayout must use provider-owned HTML-in-Canvas preview rendering');
+    assert.ok(logic.includes('createWebXRLaunchRecommendation'), 'SpatialLayout must use provider WebXR launch recommendation logic');
+    assert.ok(logic.includes('this.ref.enterButton.disabled'), 'SpatialLayout must disable XR launch when provider diagnostics say launch is blocked');
+    assert.ok(logic.includes('mountPanel(panel, content)'), 'SpatialLayout DOM preview must keep live panels visible in the DOM fallback');
+    assert.equal(logic.includes('content.hidden = true'), false, 'SpatialLayout must not hide live DOM panels just because HTML-in-Canvas is detected');
+    assert.equal(logic.includes('mountPanel(panel, canvas)'), false, 'SpatialLayout must not replace the visible DOM fallback with a canvas-only subtree');
     assert.equal(/\.drawElementImage\s*\(/.test(logic), false, 'SpatialLayout must not call experimental canvas APIs directly');
     assert.ok(logic.includes('createXRSpatialScene'), 'SpatialLayout must use provider human-space scene projection');
     assert.ok(logic.includes('createXRSpatialPreview'), 'SpatialLayout must use provider DOM preview projection');

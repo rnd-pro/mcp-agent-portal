@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XR Diagnostics</title>
+<link rel="stylesheet" href="/packages/symbiote-node/themes/default-provider.css">
+<script type="importmap">
+{
+  "imports": {
+    "symbiote-node/xr": "/packages/symbiote-node/xr/index.js"
+  }
+}
+</script>
+<style>
+  html,
+  body {
+    background: var(--sn-bg);
+    color: var(--sn-text);
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  header {
+    align-items: center;
+    background: var(--sn-panel-bg);
+    border-bottom: 1px solid var(--sn-node-border);
+    display: flex;
+    gap: var(--sn-space-md);
+    justify-content: space-between;
+    padding: var(--sn-space-md) var(--sn-space-lg);
+  }
+
+  h1 {
+    font-size: 16px;
+    margin: 0;
+  }
+
+  main {
+    display: grid;
+    gap: var(--sn-space-lg);
+    grid-template-columns: minmax(320px, 0.86fr) minmax(0, 1.14fr);
+    min-height: 0;
+    padding: var(--sn-space-lg);
+  }
+
+  button {
+    background: var(--sn-button-primary-bg);
+    border: 1px solid var(--sn-button-primary-bg);
+    border-radius: var(--sn-card-radius);
+    color: var(--sn-button-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 650;
+    min-height: 34px;
+    padding: 0 var(--sn-space-md);
+  }
+
+  button:disabled {
+    background: var(--sn-field-control-bg);
+    border-color: var(--sn-node-border);
+    color: var(--sn-text-dim);
+    cursor: default;
+  }
+
+  section {
+    background: var(--sn-panel-bg);
+    border: 1px solid var(--sn-node-border);
+    border-radius: var(--sn-card-radius);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .status {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .status h2,
+  .preview h2 {
+    border-bottom: 1px solid var(--sn-node-border);
+    font-size: 12px;
+    letter-spacing: 0;
+    margin: 0;
+    padding: var(--sn-space-sm) var(--sn-space-md);
+    text-transform: uppercase;
+  }
+
+  dl {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+    margin: 0;
+    overflow: auto;
+  }
+
+  dt,
+  dd {
+    border-bottom: 1px solid var(--sn-node-border);
+    margin: 0;
+    min-width: 0;
+    padding: var(--sn-space-sm) var(--sn-space-md);
+  }
+
+  dt {
+    color: var(--sn-text-dim);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  dd {
+    overflow-wrap: anywhere;
+  }
+
+  .preview {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .stage {
+    background:
+      radial-gradient(circle at 50% 34%, color-mix(in oklch, var(--sn-node-selected) 16%, transparent), transparent 36%),
+      var(--sn-bg);
+    display: grid;
+    gap: var(--sn-space-md);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 0;
+    padding: var(--sn-space-lg);
+  }
+
+  .panel {
+    background: var(--sn-xr-panel-bg, var(--sn-panel-bg));
+    border: 1px solid var(--sn-xr-panel-border, var(--sn-node-border));
+    border-radius: var(--sn-xr-panel-radius, var(--sn-card-radius));
+    box-shadow: var(--sn-xr-panel-shadow, var(--sn-node-shadow));
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 160px;
+    overflow: hidden;
+  }
+
+  .panel strong {
+    border-bottom: 1px solid var(--sn-node-border);
+    padding: var(--sn-space-sm) var(--sn-space-md);
+  }
+
+  .panel p {
+    color: var(--sn-text-dim);
+    margin: 0;
+    padding: var(--sn-space-md);
+  }
+
+  canvas {
+    background: var(--sn-bg);
+    border-top: 1px solid var(--sn-node-border);
+    display: block;
+    height: 180px;
+    width: 100%;
+  }
+
+  @media (max-width: 860px) {
+    main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>XR Diagnostics</h1>
+    <button id="enter" type="button" disabled>Enter VR/AR</button>
+  </header>
+  <main>
+    <section class="status">
+      <h2>Runtime</h2>
+      <dl id="status"></dl>
+    </section>
+    <section class="preview">
+      <h2>Visible DOM Blocks</h2>
+      <div class="stage" id="stage">
+        <article class="panel"><strong>Panel A</strong><p>DOM visibility probe.</p></article>
+        <article class="panel"><strong>Panel B</strong><p>Theme token probe.</p></article>
+        <article class="panel"><strong>Panel C</strong><p>Layout surface probe.</p></article>
+        <article class="panel"><strong>Panel D</strong><p>XR session probe.</p></article>
+      </div>
+      <canvas id="canvas" width="960" height="540"></canvas>
+    </section>
+  </main>
+  <script type="module" src="/xr-diagnostics.js"></script>
+</body>
+</html>

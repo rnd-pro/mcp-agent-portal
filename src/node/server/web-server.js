@@ -12,6 +12,8 @@ import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
+import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
+import { createNetworkAuthController } from './network-auth.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
@@ -136,9 +138,19 @@ function proxyToBackend(req, res, url, proxyManager) {
  * @returns {{ server: http.Server, proxyManager: MCPProxyManager }}
  */
 export function startWebServer(projectRoot) {
+  let networkAccess = getNetworkAccessConfig();
+  let requestedPort = resolveRequestedPort();
+  let networkAccessStatus = { ...networkAccess, localUrl: null, lanUrls: [] };
+  let networkAuth = createNetworkAuthController();
   let proxyManager = new MCPProxyManager(projectRoot);
   proxyManager.initStateSync();
-  let routes = createRoutes({ proxyManager, projectRoot });
+  let routes = createRoutes({
+    proxyManager,
+    projectRoot,
+    getNetworkAccessStatus: () => networkAccessStatus,
+    getServerAddress: () => server.address(),
+  });
+  routes = { ...routes, ...networkAuth.routes() };
   let projectRoutes = createProjectRoutes();
   let runtimeRoutes = createRuntimeRoutes({ proxyManager, projectRoot });
   let allRoutes = { ...routes, ...projectRoutes, ...runtimeRoutes };
@@ -168,6 +180,11 @@ export function startWebServer(projectRoot) {
 
   let server = http.createServer((req, res) => {
     let url = new URL(req.url, 'http://localhost');
+
+    if (networkAccess.lanEnabled && networkAccess.networkAuthRequired !== false
+      && !networkAuth.requireNetworkAuthorization(req, res)) {
+      return;
+    }
 
     // CORS preflight
     if (req.method === 'OPTIONS') {
@@ -208,18 +225,25 @@ export function startWebServer(projectRoot) {
   });
 
   server.on('upgrade', (req, socket, head) => {
+    if (networkAccess.lanEnabled && networkAccess.networkAuthRequired !== false
+      && !networkAuth.hasAuthorizedUpgrade(req)) {
+      socket.destroy();
+      return;
+    }
     if (proxyManager.handleUpgrade(req, socket, head)) {
       return;
     }
     socket.destroy();
   });
 
-  server.listen(0, '127.0.0.1', () => {
+  server.listen(requestedPort, networkAccess.bindHost, () => {
     let port = server.address().port;
     let projectName = path.basename(projectRoot);
+    Object.assign(networkAccessStatus, createNetworkAccessStatus(port, networkAccess));
     let gateway = registerService('portal', port, {
       projectName,
       projectPath: projectRoot,
+      host: networkAccessStatus.bindHost,
     });
     // Fire-and-forget: populate OpenCode model cache
     discoverOpenCodeModels().catch(() => {});
@@ -234,7 +258,7 @@ export function startWebServer(projectRoot) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  return { server, proxyManager };
+  return { server, proxyManager, networkAccess: networkAccessStatus };
 }
 
 export default startWebServer;

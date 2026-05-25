@@ -34,6 +34,15 @@ function renderIconTextButton(button, icon, label, spinning = false) {
   button.replaceChildren(iconEl, document.createTextNode(` ${label}`));
 }
 
+function renderLink(url, label = url) {
+  let link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = label;
+  return link;
+}
+
 function setStatus(el, message, kind = "muted") {
   el.textContent = message;
   el.dataset.status = kind;
@@ -63,6 +72,7 @@ const DEFAULT_GATEWAY = {
 export class SettingsPanel extends Symbiote {
   init$ = {};
   _statusInterval = null;
+  _approvalInterval = null;
   _settings = {};
 
   renderCallback() {
@@ -71,6 +81,7 @@ export class SettingsPanel extends Symbiote {
     this.ref.restartBtn.onclick = () => this.restartServer();
     this.ref.stopBtn.onclick = () => this.stopServer();
     this.ref.saveSettingsBtn.onclick = () => this.saveSettings();
+    this.ref.lanAccessInput.onchange = () => this.saveNetworkAccessSettings();
     this.ref.gatewayTestBtn.onclick = () => this.testGateway();
     this.fetchInfo();
     this.fetchSettings();
@@ -88,6 +99,7 @@ export class SettingsPanel extends Symbiote {
       }
       this._settings = r || {};
       this._applyAgentPortalSettings(r.agentPortal || {});
+      if (this._lastNetworkAccess) this._renderNetworkAccess(this._lastNetworkAccess);
       this._applyGatewaySettings(r.anthropicGateway || {});
     } catch (e) {
       console.error('Failed to fetch settings:', e);
@@ -116,17 +128,40 @@ export class SettingsPanel extends Symbiote {
     }
   }
 
+  async saveNetworkAccessSettings() {
+    try {
+      let agentPortal = this._readAgentPortalSettings();
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentPortal }),
+      });
+      this._settings = { ...this._settings, agentPortal };
+      this._renderNetworkAccess(this._lastNetworkAccess || null);
+      setStatus(this.ref.restartStatus, "Network setting saved. Restart to apply the listening address.", "warning");
+    } catch (e) {
+      setStatus(this.ref.restartStatus, `Failed to save network setting: ${e.message}`, "error");
+    }
+  }
+
   _applyAgentPortalSettings(raw) {
     this.ref.openLibraryPathInput.value = raw.openLibraryPath || '';
     this.ref.teamLibraryRepoInput.value = raw.teamLibraryRepo || '';
     this.ref.teamLibraryBranchInput.value = raw.teamLibraryBranch || 'main';
+    this.ref.lanAccessInput.checked = raw.networkAccess?.lanEnabled === true;
   }
 
   _readAgentPortalSettings() {
+    let current = this._settings.agentPortal || {};
     return {
+      ...current,
       openLibraryPath: this.ref.openLibraryPathInput.value.trim(),
       teamLibraryRepo: this.ref.teamLibraryRepoInput.value.trim(),
       teamLibraryBranch: this.ref.teamLibraryBranchInput.value.trim() || 'main',
+      networkAccess: {
+        ...(current.networkAccess || {}),
+        lanEnabled: this.ref.lanAccessInput.checked,
+      },
     };
   }
 
@@ -206,11 +241,17 @@ export class SettingsPanel extends Symbiote {
       clearInterval(this._statusInterval);
       this._statusInterval = null;
     }
+    if (this._approvalInterval) {
+      clearInterval(this._approvalInterval);
+      this._approvalInterval = null;
+    }
   }
 
   _startStatusPolling() {
     this._fetchStatus();
+    this._fetchNetworkApprovals();
     this._statusInterval = setInterval(() => this._fetchStatus(), 5000);
+    this._approvalInterval = setInterval(() => this._fetchNetworkApprovals(), 3000);
   }
 
   async _fetchStatus() {
@@ -230,6 +271,72 @@ export class SettingsPanel extends Symbiote {
       this.ref.uptimeVal.textContent = "—";
       this.ref.shutdownMetric.removeAttribute("status");
     }
+  }
+
+  async _fetchNetworkApprovals() {
+    try {
+      let r = await fetch('/api/network-auth/pending').then((res) => res.json());
+      this._renderNetworkApprovals(r.pending || []);
+    } catch {
+      this._renderNetworkApprovals([]);
+    }
+  }
+
+  _renderNetworkApprovals(pending) {
+    let host = this.ref.networkApprovals;
+    if (!host) return;
+    if (!Array.isArray(pending) || pending.length === 0) {
+      host.replaceChildren();
+      return;
+    }
+    let items = pending.map((request) => {
+      let row = document.createElement('div');
+      row.className = 'pg-network-request';
+
+      let main = document.createElement('div');
+      main.className = 'pg-network-request-main';
+
+      let title = document.createElement('div');
+      title.className = 'pg-network-request-title';
+      title.textContent = `Approve browser ${request.id}`;
+
+      let address = document.createElement('div');
+      address.className = 'pg-network-request-meta';
+      address.textContent = request.address || 'unknown address';
+
+      let userAgent = document.createElement('div');
+      userAgent.className = 'pg-network-request-meta';
+      userAgent.textContent = request.userAgent || 'unknown browser';
+      main.append(title, address, userAgent);
+
+      let actions = document.createElement('div');
+      actions.className = 'pg-network-request-actions';
+
+      let approve = document.createElement('sn-button');
+      approve.setAttribute('variant', 'primary');
+      approve.textContent = 'Approve';
+      approve.onclick = () => this._resolveNetworkApproval(request.id, true);
+
+      let reject = document.createElement('sn-button');
+      reject.setAttribute('variant', 'danger');
+      reject.textContent = 'Reject';
+      reject.onclick = () => this._resolveNetworkApproval(request.id, false);
+
+      actions.append(approve, reject);
+      row.append(main, actions);
+      return row;
+    });
+    host.replaceChildren(...items);
+  }
+
+  async _resolveNetworkApproval(id, approve) {
+    let route = approve ? '/api/network-auth/approve' : '/api/network-auth/reject';
+    await fetch(route, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    await this._fetchNetworkApprovals();
   }
 
   async stopServer() {
@@ -292,6 +399,7 @@ export class SettingsPanel extends Symbiote {
         renderMetric("PID", info.pid || "—"),
         renderMetric("Connected Agents", info.agents ?? "—"),
       );
+      this._renderNetworkAccess(info.networkAccess || null);
 
       let n = this.ref.instanceList;
       n.replaceChildren();
@@ -317,6 +425,35 @@ export class SettingsPanel extends Symbiote {
         renderEmptyState(`Error: ${t.message}`, "error"),
       );
     }
+  }
+
+  _renderNetworkAccess(networkAccess) {
+    this._lastNetworkAccess = networkAccess;
+    if (!networkAccess) {
+      setStatus(this.ref.networkStatus, "Network status is unavailable.", "warning");
+      this.ref.networkLinks.replaceChildren();
+      return;
+    }
+    let active = networkAccess.lanEnabled === true;
+    let requested = this.ref.lanAccessInput.checked === true;
+    let pending = requested !== active;
+    setStatus(
+      this.ref.networkStatus,
+      pending
+        ? `Saved setting differs from the running server; restart to bind ${requested ? "LAN" : "loopback only"}.`
+        : active
+          ? `LAN enabled; bound to ${networkAccess.bindHost || "—"}. HTTPS is still required for immersive WebXR.`
+          : `LAN disabled; bound to ${networkAccess.bindHost || "127.0.0.1"}.`,
+      pending ? "warning" : active ? "success" : "muted",
+    );
+
+    let links = [];
+    if (networkAccess.localUrl) links.push(renderLink(networkAccess.localUrl, `Current local: ${networkAccess.localUrl}`));
+    for (let url of networkAccess.lanUrls || []) links.push(renderLink(url, `Current LAN: ${url}`));
+    if (requested && !active) {
+      for (let url of networkAccess.availableLanUrls || []) links.push(renderLink(url, `After restart: ${url}`));
+    }
+    this.ref.networkLinks.replaceChildren(...links);
   }
 
   // ── Provider Models ──

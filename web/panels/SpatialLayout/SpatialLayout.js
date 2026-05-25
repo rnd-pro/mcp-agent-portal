@@ -16,6 +16,7 @@ import {
   updateXRPanelGesture,
   createXRLayoutTransactionFromGesture,
   getWebXRSupport,
+  createWebXRLaunchRecommendation,
   hitTestXRPanels,
 } from 'symbiote-node/xr';
 import { createProjectTransactionEvent } from '../../services/project-transaction-messages.js';
@@ -44,6 +45,12 @@ export class SpatialLayout extends Symbiote {
   _xrState = null;
   _activeHit = null;
   _support = { supported: false, fallback: 'dom-canvas' };
+  _launchRecommendation = {
+    canLaunch: false,
+    mode: null,
+    reason: 'pending',
+    version: 'webxr-launch-recommendation-v1',
+  };
   _htmlCanvasSupport = { supported: false, preferredMode: null };
   _htmlCanvasDiagnostics = null;
   _canvasPreviewResult = null;
@@ -104,6 +111,7 @@ export class SpatialLayout extends Symbiote {
 
   async _loadSupport() {
     this._support = await getWebXRSupport(globalThis);
+    this._launchRecommendation = createWebXRLaunchRecommendation(this._support);
     this._renderStatus();
   }
 
@@ -199,14 +207,8 @@ export class SpatialLayout extends Symbiote {
     canvas.height = Math.round(panel.contentViewport?.height || 540);
     canvas.hidden = true;
     node.append(canvas);
-    let useCanvasSubtree = Boolean(this._htmlCanvasSupport.supported);
-    if (useCanvasSubtree) {
-      canvas.dataset.live = 'true';
-      canvas.hidden = false;
-      content.hidden = true;
-    }
-    let liveElement = this._panelHost.mountPanel(panel, useCanvasSubtree ? canvas : content);
-    let prepared = this._htmlCanvasRenderer.preparePanel(liveElement, panel, { canvas });
+    let liveElement = this._panelHost.mountPanel(panel, content);
+    let prepared = this._htmlCanvasRenderer.preparePanel(liveElement, panel);
     node.dataset.canvas = prepared.supported ? 'prepared' : 'fallback';
     if (options.renderCanvasPreview) {
       this._canvasPreviewResult = this._htmlCanvasRenderer.renderPanelPreview(panel.id, canvas, {
@@ -360,6 +362,13 @@ export class SpatialLayout extends Symbiote {
       ? `${this._activeHit.panelId} ${this._activeHit.point.x.toFixed(2)}, ${this._activeHit.point.y.toFixed(2)}`
       : 'none';
     let gesture = this._gestureState?.status || (this._activeHit ? 'select' : 'read-only');
+    let launch = this._launchRecommendation || createWebXRLaunchRecommendation(this._support);
+
+    this.ref.enterButton.disabled = !launch.canLaunch;
+    this.ref.enterButton.dataset.available = String(Boolean(launch.canLaunch));
+    this.ref.enterButton.title = launch.canLaunch
+      ? `Start ${launch.mode}`
+      : `XR unavailable: ${launch.reason}`;
 
     this.ref.status.replaceChildren(
       this._statusItem('Source', this._targetSection || '-'),
@@ -373,6 +382,7 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Theme', this._themeSnapshot?.themeScope || '-'),
       this._statusItem('Tokens', `${tokenCount}/${Object.keys(this._themeSnapshot?.tokens || {}).length}`),
       this._statusItem('XR', support),
+      this._statusItem('XR launch', launch.canLaunch ? launch.mode : launch.reason),
       this._statusItem('Pointer', hit),
       this._statusItem('Gesture', gesture),
       this._statusItem('Last tx', this._lastTransactionId || '-'),
@@ -397,14 +407,24 @@ export class SpatialLayout extends Symbiote {
     if (!this._spatialLayout) {
       this._renderProjection();
     }
-    let mode = this._support.modes?.immersiveAr
-      ? WEBXR_MODES.immersiveAr
-      : WEBXR_MODES.immersiveVr;
+    this._launchRecommendation = createWebXRLaunchRecommendation(this._support);
+    if (!this._launchRecommendation.canLaunch) {
+      this._renderStatus();
+      return;
+    }
+    let mode = this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
     let result = await this._controller.start(mode, {
       optionalFeatures: [WEBXR_FEATURES.localFloor, WEBXR_FEATURES.boundedFloor, WEBXR_FEATURES.domOverlay],
       domOverlayRoot: this,
     });
     this._xrState = result.state;
+    if (!result.ok) {
+      this._launchRecommendation = {
+        ...this._launchRecommendation,
+        canLaunch: false,
+        reason: result.reason || 'request-failed',
+      };
+    }
     this._renderStatus();
   }
 

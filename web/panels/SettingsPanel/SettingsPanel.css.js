@@ -19,18 +19,21 @@ export default`
 }
 
 .stg-status[data-status="warning"],
+.pg-network-status[data-status="warning"],
 .pg-gateway-status[data-status="warning"],
 .pm-status[data-status="warning"] {
   color: var(--sn-warning-color);
 }
 
 .stg-status[data-status="success"],
+.pg-network-status[data-status="success"],
 .pg-gateway-status[data-status="success"],
 .pm-status[data-status="success"] {
   color: var(--sn-success-color);
 }
 
 .stg-status[data-status="error"],
+.pg-network-status[data-status="error"],
 .pg-gateway-status[data-status="error"],
 .pm-status[data-status="error"] {
   color: var(--sn-danger-color);
@@ -79,6 +82,7 @@ export default`
 
 /* Claude Gateway */
 .pg-library-settings,
+.pg-network-settings,
 .pg-gateway {
   display: flex;
   flex-direction: column;
@@ -104,7 +108,7 @@ export default`
   gap: 8px;
 }
 
-.pg-gateway-toggle {
+.pg-settings-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -113,8 +117,73 @@ export default`
   color: var(--sn-text);
 }
 
-.pg-gateway-toggle input {
+.pg-settings-toggle input {
   margin: 0;
+}
+
+.pg-network-status {
+  min-height: 16px;
+  font-size: 11px;
+  color: var(--sn-text-dim);
+}
+
+.pg-network-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pg-network-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pg-network-request {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: var(--sn-radius-sm);
+  background: var(--sn-node-bg);
+}
+
+.pg-network-request-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pg-network-request-title {
+  color: var(--sn-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pg-network-request-meta {
+  color: var(--sn-text-dim);
+  font: 11px var(--sn-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-network-request-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pg-network-links a {
+  color: var(--sn-node-selected);
+  font: 11px var(--sn-font-mono);
+  text-decoration: none;
+}
+
+.pg-network-links a:hover {
+  text-decoration: underline;
 }
 
 .pg-gateway-grid {
