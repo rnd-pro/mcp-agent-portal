@@ -14,6 +14,7 @@ import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
 import { createNetworkAuthController } from './network-auth.js';
+import { createServerDemoMode } from './demo-mode.js';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
@@ -142,6 +143,7 @@ export function startWebServer(projectRoot) {
   let requestedPort = resolveRequestedPort();
   let networkAccessStatus = { ...networkAccess, localUrl: null, lanUrls: [] };
   let networkAuth = createNetworkAuthController();
+  let serverDemoMode = createServerDemoMode({ projectRoot });
   let proxyManager = new MCPProxyManager(projectRoot);
   proxyManager.initStateSync();
   let routes = createRoutes({
@@ -154,6 +156,9 @@ export function startWebServer(projectRoot) {
   let projectRoutes = createProjectRoutes();
   let runtimeRoutes = createRuntimeRoutes({ proxyManager, projectRoot });
   let allRoutes = { ...routes, ...projectRoutes, ...runtimeRoutes };
+  if (serverDemoMode.enabled) {
+    allRoutes = { ...allRoutes, ...serverDemoMode.routes };
+  }
   let anthropicGatewayHandler = createAnthropicGatewayHandler();
 
   // ── MCP HTTP Gateway ──────────────────────────────────
@@ -198,6 +203,12 @@ export function startWebServer(projectRoot) {
       return;
     }
 
+    if (serverDemoMode.enabled && (url.pathname === '/mcp' || url.pathname === '/mcp/message' || url.pathname.startsWith('/anthropic/'))) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unavailable in public demo mode' }));
+      return;
+    }
+
     // MCP Streamable HTTP endpoint
     if (url.pathname === '/mcp' || url.pathname === '/mcp/message') {
       getMcpHandler()(req, res);
@@ -216,6 +227,11 @@ export function startWebServer(projectRoot) {
 
     // Fallback: proxy unknown /api/ to backend MCP servers
     if (url.pathname.startsWith('/api/')) {
+      if (serverDemoMode.enabled) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unknown public demo API endpoint' }));
+        return;
+      }
       proxyToBackend(req, res, url, proxyManager);
       return;
     }
@@ -228,6 +244,9 @@ export function startWebServer(projectRoot) {
     if (networkAccess.lanEnabled && networkAccess.networkAuthRequired !== false
       && !networkAuth.hasAuthorizedUpgrade(req)) {
       socket.destroy();
+      return;
+    }
+    if (serverDemoMode.handleUpgrade(req, socket, head)) {
       return;
     }
     if (proxyManager.handleUpgrade(req, socket, head)) {
