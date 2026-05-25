@@ -19,9 +19,10 @@ import {
 } from '../../../demo/mock-data.js';
 import { json, parseBody } from './routes/http.js';
 
-const PUBLIC_ROOTS = ['ARCHITECTURE.md', 'README.md', 'demo', 'docs', 'packages', 'src', 'test', 'web'];
+const PUBLIC_ROOTS = ['ARCHITECTURE.md', 'README.md', 'demo', 'docs', 'packages', 'scripts', 'src', 'test', 'web'];
 const BLOCKED_SEGMENTS = new Set(['.env', '.git', '.ssh', 'node_modules', 'secrets', 'tmp']);
 const MAX_FILE_BYTES = 96 * 1024;
+const DEMO_PROJECT_PATH = '/workspace/agent-portal';
 
 function isEnabled(value) {
   return value === true || value === 'true' || value === '1' || value === 1;
@@ -82,8 +83,24 @@ function createDemoChats() {
   return chats;
 }
 
-function publicPathAllowed(relativePath) {
-  let normalized = path.posix.normalize(String(relativePath || '').replaceAll('\\', '/')).replace(/^\/+/, '');
+function publicRelativePath(projectRoot, requestedPath) {
+  let normalized = path.posix.normalize(String(requestedPath || '').replaceAll('\\', '/'));
+  let rootAliases = [
+    path.posix.normalize(projectRoot.replaceAll('\\', '/')),
+    DEMO_PROJECT_PATH,
+  ];
+  for (let rootAlias of rootAliases) {
+    if (normalized === rootAlias) return '';
+    if (normalized.startsWith(`${rootAlias}/`)) {
+      normalized = normalized.slice(rootAlias.length + 1);
+      break;
+    }
+  }
+  return normalized.replace(/^\/+/, '');
+}
+
+function publicPathAllowed(projectRoot, requestedPath) {
+  let normalized = publicRelativePath(projectRoot, requestedPath);
   if (!normalized || normalized.startsWith('../')) return null;
   let parts = normalized.split('/');
   if (parts.some((part) => BLOCKED_SEGMENTS.has(part) || part.startsWith('.'))) return null;
@@ -93,7 +110,7 @@ function publicPathAllowed(relativePath) {
 }
 
 function readPublicFile(projectRoot, requestedPath) {
-  let safePath = publicPathAllowed(requestedPath);
+  let safePath = publicPathAllowed(projectRoot, requestedPath);
   if (!safePath) return null;
   let absolutePath = path.join(projectRoot, safePath);
   if (!absolutePath.startsWith(projectRoot) || !fs.existsSync(absolutePath)) return null;
@@ -102,25 +119,85 @@ function readPublicFile(projectRoot, requestedPath) {
   return fs.readFileSync(absolutePath, 'utf8');
 }
 
-function walkFiles(rootDir, relativeDir = '', out = []) {
+function walkFiles(rootDir, relativeDir = '', out = [], limit = 5000) {
   let absoluteDir = path.join(rootDir, relativeDir);
   if (!fs.existsSync(absoluteDir)) return out;
   for (let entry of fs.readdirSync(absoluteDir, { withFileTypes: true })) {
     if (BLOCKED_SEGMENTS.has(entry.name) || entry.name.startsWith('.')) continue;
     let relPath = path.posix.join(relativeDir.replaceAll('\\', '/'), entry.name);
-    if (!publicPathAllowed(relPath)) continue;
+    if (!publicPathAllowed(rootDir, relPath)) continue;
     if (entry.isDirectory()) {
-      walkFiles(rootDir, relPath, out);
+      walkFiles(rootDir, relPath, out, limit);
     } else if (entry.isFile()) {
       out.push(relPath);
     }
-    if (out.length >= 600) return out;
+    if (out.length >= limit) return out;
   }
   return out;
 }
 
 function mcpContent(text) {
   return { result: { content: [{ type: 'text', text }] } };
+}
+
+function filePayload(projectRoot, requestedPath) {
+  let safePath = publicPathAllowed(projectRoot, requestedPath);
+  let content = safePath ? readPublicFile(projectRoot, safePath) : null;
+  if (content === null) {
+    return {
+      path: safePath || String(requestedPath || ''),
+      content: `Public demo file is unavailable: ${requestedPath || 'unknown'}`,
+      raw: '',
+      code: '',
+      demoMode: true,
+      unavailable: true,
+    };
+  }
+  return {
+    path: safePath,
+    content,
+    raw: content,
+    code: content,
+    compressed: content,
+    expanded: content.length,
+    decompiled: content.length,
+    codeTok: Math.ceil(content.length / 4),
+    ctxTok: 0,
+    savings: '0%',
+    demoMode: true,
+  };
+}
+
+function buildPublicFileTree(projectRoot) {
+  let tree = {};
+  for (let filePath of walkFiles(projectRoot)) {
+    let directory = path.posix.dirname(filePath);
+    let key = directory === '.' ? './' : `${directory}/`;
+    if (!tree[key]) tree[key] = [];
+    tree[key].push(path.posix.basename(filePath));
+  }
+  for (let files of Object.values(tree)) files.sort();
+  return Object.fromEntries(Object.entries(tree).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function buildPublicImportMap(projectRoot) {
+  let imports = {};
+  for (let [filePath, deps] of Object.entries(skeleton.a || {})) {
+    let safePath = publicPathAllowed(projectRoot, filePath);
+    if (!safePath) continue;
+    let absolutePath = path.join(projectRoot, safePath);
+    if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) continue;
+    imports[safePath] = deps;
+  }
+  return imports;
+}
+
+function publicSkeleton(projectRoot) {
+  return {
+    ...clone(skeleton),
+    f: buildPublicFileTree(projectRoot),
+    a: buildPublicImportMap(projectRoot),
+  };
 }
 
 function createMcpResponse(projectRoot, body = {}) {
@@ -136,11 +213,10 @@ function createMcpResponse(projectRoot, body = {}) {
 
   let toolName = params.name;
   let args = params.arguments || {};
-  if (toolName === 'get_skeleton') return mcpContent(JSON.stringify(skeleton));
+  if (toolName === 'get_skeleton') return mcpContent(JSON.stringify(publicSkeleton(projectRoot)));
   if (toolName === 'compact' || toolName === 'docs') {
     let filePath = args.file || args.path;
-    let content = readPublicFile(projectRoot, filePath);
-    return mcpContent(content || `Public demo file is unavailable: ${filePath || 'unknown'}`);
+    return mcpContent(JSON.stringify(filePayload(projectRoot, filePath)));
   }
   if (toolName === 'analyze') {
     let files = walkFiles(projectRoot);
@@ -249,6 +325,22 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
       'POST /api/mcp-call': async (req, res) => {
         let body = await parseBody(req);
         json(res, createMcpResponse(projectRoot, body));
+      },
+      'POST /api/file': async (req, res) => {
+        let body = await parseBody(req);
+        json(res, filePayload(projectRoot, body.path || body.file));
+      },
+      'POST /api/raw-file': async (req, res) => {
+        let body = await parseBody(req);
+        json(res, filePayload(projectRoot, body.path || body.file));
+      },
+      'POST /api/compact-file': async (req, res) => {
+        let body = await parseBody(req);
+        json(res, filePayload(projectRoot, body.path || body.file));
+      },
+      'POST /api/expand-file': async (req, res) => {
+        let body = await parseBody(req);
+        json(res, filePayload(projectRoot, body.path || body.file));
       },
       'POST /api/adapter/run': async (req, res) => {
         let body = await parseBody(req);

@@ -107,4 +107,61 @@ describe('server demo mode', () => {
     );
     assert.match(blockedRes.json().result.content[0].text, /unavailable/);
   });
+
+  it('reads browser-resolved public file paths without exposing blocked paths', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+
+    let fileRes = makeRes();
+    await demo.routes['POST /api/mcp-call'](
+      makeReq('POST', '/api/mcp-call', {
+        method: 'tools/call',
+        params: { name: 'compact', arguments: { path: '/workspace/agent-portal/test/unit/server-demo-mode.test.js' } },
+      }),
+      fileRes,
+    );
+    let file = JSON.parse(fileRes.json().result.content[0].text);
+    assert.equal(file.path, 'test/unit/server-demo-mode.test.js');
+    assert.match(file.code, /server demo mode/);
+    assert.equal(file.unavailable, undefined);
+
+    let directRes = makeRes();
+    await demo.routes['POST /api/file'](
+      makeReq('POST', '/api/file', { path: '/workspace/agent-portal/src/node/server/demo-mode.js' }),
+      directRes,
+    );
+    assert.match(directRes.json().content, /AGENT_PORTAL_DEMO_MODE/);
+
+    let blockedRes = makeRes();
+    await demo.routes['POST /api/file'](
+      makeReq('POST', '/api/file', { path: '/workspace/agent-portal/tmp/private-note.md' }),
+      blockedRes,
+    );
+    assert.equal(blockedRes.json().unavailable, true);
+    assert.equal(blockedRes.json().raw, '');
+  });
+
+  it('builds the public demo skeleton from files that exist in the repository allowlist', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+
+    let skeletonRes = makeRes();
+    await demo.routes['POST /api/mcp-call'](
+      makeReq('POST', '/api/mcp-call', {
+        method: 'tools/call',
+        params: { name: 'get_skeleton', arguments: {} },
+      }),
+      skeletonRes,
+    );
+
+    let parsed = JSON.parse(skeletonRes.json().result.content[0].text);
+    assert.equal(parsed.f['scripts/diagnostics/'].includes('opencode-e2e.js'), true);
+    assert.equal(parsed.f['test/integration/'].includes('api.test.js'), true);
+    assert.equal(parsed.f['test/integration/'].includes('opencode-e2e.js'), false);
+    assert.equal(Object.keys(parsed.f).some((key) => key.startsWith('tmp/')), false);
+  });
 });
