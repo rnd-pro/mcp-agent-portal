@@ -322,7 +322,7 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   let html = fs.readFileSync(path.join(ROOT, 'web/xr-three-panels-baseline.html'), 'utf8');
   let script = fs.readFileSync(path.join(ROOT, 'web/xr-three-panels-baseline.js'), 'utf8');
 
-  assert.ok(html.includes('"three": "/vendor/three/build/three.module.js?v=0-170-0"'), 'Three baseline must use the reviewed local Three bundle');
+  assert.ok(html.includes('"three": "/vendor/three/build/three.module.js?v=0-184-0"'), 'Three baseline must use the reviewed local Three bundle with HTMLTexture support');
   assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr/index.js"'), 'Three baseline must import XR through the public provider entrypoint');
   assert.ok(html.includes('XR Three Panels Baseline'), 'Three baseline must be clearly scoped');
   assert.ok(html.includes('rel="icon" href="data:,"'), 'Three baseline must not create favicon 404 noise in browser-agent smoke');
