@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { getRoute, navigate } from 'symbiote-node/ui';
+import { getRoute, navigate, parseQuery } from 'symbiote-node/ui';
 import { panelTypes, getHomeSections, getProjectSections, hasSection } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import { layoutMatchesSection } from '../../layout-policy.js';
@@ -75,8 +75,10 @@ export class PgWorkspace extends Symbiote {
           history.replaceState(null, '', this.lastHash);
         }
         this._syncRouterFromHash();
+      } else if (this._currentHashBelongsToWorkspace()) {
+        this.lastHash = location.hash;
+        this._syncRouterFromHash();
       } else {
-        // First activation — force navigate to default section
         let defaultSection = this._projectId === 'global' ? 'dashboard' : 'explorer';
         navigate(defaultSection);
       }
@@ -122,6 +124,13 @@ export class PgWorkspace extends Symbiote {
   _syncRouterFromHash() {
     // Dispatch a synthetic hashchange to trigger LayoutRouter's internal syncFromHash()
     window.dispatchEvent(new HashChangeEvent('hashchange'));
+  }
+
+  _currentHashBelongsToWorkspace() {
+    let route = getRoute();
+    if (!hasSection(route.panel)) return false;
+    let projectId = parseQuery(route.query).project || 'global';
+    return projectId === this._projectId;
   }
 
   _handleRoute() {
