@@ -696,6 +696,8 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRThreeSessionHealthSummary'), 'SpatialLayout must compose readiness from provider session health diagnostics');
     assert.ok(logic.includes('this.ref.enterButton.disabled'), 'SpatialLayout must disable XR launch when provider diagnostics say launch is blocked');
     assert.ok(logic.includes('spatial-session-blocked'), 'SpatialLayout must log provider launch gate blocks before starting XR');
+    assert.ok(logic.includes('spatial-strict-texture-blocked'), 'SpatialLayout must block immersive entry with a provider diagnostic instead of showing empty strict-texture XR panels');
+    assert.ok(logic.includes('textureGate.strict && textureGate.blocked'), 'SpatialLayout must use provider texture gate data before starting immersive XR');
     assert.ok(logic.includes('texture,'), 'SpatialLayout must post provider texture diagnostics beside launch gate diagnostics');
     assert.ok(logic.includes('debugMode: this._textureDebugMode'), 'SpatialLayout must include provider texture debug mode in texture diagnostics');
     assert.equal(logic.includes('strict: true'), false, 'SpatialLayout must not hardcode strict texture policy locally');

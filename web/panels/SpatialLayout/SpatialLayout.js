@@ -734,7 +734,22 @@ export class SpatialLayout extends Symbiote {
         this._renderStatus();
         return;
       }
-      let mode = this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
+      this._syncThreeXRScene();
+      let textureGate = this._createTextureGate();
+      if (textureGate.strict && textureGate.blocked) {
+        this._lastThreeXRError = textureGate.reason || 'strict-texture-blocked';
+        this._postXRDiagnostic('spatial-strict-texture-blocked', {
+          details: {
+            launchGate: this._launchGate,
+            texture: textureGate,
+            controller: this._createSceneDiagnostics(),
+          },
+          error: this._lastThreeXRError,
+        });
+        this._renderStatus();
+        return;
+      }
+      let mode = this._launchGate.mode || this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
       let threeResult = await this._enterThreeXR(mode);
       this._postXRDiagnostic(threeResult.ok ? 'spatial-three-session-result' : 'spatial-three-session-failed', {
         details: {
