@@ -1048,7 +1048,6 @@ export class SpatialLayout extends Symbiote {
       preferredMode: this.ref.xrModeSelect?.value === 'auto' ? null : this.ref.xrModeSelect?.value,
       selectedMode: launch.mode,
       launch,
-      texture: this._createTextureGate(),
       userActivation: window.navigator?.userActivation || null,
       requireUserActivation: options.requireUserActivation === true,
     });
