@@ -393,8 +393,8 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   assert.ok(script.includes('Three texture resolver'), 'Three baseline must display provider Three texture resolver diagnostics');
   assert.ok(script.includes('Three texture applied'), 'Three baseline must display provider-applied Three texture counts');
   assert.ok(script.includes('Texture strict'), 'Three baseline must display strict texture mode');
-  assert.ok(script.includes('hideStrictTextureFailures: textureDebugMode.hideStrictTextureFailures'), 'Three baseline must hide provider-classified strict texture failures instead of showing fallback panels');
-  assert.ok(script.includes('Strict hidden panels'), 'Three baseline must display hidden strict texture panels');
+  assert.ok(script.includes('hideStrictTextureFailures: textureDebugMode.hideStrictTextureFailures'), 'Three baseline must request provider-classified strict texture diagnostics instead of product fallback panels');
+  assert.ok(script.includes('Strict diagnostic panels'), 'Three baseline must display strict texture diagnostic panels');
   assert.ok(script.includes('Texture debug mode'), 'Three baseline must display provider-normalized texture debug mode');
   assert.ok(script.includes('Texture ready'), 'Three baseline must display HTML-in-Canvas texture readiness');
   assert.ok(script.includes('Texture block reason'), 'Three baseline must display strict texture block reasons');

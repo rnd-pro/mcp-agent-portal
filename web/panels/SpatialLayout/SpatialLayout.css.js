@@ -206,10 +206,12 @@ pg-spatial-layout {
   height: var(--sn-xr-content-height);
   min-height: 0;
   overflow: hidden;
+  position: relative;
   transform: scale(var(--sn-xr-content-scale));
   transform-origin: 0 0;
   width: 100%;
   width: var(--sn-xr-content-width);
+  z-index: 1;
 }
 
 .psl-panel-live > * {
@@ -235,17 +237,19 @@ pg-spatial-layout {
 
 .psl-panel-canvas[data-preview="source"] {
   border: 0;
+  bottom: auto;
   height: var(--sn-xr-content-height);
+  inset: 0;
   max-height: none;
   max-width: none;
   opacity: 1;
   pointer-events: none;
-  position: fixed;
+  position: absolute;
   right: auto;
-  top: 0;
-  transform: translate(-200vw, -200vh);
+  top: auto;
+  transform: none;
   width: var(--sn-xr-content-width);
-  z-index: -1;
+  z-index: 0;
 }
 
 .psl-panel-canvas[data-live="true"] {
@@ -314,18 +318,6 @@ pg-spatial-layout {
   box-shadow:
     0 0 0 2px color-mix(in oklch, var(--sn-node-selected) 86%, transparent),
     0 0 34px color-mix(in oklch, var(--sn-node-selected) 44%, transparent);
-}
-
-.psl-xr-layer-canvas {
-  height: 720px;
-  left: 0;
-  opacity: 1;
-  pointer-events: none;
-  position: fixed;
-  top: 0;
-  transform: translate(-200vw, -200vh);
-  width: 1280px;
-  z-index: -1;
 }
 
 .psl-xr-canvas-source {

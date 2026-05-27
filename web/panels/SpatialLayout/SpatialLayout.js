@@ -164,6 +164,9 @@ export class SpatialLayout extends Symbiote {
           error: details?.error || null,
         });
       },
+      onFrame: () => {
+        this._postXRDiagnostic('spatial-three-frame', { throttleMs: 1000 });
+      },
     });
     this._controller = createXRSceneController({
       globalThis,
@@ -639,6 +642,9 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Renderer', summary.renderer),
       this._statusItem('XR scene adapter', summary.three.adapter || '-'),
       this._statusItem('Three panels', String(summary.three.panels)),
+      this._statusItem('Three rendered panels', `${summary.three.renderedPanels}/${summary.three.panels}`),
+      this._statusItem('Three diagnostic panels', String(summary.three.diagnosticPanels)),
+      this._statusItem('Three frames', String(summary.three.frames)),
       this._statusItem('Three hits', String(summary.three.hits)),
       this._statusItem('Three misses', String(summary.three.misses)),
       this._statusItem('XR ray', summary.three.raySource || '-'),

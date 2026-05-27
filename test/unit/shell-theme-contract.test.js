@@ -705,6 +705,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRThreeWebXRAdapter'), 'SpatialLayout must use the provider Three/WebXR adapter for immersive panels');
     assert.ok(logic.includes('createXRThreeRenderHost'), 'SpatialLayout must delegate Three renderer/camera/scene setup to symbiote-node/xr');
     assert.ok(logic.includes('createXRThreeSessionController'), 'SpatialLayout must delegate Three/WebXR session lifecycle to symbiote-node/xr');
+    assert.ok(logic.includes("this._postXRDiagnostic('spatial-three-frame'"), 'SpatialLayout must post throttled provider frame diagnostics during immersive sessions');
     assert.ok(logic.includes('createXRThreeSessionOptions'), 'SpatialLayout must build Three/WebXR session options through symbiote-node/xr');
     assert.ok(logic.includes('createPortalXRDeepGraphScene'), 'SpatialLayout must adapt project graph data through the portal XR deep-graph adapter');
     assert.ok(logic.includes("events.addEventListener('skeleton-loaded'"), 'SpatialLayout must rebuild deep graph diagnostics when project skeleton data arrives');
@@ -799,7 +800,9 @@ describe('portal shell theme contract', () => {
     assert.ok(css.includes('.psl-panel::after'), 'SpatialLayout must expose provider-style XR resize affordances');
     assert.ok(css.includes('--sn-xr-content-width'), 'SpatialLayout fallback must use provider XR content width');
     assert.ok(css.includes('--sn-xr-content-scale'), 'SpatialLayout fallback must use provider XR content scale');
-    assert.ok(css.includes('transform: translate(-200vw, -200vh)'), 'SpatialLayout must keep HTML-in-Canvas source panels laid out but outside the visible viewport');
+    assert.equal(css.includes('transform: translate(-200vw, -200vh)'), false, 'SpatialLayout must not move HTML-in-Canvas source panels outside the paintable viewport');
+    assert.equal(css.includes('.psl-xr-layer-canvas'), false, 'SpatialLayout must not keep unused raw XR layer canvas styling');
+    assert.ok(logic.includes('Three diagnostic panels'), 'SpatialLayout must expose provider strict texture diagnostic panel counts');
     assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');
     let deepGraphAdapter = fs.readFileSync(path.join(ROOT, 'web/services/xr-deep-graph-scene.js'), 'utf8');
     assert.ok(deepGraphAdapter.includes("from 'symbiote-node/xr'"), 'Deep graph adapter must consume public symbiote-node/xr exports');
