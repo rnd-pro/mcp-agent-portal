@@ -163,6 +163,25 @@ test('XR Three baseline smoke verifies runtime visual readiness without new depe
   assert.equal(script.includes('puppeteer'), false, 'Three smoke must not add Puppeteer as a hidden dependency');
 });
 
+test('XR production spatial smoke verifies the production route instead of a harness page', () => {
+  let script = fs.readFileSync(path.join(ROOT, 'scripts/diagnostics/xr-production-spatial-smoke.js'), 'utf8');
+  let pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+  assert.equal(pkg.scripts['xr:production-smoke'], 'node scripts/diagnostics/xr-production-spatial-smoke.js');
+  assert.ok(script.includes('#spatial?'), 'production smoke must open the SpatialLayout route');
+  assert.ok(script.includes("project: 'agent-portal'"), 'production smoke must default to the public Agent Portal project');
+  assert.ok(script.includes("target: 'graph'"), 'production smoke must default to graph as the projected section');
+  assert.ok(script.includes("texture: 'strict'"), 'production smoke must verify strict production texture mode');
+  assert.ok(script.includes("surfaceKind === 'production'"), 'production smoke must require production diagnostics');
+  assert.ok(script.includes("entrypoint === 'spatial-layout'"), 'production smoke must reject baseline harness diagnostics');
+  assert.ok(script.includes('launch-texture-gate-aligned'), 'production smoke must catch button/click gate divergence');
+  assert.ok(script.includes('missingRows'), 'production smoke must report stale or incomplete public pages with missing rows');
+  assert.equal(script.includes('xr-three-panels-baseline.html'), false, 'production smoke must not target the Three harness page');
+  assert.equal(script.includes('xr-panels-baseline.html'), false, 'production smoke must not target the empty-panel harness page');
+  assert.equal(script.includes('playwright'), false, 'production smoke must not add Playwright as a hidden dependency');
+  assert.equal(script.includes('puppeteer'), false, 'production smoke must not add Puppeteer as a hidden dependency');
+});
+
 test('XR headset summary smoke verifies server-confirmed headset diagnostics', () => {
   let script = fs.readFileSync(path.join(ROOT, 'scripts/diagnostics/xr-headset-summary-smoke.js'), 'utf8');
   let pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));

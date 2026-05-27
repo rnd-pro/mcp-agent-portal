@@ -12,6 +12,7 @@
     "dev": "node index.js --dev",
     "xr:visual-smoke": "node scripts/diagnostics/xr-visual-agent-smoke.js",
     "xr:three-smoke": "node scripts/diagnostics/xr-three-baseline-smoke.js",
+    "xr:production-smoke": "node scripts/diagnostics/xr-production-spatial-smoke.js",
     "xr:headset-summary": "node scripts/diagnostics/xr-headset-summary-smoke.js",
     "xr:headset-wait": "node scripts/diagnostics/xr-headset-summary-smoke.js --wait-ms 120000 --interval-ms 2000",
     "test:audit": "node scripts/test-hygiene-audit.js",

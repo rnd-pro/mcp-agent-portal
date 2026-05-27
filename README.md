@@ -157,7 +157,9 @@ Agent Portal serves WebXR diagnostic pages for headset testing. The reusable XR 
 
 For browser builds that require the HTML-in-Canvas origin trial, set `AGENT_PORTAL_HTML_IN_CANVAS_ORIGIN_TRIAL_TOKEN` in the runtime environment. Static HTML responses will include it as an HTTP `Origin-Trial` header and expose only non-secret boolean diagnostics to the page and `/api/xr-diagnostics/*` logs.
 
-The public Three/WebXR baseline posts provider-shaped texture diagnostics from `symbiote-node/xr`, including provider-normalized strict texture mode, bridge stages, resolver stages, strict texture gate status, scene quality, and session health. This keeps headset debugging observable without adding product-local renderer fallbacks.
+The production XR demo URL is `https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict`. It must render through `SpatialLayout`, post production `symbiote-node/xr` diagnostics, and block launch when strict live-texture readiness is incomplete. The `xr-three-panels-baseline.html` and `xr-panels-baseline.html` pages are diagnostic harnesses only; they are not production demo UI.
+
+Use `npm run xr:production-smoke` for the local production route gate and `npm run xr:three-smoke` only for the Three/WebXR harness. Public headset debugging starts after the public production smoke confirms the deployed route is current.
 
 ### Public Demo Mode
 

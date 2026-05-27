@@ -225,9 +225,9 @@ function demoNetworkAccess() {
   return {
     lanEnabled: false,
     bindHost: '127.0.0.1',
-    localUrl: 'https://playground.rnd-pro.com/demos/agent-portal-vr/',
+    localUrl: 'https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict',
     lanUrls: [],
-    availableLanUrls: ['https://playground.rnd-pro.com/demos/agent-portal-vr/'],
+    availableLanUrls: ['https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict'],
     requiresApproval: false,
     secureContextRequired: true,
     demoMode: true,
