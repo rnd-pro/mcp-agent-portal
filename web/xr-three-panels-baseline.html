@@ -149,6 +149,16 @@
     transform-origin: top left;
   }
 
+  .live-panel-canvas-source {
+    display: block;
+    height: var(--sn-xr-content-height, 720px);
+    left: -10000px;
+    pointer-events: none;
+    position: fixed;
+    top: 0;
+    width: var(--sn-xr-content-width, 1280px);
+  }
+
   xr-baseline-live-panel {
     box-sizing: border-box;
     display: grid;

@@ -1,6 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import * as THREE from 'three';
-import { sharedUiStyles as cssShared, getRoute, parseQuery } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared, getRoute, parseQuery, buildHash } from 'symbiote-node/ui';
 import {
   WEBXR_FEATURES,
   WEBXR_MODES,
@@ -48,6 +48,8 @@ import {
 } from 'symbiote-node/xr';
 import { createProjectTransactionEvent } from '../../services/project-transaction-messages.js';
 import { events, state, skeletonMatchesProject } from '../../app.js';
+import { readLayout } from '../../common/ui-state.js';
+import { layoutMatchesSection } from '../../layout-policy.js';
 import { getSectionsForScope, panelTypes } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import { createPortalXRDeepGraphScene } from '../../services/xr-deep-graph-scene.js';
@@ -71,6 +73,25 @@ function readFocusPath() {
 
 function readTextureDebugMode() {
   return parseQuery(getRoute().query).texture || null;
+}
+
+function readTargetSectionParam() {
+  let target = parseQuery(getRoute().query).target || null;
+  return target && target !== 'spatial' ? target : null;
+}
+
+function readTargetSection(projectId) {
+  return readTargetSectionParam() || defaultTargetSection(projectId);
+}
+
+function storageKeyForSection(projectId, section) {
+  return `pg-layout-v4-${projectId || 'global'}-${section}`;
+}
+
+function resolvePortalSectionLayout(section, projectId) {
+  let fallback = getPortalRuntimeLayout(section, projectId);
+  let saved = readLayout(storageKeyForSection(projectId, section));
+  return layoutMatchesSection(section, saved, fallback) ? saved : fallback;
 }
 
 export class SpatialLayout extends Symbiote {
@@ -199,9 +220,10 @@ export class SpatialLayout extends Symbiote {
     this._htmlCanvasSupport = this._htmlCanvasRenderer.getSupport();
     this._htmlCanvasDiagnostics = this._htmlCanvasSupport.diagnostics;
     this._projectId = readProjectId();
-    this._targetSection = defaultTargetSection(this._projectId);
+    this._targetSection = readTargetSection(this._projectId);
     this.ref.sectionSelect.addEventListener('change', () => {
       this._targetSection = this.ref.sectionSelect.value || defaultTargetSection(this._projectId);
+      this._syncTargetSectionParam();
       this._renderProjection();
     });
     this.ref.scaleInput.addEventListener('input', () => this._renderProjection());
@@ -265,9 +287,12 @@ export class SpatialLayout extends Symbiote {
   _refresh() {
     this._syncTextureDebugMode();
     let nextProjectId = readProjectId();
+    let explicitTarget = readTargetSectionParam();
     if (nextProjectId !== this._projectId) {
       this._projectId = nextProjectId;
-      this._targetSection = defaultTargetSection(this._projectId);
+      this._targetSection = explicitTarget || defaultTargetSection(this._projectId);
+    } else if (explicitTarget && explicitTarget !== this._targetSection) {
+      this._targetSection = explicitTarget;
     }
     this._renderSectionOptions();
     this._renderProjection();
@@ -285,7 +310,7 @@ export class SpatialLayout extends Symbiote {
   _renderSectionOptions() {
     let sections = getSectionsForScope(this._projectId)
       .filter((section) => section.id !== 'spatial')
-      .filter((section) => Boolean(getPortalRuntimeLayout(section.id, this._projectId)));
+      .filter((section) => Boolean(resolvePortalSectionLayout(section.id, this._projectId)));
     if (!sections.some((section) => section.id === this._targetSection)) {
       this._targetSection = sections[0]?.id || defaultTargetSection(this._projectId);
     }
@@ -300,7 +325,7 @@ export class SpatialLayout extends Symbiote {
   }
 
   _renderProjection() {
-    let root = getPortalRuntimeLayout(this._targetSection, this._projectId);
+    let root = resolvePortalSectionLayout(this._targetSection, this._projectId);
     this._themeSnapshot = createXRThemeSnapshot(document.documentElement, {
       themeScope: `section.${this._targetSection}`,
     });
@@ -364,6 +389,16 @@ export class SpatialLayout extends Symbiote {
     this._renderStatus();
     this._renderGeometryDiagnostics();
     this._postXRDiagnostic('spatial-projection-rendered', { throttleMs: 1200 });
+  }
+
+  _syncTargetSectionParam() {
+    let route = getRoute();
+    if (route.panel !== 'spatial') return;
+    let params = {
+      ...parseQuery(route.query),
+      target: this._targetSection,
+    };
+    history.replaceState(null, '', `#${buildHash('spatial', route.subpath || '', params)}`);
   }
 
   _createPanelNode(panel, options = {}) {

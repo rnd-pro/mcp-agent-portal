@@ -336,6 +336,9 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   assert.ok(script.includes('applyXRThemeToPanel'), 'Three baseline must apply provider theme materials before rendering panels');
   assert.ok(script.includes('createXRThreeWebXRAdapter'), 'Three baseline must use the provider-owned Three WebXR adapter');
   assert.ok(script.includes('createXRPanelHost'), 'Three baseline must mount live DOM panel sources through the provider XR panel host');
+  assert.ok(script.includes('sourcePanelHost'), 'Three baseline must keep a provider-owned source host for HTML-in-Canvas textures');
+  assert.ok(script.includes('live-panel-canvas-source'), 'Three baseline texture source must be a direct canvas child, not the visible preview card');
+  assert.ok(script.includes('getPanelElement: (panelId) => sourcePanelHost.getPanelElement(panelId)'), 'Three baseline texture bridge must resolve source-host elements');
   assert.ok(script.includes('createXRHtmlCanvasRenderer'), 'Three baseline must prepare live DOM panels through the provider HTML-in-Canvas renderer');
   assert.ok(script.includes('createXRThreePanelTextureBridge'), 'Three baseline must route live DOM texture preparation through the provider Three bridge');
   assert.ok(script.includes('createXRThreeHtmlCanvasTextureResolver'), 'Three baseline must resolve HTML-in-Canvas sources into Three textures through the provider');

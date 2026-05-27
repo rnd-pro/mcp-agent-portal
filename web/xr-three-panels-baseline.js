@@ -215,6 +215,12 @@ const livePanelHost = createXRPanelHost({
     return name === livePanelComponent.tagName ? livePanelComponent : name;
   },
 });
+const sourcePanelHost = createXRPanelHost({
+  document,
+  componentResolver(name) {
+    return name === livePanelComponent.tagName ? livePanelComponent : name;
+  },
+});
 const htmlCanvasRenderer = createXRHtmlCanvasRenderer({ globalThis: window });
 let threeTextureBridge = null;
 let threeTextureResolver = createXRThreeHtmlCanvasTextureResolver({
@@ -327,6 +333,7 @@ function postHeartbeat() {
 
 function mountLivePanels() {
   livePanelHost.setScene(scene, { themeSnapshot });
+  sourcePanelHost.setScene(scene, { themeSnapshot });
   livePanelRoot.replaceChildren();
   for (let panel of scene.panels) {
     let container = document.createElement('section');
@@ -334,10 +341,17 @@ function mountLivePanels() {
     container.dataset.panelId = panel.id;
     livePanelRoot.append(container);
     livePanelHost.mountPanel(panel, container);
+    let sourceCanvas = document.createElement('canvas');
+    sourceCanvas.className = 'live-panel-canvas-source';
+    sourceCanvas.dataset.panelId = panel.id;
+    sourceCanvas.setAttribute('layoutsubtree', '');
+    sourceCanvas.setAttribute('aria-hidden', 'true');
+    livePanelRoot.append(sourceCanvas);
+    sourcePanelHost.mountPanel(panel, sourceCanvas);
   }
   threeTextureBridge = createXRThreePanelTextureBridge({
     htmlCanvasRenderer,
-    getPanelElement: (panelId) => livePanelHost.getPanelElement(panelId),
+    getPanelElement: (panelId) => sourcePanelHost.getPanelElement(panelId),
     requireTextureUpload: textureDebugMode.requireTextureUpload,
     textureResolver: threeTextureResolver.resolve,
   });
@@ -350,6 +364,7 @@ function mountLivePanels() {
   textureSourceSummaries = textureBridgeRecords.map((record) => record.summary).filter(Boolean);
   livePanelPrepareSummary = {
     host: livePanelHost.getState(),
+    sourceHost: sourcePanelHost.getState(),
     scene: sceneResult,
     textureBridge: threeTextureBridge.getState(),
     textureResolver: threeTextureResolver.getState(),
