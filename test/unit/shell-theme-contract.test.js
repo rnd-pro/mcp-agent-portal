@@ -667,16 +667,18 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRHtmlCanvasRenderer'), 'SpatialLayout must use the provider HTML-in-Canvas bridge');
     assert.ok(logic.includes('createXRDomPanelWorkbench'), 'SpatialLayout must delegate DOM-backed XR panel source preparation to symbiote-node/xr');
     assert.ok(logic.includes('mountPreviewPanel'), 'SpatialLayout DOM preview must be built through the provider XR panel workbench');
-    assert.ok(logic.includes('prepareLayerSources'), 'SpatialLayout XR layer sources must be prepared through the provider XR panel workbench');
+    assert.ok(logic.includes('createXRThreePanelTextureBridge'), 'SpatialLayout XR texture sources must be bridged through the provider Three/WebXR path');
     assert.ok(logic.includes('renderCanvasPreview'), 'SpatialLayout must request provider-owned HTML-in-Canvas preview rendering through the workbench');
     assert.ok(logic.includes('createWebXRLaunchRecommendation'), 'SpatialLayout must use provider WebXR launch recommendation logic');
     assert.ok(logic.includes('createWebXRLaunchGateSummary'), 'SpatialLayout must use provider WebXR launch gate diagnostics');
     assert.ok(logic.includes('createXRTextureDebugModeSummary'), 'SpatialLayout must normalize texture debug mode through the provider');
     assert.ok(logic.includes('createXRTextureGateSummary'), 'SpatialLayout must use provider texture gate diagnostics');
     assert.ok(logic.includes('createXRPointerRayFromDomEvent'), 'SpatialLayout must use provider DOM pointer ray projection');
-    assert.ok(logic.includes('createXRWebGLLayerSize'), 'SpatialLayout must use provider XR layer sizing');
     assert.ok(logic.includes('createXRSceneQualitySummary'), 'SpatialLayout must use provider scene quality diagnostics');
     assert.ok(logic.includes('createXRReadinessSummary'), 'SpatialLayout must use provider XR readiness diagnostics');
+    assert.ok(logic.includes('createXRVisualTestSummary'), 'SpatialLayout must use provider visual readiness diagnostics');
+    assert.ok(logic.includes('createXRVisualAgentReadinessSummary'), 'SpatialLayout must post provider visual readiness to server diagnostics');
+    assert.ok(logic.includes('createXRThreeInteractionReadinessSummary'), 'SpatialLayout must post provider interaction readiness to server diagnostics');
     assert.ok(logic.includes('readXRHtmlCanvasOriginTrialHeaderStatus'), 'SpatialLayout must use provider origin-trial response-header diagnostics');
     assert.ok(logic.includes('_createHtmlCanvasDiagnosticsPayload'), 'SpatialLayout must post HTML-in-Canvas response-header diagnostics to the server');
     assert.ok(logic.includes('HTML Canvas origin trial header'), 'SpatialLayout must display HTML-in-Canvas response-header status');
@@ -717,9 +719,13 @@ describe('portal shell theme contract', () => {
     assert.equal(logic.includes('for (let graphNode of this._deepGraph.preview.nodes)'), false, 'SpatialLayout must not render deep graph nodes locally');
     assert.equal(logic.includes('Math.atan2'), false, 'SpatialLayout must not calculate deep graph edge angles locally');
     assert.ok(logic.includes('this._threeXRSessionController?.getDiagnostics'), 'SpatialLayout must post/display Three session diagnostics from symbiote-node/xr');
-    assert.ok(logic.includes('_enterThreeXR'), 'SpatialLayout must try the provider Three/WebXR path before lower-level fallback rendering');
-    assert.ok(logic.includes('createXRWebGLLayerTarget'), 'SpatialLayout must delegate lower-level WebGL layer target creation to symbiote-node/xr');
-    assert.ok(logic.includes('_getXRLayerTarget'), 'SpatialLayout may keep a thin target accessor around the provider fallback');
+    assert.ok(logic.includes('_enterThreeXR'), 'SpatialLayout production XR must enter through the provider Three/WebXR path');
+    assert.ok(logic.includes('spatial-production-xr-blocked'), 'SpatialLayout must report blocked production XR instead of falling through to a second renderer');
+    assert.equal(logic.includes('createXRWebGLLayerPanelRenderer'), false, 'SpatialLayout must not keep a second production-like raw WebGL panel renderer');
+    assert.equal(logic.includes('createXRWebGLLayerTarget'), false, 'SpatialLayout must not keep a second production-like raw WebGL layer target path');
+    assert.equal(logic.includes('createXRWebGLLayerSize'), false, 'SpatialLayout must not size a separate raw WebGL fallback as production XR');
+    assert.equal(logic.includes('_getXRLayerTarget'), false, 'SpatialLayout must not keep a lower-level XR layer fallback accessor');
+    assert.equal(logic.includes('this._controller.start'), false, 'SpatialLayout must not start a second XR session controller after Three/WebXR fails');
     assert.equal(logic.includes('navigator.xr.requestSession'), false, 'SpatialLayout must not request Three WebXR sessions directly');
     assert.equal(logic.includes('setAnimationLoop'), false, 'SpatialLayout must not own the Three WebXR render loop');
     assert.equal(logic.includes('getController('), false, 'SpatialLayout must not wire Three XR controllers directly');
@@ -777,7 +783,7 @@ describe('portal shell theme contract', () => {
     assert.equal(logic.includes('patch: { layout: { rect'), false, 'SpatialLayout must not build XR geometry patches locally');
     assert.ok(logic.includes('setPointerCapture'), 'SpatialLayout must keep DOM fallback drags captured until finish or cancel');
     assert.ok(
-      logic.indexOf('this._syncThreeXRScene();') > logic.indexOf('this.ref.space.append(node);'),
+      logic.lastIndexOf('this._syncThreeXRScene();') > logic.indexOf('this.ref.space.append(node);'),
       'SpatialLayout must sync the Three XR scene after DOM/source panels are mounted',
     );
     assert.equal(logic.includes("createElement('article')"), false, 'SpatialLayout must not render placeholder spatial cards');
