@@ -789,6 +789,7 @@ describe('portal shell theme contract', () => {
     );
     assert.equal(logic.includes("createElement('article')"), false, 'SpatialLayout must not render placeholder spatial cards');
     assert.equal(css.includes('.psl-line'), false, 'SpatialLayout must not keep placeholder line styling');
+    assert.equal(css.includes('opacity: 0.001'), false, 'SpatialLayout must not hide HTML-in-Canvas source panels through opacity because it leaks into XR textures');
     assert.ok(css.includes('.psl-geometry'), 'SpatialLayout must expose XR geometry diagnostics with provider tokens');
     assert.ok(css.includes('.psl-html-canvas'), 'SpatialLayout must expose HTML-in-Canvas diagnostics with provider tokens');
     assert.ok(css.includes('.psl-deep-graph'), 'SpatialLayout must expose XR deep graph overlay styling with provider tokens');
@@ -798,6 +799,7 @@ describe('portal shell theme contract', () => {
     assert.ok(css.includes('.psl-panel::after'), 'SpatialLayout must expose provider-style XR resize affordances');
     assert.ok(css.includes('--sn-xr-content-width'), 'SpatialLayout fallback must use provider XR content width');
     assert.ok(css.includes('--sn-xr-content-scale'), 'SpatialLayout fallback must use provider XR content scale');
+    assert.ok(css.includes('transform: translate(-200vw, -200vh)'), 'SpatialLayout must keep HTML-in-Canvas source panels laid out but outside the visible viewport');
     assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');
     let deepGraphAdapter = fs.readFileSync(path.join(ROOT, 'web/services/xr-deep-graph-scene.js'), 'utf8');
     assert.ok(deepGraphAdapter.includes("from 'symbiote-node/xr'"), 'Deep graph adapter must consume public symbiote-node/xr exports');

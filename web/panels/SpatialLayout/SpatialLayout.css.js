@@ -234,13 +234,18 @@ pg-spatial-layout {
 }
 
 .psl-panel-canvas[data-preview="source"] {
-  height: 1px;
-  opacity: 0.001;
+  border: 0;
+  height: var(--sn-xr-content-height);
+  max-height: none;
+  max-width: none;
+  opacity: 1;
   pointer-events: none;
-  position: absolute;
+  position: fixed;
   right: auto;
-  top: auto;
-  width: 1px;
+  top: 0;
+  transform: translate(-200vw, -200vh);
+  width: var(--sn-xr-content-width);
+  z-index: -1;
 }
 
 .psl-panel-canvas[data-live="true"] {
@@ -314,10 +319,11 @@ pg-spatial-layout {
 .psl-xr-layer-canvas {
   height: 720px;
   left: 0;
-  opacity: 0.001;
+  opacity: 1;
   pointer-events: none;
   position: fixed;
   top: 0;
+  transform: translate(-200vw, -200vh);
   width: 1280px;
   z-index: -1;
 }
