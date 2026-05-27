@@ -53,6 +53,7 @@ function sanitizeXrDiagnosticDetails(value, depth = 0) {
 }
 
 function normalizeXrDiagnosticLog(req, body = {}, options = {}) {
+  let surface = body.surface && typeof body.surface === 'object' ? body.surface : {};
   return {
     id: `${Date.now().toString(36)}-${options.count.toString(36)}`,
     receivedAt: new Date().toISOString(),
@@ -61,6 +62,13 @@ function normalizeXrDiagnosticLog(req, body = {}, options = {}) {
     userAgent: String(req.headers['user-agent'] || '').slice(0, 240),
     clientId: sanitizeXrDiagnosticId(body.clientId, 'anonymous-client'),
     event: String(body.event || 'diagnostic').slice(0, 80),
+    surface: {
+      surfaceKind: String(body.surfaceKind || surface.surfaceKind || '').slice(0, 80) || null,
+      entrypoint: String(body.entrypoint || surface.entrypoint || '').slice(0, 120) || null,
+      projectId: String(body.projectId || surface.projectId || '').slice(0, 120) || null,
+      targetSection: String(body.targetSection || surface.targetSection || '').slice(0, 120) || null,
+      panelContentKind: String(body.panelContentKind || surface.panelContentKind || '').slice(0, 120) || null,
+    },
     pageUrl: sanitizeXrDiagnosticUrl(body.pageUrl),
     secureContext: body.secureContext === true,
     navigatorXr: body.navigatorXr === true,
@@ -161,6 +169,18 @@ function normalizeHtmlCanvasDiagnosticSummary(htmlCanvas = null) {
     blockingMissing: sanitizeStringList(htmlCanvas.blockingMissing),
     missingCore: sanitizeStringList(htmlCanvas.missingCore),
     missingTexture: sanitizeStringList(htmlCanvas.missingTexture),
+    threeTexture: htmlCanvas.threeTexture && typeof htmlCanvas.threeTexture === 'object'
+      ? {
+        version: htmlCanvas.threeTexture.version ? String(htmlCanvas.threeTexture.version).slice(0, 120) : null,
+        renderer: htmlCanvas.threeTexture.renderer ? String(htmlCanvas.threeTexture.renderer).slice(0, 80) : null,
+        threeRevision: htmlCanvas.threeTexture.threeRevision ? String(htmlCanvas.threeTexture.threeRevision).slice(0, 40) : null,
+        htmlTextureAvailable: htmlCanvas.threeTexture.htmlTextureAvailable === true,
+        htmlTextureRequired: htmlCanvas.threeTexture.htmlTextureRequired === true,
+        textureUploadAvailable: htmlCanvas.threeTexture.textureUploadAvailable === true,
+        ready: htmlCanvas.threeTexture.ready === true,
+        reason: htmlCanvas.threeTexture.reason ? String(htmlCanvas.threeTexture.reason).slice(0, 160) : null,
+      }
+      : null,
     originTrial: htmlCanvas.originTrial && typeof htmlCanvas.originTrial === 'object'
       ? {
         status: htmlCanvas.originTrial.status ? String(htmlCanvas.originTrial.status).slice(0, 80) : null,
@@ -517,6 +537,78 @@ function normalizeVectorSummary(value, limit = 3) {
   return null;
 }
 
+function normalizeRenderStateSummary(value = null) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    version: value.version ? String(value.version).slice(0, 120) : null,
+    baseLayer: value.baseLayer && typeof value.baseLayer === 'object'
+      ? {
+        present: value.baseLayer.present === true,
+        framebufferWidth: Number.isFinite(Number(value.baseLayer.framebufferWidth)) ? Number(value.baseLayer.framebufferWidth) : null,
+        framebufferHeight: Number.isFinite(Number(value.baseLayer.framebufferHeight)) ? Number(value.baseLayer.framebufferHeight) : null,
+        fixedFoveation: Number.isFinite(Number(value.baseLayer.fixedFoveation)) ? Number(value.baseLayer.fixedFoveation) : null,
+      }
+      : null,
+    layers: value.layers && typeof value.layers === 'object'
+      ? {
+        count: Number.isFinite(Number(value.layers.count)) ? Number(value.layers.count) : 0,
+        present: value.layers.present === true,
+      }
+      : null,
+    depthNear: Number.isFinite(Number(value.depthNear)) ? Number(value.depthNear) : null,
+    depthFar: Number.isFinite(Number(value.depthFar)) ? Number(value.depthFar) : null,
+  };
+}
+
+function normalizeViewportSummary(value = null) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    version: value.version ? String(value.version).slice(0, 120) : null,
+    viewCount: Number.isFinite(Number(value.viewCount)) ? Number(value.viewCount) : 0,
+    views: Array.isArray(value.views)
+      ? value.views.slice(0, 4).map((view) => ({
+        eye: view?.eye ? String(view.eye).slice(0, 40) : null,
+        viewport: view?.viewport && typeof view.viewport === 'object'
+          ? {
+            x: Number.isFinite(Number(view.viewport.x)) ? Number(view.viewport.x) : null,
+            y: Number.isFinite(Number(view.viewport.y)) ? Number(view.viewport.y) : null,
+            width: Number.isFinite(Number(view.viewport.width)) ? Number(view.viewport.width) : null,
+            height: Number.isFinite(Number(view.viewport.height)) ? Number(view.viewport.height) : null,
+          }
+          : null,
+        projectionMatrix: view?.projectionMatrix === true,
+        transform: view?.transform === true,
+      }))
+      : [],
+  };
+}
+
+function normalizeMaterialDiagnosticsSummary(value = null) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    version: value.version ? String(value.version).slice(0, 120) : null,
+    total: Number.isFinite(Number(value.total)) ? Number(value.total) : 0,
+    transparentCount: Number.isFinite(Number(value.transparentCount)) ? Number(value.transparentCount) : 0,
+    mappedCount: Number.isFinite(Number(value.mappedCount)) ? Number(value.mappedCount) : 0,
+    strictDiagnosticCount: Number.isFinite(Number(value.strictDiagnosticCount)) ? Number(value.strictDiagnosticCount) : 0,
+    strictDiagnosticPanelIds: sanitizeStringList(value.strictDiagnosticPanelIds, 16),
+    panels: Array.isArray(value.panels)
+      ? value.panels.slice(0, 16).map((panel) => ({
+        panelId: panel?.panelId ? sanitizeXrDiagnosticId(panel.panelId, 'panel') : null,
+        visible: panel?.visible !== false,
+        transparent: panel?.transparent === true,
+        opacity: Number.isFinite(Number(panel?.opacity)) ? Number(panel.opacity) : null,
+        mapApplied: panel?.mapApplied === true,
+        textureKind: panel?.texture?.kind ? String(panel.texture.kind).slice(0, 80) : null,
+        textureWidth: Number.isFinite(Number(panel?.texture?.width)) ? Number(panel.texture.width) : null,
+        textureHeight: Number.isFinite(Number(panel?.texture?.height)) ? Number(panel.texture.height) : null,
+        strictDiagnostic: panel?.strictDiagnostic === true,
+        strictDiagnosticReason: panel?.strictDiagnosticReason ? String(panel.strictDiagnosticReason).slice(0, 160) : null,
+      }))
+      : [],
+  };
+}
+
 function normalizeFrameTargetSummary(value) {
   if (!value || typeof value !== 'object') return null;
   return {
@@ -542,6 +634,8 @@ function normalizeXrDiagnosticSessionSummary(session = null) {
     enabledFeatures: sanitizeStringList(session.enabledFeatures, 16),
     inputSources: normalizeInputSourceSummary(session.inputSources),
     sessionOptions: normalizeSessionOptionsSummary(session.sessionOptions),
+    renderState: normalizeRenderStateSummary(session.renderState),
+    viewports: normalizeViewportSummary(session.viewports),
     frames: Number.isFinite(Number(session.frames)) ? Number(session.frames) : 0,
     controllers: Number.isFinite(Number(session.controllers)) ? Number(session.controllers) : 0,
     controllerRayVisuals: Number.isFinite(Number(session.controllerRayVisuals)) ? Number(session.controllerRayVisuals) : 0,
@@ -561,6 +655,7 @@ function normalizeXrDiagnosticSessionSummary(session = null) {
     lastEvent: session.lastEvent ? String(session.lastEvent).slice(0, 160) : null,
     lastError: session.lastError ? String(session.lastError).slice(0, 300) : null,
     panelCount: Number.isFinite(Number(session.panelCount)) ? Number(session.panelCount) : 0,
+    materialDiagnostics: normalizeMaterialDiagnosticsSummary(session.materialDiagnostics),
     drag: session.drag && typeof session.drag === 'object'
       ? {
         active: session.drag.active === true,
@@ -640,6 +735,7 @@ function createXrDiagnosticSummary(logs = []) {
       lastSeenAt: entry.receivedAt,
       eventCount: 0,
       latestEvent: null,
+      surface: null,
       pageUrl: '',
       userAgent: '',
       modes: null,
@@ -660,6 +756,7 @@ function createXrDiagnosticSummary(logs = []) {
     client.lastSeenAt = entry.receivedAt;
     client.eventCount += 1;
     client.latestEvent = entry.event;
+    client.surface = entry.surface;
     client.pageUrl = entry.pageUrl;
     client.userAgent = entry.userAgent;
     if (entry.modes) client.modes = entry.modes;
@@ -725,6 +822,7 @@ function createXrDiagnosticSummary(logs = []) {
       clientId: latest.clientId,
       receivedAt: latest.receivedAt,
       event: latest.event,
+      surface: latest.surface,
       pageUrl: latest.pageUrl,
       secureContext: latest.secureContext,
       navigatorXr: latest.navigatorXr,

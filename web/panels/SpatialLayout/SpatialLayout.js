@@ -26,6 +26,7 @@ import {
   createXRThreeRenderHost,
   createXRThreePanelTextureBridge,
   createXRThreeHtmlCanvasTextureResolver,
+  createXRThreeTextureCapabilitySummary,
   createXRThreeSessionController,
   createXRThreeSessionHealthSummary,
   createXRThreeSessionOptions,
@@ -934,8 +935,15 @@ export class SpatialLayout extends Symbiote {
       navigatorXr: Boolean(navigator.xr),
       modes: this._support?.modes || null,
       launch,
-      clientId: this._diagnosticClientId,
-      session: this._createSessionDiagnosticPayload(),
+	      clientId: this._diagnosticClientId,
+	      surface: {
+	        surfaceKind: 'production',
+	        entrypoint: 'spatial-layout',
+	        projectId: this._projectId || null,
+	        targetSection: this._targetSection || null,
+	        panelContentKind: 'portal-runtime-layout',
+	      },
+	      session: this._createSessionDiagnosticPayload(),
       error: options.error || null,
       details,
       htmlCanvas: this._createHtmlCanvasDiagnosticsPayload(),
@@ -1091,6 +1099,7 @@ export class SpatialLayout extends Symbiote {
     if (!htmlCanvas) return null;
     return {
       ...htmlCanvas,
+      threeTexture: createXRThreeTextureCapabilitySummary(THREE, this._htmlCanvasSupport || {}),
       responseHeader: {
         checked: this._originTrialHeaderStatus.checked,
         originTrialPresent: this._originTrialHeaderStatus.present,
@@ -1184,6 +1193,7 @@ export class SpatialLayout extends Symbiote {
       this._htmlCanvasChip('paint', diagnostics.apis?.paintEvent),
       this._htmlCanvasChip('WebGL texture', diagnostics.apis?.webglTextureUpload),
       this._htmlCanvasChip('WebGPU texture', diagnostics.apis?.webgpuTextureCopy),
+      this._htmlCanvasChip('Three HTMLTexture', diagnostics.threeTexture?.htmlTextureAvailable),
       this._htmlCanvasChip('Origin-Trial header', this._originTrialHeaderStatus.present),
       this._htmlCanvasChip('Preview', this._canvasPreviewResult?.rendered),
     );

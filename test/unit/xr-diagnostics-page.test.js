@@ -189,12 +189,31 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
           mode: 'immersive-vr',
           frames: 42,
           panelCount: 4,
+          renderState: { baseLayer: { present: true, framebufferWidth: 1832, framebufferHeight: 1920 } },
+          viewports: { viewCount: 2 },
+          materialDiagnostics: {
+            total: 4,
+            mappedCount: 4,
+            transparentCount: 0,
+            strictDiagnosticCount: 0,
+            strictDiagnosticPanelIds: [],
+          },
           health: { checks: { frames: 42, panelCount: 4 } },
+        },
+        surface: {
+          surfaceKind: 'production',
+          entrypoint: 'spatial-layout',
+          projectId: 'agent-portal',
+          targetSection: 'graph',
+          panelContentKind: 'portal-runtime-layout',
         },
         visualReadiness: { status: 'pass', reason: 'ready', checks: [{ id: 'visual-status', status: 'pass' }] },
         interactionReadiness: { ready: false, status: 'blocked', reason: 'texture-upload-ready', issueCodes: ['texture-upload-ready'] },
-        texture: { ready: 0, total: 4, reason: 'html-in-canvas-unsupported' },
-        htmlCanvas: { availability: 'origin-trial-or-flag-required' },
+        texture: { ready: 4, total: 4, reason: null },
+        htmlCanvas: {
+          availability: 'origin-trial-or-flag-required',
+          threeTexture: { htmlTextureAvailable: true, ready: true, threeRevision: '184' },
+        },
       },
     ],
   }));
@@ -222,6 +241,9 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.ok(script.includes('summaryImmersiveClientCount'), 'headset smoke must expose immersive client counts');
   assert.ok(script.includes('open-xr-demo-page'), 'headset smoke must direct agents to open the XR page when no diagnostic client exists');
   assert.ok(script.includes('check-requested-diagnostic-client'), 'headset smoke must distinguish missing explicit client ids');
+  assert.ok(script.includes('production-surface'), 'headset smoke must require production SpatialLayout diagnostics by default');
+  assert.ok(script.includes('--allow-harness'), 'headset smoke must allow explicit harness diagnostics when requested');
+  assert.ok(script.includes('open-production-spatial-url'), 'headset smoke must guide agents to the production spatial URL when harness data is selected');
   assert.ok(script.includes('sanitizeErrorMessage'), 'headset smoke must sanitize fetch errors before writing reports');
   assert.ok(script.includes('lastErrorName'), 'headset smoke report must expose sanitized error metadata');
   assert.equal(script.includes('playwright'), false, 'headset smoke must not add Playwright as a hidden dependency');
@@ -243,8 +265,17 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.equal(report.selectedClientId, 'quest-client');
   assert.equal(report.frames, 42);
   assert.equal(report.panels, 4);
+  assert.equal(report.surfaceKind, 'production');
+  assert.equal(report.entrypoint, 'spatial-layout');
+  assert.equal(report.projectId, 'agent-portal');
+  assert.equal(report.targetSection, 'graph');
   assert.equal(report.visualReadiness, 'pass:ready');
   assert.equal(report.interactionReadiness, 'blocked:texture-upload-ready');
+  assert.equal(report.threeHtmlTexture, 'available:184');
+  assert.equal(report.baseLayer, 'present:1832x1920');
+  assert.equal(report.viewports, '2');
+  assert.equal(report.materialMaps, '4/4');
+  assert.equal(report.diagnosticMaterials, '0:-');
   assert.equal(report.failedChecks.length, 0);
   assert.equal(report.waitMs, 0);
   assert.equal(report.deadlineMs, 0);
@@ -257,6 +288,65 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.equal(report.checks.find((check) => check.id === 'interaction-readiness').status, 'pass');
   assert.equal(report.checks.find((check) => check.id === 'interaction-readiness').readinessStatus, 'blocked');
   assert.equal(JSON.parse(fs.readFileSync(reportPath, 'utf8')).ok, true);
+
+  let harnessFixturePath = path.join(tempDir, 'harness-summary.json');
+  let harnessReportPath = path.join(tempDir, 'harness-report.json');
+  fs.writeFileSync(harnessFixturePath, JSON.stringify({
+    version: 'xr-diagnostics-summary-v1',
+    clientCount: 1,
+    immersiveClientCount: 1,
+    latestClient: { clientId: 'harness-client' },
+    latestImmersiveClient: { clientId: 'harness-client' },
+    clients: [
+      {
+        clientId: 'harness-client',
+        stale: false,
+        ageMs: 100,
+        phase: 'running',
+        modes: { immersiveVr: true },
+        surface: {
+          surfaceKind: 'harness',
+          entrypoint: 'xr-three-panels-baseline',
+          projectId: null,
+          targetSection: 'xr-three-baseline',
+        },
+        session: {
+          active: true,
+          status: 'running',
+          mode: 'immersive-vr',
+          frames: 12,
+          panelCount: 4,
+          renderState: { baseLayer: { present: true, framebufferWidth: 1024, framebufferHeight: 1024 } },
+          viewports: { viewCount: 2 },
+          materialDiagnostics: { total: 4, mappedCount: 4, transparentCount: 0, strictDiagnosticCount: 0, strictDiagnosticPanelIds: [] },
+        },
+        visualReadiness: { status: 'pass', reason: 'ready' },
+        interactionReadiness: { ready: true, status: 'ready', reason: 'ready' },
+        texture: { ready: 4, total: 4 },
+        htmlCanvas: { threeTexture: { htmlTextureAvailable: true, ready: true, threeRevision: '184' } },
+      },
+    ],
+  }));
+  let harnessRun = spawnSync(process.execPath, [
+    path.join(ROOT, 'scripts/diagnostics/xr-headset-summary-smoke.js'),
+    '--fixture',
+    harnessFixturePath,
+    '--report',
+    harnessReportPath,
+  ], { cwd: ROOT, encoding: 'utf8' });
+  assert.notEqual(harnessRun.status, 0, 'harness diagnostics must fail the production headset gate by default');
+  let harnessReport = JSON.parse(harnessRun.stdout);
+  assert.equal(harnessReport.failedChecks.includes('production-surface'), true);
+  assert.equal(harnessReport.nextAction, 'open-production-spatial-url');
+  let allowedHarnessRun = spawnSync(process.execPath, [
+    path.join(ROOT, 'scripts/diagnostics/xr-headset-summary-smoke.js'),
+    '--fixture',
+    harnessFixturePath,
+    '--report',
+    path.join(tempDir, 'allowed-harness-report.json'),
+    '--allow-harness',
+  ], { cwd: ROOT, encoding: 'utf8' });
+  assert.equal(allowedHarnessRun.status, 0, 'explicit harness checks must remain available');
 
   let emptyFixturePath = path.join(tempDir, 'empty-summary.json');
   let emptyReportPath = path.join(tempDir, 'empty-report.json');
@@ -394,6 +484,11 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   assert.ok(script.includes('Live panels mounted'), 'Three baseline must display mounted live DOM panel count');
   assert.ok(script.includes('Live panels prepared'), 'Three baseline must display prepared live DOM panel count');
   assert.ok(script.includes('HTML canvas support'), 'Three baseline must display HTML-in-Canvas support diagnostics');
+  assert.ok(script.includes('createXRThreeTextureCapabilitySummary'), 'Three baseline must use provider-owned Three texture capability diagnostics');
+  assert.ok(script.includes('Three HTMLTexture'), 'Three baseline must display Three HTMLTexture capability diagnostics');
+  assert.ok(script.includes('Three texture capability'), 'Three baseline must display Three texture readiness diagnostics');
+  assert.ok(script.includes('Surface'), 'Three baseline must classify itself as a diagnostic surface');
+  assert.ok(script.includes('Production'), 'Three baseline must make non-production status visible');
   assert.ok(script.includes('HTML canvas origin trial meta'), 'Three baseline must display origin-trial meta presence without exposing token content');
   assert.ok(script.includes('HTML canvas origin trial configured'), 'Three baseline must display origin-trial configured state without exposing token content');
   assert.ok(script.includes('HTML canvas origin trial header'), 'Three baseline must display origin-trial response header presence without exposing token content');
@@ -426,6 +521,19 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   assert.ok(script.includes('Server HTML canvas origin trial header'), 'Three baseline must display server-confirmed origin-trial response header presence');
   assert.ok(script.includes('Server HTML canvas flag'), 'Three baseline must display server-confirmed HTML-in-Canvas flag guidance');
   assert.ok(script.includes('Server HTML canvas texture upload'), 'Three baseline must display server-confirmed HTML-in-Canvas texture readiness');
+  assert.ok(script.includes('Server Three HTMLTexture'), 'Three baseline must display server-confirmed Three HTMLTexture capability');
+  assert.ok(script.includes('Server Three texture capability'), 'Three baseline must display server-confirmed Three texture readiness');
+  assert.ok(script.includes('Session base layer'), 'Three baseline must display WebXR base layer diagnostics');
+  assert.ok(script.includes('Session viewports'), 'Three baseline must display WebXR per-view viewport diagnostics');
+  assert.ok(script.includes('Panel material opacity'), 'Three baseline must display material transparency diagnostics');
+  assert.ok(script.includes('Panel material maps'), 'Three baseline must display texture map application diagnostics');
+  assert.ok(script.includes('Panel diagnostic materials'), 'Three baseline must display strict diagnostic material usage');
+  assert.ok(script.includes('Server surface'), 'Three baseline must display server-confirmed surface identity');
+  assert.ok(script.includes('Server base layer'), 'Three baseline must display server-confirmed base layer diagnostics');
+  assert.ok(script.includes('Server viewports'), 'Three baseline must display server-confirmed viewport diagnostics');
+  assert.ok(script.includes('Server material opacity'), 'Three baseline must display server-confirmed material transparency diagnostics');
+  assert.ok(script.includes('Server material maps'), 'Three baseline must display server-confirmed texture map diagnostics');
+  assert.ok(script.includes('Server diagnostic materials'), 'Three baseline must display server-confirmed diagnostic material usage');
   assert.ok(script.includes('Server scene quality'), 'Three baseline must display server-confirmed scene quality');
   assert.ok(script.includes('Server scene warnings'), 'Three baseline must display server-confirmed scene warning counts');
   assert.ok(script.includes('Server XR readiness'), 'Three baseline must display server-confirmed XR readiness');

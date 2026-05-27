@@ -113,6 +113,13 @@ describe('api-routes', () => {
       navigatorXr: true,
       modes: { inline: true, immersiveVr: false, immersiveAr: false },
       launch: { canLaunch: false, reason: 'insecure-context' },
+      surface: {
+        surfaceKind: 'production',
+        entrypoint: 'spatial-layout',
+        projectId: 'agent-portal',
+        targetSection: 'graph',
+        panelContentKind: 'portal-runtime-layout',
+      },
       session: {
         version: 'xr-three-session-telemetry-v1',
         status: 'preflight',
@@ -133,6 +140,15 @@ describe('api-routes', () => {
         controllers: 1,
         controllerRayVisuals: 1,
         hitReticleVisuals: 1,
+        renderState: { baseLayer: { present: true, framebufferWidth: 1832, framebufferHeight: 1920 } },
+        viewports: { viewCount: 2 },
+        materialDiagnostics: {
+          total: 4,
+          transparentCount: 0,
+          mappedCount: 4,
+          strictDiagnosticCount: 0,
+          strictDiagnosticPanelIds: [],
+        },
         selectedPanelId: 'front',
         hover: { panelId: 'front', point: { x: 0.4, y: 0.6 }, distance: 1.7, reticleVisible: true },
         drag: {
@@ -165,6 +181,14 @@ describe('api-routes', () => {
           blockingMissing: ['layoutsubtree', 'render-target-api'],
           missingCore: ['layoutsubtree', 'render-target-api'],
           missingTexture: ['texElementImage2D', 'copyElementImageToTexture'],
+          threeTexture: {
+            version: 'xr-three-texture-capability-v1',
+            htmlTextureAvailable: false,
+            textureUploadAvailable: false,
+            ready: false,
+            reason: 'three-html-texture-api-missing',
+            threeRevision: '184',
+          },
           originTrial: {
             status: 'origin-trial',
             chromeMilestoneRange: '148-150',
@@ -413,6 +437,16 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().latestClient.session.hover.panelId, 'front');
     assert.equal(summaryRes.json().latestClient.session.health.status, 'warning');
     assert.equal(summaryRes.json().latestClient.session.health.issues[0].code, 'low-fps');
+    assert.equal(summaryRes.json().latestClient.surface.surfaceKind, 'production');
+    assert.equal(summaryRes.json().latestClient.surface.entrypoint, 'spatial-layout');
+    assert.equal(summaryRes.json().latestClient.surface.projectId, 'agent-portal');
+    assert.equal(summaryRes.json().latestClient.surface.targetSection, 'graph');
+    assert.equal(summaryRes.json().latestClient.surface.panelContentKind, 'portal-runtime-layout');
+    assert.equal(summaryRes.json().latest.surface.surfaceKind, 'production');
+    assert.equal(summaryRes.json().latestClient.session.renderState.baseLayer.present, true);
+    assert.equal(summaryRes.json().latestClient.session.viewports.viewCount, 2);
+    assert.equal(summaryRes.json().latestClient.session.materialDiagnostics.mappedCount, 4);
+    assert.equal(summaryRes.json().latestClient.session.materialDiagnostics.strictDiagnosticCount, 0);
     assert.equal('token' in summaryRes.json().latestClient.session, false);
     assert.equal(summaryRes.json().latestClient.htmlCanvas.availability, 'origin-trial-or-flag-required');
     assert.equal(summaryRes.json().latestClient.htmlCanvas.originTrial.flagUrl, 'chrome://flags/#canvas-draw-element');
@@ -427,6 +461,8 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().latestClient.htmlCanvas.textureUploadAvailable, false);
     assert.deepEqual(summaryRes.json().latestClient.htmlCanvas.missingCore, ['layoutsubtree', 'render-target-api']);
     assert.deepEqual(summaryRes.json().latestClient.htmlCanvas.missingTexture, ['texElementImage2D', 'copyElementImageToTexture']);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.threeTexture.htmlTextureAvailable, false);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.threeTexture.reason, 'three-html-texture-api-missing');
     assert.equal(summaryRes.json().htmlCanvas.availability, 'origin-trial-or-flag-required');
     assert.equal(summaryRes.json().latestClient.sceneQuality.status, 'warning');
     assert.equal(summaryRes.json().latestClient.sceneQuality.lowQualityCount, 1);

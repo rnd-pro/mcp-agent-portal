@@ -767,6 +767,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRSpatialPreview'), 'SpatialLayout must use provider DOM preview projection');
     assert.ok(logic.includes('createXRThreePanelTextureBridge'), 'SpatialLayout must bridge the same DOM panel sources into the Three XR renderer');
     assert.ok(logic.includes('createXRThreeHtmlCanvasTextureResolver'), 'SpatialLayout must use provider HTML-in-Canvas texture resolver for Three XR panels');
+    assert.ok(logic.includes('createXRThreeTextureCapabilitySummary'), 'SpatialLayout must report provider-owned Three texture capability diagnostics');
     assert.ok(logic.includes('createXRSpatialWorkbenchSummary'), 'SpatialLayout must aggregate XR workbench status through symbiote-node/xr');
     assert.ok(logic.includes('createXRWorkbenchDiagnosticPayload'), 'SpatialLayout must compose XR diagnostic payloads through symbiote-node/xr');
     assert.ok(logic.includes('createXRPanelGeometrySummary'), 'SpatialLayout must display provider-owned XR geometry summaries');

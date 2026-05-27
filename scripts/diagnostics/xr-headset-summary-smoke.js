@@ -20,6 +20,11 @@ function parseArgs(argv) {
     requirePanels: true,
     requireVisualReady: true,
     requireInteractionReady: false,
+    requireProduction: true,
+    expectedSurfaceKind: 'production',
+    expectedEntrypoint: 'spatial-layout',
+    expectedProjectId: 'agent-portal',
+    expectedTargetSection: 'graph',
     allowStale: false,
     timeoutMs: 15000,
     waitMs: 0,
@@ -40,6 +45,10 @@ function parseArgs(argv) {
     else if (arg === '--no-require-panels') options.requirePanels = false;
     else if (arg === '--no-require-visual-ready') options.requireVisualReady = false;
     else if (arg === '--require-interaction-ready') options.requireInteractionReady = true;
+    else if (arg === '--allow-harness') options.requireProduction = false;
+    else if (arg === '--no-require-production') options.requireProduction = false;
+    else if (arg === '--expected-project') options.expectedProjectId = argv[++index];
+    else if (arg === '--expected-target') options.expectedTargetSection = argv[++index];
   }
   return options;
 }
@@ -101,8 +110,25 @@ function loadFixture(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-function resolveClientId(summary, explicitClientId) {
+function surfaceMatches(client, options = {}) {
+  let surface = client?.surface || {};
+  return (
+    surface.surfaceKind === options.expectedSurfaceKind &&
+    surface.entrypoint === options.expectedEntrypoint &&
+    surface.projectId === options.expectedProjectId &&
+    surface.targetSection === options.expectedTargetSection
+  );
+}
+
+function resolveClientId(summary, explicitClientId, options = {}) {
   if (explicitClientId) return explicitClientId;
+  if (options.requireProduction) {
+    let clients = Array.isArray(summary?.clients) ? summary.clients : [];
+    let productionImmersive = clients.find((client) => isImmersiveClient(client) && surfaceMatches(client, options));
+    if (productionImmersive) return productionImmersive.clientId;
+    let productionClient = clients.find((client) => surfaceMatches(client, options));
+    if (productionClient) return productionClient.clientId;
+  }
   return summary?.latestImmersiveClient?.clientId || summary?.latestClient?.clientId || null;
 }
 
@@ -128,9 +154,11 @@ function deriveNextAction(report) {
   if (failed.includes('client-selected')) return 'check-diagnostic-client';
   if (failed.includes('client-fresh')) return 'refresh-headset-client';
   if (failed.includes('immersive-client') || failed.includes('wait-timeout')) return 'enter-xr-in-headset';
+  if (failed.includes('production-surface')) return 'open-production-spatial-url';
   if (failed.includes('xr-frames')) return 'inspect-xr-render-loop';
   if (failed.includes('xr-panels')) return 'inspect-panel-scene-mount';
   if (failed.includes('visual-readiness')) return 'inspect-visual-readiness';
+  if (failed.includes('texture-readiness') || failed.includes('material-textures')) return 'inspect-xr-texture-path';
   if (failed.includes('interaction-readiness')) return 'inspect-interaction-readiness';
   if (typeof report?.interactionReadiness === 'string' && report.interactionReadiness.startsWith('blocked:')) {
     return 'inspect-interaction-readiness';
@@ -139,7 +167,7 @@ function deriveNextAction(report) {
 }
 
 function createHeadsetSummaryReport(summary, options = {}) {
-  let clientId = resolveClientId(summary, options.clientId);
+  let clientId = resolveClientId(summary, options.clientId, options);
   let diagnostics = createXRThreeDiagnosticServerSummary(summary, { clientId });
   let troubleshooting = createXRThreeTroubleshootingSummary(diagnostics);
   let client = diagnostics.currentClient || null;
@@ -149,6 +177,8 @@ function createHeadsetSummaryReport(summary, options = {}) {
   let panels = Number(session.panelCount || diagnostics.currentChecks?.panelCount || 0);
   let visualReadiness = diagnostics.currentVisualReadiness || null;
   let interactionReadiness = diagnostics.currentInteractionReadiness || null;
+  let surface = client?.surface || {};
+  let materialDiagnostics = session.materialDiagnostics || {};
 
   addCheck(checks, 'summary-available', Boolean(summary?.version), { version: summary?.version || null });
   addCheck(checks, 'client-selected', Boolean(client), { clientId });
@@ -159,6 +189,22 @@ function createHeadsetSummaryReport(summary, options = {}) {
   addCheck(checks, 'immersive-client', !options.requireImmersive || isImmersiveClient(client), {
     required: options.requireImmersive,
     mode: session.mode || client?.launch?.mode || null,
+  });
+  addCheck(checks, 'production-surface', !options.requireProduction || (
+    surface.surfaceKind === options.expectedSurfaceKind &&
+    surface.entrypoint === options.expectedEntrypoint &&
+    surface.projectId === options.expectedProjectId &&
+    surface.targetSection === options.expectedTargetSection
+  ), {
+    required: options.requireProduction,
+    surfaceKind: surface.surfaceKind || null,
+    entrypoint: surface.entrypoint || null,
+    projectId: surface.projectId || null,
+    targetSection: surface.targetSection || null,
+    expectedSurfaceKind: options.expectedSurfaceKind,
+    expectedEntrypoint: options.expectedEntrypoint,
+    expectedProjectId: options.expectedProjectId,
+    expectedTargetSection: options.expectedTargetSection,
   });
   addCheck(checks, 'xr-frames', !options.requireFrames || frames > 0, { required: options.requireFrames, frames });
   addCheck(checks, 'xr-panels', !options.requirePanels || panels > 0, { required: options.requirePanels, panels });
@@ -172,6 +218,32 @@ function createHeadsetSummaryReport(summary, options = {}) {
     readinessStatus: interactionReadiness?.status || null,
     reason: interactionReadiness?.reason || null,
     issueCodes: interactionReadiness?.issueCodes || [],
+  });
+  let textureReady = Number(diagnostics.currentTexture?.ready || 0);
+  let textureTotal = Number(diagnostics.currentTexture?.total || 0);
+  let strictDiagnosticCount = Number(materialDiagnostics.strictDiagnosticCount || 0);
+  let materialMapCount = Number(materialDiagnostics.mappedCount ?? materialDiagnostics.mapAppliedCount ?? 0);
+  let materialTotal = Number(materialDiagnostics.total || 0);
+  addCheck(checks, 'texture-readiness', !options.requireProduction || (
+    textureTotal > 0 &&
+    textureReady === textureTotal &&
+    diagnostics.currentHtmlCanvas?.threeTexture?.ready !== false
+  ), {
+    required: options.requireProduction,
+    textureReady,
+    textureTotal,
+    threeTextureReady: diagnostics.currentHtmlCanvas?.threeTexture?.ready ?? null,
+    reason: diagnostics.currentTexture?.reason || diagnostics.currentTexture?.stage || null,
+  });
+  addCheck(checks, 'material-textures', !options.requireProduction || (
+    materialTotal > 0 &&
+    materialMapCount === materialTotal &&
+    strictDiagnosticCount === 0
+  ), {
+    required: options.requireProduction,
+    materialMapCount,
+    materialTotal,
+    strictDiagnosticCount,
   });
 
   let failed = checks.filter((check) => check.status === 'fail');
@@ -189,6 +261,10 @@ function createHeadsetSummaryReport(summary, options = {}) {
     ageMs: client?.ageMs ?? null,
     sessionStatus: session.status || null,
     mode: session.mode || client?.launch?.mode || null,
+    surfaceKind: surface.surfaceKind || null,
+    entrypoint: surface.entrypoint || null,
+    projectId: surface.projectId || null,
+    targetSection: surface.targetSection || null,
     frames,
     panels,
     visualReadiness: visualReadiness ? `${visualReadiness.status}:${visualReadiness.reason}` : null,
@@ -197,6 +273,16 @@ function createHeadsetSummaryReport(summary, options = {}) {
       ? `${diagnostics.currentTexture.ready}/${diagnostics.currentTexture.total}:${diagnostics.currentTexture.reason || diagnostics.currentTexture.stage || 'ready'}`
       : null,
     htmlCanvasAvailability: diagnostics.currentHtmlCanvas?.availability || null,
+    threeHtmlTexture: diagnostics.currentHtmlCanvas?.threeTexture
+      ? `${diagnostics.currentHtmlCanvas.threeTexture.htmlTextureAvailable ? 'available' : 'missing'}:${diagnostics.currentHtmlCanvas.threeTexture.reason || diagnostics.currentHtmlCanvas.threeTexture.threeRevision || '-'}`
+      : null,
+    baseLayer: session.renderState?.baseLayer
+      ? `${session.renderState.baseLayer.present ? 'present' : 'missing'}:${session.renderState.baseLayer.framebufferWidth || '-'}x${session.renderState.baseLayer.framebufferHeight || '-'}`
+      : null,
+    viewports: session.viewports ? `${session.viewports.viewCount}` : null,
+    materialOpacity: session.materialDiagnostics ? `${materialDiagnostics.transparentCount}/${materialDiagnostics.total}` : null,
+    materialMaps: session.materialDiagnostics ? `${materialMapCount}/${materialDiagnostics.total}` : null,
+    diagnosticMaterials: session.materialDiagnostics ? `${materialDiagnostics.strictDiagnosticCount}:${materialDiagnostics.strictDiagnosticPanelIds?.join(',') || '-'}` : null,
     troubleshootingStatus: troubleshooting.status,
     troubleshootingIssueCodes: troubleshooting.issueCodes,
     failedChecks: failed.map((check) => check.id),
