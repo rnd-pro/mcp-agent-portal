@@ -611,7 +611,7 @@ export class SpatialLayout extends Symbiote {
     this.ref.enterButton.disabled = !launchGate.canStart;
     this.ref.enterButton.dataset.available = String(Boolean(launchGate.canStart));
     this.ref.enterButton.title = launchGate.canStart
-      ? `Start ${launch.mode}`
+      ? `Start ${launchGate.mode || launch.mode || WEBXR_MODES.immersiveVr}`
       : `XR unavailable: ${launchGate.reason}`;
 
     this.ref.status.replaceChildren(
@@ -684,7 +684,9 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Theme', summary.theme.scope || '-'),
       this._statusItem('Tokens', `${summary.theme.resolvedTokens}/${summary.theme.totalTokens}`),
       this._statusItem('XR', summary.support.status),
-      this._statusItem('XR launch', launch.canLaunch ? launch.mode : launch.reason),
+      this._statusItem('XR launch', launchGate.canProbeMode
+        ? `probe:${launchGate.mode || WEBXR_MODES.immersiveVr}`
+        : launch.canLaunch ? launch.mode : launch.reason),
       this._statusItem('XR gate', launchGate.blocked ? `blocked:${launchGate.reason}` : 'ready'),
       this._statusItem('XR gate checks', launchGate.blockingChecks?.length ? launchGate.blockingChecks.map((check) => check.id).join(', ') : '-'),
       this._statusItem('XR error', summary.error || '-'),
