@@ -660,6 +660,7 @@ describe('portal shell theme contract', () => {
     let logic = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.js'), 'utf8');
     let css = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.css.js'), 'utf8');
     let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
+    let workspace = fs.readFileSync(path.join(ROOT, 'web/components/PgWorkspace/PgWorkspace.js'), 'utf8');
 
     assert.ok(logic.includes("from 'symbiote-node/xr'"), 'SpatialLayout must consume public symbiote-node/xr exports');
     assert.ok(logic.includes('createXRSceneController'), 'SpatialLayout must use provider XR session controller');
@@ -818,6 +819,10 @@ describe('portal shell theme contract', () => {
     assert.equal(deepGraphAdapter.includes('packages/symbiote-node'), false, 'Deep graph adapter must not deep-import provider files');
     assert.ok(router.includes("'spatial-layout'"), 'Spatial route panel type must be registered');
     assert.ok(router.includes("registerSection('spatial'"), 'Spatial section must be registered');
+    assert.ok(workspace.includes('getHomeSections()'), 'workspace route preservation must validate home sections by workspace scope');
+    assert.ok(workspace.includes('getProjectSections()'), 'workspace route preservation must validate project sections by workspace scope');
+    assert.ok(workspace.includes('sections.some((section) => section.id === route.panel)'), 'workspace route preservation must not accept sections outside the active workspace scope');
+    assert.ok(workspace.includes("navigate(defaultSection, '', { project: this._projectId })"), 'project workspace default navigation must keep the project route query');
 
     for (let token of [
       '--sn-bg',

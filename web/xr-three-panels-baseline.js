@@ -429,6 +429,7 @@ function getLaunchGateSummary(options = {}) {
     preferredMode: modeSelect.value || null,
     selectedMode: mode,
     launch: launchRecommendation,
+    texture: options.texture || getTextureReadiness(),
     userActivation: window.navigator?.userActivation || null,
     requireUserActivation: options.requireUserActivation === true,
   });

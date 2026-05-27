@@ -15,6 +15,11 @@ const REQUIRED_ROWS = [
   'XR interaction checks',
   'Server visual readiness',
   'Server interaction readiness',
+  'Texture strict',
+  'Texture ready',
+  'Texture block reason',
+  'Three texture applied',
+  'Strict diagnostic panels',
 ];
 
 function parseArgs(argv) {
@@ -342,12 +347,22 @@ async function main() {
     let interactionChecks = inspected.rows['XR interaction checks'];
     let serverVisualReadiness = inspected.rows['Server visual readiness'];
     let serverInteractionReadiness = inspected.rows['Server interaction readiness'];
+    let textureStrict = inspected.rows['Texture strict'];
+    let textureReady = inspected.rows['Texture ready'];
+    let textureBlockReason = inspected.rows['Texture block reason'];
+    let textureApplied = inspected.rows['Three texture applied'];
+    let strictDiagnosticPanels = inspected.rows['Strict diagnostic panels'];
     let ok = (
       readiness === 'pass:ready' &&
       checks === 'ready' &&
+      interactionReadiness === 'ready:ready' &&
       serverVisualReadiness === 'pass:ready' &&
-      Boolean(serverInteractionReadiness) &&
-      serverInteractionReadiness !== '-' &&
+      serverInteractionReadiness === 'ready:ready' &&
+      textureStrict === 'required' &&
+      textureReady === '4/4' &&
+      textureBlockReason === '-' &&
+      textureApplied === '4/4' &&
+      strictDiagnosticPanels === '-' &&
       inspected.hasCanvas &&
       inspected.livePanelCount === 4 &&
       pageErrors.length === 0
@@ -366,6 +381,11 @@ async function main() {
       interactionChecks,
       serverVisualReadiness,
       serverInteractionReadiness,
+      textureStrict,
+      textureReady,
+      textureBlockReason,
+      textureApplied,
+      strictDiagnosticPanels,
       pageErrorCount: pageErrors.length,
       pageErrors,
       hasCanvas: inspected.hasCanvas,

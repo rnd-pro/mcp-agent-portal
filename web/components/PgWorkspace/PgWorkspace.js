@@ -80,7 +80,11 @@ export class PgWorkspace extends Symbiote {
         this._syncRouterFromHash();
       } else {
         let defaultSection = this._projectId === 'global' ? 'dashboard' : 'explorer';
-        navigate(defaultSection);
+        if (this._projectId === 'global') {
+          navigate(defaultSection);
+        } else {
+          navigate(defaultSection, '', { project: this._projectId });
+        }
       }
 
       // Sync sidebar highlight with current route
@@ -128,7 +132,10 @@ export class PgWorkspace extends Symbiote {
 
   _currentHashBelongsToWorkspace() {
     let route = getRoute();
-    if (!hasSection(route.panel)) return false;
+    let sections = this._projectId === 'global'
+      ? getHomeSections()
+      : getProjectSections();
+    if (!sections.some((section) => section.id === route.panel)) return false;
     let projectId = parseQuery(route.query).project || 'global';
     return projectId === this._projectId;
   }

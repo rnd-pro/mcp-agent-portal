@@ -137,6 +137,14 @@ test('XR Three baseline smoke verifies runtime visual readiness without new depe
   assert.ok(script.includes('XR interaction checks'), 'smoke must verify provider interaction readiness checks row');
   assert.ok(script.includes('Server visual readiness'), 'smoke must wait for server-confirmed visual readiness row');
   assert.ok(script.includes('Server interaction readiness'), 'smoke must wait for server-confirmed interaction readiness row');
+  assert.ok(script.includes('Texture strict'), 'smoke must require strict texture diagnostics');
+  assert.ok(script.includes("textureStrict === 'required'"), 'smoke must fail when strict texture mode is not active');
+  assert.ok(script.includes("textureReady === '4/4'"), 'smoke must fail unless all live textures are ready');
+  assert.ok(script.includes("textureBlockReason === '-'"), 'smoke must fail when texture readiness reports a block reason');
+  assert.ok(script.includes("textureApplied === '4/4'"), 'smoke must fail unless all Three textures are applied');
+  assert.ok(script.includes("strictDiagnosticPanels === '-'"), 'smoke must fail when strict mode rendered provider diagnostic panels');
+  assert.ok(script.includes("interactionReadiness === 'ready:ready'"), 'smoke must fail when local interaction readiness is blocked');
+  assert.ok(script.includes("serverInteractionReadiness === 'ready:ready'"), 'smoke must fail when server interaction readiness is blocked');
   assert.ok(script.includes('REQUIRED_ROWS'), 'smoke must keep local and public diagnostics row gates aligned');
   assert.ok(script.includes('missingRows'), 'smoke must report missing diagnostics rows instead of only throwing');
   assert.ok(script.includes('missing-diagnostics-rows'), 'smoke must classify stale public pages with a stable stage');
