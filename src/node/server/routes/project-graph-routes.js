@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { validateProjectGraphMetadata } from '../../../iso/project-graph-metadata.js';
+import { validateProjectGraphMetadata } from 'symbiote-node/graph';
 import { json, parseBody } from './http.js';
 
 function getProjectGraphMetadataPath(root) {

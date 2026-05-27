@@ -1,0 +1,269 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import path from 'node:path';
+import process from 'node:process';
+import {
+  createXRThreeDiagnosticServerSummary,
+  createXRThreeTroubleshootingSummary,
+} from 'symbiote-node/xr';
+
+function parseArgs(argv) {
+  let options = {
+    baseUrl: process.env.XR_HEADSET_BASE_URL || 'https://playground.rnd-pro.com/demos/agent-portal-vr',
+    clientId: process.env.XR_HEADSET_CLIENT_ID || null,
+    fixturePath: null,
+    reportPath: path.join('tmp', 'xr-headset-summary-smoke', 'report.json'),
+    requireImmersive: true,
+    requireFrames: true,
+    requirePanels: true,
+    requireVisualReady: true,
+    requireInteractionReady: false,
+    allowStale: false,
+    timeoutMs: 15000,
+    waitMs: 0,
+    intervalMs: 2000,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    let arg = argv[index];
+    if (arg === '--base-url') options.baseUrl = argv[++index];
+    else if (arg === '--client-id') options.clientId = argv[++index];
+    else if (arg === '--fixture') options.fixturePath = argv[++index];
+    else if (arg === '--report') options.reportPath = argv[++index];
+    else if (arg === '--timeout-ms') options.timeoutMs = Number(argv[++index]) || options.timeoutMs;
+    else if (arg === '--wait-ms') options.waitMs = Number(argv[++index]) || 0;
+    else if (arg === '--interval-ms') options.intervalMs = Number(argv[++index]) || options.intervalMs;
+    else if (arg === '--allow-stale') options.allowStale = true;
+    else if (arg === '--no-require-immersive') options.requireImmersive = false;
+    else if (arg === '--no-require-frames') options.requireFrames = false;
+    else if (arg === '--no-require-panels') options.requirePanels = false;
+    else if (arg === '--no-require-visual-ready') options.requireVisualReady = false;
+    else if (arg === '--require-interaction-ready') options.requireInteractionReady = true;
+  }
+  return options;
+}
+
+function createSummaryUrl(baseUrl) {
+  let base = new URL(baseUrl);
+  let pathname = base.pathname.endsWith('/') ? base.pathname.slice(0, -1) : base.pathname;
+  base.pathname = `${pathname}/api/xr-diagnostics/summary`.replace(/\/+/g, '/');
+  base.search = '';
+  base.hash = '';
+  return base;
+}
+
+function requestJson(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let transport = url.protocol === 'https:' ? https : http;
+    let request = transport.request(url, { method: 'GET', timeout: timeoutMs, headers: { Accept: 'application/json' } }, (response) => {
+      let chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`HTTP ${response.statusCode} ${url.href}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on('timeout', () => {
+      request.destroy(new Error(`Timeout ${timeoutMs}ms ${url.href}`));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sanitizeErrorMessage(error) {
+  let message = String(error?.message || error || 'unknown-error');
+  return message.replace(/https?:\/\/[^\s?#]+(?:\?[^\s#]*)?(?:#[^\s]*)?/g, (value) => {
+    try {
+      let url = new URL(value);
+      url.search = '';
+      url.hash = '';
+      return url.href;
+    } catch {
+      return '[url-redacted]';
+    }
+  });
+}
+
+function loadFixture(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function resolveClientId(summary, explicitClientId) {
+  if (explicitClientId) return explicitClientId;
+  return summary?.latestImmersiveClient?.clientId || summary?.latestClient?.clientId || null;
+}
+
+function isImmersiveClient(client) {
+  return Boolean(
+    client?.session?.active ||
+    client?.session?.mode?.startsWith?.('immersive-') ||
+    client?.launch?.mode?.startsWith?.('immersive-') ||
+    client?.modes?.immersiveVr ||
+    client?.modes?.immersiveAr
+  );
+}
+
+function addCheck(checks, id, pass, details = {}) {
+  checks.push({ id, ...details, status: pass ? 'pass' : 'fail' });
+}
+
+function deriveNextAction(report) {
+  let failed = Array.isArray(report?.failedChecks) ? report.failedChecks : [];
+  if (failed.includes('summary-available') || failed.includes('summary-fetch')) return 'check-summary-endpoint';
+  if (failed.includes('client-selected') && Number(report?.summaryClientCount || 0) <= 0) return 'open-xr-demo-page';
+  if (failed.includes('client-selected') && report?.clientId) return 'check-requested-diagnostic-client';
+  if (failed.includes('client-selected')) return 'check-diagnostic-client';
+  if (failed.includes('client-fresh')) return 'refresh-headset-client';
+  if (failed.includes('immersive-client') || failed.includes('wait-timeout')) return 'enter-xr-in-headset';
+  if (failed.includes('xr-frames')) return 'inspect-xr-render-loop';
+  if (failed.includes('xr-panels')) return 'inspect-panel-scene-mount';
+  if (failed.includes('visual-readiness')) return 'inspect-visual-readiness';
+  if (failed.includes('interaction-readiness')) return 'inspect-interaction-readiness';
+  if (typeof report?.interactionReadiness === 'string' && report.interactionReadiness.startsWith('blocked:')) {
+    return 'inspect-interaction-readiness';
+  }
+  return report?.ok ? 'headset-summary-ready' : 'inspect-headset-summary';
+}
+
+function createHeadsetSummaryReport(summary, options = {}) {
+  let clientId = resolveClientId(summary, options.clientId);
+  let diagnostics = createXRThreeDiagnosticServerSummary(summary, { clientId });
+  let troubleshooting = createXRThreeTroubleshootingSummary(diagnostics);
+  let client = diagnostics.currentClient || null;
+  let session = diagnostics.currentSession || {};
+  let checks = [];
+  let frames = Number(session.frames || diagnostics.currentChecks?.frames || 0);
+  let panels = Number(session.panelCount || diagnostics.currentChecks?.panelCount || 0);
+  let visualReadiness = diagnostics.currentVisualReadiness || null;
+  let interactionReadiness = diagnostics.currentInteractionReadiness || null;
+
+  addCheck(checks, 'summary-available', Boolean(summary?.version), { version: summary?.version || null });
+  addCheck(checks, 'client-selected', Boolean(client), { clientId });
+  addCheck(checks, 'client-fresh', options.allowStale || client?.stale === false, {
+    stale: client?.stale ?? null,
+    ageMs: client?.ageMs ?? null,
+  });
+  addCheck(checks, 'immersive-client', !options.requireImmersive || isImmersiveClient(client), {
+    required: options.requireImmersive,
+    mode: session.mode || client?.launch?.mode || null,
+  });
+  addCheck(checks, 'xr-frames', !options.requireFrames || frames > 0, { required: options.requireFrames, frames });
+  addCheck(checks, 'xr-panels', !options.requirePanels || panels > 0, { required: options.requirePanels, panels });
+  addCheck(checks, 'visual-readiness', !options.requireVisualReady || visualReadiness?.status === 'pass', {
+    required: options.requireVisualReady,
+    readinessStatus: visualReadiness?.status || null,
+    reason: visualReadiness?.reason || null,
+  });
+  addCheck(checks, 'interaction-readiness', !options.requireInteractionReady || interactionReadiness?.ready === true, {
+    required: options.requireInteractionReady,
+    readinessStatus: interactionReadiness?.status || null,
+    reason: interactionReadiness?.reason || null,
+    issueCodes: interactionReadiness?.issueCodes || [],
+  });
+
+  let failed = checks.filter((check) => check.status === 'fail');
+  return {
+    ok: failed.length === 0,
+    version: 'xr-headset-summary-smoke-v1',
+    clientId,
+    summaryClientCount: Number(summary?.clientCount || summary?.clients?.length || 0),
+    summaryImmersiveClientCount: Number(summary?.immersiveClientCount || 0),
+    selectedClientId: client?.clientId || null,
+    latestClientId: summary?.latestClient?.clientId || null,
+    latestImmersiveClientId: summary?.latestImmersiveClient?.clientId || null,
+    phase: client?.phase || null,
+    stale: client?.stale ?? null,
+    ageMs: client?.ageMs ?? null,
+    sessionStatus: session.status || null,
+    mode: session.mode || client?.launch?.mode || null,
+    frames,
+    panels,
+    visualReadiness: visualReadiness ? `${visualReadiness.status}:${visualReadiness.reason}` : null,
+    interactionReadiness: interactionReadiness ? `${interactionReadiness.status}:${interactionReadiness.reason}` : null,
+    texture: diagnostics.currentTexture
+      ? `${diagnostics.currentTexture.ready}/${diagnostics.currentTexture.total}:${diagnostics.currentTexture.reason || diagnostics.currentTexture.stage || 'ready'}`
+      : null,
+    htmlCanvasAvailability: diagnostics.currentHtmlCanvas?.availability || null,
+    troubleshootingStatus: troubleshooting.status,
+    troubleshootingIssueCodes: troubleshooting.issueCodes,
+    failedChecks: failed.map((check) => check.id),
+    checks,
+  };
+}
+
+async function main() {
+  let options = parseArgs(process.argv.slice(2));
+  let summaryUrl = options.fixturePath ? null : createSummaryUrl(options.baseUrl);
+  let startedAt = Date.now();
+  let lastReport = null;
+  let lastError = null;
+  let attempts = 0;
+
+  do {
+    attempts += 1;
+    try {
+      let summary = options.fixturePath
+        ? loadFixture(options.fixturePath)
+        : await requestJson(summaryUrl, options.timeoutMs);
+      lastReport = createHeadsetSummaryReport(summary, options);
+      lastError = null;
+      if (lastReport.ok || !options.waitMs || options.fixturePath) break;
+    } catch (error) {
+      lastError = error;
+      if (!options.waitMs || options.fixturePath) throw error;
+    }
+    let remainingMs = options.waitMs - (Date.now() - startedAt);
+    if (!options.waitMs || remainingMs <= 0 || options.fixturePath) break;
+    await delay(Math.min(options.intervalMs, remainingMs));
+  } while (Date.now() - startedAt < options.waitMs);
+
+  if (!lastReport && lastError && (!options.waitMs || options.fixturePath)) throw lastError;
+  let report = lastReport || {
+    ok: false,
+    version: 'xr-headset-summary-smoke-v1',
+    failedChecks: ['summary-fetch'],
+    error: 'summary-fetch-failed',
+  };
+  let elapsedMs = Date.now() - startedAt;
+  report.waitMs = options.waitMs;
+  report.deadlineMs = options.waitMs;
+  report.elapsedMs = elapsedMs;
+  report.timedOut = Boolean(options.waitMs && !report.ok && elapsedMs >= options.waitMs);
+  if (report.timedOut && !report.failedChecks.includes('wait-timeout')) {
+    report.failedChecks.push('wait-timeout');
+    report.checks = Array.isArray(report.checks) ? report.checks : [];
+    addCheck(report.checks, 'wait-timeout', false, {
+      waitMs: options.waitMs,
+      elapsedMs,
+      attempts,
+    });
+  }
+  report.attempts = attempts;
+  report.lastError = lastError ? sanitizeErrorMessage(lastError) : null;
+  report.lastErrorName = lastError?.name || null;
+  report.summaryUrl = options.fixturePath ? null : createSummaryUrl(options.baseUrl).href;
+  report.nextAction = deriveNextAction(report);
+  report.reportPath = path.resolve(options.reportPath);
+  fs.mkdirSync(path.dirname(report.reportPath), { recursive: true });
+  fs.writeFileSync(report.reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exitCode = 1;
+}
+
+main().catch((error) => {
+  process.stderr.write(`${error.stack || error.message}\n`);
+  process.exitCode = 1;
+});

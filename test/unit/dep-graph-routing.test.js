@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getGraphUrlParams, parseGraphHash, updateHashParam } from '../../web/panels/dep-graph-routing.js';
+import { getGraphUrlParams, parseGraphHash, updateHashParam } from 'symbiote-node/ui';
 
 describe('dep-graph-routing', () => {
   it('parseGraphHash returns drill path and query params', () => {

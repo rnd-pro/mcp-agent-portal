@@ -1,7 +1,8 @@
 // @ctx .context/web/panels/file-tree.ctx
 import Symbiote from '@symbiotejs/symbiote';
 import 'symbiote-node/ui';
-import { api, state, events, emit } from '../../app.js';
+import { api, state, events, emit, getActiveRouteProjectId, skeletonMatchesProject } from '../../app.js';
+import { events as dashEvents, state as dashState } from '../../dashboard-state.js';
 import {
   collapseTree,
   highlightTreePath,
@@ -30,6 +31,7 @@ export class FileTree extends Symbiote {
 
   _treeData = null;
   _treeItems = [];
+  _treeSyncPending = false;
 
   initCallback() {
     setupTreePanel(this, {
@@ -37,19 +39,25 @@ export class FileTree extends Symbiote {
       onSelect: (item) => this._handleTreeSelect(item),
       onToggle: (item) => this._selectItem(item),
     });
+    this._syncTreeWhenReady();
 
     events.addEventListener('skeleton-loaded', (event) => {
+      if (!skeletonMatchesProject(event.detail, getActiveRouteProjectId())) return;
       this._renderTree(event.detail);
       if (state.activeFile) {
         requestAnimationFrame(() => this._highlightFile(state.activeFile));
       }
     });
 
-    if (state.skeleton) {
+    if (state.skeleton && skeletonMatchesProject(state.skeleton, getActiveRouteProjectId())) {
       this._renderTree(state.skeleton);
     } else {
       this._fetchSkeleton();
     }
+
+    dashEvents.addEventListener('active-project-changed', () => {
+      this._fetchSkeleton();
+    });
 
     events.addEventListener('file-selected', (event) => {
       if (event.detail.fromRoute || event.detail.source === 'canvas') {
@@ -60,9 +68,13 @@ export class FileTree extends Symbiote {
 
   async _fetchSkeleton() {
     try {
-      const skeleton = await api('/api/skeleton', {});
-      if (!state.skeleton) {
+      const projectId = getActiveRouteProjectId();
+      const skeleton = await api('/api/skeleton', { projectId });
+      if (getActiveRouteProjectId() !== projectId) return;
+      if (!skeletonMatchesProject(skeleton, projectId)) return;
+      if (!state.skeleton || state.skeletonProjectId !== projectId) {
         state.skeleton = skeleton;
+        state.skeletonProjectId = projectId;
       }
       this._renderTree(skeleton);
       emit('skeleton-loaded', skeleton);
@@ -214,7 +226,7 @@ export class FileTree extends Symbiote {
 
     this._treeItems = this._buildTreeItems(this._treeData);
     showTree(this);
-    setTreeItems(this, this._treeItems, this.$.filterText);
+    this._syncTreeItems();
   }
 
   static _getFileIcon(name) {
@@ -230,6 +242,46 @@ export class FileTree extends Symbiote {
 
   _applyFilter() {
     syncTreeFilter(this, this.$.filterText);
+  }
+
+  _syncTreeItems() {
+    showTree(this);
+    setTreeItems(this, this._treeItems, this.$.filterText);
+    this._syncDirectTreePanel();
+    this._syncTreeWhenReady();
+  }
+
+  _syncTreeWhenReady() {
+    if (this._treeSyncPending) return;
+    this._treeSyncPending = true;
+    Promise.all([
+      customElements.whenDefined('sn-tree-panel'),
+      customElements.whenDefined('sn-tree-view'),
+    ]).then(() => {
+      requestAnimationFrame(() => {
+        this._treeSyncPending = false;
+        setupTreePanel(this, {
+          storageKey: TREE_STORAGE_KEY,
+          onSelect: (item) => this._handleTreeSelect(item),
+          onToggle: (item) => this._selectItem(item),
+        });
+        if (this._treeItems.length > 0) {
+          showTree(this);
+          setTreeItems(this, this._treeItems, this.$.filterText);
+          this._syncDirectTreePanel();
+        }
+      });
+    }).catch(() => {
+      this._treeSyncPending = false;
+    });
+  }
+
+  _syncDirectTreePanel() {
+    let panel = this.ref?.panel || this.querySelector('sn-tree-panel');
+    if (!panel?.setItems) return;
+    panel.setItems(this._treeItems);
+    panel.filterText = this.$.filterText;
+    panel.showTree?.();
   }
 }
 

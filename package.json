@@ -10,6 +10,10 @@
   "scripts": {
     "start": "node bin/mcp-agent-portal.js",
     "dev": "node index.js --dev",
+    "xr:visual-smoke": "node scripts/diagnostics/xr-visual-agent-smoke.js",
+    "xr:three-smoke": "node scripts/diagnostics/xr-three-baseline-smoke.js",
+    "xr:headset-summary": "node scripts/diagnostics/xr-headset-summary-smoke.js",
+    "xr:headset-wait": "node scripts/diagnostics/xr-headset-summary-smoke.js --wait-ms 120000 --interval-ms 2000",
     "test:audit": "node scripts/test-hygiene-audit.js",
     "test:unit": "node --test --test-timeout 10000 test/unit/*.test.js",
     "test:integration": "node --test --test-timeout 20000 test/integration/*.test.js",
@@ -27,10 +31,13 @@
   "author": "RND-PRO",
   "license": "MIT",
   "dependencies": {
+    "@iwer/devui": "^1.1.2",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@symbiotejs/symbiote": "^3.5.8",
+    "iwer": "^2.2.1",
     "symbiote-node": "file:packages/symbiote-node",
     "telegraf": "^4.16.3",
+    "three": "^0.170.0",
     "ws": "^8.18.0"
   },
   "engines": {

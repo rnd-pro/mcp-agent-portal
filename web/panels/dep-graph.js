@@ -10,55 +10,56 @@
  */
 import Symbiote from '@symbiotejs/symbiote';
 import {
+  buildCanvasGraphModelFromSkeleton,
+  buildFileGraph,
+  buildGraphStatItems,
+  buildStructuredGraph,
+  normalizeProjectGraphMetadata,
+  prepareGraphBuild,
+} from 'symbiote-node/graph';
+import {
   Frame,
+  addGraphDirectoryFrames as addDirectoryFrames,
+  buildFlatPathHash,
   computeAutoLayout,
   computeTreeLayout,
   computeInitialGraphPositions,
   createForceLayoutPayload,
-  getDrillableFiles,
-  getGraphCacheKey,
-  getOrBuildGraph,
-  SubgraphRouter,
-  PinExpansion,
-  ForceLayout,
-} from 'symbiote-node/ui';
-import { api, state, events, emit, resolveProjectPath } from '../app.js';
-import { emit as dashEmit } from '../dashboard-state.js';
-import { persistUiValue, readUiValue } from '../common/ui-state.js';
-
-import { buildFileGraph, buildStructuredGraph } from '../services/skeleton-parser.js';
-import PCB_CSS from './dep-graph.css.js';
-import { findConnectionPath, resolveSymbolFile } from './dep-graph-focus.js';
-import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
-import { addDirectoryFrames, setGraphLayerVisible, toggleLayerButtonState } from './dep-graph-frames.js';
-import { normalizeProjectGraphMetadata } from '../services/project-graph-metadata.js';
-import { buildCanvasGraphModelFromSkeleton } from '../services/project-graph-canvas-model.js';
-import { buildGraphStatItems, prepareGraphBuild } from './dep-graph-build.js';
-import {
-  getNextPathStyle,
-  renderPathStyleButton,
-  renderViewModeButton,
-  resolveInitialViewMode,
-} from './dep-graph-modes.js';
-import { getGraphUrlParams, parseGraphHash, updateHashParam } from './dep-graph-routing.js';
-import {
-  mountDepGraphTemplate,
-  renderClusterPanel,
-  renderGraphStats,
-} from './dep-graph-dom.js';
-import {
-  buildFlatPathHash,
   getFileSelectionNodeId,
   getFlatFocusRestoreKey,
   getGraphHashNavigationState,
+  getDrillableFiles,
+  getGraphCacheKey,
+  getGraphUrlParams,
+  getOrBuildGraph,
+  getNextGraphPathStyle as getNextPathStyle,
+  parseGraphHash,
+  renderClusterPanel,
+  renderGraphPathStyleButton as renderPathStyleButton,
+  renderGraphStats,
+  renderGraphViewModeButton as renderViewModeButton,
   resolveFlatHashChange,
   resolveGraphNodeClick,
+  resolveInitialGraphViewMode as resolveInitialViewMode,
   resolveToolbarAction,
-  selectLabelMode,
+  selectGraphLabelMode as selectLabelMode,
+  setGraphLayerVisible,
   shouldClearFocusOnSelection,
   shouldFitForceLayoutInitialTick,
   shouldRestoreFlatFocus,
-} from './dep-graph-ui.js';
+  SubgraphRouter,
+  PinExpansion,
+  toggleGraphLayerButtonState as toggleLayerButtonState,
+  ForceLayout,
+  updateHashParam,
+} from 'symbiote-node/ui';
+import { findConnectionPath, resolveSymbolFile } from 'symbiote-node/graph';
+import { api, state, events, emit, getActiveRouteProjectId, resolveProjectPath, skeletonMatchesProject } from '../app.js';
+import { emit as dashEmit, events as dashEvents, state as dashState } from '../dashboard-state.js';
+import { persistUiValue, readUiValue } from '../common/ui-state.js';
+
+import PCB_CSS from './dep-graph.css.js';
+import DEP_GRAPH_TEMPLATE from './dep-graph-template.js';
 export class DepGraph extends Symbiote {
   init$ = {};
 
@@ -105,7 +106,7 @@ export class DepGraph extends Symbiote {
 
   initCallback() {
     // Build DOM
-    mountDepGraphTemplate(this, DEP_GRAPH_TEMPLATE);
+    this.replaceChildren(document.createRange().createContextualFragment(DEP_GRAPH_TEMPLATE));
 
     this._canvas = this.querySelector('node-canvas');
     this._pgCanvasGraph = this.querySelector('canvas-graph');
@@ -225,7 +226,7 @@ export class DepGraph extends Symbiote {
       this._lastFlatFocusRestoreKey = null;
       if (this._failsafeTimer) { clearTimeout(this._failsafeTimer); this._failsafeTimer = null; }
       this._showLoader();
-      if (state.skeleton) {
+      if (state.skeleton && skeletonMatchesProject(state.skeleton, getActiveRouteProjectId())) {
         this._buildGraph(state.skeleton);
       }
     };
@@ -285,7 +286,7 @@ export class DepGraph extends Symbiote {
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0].contentRect;
       if (rect.width > 0 && rect.height > 0) {
-        if (!this._graphBuilt && state.skeleton) {
+        if (!this._graphBuilt && state.skeleton && skeletonMatchesProject(state.skeleton, getActiveRouteProjectId())) {
           // Wrap in rAF to prevent loop if ResizeObserver caught mid-render
           requestAnimationFrame(() => this._buildGraph(state.skeleton));
         }
@@ -296,6 +297,7 @@ export class DepGraph extends Symbiote {
 
     this._onSkeletonLoaded = (e) => {
       if (this._graphBuilt || this.style.display === 'none' || this.offsetWidth === 0) return;
+      if (!skeletonMatchesProject(e.detail, getActiveRouteProjectId())) return;
       requestAnimationFrame(() => this._buildGraph(e.detail));
     };
     
@@ -327,13 +329,30 @@ export class DepGraph extends Symbiote {
 
     // Wait for canvas to initialize, then listen for data
     events.addEventListener('skeleton-loaded', this._onSkeletonLoaded);
+    this._onActiveProjectChanged = () => {
+      this._graphBuilt = false;
+      this._showLoader();
+      const projectId = getActiveRouteProjectId();
+      api('/api/skeleton', { projectId }).then((skeleton) => {
+        if (getActiveRouteProjectId() !== projectId) return;
+        if (!skeletonMatchesProject(skeleton, projectId)) return;
+        state.skeleton = skeleton;
+        state.skeletonProjectId = projectId;
+        emit('skeleton-loaded', skeleton);
+      }).catch(() => {});
+    };
+    dashEvents.addEventListener('active-project-changed', this._onActiveProjectChanged);
 
     // Initial fetch if we don't have it
-    if (!state.skeleton) {
+    if (!state.skeleton || !skeletonMatchesProject(state.skeleton, getActiveRouteProjectId())) {
       // Self-fetch skeleton (graph panel may mount before FileTree)
-      api('/api/skeleton', {}).then((skeleton) => {
+      const projectId = getActiveRouteProjectId();
+      api('/api/skeleton', { projectId }).then((skeleton) => {
+        if (getActiveRouteProjectId() !== projectId) return;
+        if (!skeletonMatchesProject(skeleton, projectId)) return;
         if (skeleton && !this._graphBuilt) {
           state.skeleton = skeleton;
+          state.skeletonProjectId = projectId;
           emit('skeleton-loaded', skeleton);
         }
       }).catch(() => {});
@@ -444,6 +463,7 @@ export class DepGraph extends Symbiote {
   disconnectedCallback() {
     super.disconnectedCallback?.();
     if (this._onSkeletonLoaded) events.removeEventListener('skeleton-loaded', this._onSkeletonLoaded);
+    if (this._onActiveProjectChanged) dashEvents.removeEventListener('active-project-changed', this._onActiveProjectChanged);
     if (this._onFollowStateChanged) events.removeEventListener('follow-state-changed', this._onFollowStateChanged);
     if (this._onFollowFocusChanged) events.removeEventListener('follow-focus-changed', this._onFollowFocusChanged);
     if (this._onFileSelected) events.removeEventListener('file-selected', this._onFileSelected);

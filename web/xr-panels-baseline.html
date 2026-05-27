@@ -3,14 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>XR Diagnostics</title>
+<title>XR Empty Panels Baseline</title>
 <link rel="stylesheet" href="/packages/symbiote-node/themes/default-provider.css">
 <script type="importmap">
 {
   "imports": {
-    "symbiote-node/xr": "/packages/symbiote-node/xr/index.js",
-    "iwer": "/vendor/iwer/build/iwer.module.js?v=iwer-2-2-1",
-    "@iwer/devui": "/vendor/iwer-devui/build/iwer-devui.module.js?v=devui-1-1-2"
+    "symbiote-node/xr": "/packages/symbiote-node/xr/index.js"
   }
 }
 </script>
@@ -44,14 +42,6 @@
     margin: 0;
   }
 
-  main {
-    display: grid;
-    gap: var(--sn-space-lg);
-    grid-template-columns: minmax(320px, 0.86fr) minmax(0, 1.14fr);
-    min-height: 0;
-    padding: var(--sn-space-lg);
-  }
-
   button {
     background: var(--sn-button-primary-bg);
     border: 1px solid var(--sn-button-primary-bg);
@@ -72,6 +62,14 @@
     cursor: default;
   }
 
+  main {
+    display: grid;
+    gap: var(--sn-space-lg);
+    grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.18fr);
+    min-height: 0;
+    padding: var(--sn-space-lg);
+  }
+
   section {
     background: var(--sn-panel-bg);
     border: 1px solid var(--sn-node-border);
@@ -80,13 +78,7 @@
     overflow: hidden;
   }
 
-  .status {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .status h2,
-  .preview h2 {
+  h2 {
     border-bottom: 1px solid var(--sn-node-border);
     font-size: 12px;
     letter-spacing: 0;
@@ -97,8 +89,9 @@
 
   dl {
     display: grid;
-    grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+    grid-template-columns: minmax(128px, 0.72fr) minmax(0, 1.28fr);
     margin: 0;
+    max-height: calc(100vh - 150px);
     overflow: auto;
   }
 
@@ -125,17 +118,12 @@
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
-  .actions {
-    display: flex;
-    gap: var(--sn-space-sm);
-  }
-
   .stage {
     background:
-      radial-gradient(circle at 50% 34%, color-mix(in oklch, var(--sn-node-selected) 16%, transparent), transparent 36%),
+      radial-gradient(circle at 50% 30%, color-mix(in oklch, var(--sn-node-selected) 15%, transparent), transparent 34%),
       var(--sn-bg);
     display: grid;
-    gap: var(--sn-space-md);
+    gap: var(--sn-space-lg);
     grid-template-columns: repeat(2, minmax(0, 1fr));
     min-height: 0;
     padding: var(--sn-space-lg);
@@ -146,28 +134,20 @@
     border: 1px solid var(--sn-xr-panel-border, var(--sn-node-border));
     border-radius: var(--sn-xr-panel-radius, var(--sn-card-radius));
     box-shadow: var(--sn-xr-panel-shadow, var(--sn-node-shadow));
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
     min-height: 160px;
-    overflow: hidden;
+    outline: 1px solid transparent;
   }
 
-  .panel strong {
-    border-bottom: 1px solid var(--sn-node-border);
-    padding: var(--sn-space-sm) var(--sn-space-md);
-  }
-
-  .panel p {
-    color: var(--sn-text-dim);
-    margin: 0;
-    padding: var(--sn-space-md);
-  }
+  .panel:nth-child(1) { opacity: 0.98; }
+  .panel:nth-child(2) { opacity: 0.88; }
+  .panel:nth-child(3) { opacity: 0.78; }
+  .panel:nth-child(4) { opacity: 0.68; }
 
   canvas {
     background: var(--sn-bg);
     border-top: 1px solid var(--sn-node-border);
     display: block;
-    height: 180px;
+    height: 220px;
     width: 100%;
   }
 
@@ -180,28 +160,25 @@
 </head>
 <body>
   <header>
-    <h1>XR Diagnostics</h1>
-    <div class="actions">
-      <button id="emulate" type="button">Install IWER</button>
-      <button id="enter" type="button" disabled>Enter VR/AR</button>
-    </div>
+    <h1>XR Empty Panels Baseline</h1>
+    <button id="enter" type="button" disabled>Checking XR...</button>
   </header>
   <main>
-    <section class="status">
+    <section>
       <h2>Runtime</h2>
       <dl id="status"></dl>
     </section>
     <section class="preview">
-      <h2>Visible DOM Blocks</h2>
-      <div class="stage" id="stage">
-        <article class="panel"><strong>Panel A</strong><p>DOM visibility probe.</p></article>
-        <article class="panel"><strong>Panel B</strong><p>Theme token probe.</p></article>
-        <article class="panel"><strong>Panel C</strong><p>Layout surface probe.</p></article>
-        <article class="panel"><strong>Panel D</strong><p>XR session probe.</p></article>
+      <h2>DOM Panel Preview</h2>
+      <div class="stage" aria-label="Empty panel preview">
+        <div class="panel"></div>
+        <div class="panel"></div>
+        <div class="panel"></div>
+        <div class="panel"></div>
       </div>
-      <canvas id="canvas" width="960" height="540"></canvas>
+      <canvas id="canvas" width="1280" height="720"></canvas>
     </section>
   </main>
-  <script type="module" src="/xr-diagnostics.js"></script>
+  <script type="module" src="xr-panels-baseline.js"></script>
 </body>
 </html>

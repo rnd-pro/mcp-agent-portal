@@ -66,56 +66,56 @@ export const instances = [
 export const projectHistory = {
   projects: [
     {
-      id: 'proj-portal',
+      id: 'agent-portal',
       name: 'Agent Portal',
       path: '/workspace/agent-portal',
       color: '#4c8bf5',
       lastOpened: Date.now() - 60_000,
     },
     {
-      id: 'proj-pool',
+      id: 'agent-pool',
       name: 'Agent Pool MCP',
       path: '/workspace/agent-portal',
       color: '#e8710a',
       lastOpened: Date.now() - 3600_000,
     },
     {
-      id: 'proj-graph',
+      id: 'project-graph',
       name: 'Project Graph MCP',
       path: '/workspace/agent-portal',
       color: '#34a853',
       lastOpened: Date.now() - 7200_000,
     },
     {
-      id: 'proj-node',
+      id: 'symbiote-node',
       name: 'Symbiote Node',
       path: '/workspace/agent-portal',
       color: '#fbbc04',
       lastOpened: Date.now() - 86400_000,
     },
     {
-      id: 'proj-context',
+      id: 'context-x',
       name: 'Context X MCP',
       path: '/workspace/agent-portal',
       color: '#9334e6',
       lastOpened: Date.now() - 172800_000,
     },
     {
-      id: 'proj-browser',
+      id: 'browser-x',
       name: 'Browser X MCP',
       path: '/workspace/agent-portal',
       color: '#00bcd4',
       lastOpened: Date.now() - 604800_000,
     },
     {
-      id: 'proj-terminal',
+      id: 'terminal-x',
       name: 'Terminal X MCP',
       path: '/workspace/agent-portal',
       color: '#ea4335',
       lastOpened: Date.now() - 604800_000,
     },
   ],
-  activeIds: ['proj-portal', 'proj-pool', 'proj-graph', 'proj-node'],
+  activeIds: ['agent-portal', 'agent-pool', 'project-graph', 'symbiote-node'],
 };
 
 // ── Chats ────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ export const chats = [
     agent: 'orchestrator',
     createdAt: Date.now() - 7200_000,
     updatedAt: Date.now() - 1800_000,
-    projectId: 'proj-portal',
+    projectId: 'agent-portal',
     messages: [
       // 1. User asks about the project
       { role: 'user', text: 'Give me a comprehensive overview of Agent Portal — architecture, features, and how everything fits together.' },
@@ -182,7 +182,7 @@ export const chats = [
     agent: 'single',
     createdAt: Date.now() - 86400_000,
     updatedAt: Date.now() - 43200_000,
-    projectId: 'proj-pool',
+    projectId: 'agent-pool',
     messages: [
       { role: 'user', text: 'Describe the agent-pool-mcp package — what it does, its tools, and how delegation works.' },
       { role: 'thinking', elapsed: 6, done: true, meta: { tools: 2, tokens: 4800, cost: 0.0072 } },
@@ -201,7 +201,7 @@ export const chats = [
     agent: 'single',
     createdAt: Date.now() - 172800_000,
     updatedAt: Date.now() - 172800_000,
-    projectId: 'proj-graph',
+    projectId: 'project-graph',
     messages: [
       { role: 'user', text: 'Describe the project-graph-mcp package — AST analysis, tools, and how it provides codebase context.' },
       { role: 'thinking', elapsed: 5, done: true, meta: { tools: 2, tokens: 3600, cost: 0.0108 } },
@@ -220,7 +220,7 @@ export const chats = [
     agent: 'single',
     createdAt: Date.now() - 259200_000,
     updatedAt: Date.now() - 259200_000,
-    projectId: 'proj-node',
+    projectId: 'symbiote-node',
     messages: [
       { role: 'user', text: 'Describe symbiote-node — the Studio UX framework, layout engine, and node graph system.' },
       { role: 'thinking', elapsed: 7, done: true, meta: { tools: 2, tokens: 5100, cost: 0.0153 } },
@@ -239,7 +239,7 @@ export const chats = [
     agent: 'single',
     createdAt: Date.now() - 604800_000,
     updatedAt: Date.now() - 604800_000,
-    projectId: 'proj-portal',
+    projectId: 'agent-portal',
     messages: [
       { role: 'user', text: 'Create a GitHub Actions CI pipeline that runs tests on PR and deploys on merge to main.' },
       { role: 'thinking', elapsed: 8, done: true, meta: { tools: 2, tokens: 5600, cost: 0.0168 } },
@@ -277,7 +277,7 @@ export const chats = [
     agent: 'researcher',
     createdAt: Date.now() - 7100_000,
     updatedAt: Date.now() - 7000_000,
-    projectId: 'proj-portal',
+    projectId: 'agent-portal',
     parentChatId: 'chat-1',
     messages: [
       { role: 'user', text: 'Analyze the delegation architecture: task-router.js, agent-pool-mcp tools, and chat-ws-server.js' },
@@ -298,7 +298,7 @@ export const chats = [
     agent: 'reviewer',
     createdAt: Date.now() - 7050_000,
     updatedAt: Date.now() - 6900_000,
-    projectId: 'proj-portal',
+    projectId: 'agent-portal',
     parentChatId: 'chat-1',
     messages: [
       { role: 'user', text: 'Audit the Agent Chat UI: message types, rendering pipeline, live status indicators' },

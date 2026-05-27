@@ -6,12 +6,14 @@ import {
   createWebXRRenderLoop,
   endWebXRSession,
   getWebXRSupport,
+  installWebXREmulationRuntime,
   requestWebXRReferenceSpace,
   requestWebXRSession,
   syncWebXRCanvas,
 } from 'symbiote-node/xr';
 
 const enterButton = document.querySelector('#enter');
+const emulateButton = document.querySelector('#emulate');
 const statusList = document.querySelector('#status');
 const canvas = document.querySelector('#canvas');
 
@@ -19,13 +21,24 @@ let support = null;
 let recommendation = null;
 let session = null;
 let loop = null;
+let emulator = {
+  installed: false,
+  runtime: 'native',
+  reason: null,
+  profile: null,
+  devui: false,
+};
+
+function getNavigator() {
+  return window.navigator || globalThis.navigator || null;
+}
 
 function postDiagnostic(event, extra = {}) {
   let payload = {
     event,
     pageUrl: location.href,
     secureContext: window.isSecureContext,
-    navigatorXr: Boolean(navigator.xr),
+    navigatorXr: Boolean(getNavigator()?.xr),
     modes: support?.modes || null,
     launch: recommendation
       ? {
@@ -61,19 +74,67 @@ function renderStatus(extra = {}) {
   setRows([
     ['URL', location.href],
     ['Secure context', String(window.isSecureContext)],
-    ['navigator.xr', String(Boolean(navigator.xr))],
+    ['navigator.xr', String(Boolean(getNavigator()?.xr))],
     ['XRWebGLLayer', String(typeof window.XRWebGLLayer === 'function')],
     ['inline', String(Boolean(modes.inline))],
     ['immersive-vr', String(Boolean(modes.immersiveVr))],
     ['immersive-ar', String(Boolean(modes.immersiveAr))],
     ['requestSession', String(Boolean(apis.requestSessionAvailable))],
     ['Launch', recommendation?.canLaunch ? recommendation.mode : recommendation?.reason],
+    ['Emulator', emulator.installed ? `${emulator.profile || 'metaQuest3'}${emulator.devui ? ' + DevUI' : ''}` : emulator.reason || emulator.runtime],
     ['Visible panels', String(panels)],
     ['Session', extra.session || (session ? 'running' : 'stopped')],
     ['Reference space', extra.referenceSpace || '-'],
     ['Layer', extra.layer || '-'],
     ['Last error', extra.error || '-'],
   ]);
+}
+
+async function installIwer() {
+  emulateButton.disabled = true;
+  emulateButton.textContent = 'Installing IWER...';
+  postDiagnostic('iwer-install-requested');
+  try {
+    let [{ XRDevice, metaQuest3 }, { DevUI }] = await Promise.all([
+      import('iwer'),
+      import('@iwer/devui'),
+    ]);
+    let result = await installWebXREmulationRuntime({
+      globalThis: window,
+      preferNative: false,
+      module: { XRDevice, metaQuest3 },
+      profile: 'metaQuest3',
+    });
+    emulator = {
+      installed: Boolean(result.installed),
+      runtime: result.runtime,
+      reason: result.reason || null,
+      profile: result.profileName || 'metaQuest3',
+      devui: false,
+    };
+    if (result.device) {
+      new DevUI(result.device);
+      emulator.devui = true;
+    }
+    postDiagnostic(result.ok ? 'iwer-installed' : 'iwer-install-failed', {
+      emulator,
+      error: result.ok ? null : result.reason,
+    });
+    await refreshSupport();
+  } catch (error) {
+    emulator = {
+      installed: false,
+      runtime: 'iwer',
+      reason: error?.message || String(error),
+      profile: 'metaQuest3',
+      devui: false,
+    };
+    postDiagnostic('iwer-install-error', { emulator, error: emulator.reason });
+    renderStatus({ error: emulator.reason });
+  } finally {
+    emulateButton.disabled = false;
+    emulateButton.textContent = emulator.installed ? 'IWER installed' : 'Install IWER';
+  }
 }
 
 function setEnterState() {
@@ -163,6 +224,7 @@ async function startSession() {
 }
 
 enterButton.addEventListener('click', startSession);
+emulateButton.addEventListener('click', installIwer);
 window.addEventListener('pagehide', async () => {
   loop?.stop();
   loop = null;
@@ -173,4 +235,8 @@ window.addEventListener('pagehide', async () => {
 });
 
 paintFallback();
-refreshSupport();
+if (new URLSearchParams(location.search).get('emulate') === '1') {
+  installIwer();
+} else {
+  refreshSupport();
+}

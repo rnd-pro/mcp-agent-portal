@@ -151,6 +151,18 @@ Agent Portal can expose an Anthropic-compatible gateway for Claude Code at `/ant
 
 Then set `DEEPSEEK_API_KEY`. When this gateway is enabled, Agent Pool's `provider: "claude"` runner injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` automatically for spawned Claude Code workers.
 
+### XR Diagnostics
+
+Agent Portal serves WebXR diagnostic pages for headset testing. The reusable XR capability, panel, theme, and HTML-in-Canvas contracts live in `symbiote-node/xr`; Agent Portal only supplies product routes and server configuration.
+
+For browser builds that require the HTML-in-Canvas origin trial, set `AGENT_PORTAL_HTML_IN_CANVAS_ORIGIN_TRIAL_TOKEN` in the runtime environment. Static HTML responses will include it as an HTTP `Origin-Trial` header and expose only non-secret boolean diagnostics to the page and `/api/xr-diagnostics/*` logs.
+
+The public Three/WebXR baseline posts provider-shaped texture diagnostics from `symbiote-node/xr`, including provider-normalized strict texture mode, bridge stages, resolver stages, strict texture gate status, scene quality, and session health. This keeps headset debugging observable without adding product-local renderer fallbacks.
+
+### Public Demo Mode
+
+Set `AGENT_PORTAL_DEMO_MODE=1` to serve Agent Portal against safe public data instead of private local workspaces. When `AGENT_PORTAL_PUBLIC_PROJECTS_ROOT` points at synchronized public repository snapshots, demo MCP `get_skeleton` responses expose allowlisted files plus import, export, line, and asset metadata. The graph and XR spatial views consume that same skeleton through the shared `graph-model-v1` pipeline, so public demos can show real project structure without exposing secrets, ignored directories, or local machine paths.
+
 ### Operating Modes
 
 ```bash

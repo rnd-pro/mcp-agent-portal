@@ -1,29 +1,60 @@
 import { Symbiote } from '@symbiotejs/symbiote';
+import * as THREE from 'three';
 import { sharedUiStyles as cssShared, getRoute, parseQuery } from 'symbiote-node/ui';
 import {
   WEBXR_FEATURES,
   WEBXR_MODES,
+  createStableXRDiagnosticClientId,
   createXRHtmlCanvasRenderer,
   createXRPanelHost,
   createXRPanelGeometrySummary,
+  createXRDeepGraphPreviewOverlay,
+  createXRSceneQualitySummary,
   createXRSceneController,
+  createXRSceneDiagnostics,
+  createXRWebGLLayerPanelRenderer,
   createXRSpatialPreview,
   createXRSpatialScene,
   createXRThemeSnapshot,
+  createXRWebGLLayerTarget,
   createXRPointerEvent,
   createXRPointerHitFromDomEvent,
   createXRPanelGestureState,
+  createXRPointerRayFromDomEvent,
+  hitTestXRPanelFrame,
   updateXRPanelGesture,
   createXRLayoutTransactionFromGesture,
+  createXRLayoutTransactionFromPanelPose,
+  createXRThreeRenderHost,
+  createXRThreePanelTextureBridge,
+  createXRThreeHtmlCanvasTextureResolver,
+  createXRThreeSessionController,
+  createXRThreeSessionHealthSummary,
+  createXRThreeSessionOptions,
+  createXRThreeSessionTelemetrySnapshot,
+  createXRThreeWebXRAdapter,
+  createXRReadinessSummary,
+  createXRSpatialWorkbenchSummary,
+  createXRDomPanelWorkbench,
+  createXRWorkbenchDiagnosticPayload,
+  createXRTextureDebugModeSummary,
+  createXRTextureGateSummary,
+  createXRWebGLLayerSize,
   getWebXRSupport,
+  createWebXRLaunchGateSummary,
   createWebXRLaunchRecommendation,
   hitTestXRPanels,
+  readXRHtmlCanvasOriginTrialHeaderStatus,
 } from 'symbiote-node/xr';
 import { createProjectTransactionEvent } from '../../services/project-transaction-messages.js';
+import { events, state, skeletonMatchesProject } from '../../app.js';
 import { getSectionsForScope, panelTypes } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
+import { createPortalXRDeepGraphScene } from '../../services/xr-deep-graph-scene.js';
 import cssLocal from './SpatialLayout.css.js';
 import template from './SpatialLayout.tpl.js';
+
+const HTML_IN_CANVAS_ORIGIN_TRIAL_DIAGNOSTIC_HEADER = 'X-Agent-Portal-Origin-Trial';
 
 function readProjectId() {
   let route = getRoute();
@@ -34,6 +65,14 @@ function defaultTargetSection(projectId) {
   return projectId ? 'graph' : 'dashboard';
 }
 
+function readFocusPath() {
+  return parseQuery(getRoute().query).focus || null;
+}
+
+function readTextureDebugMode() {
+  return parseQuery(getRoute().query).texture || null;
+}
+
 export class SpatialLayout extends Symbiote {
   _projectId = null;
   _targetSection = null;
@@ -41,7 +80,16 @@ export class SpatialLayout extends Symbiote {
   _themeSnapshot = null;
   _controller = null;
   _panelHost = null;
+  _htmlCanvasPanelHost = null;
+  _domPanelWorkbench = null;
   _htmlCanvasRenderer = null;
+  _xrLayerRenderer = null;
+  _threeXRAdapter = null;
+  _threeXRRenderHost = null;
+  _threeXRSessionController = null;
+  _threeTextureBridge = null;
+  _threeTextureResolver = null;
+  _lastThreeXRError = null;
   _xrState = null;
   _activeHit = null;
   _support = { supported: false, fallback: 'dom-canvas' };
@@ -51,26 +99,108 @@ export class SpatialLayout extends Symbiote {
     reason: 'pending',
     version: 'webxr-launch-recommendation-v1',
   };
+  _launchGate = {
+    canStart: false,
+    blocked: true,
+    reason: 'pending',
+    blockingChecks: [],
+    version: 'webxr-launch-gate-summary-v1',
+  };
   _htmlCanvasSupport = { supported: false, preferredMode: null };
   _htmlCanvasDiagnostics = null;
+  _originTrialHeaderStatus = {
+    checked: false,
+    present: false,
+    diagnosticHeader: null,
+    error: null,
+  };
   _canvasPreviewResult = null;
+  _xrCanvas = null;
+  _xrLayerTarget = null;
   _geometrySummaries = [];
+  _deepGraph = null;
+  _textureDebugMode = createXRTextureDebugModeSummary();
   _activeGeometryPanelId = null;
   _gestureState = null;
   _lastTransactionId = null;
+  _lastXrDiagnosticAt = 0;
+  _panelBuildErrors = [];
+  _diagnosticClientId = createStableXRDiagnosticClientId({
+    prefix: 'spatial',
+    globalThis: window,
+  }).id;
   _refreshHandler = () => this._refresh();
 
   initCallback() {
+    this._htmlCanvasRenderer = createXRHtmlCanvasRenderer({ globalThis });
+    this._syncTextureDebugMode();
+    this._xrLayerRenderer = createXRWebGLLayerPanelRenderer({
+      htmlCanvasRenderer: this._htmlCanvasRenderer,
+      requireTextureUpload: this._textureDebugMode.requireTextureUpload,
+    });
+    this._threeXRAdapter = createXRThreeWebXRAdapter({ THREE });
+    this._threeTextureResolver = createXRThreeHtmlCanvasTextureResolver({
+      THREE,
+      document,
+      htmlCanvasRenderer: this._htmlCanvasRenderer,
+    });
+    this._threeTextureBridge = createXRThreePanelTextureBridge({
+      htmlCanvasRenderer: this._htmlCanvasRenderer,
+      getPanelElement: (panelId) => this._htmlCanvasPanelHost?.getPanelElement(panelId),
+      requireTextureUpload: this._textureDebugMode.requireTextureUpload,
+      textureResolver: this._threeTextureResolver.resolve,
+    });
+    this._threeXRRenderHost = createXRThreeRenderHost({
+      THREE,
+      adapter: this._threeXRAdapter,
+      globalThis: window,
+      hostElement: this,
+      maxPixelRatio: 2,
+      className: 'psl-xr-three-canvas',
+    });
+    this._threeXRSessionController = createXRThreeSessionController({
+      globalThis,
+      adapter: this._threeXRAdapter,
+      onDiagnostic: (event, details) => {
+        if (event === 'spatial-three-drag-end') {
+          this._applyThreePoseTransaction(details);
+        }
+        this._postXRDiagnostic(event, {
+          details,
+          throttleMs: event === 'spatial-three-drag-miss' ? 500 : 0,
+          error: details?.error || null,
+        });
+      },
+    });
     this._controller = createXRSceneController({
       globalThis,
       referenceSpaceType: WEBXR_FEATURES.localFloor,
+      onFrame: (time, frame, state) => this._renderXRFrame(time, frame, state),
     });
     this._panelHost = createXRPanelHost({
       document,
       componentResolver: (name, node, panel) => this._resolveComponent(name, node, panel),
       propsResolver: (node, panel) => this._resolveProps(node, panel),
     });
-    this._htmlCanvasRenderer = createXRHtmlCanvasRenderer({ globalThis });
+    this._htmlCanvasPanelHost = createXRPanelHost({
+      document,
+      componentResolver: (name, node, panel) => this._resolveComponent(name, node, panel),
+      propsResolver: (node, panel) => this._resolveProps(node, panel),
+    });
+    this._domPanelWorkbench = createXRDomPanelWorkbench({
+      document,
+      panelHost: this._panelHost,
+      sourcePanelHost: this._htmlCanvasPanelHost,
+      htmlCanvasRenderer: this._htmlCanvasRenderer,
+      legacyMaterialVars: true,
+      classNames: {
+        panel: 'psl-panel',
+        live: 'psl-panel-live',
+        canvas: 'psl-panel-canvas',
+        source: 'psl-xr-canvas-source',
+        fallback: 'sn-xr-panel-fallback',
+      },
+    });
     this._htmlCanvasSupport = this._htmlCanvasRenderer.getSupport();
     this._htmlCanvasDiagnostics = this._htmlCanvasSupport.diagnostics;
     this._projectId = readProjectId();
@@ -81,9 +211,17 @@ export class SpatialLayout extends Symbiote {
     });
     this.ref.scaleInput.addEventListener('input', () => this._renderProjection());
     this.ref.depthInput.addEventListener('input', () => this._renderProjection());
+    this.ref.xrModeSelect.addEventListener('change', () => {
+      this._launchRecommendation = this._createLaunchRecommendation();
+      this._launchGate = this._createLaunchGate();
+      this._renderStatus();
+    });
     this.ref.enterButton.addEventListener('click', () => this._enterXR());
     this.ref.stage.addEventListener('pointerdown', (event) => this._startGesture(event));
-    this.ref.stage.addEventListener('pointermove', (event) => this._updatePointer(event));
+    this.ref.stage.addEventListener('pointermove', (event) => {
+      if (event.xrPanelPointer) return;
+      this._updatePointer(event);
+    });
     this.ref.stage.addEventListener('pointerup', (event) => this._finishGesture(event));
     this.ref.stage.addEventListener('pointercancel', (event) => this._cancelGesture(event));
     this.ref.stage.addEventListener('pointerleave', () => {
@@ -97,9 +235,11 @@ export class SpatialLayout extends Symbiote {
     this.ref.geometry.addEventListener('pointerover', (event) => this._activateGeometryRow(event));
     this.ref.geometry.addEventListener('pointerout', (event) => this._deactivateGeometryRow(event));
     this._loadSupport();
+    this._refreshOriginTrialHeaderStatus();
     this._refresh();
     window.addEventListener('hashchange', this._refreshHandler);
     document.addEventListener('agent-portal-project-runtime-updated', this._refreshHandler);
+    events.addEventListener('skeleton-loaded', this._refreshHandler);
   }
 
   disconnectedCallback() {
@@ -107,15 +247,28 @@ export class SpatialLayout extends Symbiote {
     this._controller?.stop();
     window.removeEventListener('hashchange', this._refreshHandler);
     document.removeEventListener('agent-portal-project-runtime-updated', this._refreshHandler);
+    events.removeEventListener('skeleton-loaded', this._refreshHandler);
   }
 
   async _loadSupport() {
     this._support = await getWebXRSupport(globalThis);
-    this._launchRecommendation = createWebXRLaunchRecommendation(this._support);
+    this._syncXRModeOptions();
+    this._launchRecommendation = this._createLaunchRecommendation();
+    this._launchGate = this._createLaunchGate();
+    this._postXRDiagnostic('spatial-support-detected');
     this._renderStatus();
   }
 
+  async _refreshOriginTrialHeaderStatus() {
+    this._originTrialHeaderStatus = await readXRHtmlCanvasOriginTrialHeaderStatus(location, {
+      diagnosticHeader: HTML_IN_CANVAS_ORIGIN_TRIAL_DIAGNOSTIC_HEADER,
+    });
+    this._renderStatus();
+    this._renderGeometryDiagnostics();
+  }
+
   _refresh() {
+    this._syncTextureDebugMode();
     let nextProjectId = readProjectId();
     if (nextProjectId !== this._projectId) {
       this._projectId = nextProjectId;
@@ -123,6 +276,20 @@ export class SpatialLayout extends Symbiote {
     }
     this._renderSectionOptions();
     this._renderProjection();
+  }
+
+  _syncTextureDebugMode() {
+    let nextMode = createXRTextureDebugModeSummary({
+      texture: readTextureDebugMode(),
+    });
+    let modeChanged = nextMode.mode !== this._textureDebugMode.mode;
+    this._textureDebugMode = nextMode;
+    if (modeChanged && this._htmlCanvasRenderer) {
+      this._xrLayerRenderer = createXRWebGLLayerPanelRenderer({
+        htmlCanvasRenderer: this._htmlCanvasRenderer,
+        requireTextureUpload: this._textureDebugMode.requireTextureUpload,
+      });
+    }
   }
 
   _renderSectionOptions() {
@@ -154,10 +321,17 @@ export class SpatialLayout extends Symbiote {
         preview: { pixelsPerMeter: Number(this.ref.scaleInput.value || 118) },
       })
       : null;
+    this._deepGraph = this._createDeepGraphProjection();
     this._xrState = this._controller?.setScene(this._spatialLayout, {
       themeSnapshot: this._themeSnapshot,
     }) || null;
     this._panelHost?.setScene(this._xrState?.scene || this._spatialLayout, {
+      themeSnapshot: this._themeSnapshot,
+    });
+    this._htmlCanvasPanelHost?.setScene(this._xrState?.scene || this._spatialLayout, {
+      themeSnapshot: this._themeSnapshot,
+    });
+    this._domPanelWorkbench?.setScene(this._xrState?.scene || this._spatialLayout, {
       themeSnapshot: this._themeSnapshot,
     });
     this._activeHit = this._activeHit && this._spatialLayout?.panels.some((panel) => panel.id === this._activeHit.panelId)
@@ -170,57 +344,105 @@ export class SpatialLayout extends Symbiote {
 
     this.ref.space.replaceChildren();
     this._geometrySummaries = [];
+    this._panelBuildErrors = [];
     let previewRendered = false;
     this._canvasPreviewResult = null;
     for (let panel of this._xrState?.scene?.panels || this._spatialLayout?.panels || []) {
-      let node = this._createPanelNode(panel, { renderCanvasPreview: !previewRendered });
-      previewRendered = true;
+      let node = null;
+      try {
+        node = this._createPanelNode(panel, { renderCanvasPreview: !previewRendered });
+        previewRendered = true;
+      } catch (error) {
+        this._panelBuildErrors.push({
+          panelId: panel.id,
+          component: panel.component || panel.panelType || 'panel',
+          reason: error?.name || 'panel-build-failed',
+          message: error?.message || '',
+        });
+        node = this._createPanelErrorNode(panel, error);
+      }
       let preview = this._positionPanel(node, panel);
-      this._geometrySummaries.push(createXRPanelGeometrySummary(panel, preview));
+      this._geometrySummaries.push(createXRPanelGeometrySummary(panel, preview, {
+        userSpace: this._spatialLayout?.userSpace,
+      }));
       this.ref.space.append(node);
     }
+    this._syncThreeXRScene();
+    this._renderDeepGraphOverlay();
+    this._launchGate = this._createLaunchGate();
     this._syncHitState();
     this._renderStatus();
     this._renderGeometryDiagnostics();
+    this._postXRDiagnostic('spatial-projection-rendered', { throttleMs: 1200 });
   }
 
   _createPanelNode(panel, options = {}) {
-    let node = document.createElement('section');
-    node.className = 'psl-panel';
-    node.dataset.panelId = panel.id;
-    node.dataset.component = panel.component || panel.panelType || 'panel';
-    node.dataset.hit = String(this._activePanelId() === panel.id);
-    node.dataset.gesture = 'read-only';
-    if (panel.material) {
-      node.style.setProperty('--psl-panel-bg', panel.material.background);
-      node.style.setProperty('--psl-panel-border', panel.material.border);
-      node.style.setProperty('--psl-panel-radius', panel.material.radius);
-      node.style.setProperty('--psl-panel-shadow', panel.material.shadow);
-    }
+    let result = this._domPanelWorkbench.mountPreviewPanel(panel, {
+      renderCanvasPreview: options.renderCanvasPreview,
+      activePanelId: this._activePanelId(),
+    });
+    if (!result.ok) throw result.error || new Error(result.reason || 'panel-build-failed');
+    if (result.previewResult) this._canvasPreviewResult = result.previewResult;
+    return result.node;
+  }
 
-    let content = document.createElement('div');
-    content.className = 'psl-panel-live';
-    node.append(content);
-    let canvas = document.createElement('canvas');
-    canvas.className = 'psl-panel-canvas';
-    canvas.width = Math.round(panel.contentViewport?.width || 960);
-    canvas.height = Math.round(panel.contentViewport?.height || 540);
-    canvas.hidden = true;
-    node.append(canvas);
-    let liveElement = this._panelHost.mountPanel(panel, content);
-    let prepared = this._htmlCanvasRenderer.preparePanel(liveElement, panel);
-    node.dataset.canvas = prepared.supported ? 'prepared' : 'fallback';
-    if (options.renderCanvasPreview) {
-      this._canvasPreviewResult = this._htmlCanvasRenderer.renderPanelPreview(panel.id, canvas, {
-        width: canvas.width,
-        height: canvas.height,
+  _createPanelErrorNode(panel, error) {
+    return this._domPanelWorkbench.createErrorPanel(panel, error);
+  }
+
+  _renderDeepGraphOverlay() {
+    if (!this._deepGraph?.preview || this._targetSection !== 'graph') return;
+    let result = createXRDeepGraphPreviewOverlay(this._deepGraph.preview, {
+      document,
+      focusNodeId: this._deepGraph.diagnostics.focusNodeId,
+      legacyCssVars: true,
+      classNames: {
+        overlay: 'psl-deep-graph',
+        edge: 'psl-deep-edge',
+        node: 'psl-deep-node',
+      },
+    });
+    if (result.ok) this.ref.space.append(result.overlay);
+  }
+
+  _syncThreeXRScene() {
+    let scene = this._xrState?.scene || this._spatialLayout;
+    return this._threeXRRenderHost?.ensureTarget({
+      scene,
+      sceneOptions: {
+        textureBridge: this._threeTextureBridge,
+        textureOptions: { requireTextureUpload: this._textureDebugMode.requireTextureUpload },
+        hideStrictTextureFailures: this._textureDebugMode.hideStrictTextureFailures,
+      },
+      stageElement: this.ref.stage,
+      pixelRatio: window.devicePixelRatio,
+    });
+  }
+
+  _ensureThreeXRRenderer() {
+    return this._syncThreeXRScene();
+  }
+
+  _renderXRFrame(time, frame, state) {
+    let layerTarget = this._xrLayerTarget;
+    try {
+      let result = this._xrLayerRenderer?.renderFrame({
+        gl: layerTarget?.gl,
+        layer: state?.layer,
+        frame,
+        referenceSpace: state?.referenceSpace,
+        scene: state?.scene,
       });
-      if (this._canvasPreviewResult.rendered) {
-        canvas.hidden = false;
-        node.dataset.canvas = 'rendered';
+      if (result && (!result.rendered || result.failedPanels?.length)) {
+        this._lastXRLayerFrame = result;
       }
+    } catch (error) {
+      this._lastXRLayerFrame = {
+        rendered: false,
+        reason: error?.name || 'xr-layer-render-failed',
+        message: error?.message || '',
+      };
     }
-    return node;
   }
 
   _positionPanel(element, panel) {
@@ -240,6 +462,7 @@ export class SpatialLayout extends Symbiote {
 
   _updatePointer(event) {
     if (!this._spatialLayout) return;
+    if (event?.xrPanelPointer || this._relayingPanelPointer) return;
     let ray = this._rayFromPointer(event);
     this._activeHit = hitTestXRPanels(ray, this._spatialLayout.panels);
     if (!this._activeHit) {
@@ -250,7 +473,12 @@ export class SpatialLayout extends Symbiote {
       primary: event.buttons === 1,
       ray,
     });
-    this._panelHost?.dispatchPointerEvent(pointerEvent);
+    this._relayingPanelPointer = true;
+    try {
+      this._panelHost?.dispatchPointerEvent(pointerEvent);
+    } finally {
+      this._relayingPanelPointer = false;
+    }
     if (this._gestureState && pointerEvent) {
       this._gestureState = updateXRPanelGesture(this._gestureState, pointerEvent, {
         active: event.buttons === 1,
@@ -279,16 +507,21 @@ export class SpatialLayout extends Symbiote {
     this._updatePointer(event);
     if (!this._activeHit) return;
     let panel = this._activeHit.panel;
+    let frameTarget = hitTestXRPanelFrame(panel, this._activeHit.point, {
+      defaultContentOperation: event.shiftKey ? 'resize' : 'move',
+    });
     let pointerEvent = createXRPointerEvent(this._activeHit, {
       source: 'mouse-fallback',
       primary: true,
       ray: this._rayFromPointer(event),
     }, 'pointerdown');
+    pointerEvent.frameTarget = frameTarget;
     this.ref.stage.setPointerCapture?.(event.pointerId);
     this._gestureState = createXRPanelGestureState({
       panel,
       layoutId: this._targetSection,
-      mode: event.shiftKey ? 'resize' : 'move',
+      mode: frameTarget.operation === 'resize' ? 'resize' : frameTarget.operation === 'move' ? 'move' : 'read-only',
+      frameTarget,
       pointerEvent,
     });
     this._syncHitState();
@@ -324,6 +557,19 @@ export class SpatialLayout extends Symbiote {
     }
   }
 
+  _applyThreePoseTransaction(details = {}) {
+    let transaction = createXRLayoutTransactionFromPanelPose(details, {
+      id: `tx:xr-pose:${this._targetSection}:${details.panelId || 'panel'}:${Date.now().toString(36)}`,
+      layoutId: this._targetSection,
+      targetProject: `agent-portal:${this._projectId || 'global'}`,
+    });
+    if (!transaction) return;
+    this._lastTransactionId = transaction.id;
+    document.dispatchEvent(createProjectTransactionEvent(this._projectId, transaction));
+    this._renderStatus();
+    this._renderGeometryDiagnostics();
+  }
+
   _syncHitState() {
     let activePanelId = this._activePanelId();
     for (let node of this.ref.space.querySelectorAll('.psl-panel')) {
@@ -337,13 +583,7 @@ export class SpatialLayout extends Symbiote {
   }
 
   _rayFromPointer(event) {
-    let rect = this.ref.stage.getBoundingClientRect();
-    let x = (event.clientX - rect.left) / rect.width - 0.5;
-    let y = 0.5 - (event.clientY - rect.top) / rect.height;
-    return {
-      origin: [x * 1.4, 1.32 + y * 0.72, 0],
-      direction: [-x * 0.28, -y * 0.18, -1],
-    };
+    return createXRPointerRayFromDomEvent(event, this.ref.stage);
   }
 
   _renderStatus() {
@@ -352,40 +592,134 @@ export class SpatialLayout extends Symbiote {
     let controllerState = this._controller?.getState();
     let rendererState = this._htmlCanvasRenderer?.getState();
     let panelHostState = this._panelHost?.getState();
+    let threeSessionDiagnostics = this._threeXRSessionController?.getDiagnostics?.() || {};
+    let threeDiagnostics = threeSessionDiagnostics.adapter ||
+      this._threeXRAdapter?.getDiagnostics?.() ||
+      this._threeXRAdapter?.getState?.() ||
+      {};
     let htmlDiagnostics = this._htmlCanvasSupport.diagnostics || this._htmlCanvasDiagnostics || {};
-    let tokenCount = Object.values(this._themeSnapshot?.tokens || {}).filter(Boolean).length;
-    let mode = controllerState?.renderMode === 'webxr-session'
-      ? 'webxr-session'
-      : this._htmlCanvasSupport.supported ? 'html-in-canvas' : 'dom-live-fallback';
-    let renderer = this._htmlCanvasSupport.preferredMode || 'unsupported';
-    let hit = this._activeHit
-      ? `${this._activeHit.panelId} ${this._activeHit.point.x.toFixed(2)}, ${this._activeHit.point.y.toFixed(2)}`
+    let launch = this._launchRecommendation || this._createLaunchRecommendation();
+    let launchGate = this._launchGate || this._createLaunchGate();
+    let textureGate = this._createTextureGate();
+    let sceneQuality = this._createSceneQuality();
+    let readiness = this._createReadiness({ launchGate, texture: textureGate, sceneQuality });
+    let layerFrame = this._xrLayerRenderer?.getState?.().lastFrame || null;
+    let summary = createXRSpatialWorkbenchSummary({
+      source: this._targetSection,
+      panels,
+      scene: this._spatialLayout,
+      coordinateSystem: this._spatialLayout?.coordinateSystem,
+      controllerState,
+      rendererState,
+      panelHostState,
+      threeSessionDiagnostics,
+      threeDiagnostics,
+      threeAdapterName: this._threeXRAdapter?.name,
+      htmlCanvasSupport: this._htmlCanvasSupport,
+      htmlCanvasDiagnostics: this._htmlCanvasDiagnostics,
+      themeSnapshot: this._themeSnapshot,
+      support: this._support,
+      launch,
+      launchGate,
+      textureGate,
+      sceneQuality,
+      readiness,
+      layerFrame,
+      geometrySummaries: this._geometrySummaries,
+      deepGraph: this._deepGraph,
+      panelBuildErrors: this._panelBuildErrors,
+      canvasPreviewResult: this._canvasPreviewResult,
+      activeHit: this._activeHit,
+      gestureState: this._gestureState,
+      lastTransactionId: this._lastTransactionId,
+      error: this._lastThreeXRError,
+    });
+    let hit = summary.pointer
+      ? `${summary.pointer.panelId} ${summary.pointer.x.toFixed(2)}, ${summary.pointer.y.toFixed(2)}`
       : 'none';
-    let gesture = this._gestureState?.status || (this._activeHit ? 'select' : 'read-only');
-    let launch = this._launchRecommendation || createWebXRLaunchRecommendation(this._support);
+    let textureQuality = summary.layerFrame.textureTotalCount
+      ? `${summary.layerFrame.textureTargetCount}/${summary.layerFrame.textureTotalCount} target`
+      : '-';
 
-    this.ref.enterButton.disabled = !launch.canLaunch;
-    this.ref.enterButton.dataset.available = String(Boolean(launch.canLaunch));
-    this.ref.enterButton.title = launch.canLaunch
+    this.ref.enterButton.disabled = !launchGate.canStart;
+    this.ref.enterButton.dataset.available = String(Boolean(launchGate.canStart));
+    this.ref.enterButton.title = launchGate.canStart
       ? `Start ${launch.mode}`
-      : `XR unavailable: ${launch.reason}`;
+      : `XR unavailable: ${launchGate.reason}`;
 
     this.ref.status.replaceChildren(
-      this._statusItem('Source', this._targetSection || '-'),
-      this._statusItem('Panels', String(panels.length)),
-      this._statusItem('Panels live', `${panelHostState?.mounted || 0}/${panels.length}`),
-      this._statusItem('Space', this._spatialLayout?.coordinateSystem || '-'),
-      this._statusItem('Mode', mode),
-      this._statusItem('Renderer', rendererState?.preferredMode || renderer),
+      this._statusItem('Source', summary.source || '-'),
+      this._statusItem('Panels', String(summary.panels.total)),
+      this._statusItem('Panels live', `${summary.panels.live}/${summary.panels.total}`),
+      this._statusItem('Deep graph', summary.deepGraph
+        ? `${summary.deepGraph.nodeCount} nodes / ${summary.deepGraph.edgeCount} edges`
+        : '-'),
+      this._statusItem('Deep preview', summary.deepGraph?.previewStatus
+        ? `${summary.deepGraph.previewStatus} ${summary.deepGraph.previewNodes.visible}/${summary.deepGraph.previewNodes.source} nodes, ${summary.deepGraph.previewEdges.visible}/${summary.deepGraph.previewEdges.source} edges`
+        : '-'),
+      this._statusItem('Deep connected', summary.deepGraph
+        ? `${summary.deepGraph.connectedNodeCount}/${summary.deepGraph.nodeCount}`
+        : '-'),
+      this._statusItem('Deep edge types', summary.deepGraph
+        ? Object.entries(summary.deepGraph.edgeTypes || {}).map(([type, count]) => `${type}:${count}`).join(', ') || '-'
+        : '-'),
+      this._statusItem('Deep focus', summary.deepGraph?.focusNodeId || '-'),
+      this._statusItem('Deep focus degree', summary.deepGraph?.focus
+        ? `${summary.deepGraph.focus.incoming} in / ${summary.deepGraph.focus.outgoing} out`
+        : '-'),
+      this._statusItem('Deep focus preview', summary.deepGraph?.previewFocus
+        ? `${summary.deepGraph.previewFocus.visible ? 'visible' : 'hidden'} ${summary.deepGraph.previewFocus.edges.visible}/${summary.deepGraph.previewFocus.edges.source} edges`
+        : '-'),
+      this._statusItem('Space', summary.space || '-'),
+      this._statusItem('Mode', summary.mode),
+      this._statusItem('Renderer', summary.renderer),
+      this._statusItem('XR scene adapter', summary.three.adapter || '-'),
+      this._statusItem('Three panels', String(summary.three.panels)),
+      this._statusItem('Three hits', String(summary.three.hits)),
+      this._statusItem('Three misses', String(summary.three.misses)),
+      this._statusItem('XR ray', summary.three.raySource || '-'),
+      this._statusItem('XR drag misses', String(summary.three.dragMisses)),
+      this._statusItem('XR hover frame', this._formatFrameTarget(summary.three.hover?.frameTarget)),
+      this._statusItem('XR drag frame', this._formatFrameTarget(summary.three.drag?.frameTarget)),
+      this._statusItem('XR drag op', summary.three.drag?.resize?.operation || summary.three.drag?.frameTarget?.operation || '-'),
+      this._statusItem('XR drag handle', summary.three.drag?.resize?.handle || summary.three.drag?.frameTarget?.handle || '-'),
+      this._statusItem('XR drag size', this._formatMeters(summary.three.drag?.size)),
+      this._statusItem('XR resize size', this._formatMeters(summary.three.drag?.resize?.size)),
       this._statusItem('HTML Canvas', htmlDiagnostics.supported ? 'supported' : htmlDiagnostics.recommendation || 'unsupported'),
-      this._statusItem('Canvas preview', this._canvasPreviewResult?.rendered ? this._canvasPreviewResult.panelId : this._canvasPreviewResult?.reason || '-'),
-      this._statusItem('Theme', this._themeSnapshot?.themeScope || '-'),
-      this._statusItem('Tokens', `${tokenCount}/${Object.keys(this._themeSnapshot?.tokens || {}).length}`),
-      this._statusItem('XR', support),
+      this._statusItem('HTML Canvas availability', summary.htmlCanvas.availability || '-'),
+      this._statusItem('HTML Canvas flag', htmlDiagnostics.originTrial?.flagUrl || '-'),
+      this._statusItem('HTML Canvas origin trial header', this._originTrialHeaderStatus.checked
+        ? (this._originTrialHeaderStatus.present ? 'present' : this._originTrialHeaderStatus.error || 'missing')
+        : 'checking'),
+      this._statusItem('HTML Canvas origin trial route', this._originTrialHeaderStatus.diagnosticHeader || '-'),
+      this._statusItem('HTML Canvas texture upload', summary.htmlCanvas.textureUploadAvailable ? 'available' : 'missing'),
+      this._statusItem('Canvas preview', summary.canvasPreview?.rendered ? summary.canvasPreview.panelId : summary.canvasPreview?.reason || '-'),
+      this._statusItem('XR layer frame', summary.layerFrame.rendered ? 'rendered' : summary.layerFrame.reason || '-'),
+      this._statusItem('XR texture', textureQuality),
+      this._statusItem('XR texture mode', textureGate.debugMode?.mode || this._textureDebugMode.mode),
+      this._statusItem('XR texture gate', textureGate.blocked ? `blocked:${textureGate.reason}` : 'ready'),
+      this._statusItem('XR texture ready', `${textureGate.ready}/${textureGate.total}`),
+      this._statusItem('XR texture stage', textureGate.stage || '-'),
+      this._statusItem('XR texture API', textureGate.requiredApi?.length ? textureGate.requiredApi.join(', ') : '-'),
+      this._statusItem('XR scene quality', sceneQuality.status || '-'),
+      this._statusItem('XR readiness', readiness.status === 'blocked' ? `blocked:${readiness.reason}` : readiness.status),
+      this._statusItem('XR readiness checks', readiness.blockingChecks?.length ? readiness.blockingChecks.map((check) => check.id).join(', ') : '-'),
+      this._statusItem('XR low quality', String(summary.layerFrame.lowQualityCount)),
+      this._statusItem('XR comfort', summary.geometry.comfortWarnings ? `${summary.geometry.comfortWarnings} warnings` : 'comfortable'),
+      this._statusItem('XR adjusted', String(summary.geometry.adjustedPanels)),
+      this._statusItem('XR facing', summary.geometry.facingWarnings ? `${summary.geometry.facingWarnings} warnings` : 'aligned'),
+      this._statusItem('XR rotated', String(summary.geometry.rotatedPanels)),
+      this._statusItem('Panel errors', String(summary.panels.errors)),
+      this._statusItem('Theme', summary.theme.scope || '-'),
+      this._statusItem('Tokens', `${summary.theme.resolvedTokens}/${summary.theme.totalTokens}`),
+      this._statusItem('XR', summary.support.status),
       this._statusItem('XR launch', launch.canLaunch ? launch.mode : launch.reason),
+      this._statusItem('XR gate', launchGate.blocked ? `blocked:${launchGate.reason}` : 'ready'),
+      this._statusItem('XR gate checks', launchGate.blockingChecks?.length ? launchGate.blockingChecks.map((check) => check.id).join(', ') : '-'),
+      this._statusItem('XR error', summary.error || '-'),
       this._statusItem('Pointer', hit),
-      this._statusItem('Gesture', gesture),
-      this._statusItem('Last tx', this._lastTransactionId || '-'),
+      this._statusItem('Gesture', summary.gesture.status),
+      this._statusItem('Last tx', summary.lastTransactionId || '-'),
     );
   }
 
@@ -404,34 +738,379 @@ export class SpatialLayout extends Symbiote {
   }
 
   async _enterXR() {
-    if (!this._spatialLayout) {
-      this._renderProjection();
-    }
-    this._launchRecommendation = createWebXRLaunchRecommendation(this._support);
-    if (!this._launchRecommendation.canLaunch) {
+    this._postXRDiagnostic('spatial-enter-clicked', {
+      details: {
+        launch: this._launchRecommendation,
+        launchGate: this._launchGate,
+        controller: this._createSceneDiagnostics(),
+      },
+    });
+    try {
+      if (!this._spatialLayout) {
+        this._renderProjection();
+      }
+      this._launchRecommendation = this._createLaunchRecommendation();
+      this._launchGate = this._createLaunchGate({ requireUserActivation: true });
+      if (!this._launchGate.canStart) {
+        this._postXRDiagnostic('spatial-session-blocked', {
+          details: {
+            launchGate: this._launchGate,
+          },
+          error: this._launchGate.reason,
+        });
+        this._renderStatus();
+        return;
+      }
+      let mode = this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
+      let threeResult = await this._enterThreeXR(mode);
+      this._postXRDiagnostic(threeResult.ok ? 'spatial-three-session-result' : 'spatial-three-session-failed', {
+        details: {
+          resultOk: Boolean(threeResult.ok),
+          handled: Boolean(threeResult.handled),
+          reason: threeResult.reason || null,
+          controller: this._createSceneDiagnostics(),
+        },
+        error: threeResult.ok ? null : threeResult.reason || 'three-session-failed',
+      });
+      if (threeResult.handled) {
+        this._renderStatus();
+        return;
+      }
+      let layerTarget = await this._getXRLayerTarget();
+      this._xrLayerTarget = layerTarget;
+      if (!layerTarget.gl) {
+        this._launchRecommendation = {
+          ...this._launchRecommendation,
+          canLaunch: false,
+          reason: layerTarget.reason || 'missing-webgl-context',
+        };
+        this._postXRDiagnostic('spatial-layer-target-failed', {
+          details: {
+            requestedMode: mode,
+            layerTarget: this._createSceneDiagnostics(layerTarget),
+          },
+          error: layerTarget.reason || 'missing-webgl-context',
+        });
+        this._renderStatus();
+        return;
+      }
+      this._prepareXRLayerSources(layerTarget.canvas);
+      this._postXRDiagnostic('spatial-session-start-requested', {
+        details: {
+          requestedMode: mode,
+          layerTarget: this._createSceneDiagnostics(layerTarget),
+        },
+      });
+      let result = await this._controller.start(mode, {
+        optionalFeatures: [WEBXR_FEATURES.localFloor, WEBXR_FEATURES.boundedFloor, WEBXR_FEATURES.domOverlay],
+        domOverlayRoot: this,
+        canvas: layerTarget.canvas,
+        gl: layerTarget.gl,
+        referenceSpaceType: mode === WEBXR_MODES.immersiveAr ? WEBXR_FEATURES.local : WEBXR_FEATURES.localFloor,
+      });
+      this._xrState = result.state;
+      if (!result.ok) {
+        this._launchRecommendation = {
+          ...this._launchRecommendation,
+          canLaunch: false,
+          reason: result.reason || 'request-failed',
+        };
+      }
+      this._postXRDiagnostic(result.ok ? 'spatial-session-started' : 'spatial-session-failed', {
+        details: {
+          resultOk: Boolean(result.ok),
+          reason: result.reason || null,
+          controller: this._createSceneDiagnostics(layerTarget),
+        },
+      });
+      if (result.ok) {
+        window.setTimeout(() => {
+          this._postXRDiagnostic('spatial-session-frame-check', {
+            details: {
+              controller: this._createSceneDiagnostics(layerTarget),
+            },
+          });
+        }, 1600);
+      }
       this._renderStatus();
-      return;
+    } catch (error) {
+      this._lastThreeXRError = error?.name || 'spatial-enter-failed';
+      this._postXRDiagnostic('spatial-enter-failed', {
+        details: {
+          controller: this._createSceneDiagnostics(),
+          message: error?.message || '',
+        },
+        error: this._lastThreeXRError,
+      });
+      this._renderStatus();
     }
-    let mode = this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
-    let result = await this._controller.start(mode, {
-      optionalFeatures: [WEBXR_FEATURES.localFloor, WEBXR_FEATURES.boundedFloor, WEBXR_FEATURES.domOverlay],
+  }
+
+  async _enterThreeXR(mode) {
+    let target = this._ensureThreeXRRenderer();
+    let sessionOptions = createXRThreeSessionOptions(mode, {
       domOverlayRoot: this,
     });
-    this._xrState = result.state;
-    if (!result.ok) {
-      this._launchRecommendation = {
-        ...this._launchRecommendation,
-        canLaunch: false,
-        reason: result.reason || 'request-failed',
-      };
+    let result = await this._threeXRSessionController.start(mode, {
+      target,
+      ...sessionOptions,
+    });
+    this._lastThreeXRError = result.ok ? null : result.reason || null;
+    return result;
+  }
+
+  _prepareXRLayerSources(canvas) {
+    if (!canvas || !this._xrState?.scene?.panels?.length) return;
+    this._domPanelWorkbench?.prepareLayerSources(this._xrState.scene, canvas);
+  }
+
+  async _getXRLayerTarget() {
+    let size = createXRWebGLLayerSize({
+      panels: this._spatialLayout?.panels || [],
+      pixelRatio: window.devicePixelRatio || 1,
+    });
+    let target = await createXRWebGLLayerTarget({
+      document,
+      hostElement: this,
+      canvas: this._xrCanvas,
+      className: 'psl-xr-layer-canvas',
+      width: size.width,
+      height: size.height,
+    });
+    this._xrCanvas = target.canvas;
+    return target;
+  }
+
+  _createSceneDiagnostics(layerTarget = {}) {
+    let state = this._controller?.getState?.() || this._xrState || {};
+    let diagnostics = this._controller?.getDiagnostics
+      ? this._controller.getDiagnostics(layerTarget)
+      : createXRSceneDiagnostics(state, layerTarget);
+    let panelHostState = this._panelHost?.getState?.() || {};
+    let rendererState = this._htmlCanvasRenderer?.getState?.() || {};
+    return {
+      ...diagnostics,
+      panelHost: panelHostState,
+      htmlCanvasPanelHost: this._htmlCanvasPanelHost?.getState?.() || {},
+      renderer: rendererState,
+      threeXR: this._threeXRSessionController?.getDiagnostics?.() ||
+        this._threeXRAdapter?.getDiagnostics?.() ||
+        this._threeXRAdapter?.getState?.() ||
+        null,
+      threeTextureBridge: this._threeTextureBridge?.getState?.() || null,
+      threeTextureResolver: this._threeTextureResolver?.getState?.() || null,
+      threeRenderHost: this._threeXRRenderHost?.getDiagnostics?.() || null,
+      htmlCanvas: this._createHtmlCanvasDiagnosticsPayload(),
+      xrLayerRenderer: this._xrLayerRenderer?.getState?.() || null,
+      panelBuildErrors: this._panelBuildErrors,
+      geometryRows: this._geometrySummaries.length,
+      deepGraph: this._deepGraph?.diagnostics || null,
+      deepGraphPreview: this._deepGraph?.preview
+        ? {
+          version: this._deepGraph.preview.version,
+          nodes: this._deepGraph.preview.nodes.length,
+          edges: this._deepGraph.preview.edges.length,
+          source: this._deepGraph.preview.source,
+          summary: this._deepGraph.previewSummary || null,
+        }
+        : null,
+    };
+  }
+
+  _createDeepGraphProjection() {
+    if (this._targetSection !== 'graph') return null;
+    if (!state.skeleton || !skeletonMatchesProject(state.skeleton, this._projectId)) return null;
+    try {
+      return createPortalXRDeepGraphScene(state.skeleton, {
+        projectId: this._projectId,
+        focusPath: readFocusPath(),
+        themeScope: 'section.graph',
+        pixelsPerMeter: Number(this.ref.scaleInput.value || 118),
+        depthScale: Number(this.ref.depthInput.value || 120) / 120,
+        eyeHeight: this._spatialLayout?.userSpace?.eyeHeight,
+      });
+    } catch (error) {
+      this._panelBuildErrors.push({
+        panelId: 'deep-graph',
+        component: 'xr-deep-graph',
+        reason: error?.name || 'deep-graph-build-failed',
+        message: error?.message || '',
+      });
+      return null;
     }
-    this._renderStatus();
+  }
+
+  _postXRDiagnostic(event, options = {}) {
+    let throttleMs = Number(options.throttleMs || 0);
+    let now = Date.now();
+    if (throttleMs && now - this._lastXrDiagnosticAt < throttleMs) return;
+    this._lastXrDiagnosticAt = now;
+    let launch = this._launchRecommendation || this._createLaunchRecommendation();
+    let launchGate = this._launchGate || this._createLaunchGate();
+    let texture = this._createTextureGate();
+    let sceneQuality = this._createSceneQuality();
+    let readiness = this._createReadiness({ launchGate, texture, sceneQuality });
+    let details = options.details || {
+      controller: this._createSceneDiagnostics(),
+    };
+    let payload = createXRWorkbenchDiagnosticPayload({
+      event,
+      pageUrl: location.href,
+      secureContext: window.isSecureContext,
+      navigatorXr: Boolean(navigator.xr),
+      modes: this._support?.modes || null,
+      launch,
+      clientId: this._diagnosticClientId,
+      session: this._createSessionDiagnosticPayload(),
+      error: options.error || null,
+      details,
+      htmlCanvas: this._createHtmlCanvasDiagnosticsPayload(),
+      texture,
+      launchGate,
+      sceneQuality,
+      readiness,
+    });
+    fetch('/api/xr-diagnostics/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => {});
   }
 
   _statusItem(label, value) {
     let item = document.createElement('span');
     item.textContent = `${label}: ${value}`;
     return item;
+  }
+
+  _formatFrameTarget(frameTarget) {
+    if (!frameTarget) return '-';
+    let operation = frameTarget.operation || 'none';
+    let zone = frameTarget.zone || frameTarget.handle || frameTarget.action || '-';
+    let panelId = frameTarget.panelId || '-';
+    return `${panelId}:${operation}/${zone}`;
+  }
+
+  _formatMeters(values) {
+    if (!Array.isArray(values) || !values.length) return '-';
+    return values
+      .filter((value) => Number.isFinite(Number(value)))
+      .map((value) => `${Number(value).toFixed(2)}m`)
+      .join(' x ') || '-';
+  }
+
+  _createLaunchRecommendation() {
+    let selectedMode = this.ref.xrModeSelect?.value || 'auto';
+    let preferredMode = selectedMode === 'auto' ? null : selectedMode;
+    return createWebXRLaunchRecommendation(this._support, {
+      preferredMode,
+    });
+  }
+
+  _createTextureGate() {
+    let panels = this._spatialLayout?.panels || [];
+    return createXRTextureGateSummary({
+      strict: this._textureDebugMode.strict,
+      panelCount: panels.length,
+      support: this._htmlCanvasSupport || {
+        diagnostics: this._htmlCanvasDiagnostics || {},
+      },
+      debugMode: this._textureDebugMode,
+      reason: this._textureDebugMode.reason,
+    });
+  }
+
+  _createSceneQuality() {
+    return createXRSceneQualitySummary(this._xrState?.scene || this._spatialLayout || { panels: [] }, {
+      eyeHeight: this._spatialLayout?.userSpace?.eyeHeight,
+    });
+  }
+
+  _createSessionHealth() {
+    let threeDiagnostics = this._threeXRSessionController?.getDiagnostics?.() ||
+      this._threeXRAdapter?.getDiagnostics?.() ||
+      this._threeXRAdapter?.getState?.() ||
+      {};
+    let telemetry = createXRThreeSessionTelemetrySnapshot(threeDiagnostics);
+    return createXRThreeSessionHealthSummary(telemetry);
+  }
+
+  _createSessionDiagnosticPayload() {
+    let threeDiagnostics = this._threeXRSessionController?.getDiagnostics?.() ||
+      this._threeXRAdapter?.getDiagnostics?.() ||
+      this._threeXRAdapter?.getState?.() ||
+      {};
+    let telemetry = createXRThreeSessionTelemetrySnapshot(threeDiagnostics);
+    let health = createXRThreeSessionHealthSummary(telemetry);
+    let controllerState = this._controller?.getState?.() || {};
+    return {
+      ...telemetry,
+      health,
+      controllerRenderMode: controllerState.renderMode || null,
+      controllerMode: controllerState.mode || null,
+    };
+  }
+
+  _createReadiness(overrides = {}) {
+    let launchGate = overrides.launchGate || this._launchGate || this._createLaunchGate();
+    let texture = overrides.texture || this._createTextureGate();
+    let sceneQuality = overrides.sceneQuality || this._createSceneQuality();
+    let sessionHealth = this._createSessionHealth();
+    return createXRReadinessSummary({
+      launchGate,
+      htmlCanvas: this._createHtmlCanvasDiagnosticsPayload(),
+      texture,
+      sceneQuality,
+      sessionHealth,
+      sessionActive: this._threeXRSessionController?.getDiagnostics?.().active === true ||
+        this._controller?.getState?.().renderMode === 'webxr-session',
+      mode: launchGate.mode || this._launchRecommendation?.mode || null,
+    });
+  }
+
+  _createHtmlCanvasDiagnosticsPayload() {
+    let htmlCanvas = this._htmlCanvasSupport?.diagnostics || this._htmlCanvasDiagnostics || null;
+    if (!htmlCanvas) return null;
+    return {
+      ...htmlCanvas,
+      responseHeader: {
+        checked: this._originTrialHeaderStatus.checked,
+        originTrialPresent: this._originTrialHeaderStatus.present,
+        diagnosticHeader: this._originTrialHeaderStatus.diagnosticHeader,
+        error: this._originTrialHeaderStatus.error,
+      },
+    };
+  }
+
+  _createLaunchGate(options = {}) {
+    let launch = this._launchRecommendation || this._createLaunchRecommendation();
+    return createWebXRLaunchGateSummary(this._support, {
+      preferredMode: this.ref.xrModeSelect?.value === 'auto' ? null : this.ref.xrModeSelect?.value,
+      selectedMode: launch.mode,
+      launch,
+      texture: this._createTextureGate(),
+      userActivation: window.navigator?.userActivation || null,
+      requireUserActivation: options.requireUserActivation === true,
+    });
+  }
+
+  _syncXRModeOptions() {
+    let select = this.ref.xrModeSelect;
+    if (!select) return;
+    let modes = this._support?.modes || {};
+    for (let option of select.options) {
+      if (option.value === 'auto') {
+        option.disabled = false;
+      } else if (option.value === WEBXR_MODES.immersiveAr) {
+        option.disabled = !modes.immersiveAr;
+      } else if (option.value === WEBXR_MODES.immersiveVr) {
+        option.disabled = !modes.immersiveVr;
+      }
+    }
+    if (select.value !== 'auto' && select.selectedOptions[0]?.disabled) {
+      select.value = 'auto';
+    }
   }
 
   _renderGeometryDiagnostics() {
@@ -462,6 +1141,11 @@ export class SpatialLayout extends Symbiote {
         this._geometryCell(this._formatMeters(summary.meters), 'meters'),
         this._geometryCell(this._formatPixels(summary.previewPixels), 'preview pixels'),
         this._geometryCell(this._formatViewport(summary.contentViewport), 'content viewport'),
+        this._geometryCell(this._formatQuality(summary.textureQuality), 'texture quality'),
+        this._geometryCell(this._formatComfort(summary.poseComfort), 'pose comfort'),
+        this._geometryCell(this._formatAdjustment(summary.poseAdjustment), 'adjustment'),
+        this._geometryCell(this._formatFacing(summary.facing), 'facing'),
+        this._geometryCell(this._formatAdjustment(summary.rotationAdjustment), 'rotation adjustment'),
       );
       return row;
     });
@@ -474,11 +1158,13 @@ export class SpatialLayout extends Symbiote {
     let row = document.createElement('div');
     row.className = 'psl-html-canvas';
     row.replaceChildren(
+      this._htmlCanvasChip(diagnostics.availability || diagnostics.recommendation || 'unknown', diagnostics.supported),
       this._htmlCanvasChip('layoutsubtree', diagnostics.apis?.layoutsubtree),
       this._htmlCanvasChip('drawElementImage', diagnostics.apis?.drawElementImage),
       this._htmlCanvasChip('paint', diagnostics.apis?.paintEvent),
       this._htmlCanvasChip('WebGL texture', diagnostics.apis?.webglTextureUpload),
       this._htmlCanvasChip('WebGPU texture', diagnostics.apis?.webgpuTextureCopy),
+      this._htmlCanvasChip('Origin-Trial header', this._originTrialHeaderStatus.present),
       this._htmlCanvasChip('Preview', this._canvasPreviewResult?.rendered),
     );
     row.dataset.supported = String(Boolean(diagnostics.supported));
@@ -543,6 +1229,28 @@ export class SpatialLayout extends Symbiote {
   _formatViewport(viewport) {
     if (!viewport) return '-';
     return `${Math.round(viewport.width)}x${Math.round(viewport.height)} @ ${this._formatNumber(viewport.scale)}`;
+  }
+
+  _formatQuality(quality) {
+    if (!quality) return '-';
+    return `${quality.status} ${Math.round(quality.pixelsPerMeter?.min || 0)}px/m`;
+  }
+
+  _formatComfort(comfort) {
+    if (!comfort) return '-';
+    let horizontal = this._formatNumber(comfort.angles?.horizontal);
+    let vertical = this._formatNumber(comfort.angles?.vertical);
+    return `${comfort.status} ${this._formatNumber(comfort.distance)}m ${horizontal}deg/${vertical}deg`;
+  }
+
+  _formatAdjustment(adjustment) {
+    if (!adjustment) return '-';
+    return adjustment.adjusted ? adjustment.reason || 'adjusted' : 'none';
+  }
+
+  _formatFacing(facing) {
+    if (!facing) return '-';
+    return `${facing.status} ${this._formatNumber(facing.delta?.yaw)}deg`;
   }
 
   _formatNumber(value) {

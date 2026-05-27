@@ -24,7 +24,7 @@ import "./panels/ProjectList/ProjectList.js";
 import "./panels/ActionBoard/ActionBoard.js";
 import "./panels/SettingsPanel/SettingsPanel.js";
 import "./panels/RuntimeControl/RuntimeControl.js";
-import "./panels/SpatialLayout/SpatialLayout.js";
+import "./panels/SpatialLayout/SpatialLayout.js?v=xr-spatial-readiness";
 import "./panels/AgentChat/AgentChat.js";
 import "./panels/Marketplace/Marketplace.js";
 import "./panels/Topology/TopologyPanel.js";
@@ -43,7 +43,7 @@ import { state as dashState, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
 import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
 
-export const state = { skeleton: null, activeFile: null, ws: null, monitorEvents: [] };
+export const state = { skeleton: null, skeletonProjectId: null, activeFile: null, ws: null, monitorEvents: [] };
 export { formatStats } from "symbiote-node/display/format-utils";
 import { uiAlert } from "symbiote-node/ui";
 window.alert = (msg) => uiAlert(msg);
@@ -61,19 +61,34 @@ export function resolveProjectPath(p) {
   return p;
 }
 
+export function skeletonMatchesProject(skeleton, projectId) {
+  let sourceProjectId = skeleton?.publicSource?.projectId || null;
+  let project = (dashState.projectHistory || []).find((item) => item.id === projectId);
+  let requiresPublicSource = String(project?.path || '').includes('/workspace/public-projects/')
+    || (location.pathname.includes('/demos/agent-portal-vr/') && Boolean(projectId));
+  if (!sourceProjectId) return !requiresPublicSource;
+  return sourceProjectId === (projectId || null);
+}
+
+export function getActiveRouteProjectId() {
+  if (dashState.activeProjectId) return dashState.activeProjectId;
+  let query = String(location.hash || '').split('?')[1] || '';
+  return new URLSearchParams(query).get('project') || null;
+}
+
 export async function api(endpoint, params = {}) {
   const urlParams = new URLSearchParams(window.location.search);
   const serverName = urlParams.get('server') || "project-graph";
   let projectRoot = resolveProjectPath('.');
 
   const map = {
-    "/api/skeleton": { name: "get_skeleton", args: p => ({ path: resolveProjectPath(p.path) }) },
-    "/api/file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), beautify: true }) },
-    "/api/compact-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), beautify: false }) },
-    "/api/expand-file": { name: "compact", args: p => ({ action: "expand_file", path: resolveProjectPath(p.path), beautify: true }) },
-    "/api/raw-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), beautify: false }) },
-    "/api/analysis": { name: "analyze", args: p => ({ action: "full_analysis", path: resolveProjectPath(p.path) }) },
-    "/api/analysis-summary": { name: "analyze", args: p => ({ action: "analysis_summary", path: resolveProjectPath(p.path) }) },
+    "/api/skeleton": { name: "get_skeleton", args: p => ({ path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null }) },
+    "/api/file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: true }) },
+    "/api/compact-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: false }) },
+    "/api/expand-file": { name: "compact", args: p => ({ action: "expand_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: true }) },
+    "/api/raw-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: false }) },
+    "/api/analysis": { name: "analyze", args: p => ({ action: "full_analysis", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null }) },
+    "/api/analysis-summary": { name: "analyze", args: p => ({ action: "analysis_summary", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null }) },
     "/api/deps": { name: "navigate", args: p => ({ action: "deps", symbol: p.symbol, path: projectRoot }) },
     "/api/usages": { name: "navigate", args: p => ({ action: "usages", symbol: p.symbol, path: projectRoot }) },
     "/api/expand": { name: "navigate", args: p => ({ action: "expand", symbol: p.symbol, path: projectRoot }) },
@@ -148,7 +163,11 @@ function initDashboardWS(e) {
 }
 
 function connectDashboardWS(e, t, o, _att = 0) {
-  const r = `${t}${o}${e.prefix}/ws/monitor`, n = new WebSocket(r);
+  const path = `${String(e.prefix || '').replace(/^\/+/, '')}/ws/monitor`;
+  const r = new URL(path, baseUrl);
+  r.protocol = t;
+  r.host = o;
+  const n = new WebSocket(r.href);
   n.onopen = () => {
     _att = 0;
   };
@@ -217,7 +236,10 @@ function getSubPanelsForSection(sectionId, projectId) {
  * Called when ?project= param changes in URL.
  */
 function handleProjectSwitch(projectId) {
-  if (projectId === _currentProjectId) return;
+  if (projectId === _currentProjectId && state.skeleton && skeletonMatchesProject(state.skeleton, projectId)) {
+    updateTopbarPath();
+    return;
+  }
   _currentProjectId = projectId;
 
   let sidebar = document.getElementById('app-sidebar');
@@ -259,9 +281,13 @@ function handleProjectSwitch(projectId) {
   // Re-fetch skeleton for the new project context
   // This triggers file-tree and dep-graph to re-render with correct data
   state.skeleton = null;
+  state.skeletonProjectId = projectId || null;
   _currentSection = ''; // Force layout re-apply on next route
-  api('/api/skeleton', {}).then(sk => {
+  api('/api/skeleton', { projectId }).then(sk => {
+    if (_currentProjectId !== projectId) return;
+    if (!skeletonMatchesProject(sk, projectId)) return;
     state.skeleton = sk;
+    state.skeletonProjectId = projectId || null;
     emit('skeleton-loaded', sk);
   }).catch(() => {});
   
@@ -274,12 +300,18 @@ function updateTopbarPath() {
   
   let proj = (dashState.projectHistory || []).find(p => p.id === dashState.activeProjectId);
   if (proj && proj.path) {
-    pathEl.textContent = proj.path;
+    pathEl.textContent = formatProjectPathForTopbar(proj.path);
     pathEl.title = proj.path;
   } else {
     pathEl.textContent = 'Workspace not selected';
     pathEl.title = '';
   }
+}
+
+function formatProjectPathForTopbar(projectPath) {
+  let parts = String(projectPath || '').split('/').filter(Boolean);
+  if (parts.length <= 3) return projectPath;
+  return `.../${parts.slice(-3).join('/')}`;
 }
 
 /**
@@ -489,9 +521,9 @@ async function u() {
   // Also keep original Explorer websocket events alive conceptually
   s("project", e => { e && (document.title = `${e.name} — Project Graph`, document.getElementById("project-name").textContent = e.name, document.documentElement.style.setProperty("--project-accent", e.color), g(e.agents)) });
   events.addEventListener("skeleton-loaded", e => {
-    const t = e.detail; if (!t) return; state.skeleton = t; const n = new Set; for (const e of Object.values(t.n || {})) e.f && n.add(e.f); for (const e of Object.keys(t.X || {})) n.add(e); for (const [e, o] of Object.entries(t.f || {})) for (const t of o) n.add("./" === e ? t : `${e}${t}`); for (const [e, o] of Object.entries(t.a || {})) for (const t of o) n.add("./" === e ? t : `${e}${t}`); const o = document.getElementById("project-files"); o && (o.textContent = `${n.size} files`)
+    const t = e.detail; if (!t || !skeletonMatchesProject(t, getActiveRouteProjectId())) return; state.skeleton = t; const n = new Set; for (const e of Object.values(t.n || {})) e.f && n.add(e.f); for (const e of Object.keys(t.X || {})) n.add(e); for (const [e, o] of Object.entries(t.f || {})) for (const t of o) n.add("./" === e ? t : `${e}${t}`); for (const [e, o] of Object.entries(t.a || {})) for (const t of o) n.add("./" === e ? t : `${e}${t}`); const o = document.getElementById("project-files"); o && (o.textContent = `${n.size} files`)
   });
-  s("skeleton", e => { if (!e) return; state.skeleton = e; emit("skeleton-loaded", e) });
+  s("skeleton", e => { if (!e || !skeletonMatchesProject(e, getActiveRouteProjectId())) return; state.skeleton = e; state.skeletonProjectId = getActiveRouteProjectId(); emit("skeleton-loaded", e) });
   s("connected", e => { const t = document.getElementById("status-indicator"); t && (t.className = e ? "status connected" : "status disconnected") });
   i(e => {
     if ("agent_connect" === e.type || "agent_disconnect" === e.type) return g(e.agents), void emit("agent-event", e);

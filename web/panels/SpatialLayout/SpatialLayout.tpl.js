@@ -20,6 +20,14 @@ export default html`
         <span>Depth</span>
         <input ref="depthInput" type="range" min="80" max="180" value="120">
       </label>
+      <label class="psl-control">
+        <span>XR</span>
+        <select ref="xrModeSelect">
+          <option value="auto">Auto</option>
+          <option value="immersive-ar">AR</option>
+          <option value="immersive-vr">VR</option>
+        </select>
+      </label>
       <button class="psl-enter" ref="enterButton" type="button">
         <span class="material-symbols-outlined">view_in_ar</span>
         Enter VR/AR

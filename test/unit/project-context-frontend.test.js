@@ -1,0 +1,73 @@
+import { strict as assert } from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, it } from 'node:test';
+
+const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+
+function readSource(file) {
+  return fs.readFileSync(path.join(ROOT, file), 'utf8');
+}
+
+describe('project scoped frontend data loading', () => {
+  it('passes active project id through skeleton and file API calls', () => {
+    let source = readSource('web/app.js');
+
+    assert.match(source, /"\/api\/skeleton": \{ name: "get_skeleton", args: p => \(\{ path: resolveProjectPath\(p\.path\), projectId: p\.projectId \|\| dashState\.activeProjectId \|\| null \}\) \}/);
+    assert.match(source, /api\('\/api\/skeleton', \{ projectId \}\)/);
+    assert.match(source, /if \(_currentProjectId !== projectId\) return;/);
+    assert.match(source, /projectId === _currentProjectId && state\.skeleton && skeletonMatchesProject\(state\.skeleton, projectId\)/);
+    assert.match(source, /function skeletonMatchesProject\(skeleton, projectId\)/);
+    assert.match(source, /function getActiveRouteProjectId\(\)/);
+    assert.match(source, /!t \|\| !skeletonMatchesProject\(t, getActiveRouteProjectId\(\)\)/);
+    assert.match(source, /!e \|\| !skeletonMatchesProject\(e, getActiveRouteProjectId\(\)\)/);
+    assert.match(source, /requiresPublicSource = String\(project\?\.path \|\| ''\)\.includes\('\/workspace\/public-projects\/'\)/);
+    assert.match(source, /location\.pathname\.includes\('\/demos\/agent-portal-vr\/'\) && Boolean\(projectId\)/);
+    assert.match(source, /if \(!sourceProjectId\) return !requiresPublicSource;/);
+    assert.match(source, /if \(!skeletonMatchesProject\(sk, projectId\)\) return;/);
+    assert.match(source, /new URL\(path, baseUrl\)/);
+    assert.ok(source.includes("String(e.prefix || '').replace(/^\\/+/, '')"));
+  });
+
+  it('prevents panel self-fetches from accepting stale project skeletons', () => {
+    let fileTreeSource = readSource('web/panels/FileTree/FileTree.js');
+    let graphSource = readSource('web/panels/dep-graph.js');
+
+    assert.match(fileTreeSource, /api\('\/api\/skeleton', \{ projectId \}\)/);
+    assert.match(fileTreeSource, /getActiveRouteProjectId\(\) !== projectId/);
+    assert.match(fileTreeSource, /state\.skeleton && skeletonMatchesProject\(state\.skeleton, getActiveRouteProjectId\(\)\)/);
+    assert.match(fileTreeSource, /dashEvents\.addEventListener\('active-project-changed'/);
+    assert.match(fileTreeSource, /customElements\.whenDefined\('sn-tree-panel'\)/);
+    assert.match(fileTreeSource, /customElements\.whenDefined\('sn-tree-view'\)/);
+    assert.match(fileTreeSource, /setTreeItems\(this, this\._treeItems, this\.\$\.filterText\)/);
+    assert.match(fileTreeSource, /this\.querySelector\('sn-tree-panel'\)/);
+    assert.match(fileTreeSource, /panel\.setItems\(this\._treeItems\)/);
+    assert.match(fileTreeSource, /skeletonMatchesProject\(event\.detail, getActiveRouteProjectId\(\)\)/);
+    assert.match(fileTreeSource, /skeletonMatchesProject\(skeleton, projectId\)/);
+    assert.match(graphSource, /api\('\/api\/skeleton', \{ projectId \}\)/);
+    assert.match(graphSource, /getActiveRouteProjectId\(\) !== projectId/);
+    assert.match(graphSource, /!state\.skeleton \|\| !skeletonMatchesProject\(state\.skeleton, getActiveRouteProjectId\(\)\)/);
+    assert.match(graphSource, /dashEvents\.addEventListener\('active-project-changed', this\._onActiveProjectChanged\)/);
+    assert.match(graphSource, /skeletonMatchesProject\(e\.detail, getActiveRouteProjectId\(\)\)/);
+    assert.match(graphSource, /skeletonMatchesProject\(skeleton, projectId\)/);
+  });
+
+  it('keeps the final project directory visible in the topbar path', () => {
+    let appSource = readSource('web/app.js');
+    let styleSource = readSource('web/style.css');
+
+    assert.match(appSource, /formatProjectPathForTopbar\(proj\.path\)/);
+    assert.match(appSource, /parts\.slice\(-3\)\.join\('\/'\)/);
+    assert.match(styleSource, /#active-project-path\s*\{[\s\S]*text-overflow: ellipsis;/);
+  });
+
+  it('declares a runtime base path before API calls are patched', () => {
+    let indexSource = readSource('web/index.html');
+    let appSource = readSource('web/app.js');
+
+    assert.match(indexSource, /<base href="\$\{basePath \|\| '\/'\}">/);
+    assert.ok(indexSource.indexOf('<base href=') < indexSource.indexOf('<script type="importmap">'));
+    assert.match(indexSource, /src="app\.js\?v=xr-spatial-readiness"/);
+    assert.ok(appSource.includes('import "./common/base-path.js";'));
+  });
+});

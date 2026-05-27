@@ -1,10 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildFlatGroups,
   buildGraphStatItems,
   prepareGraphBuild,
-} from '../../web/panels/dep-graph-build.js';
-import { buildFlatGroups } from '../../web/panels/dep-graph-layout.js';
+} from 'symbiote-node/graph';
 
 function createGraph() {
   return {

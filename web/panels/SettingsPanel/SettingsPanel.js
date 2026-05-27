@@ -342,7 +342,11 @@ export class SettingsPanel extends Symbiote {
   async stopServer() {
     if (!(await uiConfirm("Stop the server? It will not restart automatically."))) return;
     try {
-      await fetch("/api/stop", { method: "POST" });
+      let res = await fetch("/api/stop", { method: "POST" });
+      if (!res.ok) {
+        let body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
       setStatus(this.ref.restartStatus, "Server stopped.", "error");
     } catch (e) {
       setStatus(this.ref.restartStatus, `Error: ${e.message}`, "error");
@@ -353,7 +357,11 @@ export class SettingsPanel extends Symbiote {
     let t = this.ref.restartStatus;
     setStatus(t, "Restarting server...", "warning");
     try {
-      await fetch("/api/restart", { method: "POST" });
+      let res = await fetch("/api/restart", { method: "POST" });
+      if (!res.ok) {
+        let body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
       setStatus(t, "Server stopped. Reconnecting...", "warning");
       let retries = 0;
       let timer = setInterval(async () => {

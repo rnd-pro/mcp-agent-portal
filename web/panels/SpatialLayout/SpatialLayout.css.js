@@ -174,6 +174,33 @@ pg-spatial-layout {
     var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
 }
 
+.psl-panel::before,
+.psl-panel::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.psl-panel::before {
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--sn-xr-pointer-color) 34%, transparent), transparent 22%),
+    color-mix(in oklch, var(--sn-xr-panel-border) 64%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--sn-xr-panel-border) 78%, transparent);
+  height: max(16px, calc(var(--sn-space-lg) * 0.72));
+  inset: 0 0 auto 0;
+}
+
+.psl-panel::after {
+  border-bottom: 2px solid var(--sn-xr-pointer-color);
+  border-right: 2px solid var(--sn-xr-pointer-color);
+  bottom: var(--sn-space-xs);
+  height: var(--sn-space-md);
+  opacity: 0.76;
+  right: var(--sn-space-xs);
+  width: var(--sn-space-md);
+}
+
 .psl-panel-live {
   display: block;
   height: var(--sn-xr-content-height);
@@ -206,6 +233,16 @@ pg-spatial-layout {
   width: 32%;
 }
 
+.psl-panel-canvas[data-preview="source"] {
+  height: 1px;
+  opacity: 0.001;
+  pointer-events: none;
+  position: absolute;
+  right: auto;
+  top: auto;
+  width: 1px;
+}
+
 .psl-panel-canvas[data-live="true"] {
   border: 0;
   border-radius: 0;
@@ -219,8 +256,77 @@ pg-spatial-layout {
   width: 100%;
 }
 
-.psl-panel-canvas[hidden] {
-  display: none;
+.psl-deep-graph {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform-style: preserve-3d;
+  z-index: 3;
+}
+
+.psl-deep-edge {
+  background: color-mix(in oklch, var(--sn-node-border) 62%, var(--sn-node-selected));
+  display: block;
+  height: 1px;
+  left: 50%;
+  opacity: 0.42;
+  position: absolute;
+  top: 50%;
+  transform:
+    translate3d(calc(-50% + var(--psl-edge-x)), calc(-50% + var(--psl-edge-y)), var(--psl-edge-z))
+    rotate(var(--psl-edge-angle));
+  transform-origin: 0 50%;
+  width: var(--psl-edge-length);
+}
+
+.psl-deep-node {
+  align-items: center;
+  background: color-mix(in oklch, var(--sn-xr-panel-bg) 84%, var(--sn-node-selected) 16%);
+  border: 1px solid color-mix(in oklch, var(--sn-node-border) 72%, var(--sn-node-selected));
+  border-radius: 999px;
+  box-shadow: 0 0 18px color-mix(in oklch, var(--sn-node-selected) 22%, transparent);
+  color: transparent;
+  display: inline-flex;
+  height: var(--psl-node-size);
+  justify-content: center;
+  left: 50%;
+  min-height: 7px;
+  min-width: 7px;
+  overflow: hidden;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  width: var(--psl-node-size);
+}
+
+.psl-deep-node[data-depth="0"] {
+  background: var(--sn-node-selected);
+  border-color: var(--sn-node-selected);
+}
+
+.psl-deep-node[data-focus="true"] {
+  box-shadow:
+    0 0 0 2px color-mix(in oklch, var(--sn-node-selected) 86%, transparent),
+    0 0 34px color-mix(in oklch, var(--sn-node-selected) 44%, transparent);
+}
+
+.psl-xr-layer-canvas {
+  height: 720px;
+  left: 0;
+  opacity: 0.001;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  width: 1280px;
+  z-index: -1;
+}
+
+.psl-xr-canvas-source {
+  display: block;
+  left: 0;
+  position: absolute;
+  top: 0;
 }
 
 .sn-xr-panel-fallback {

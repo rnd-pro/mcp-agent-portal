@@ -80,6 +80,13 @@ html, body {
   max-width: 40vw;
 }
 
+#active-project-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .topbar-project-icon {
   font-size: 14px;
 }

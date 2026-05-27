@@ -34,16 +34,40 @@ let MIME_TYPES = {
   '.woff2': 'font/woff2',
 };
 
+export const HTML_IN_CANVAS_ORIGIN_TRIAL_ENV = 'AGENT_PORTAL_HTML_IN_CANVAS_ORIGIN_TRIAL_TOKEN';
+
+export function resolveHtmlInCanvasOriginTrialToken(env = process.env) {
+  let token = String(env[HTML_IN_CANVAS_ORIGIN_TRIAL_ENV] || '').trim();
+  return token || null;
+}
+
+export function createStaticFileHeaders(targetPath, options = {}) {
+  let env = options.env || process.env;
+  let ext = path.extname(targetPath);
+  let mime = MIME_TYPES[ext] || 'application/octet-stream';
+  let headers = {
+    'Content-Type': mime,
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+  };
+  let htmlInCanvasToken = resolveHtmlInCanvasOriginTrialToken(env);
+  if (ext === '.html' && htmlInCanvasToken) {
+    headers['Origin-Trial'] = htmlInCanvasToken;
+    headers['X-Agent-Portal-Origin-Trial'] = 'html-in-canvas';
+  }
+  return headers;
+}
+
 /**
  * Serve a static file from WEB_DIR or packages/.
  * @param {string} reqPath
+ * @param {string} method
  * @param {http.ServerResponse} res
  */
-function serveStaticFile(reqPath, res) {
+function serveStaticFile(reqPath, method, res) {
   let normalizedPath = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, '');
   // Route /packages/<name>/... to packages/<name>/...
   let pkgMatch = normalizedPath.match(/^[/\\]?packages[/\\]([^/\\]+)[/\\]?(.*)/);
-  // Route /vendor/symbiote/... to node_modules/@symbiotejs/symbiote/...
+  // Route reviewed browser vendor modules from node_modules.
   let vendorMatch = normalizedPath.match(/^[/\\]?vendor[/\\]([^/\\]+)[/\\]?(.*)/);
 
   let targetPath;
@@ -56,6 +80,12 @@ function serveStaticFile(reqPath, res) {
     let restPath = vendorMatch[2] || 'index.js';
     if (vendorName === 'symbiote') {
       targetPath = path.join(ROOT_DIR, 'node_modules', '@symbiotejs', 'symbiote', restPath);
+    } else if (vendorName === 'iwer') {
+      targetPath = path.join(ROOT_DIR, 'node_modules', 'iwer', restPath);
+    } else if (vendorName === 'iwer-devui') {
+      targetPath = path.join(ROOT_DIR, 'node_modules', '@iwer', 'devui', restPath);
+    } else if (vendorName === 'three') {
+      targetPath = path.join(ROOT_DIR, 'node_modules', 'three', restPath);
     } else {
       res.writeHead(403);
       res.end('Forbidden vendor');
@@ -75,11 +105,9 @@ function serveStaticFile(reqPath, res) {
     return;
   }
 
-  let ext = path.extname(targetPath);
-  let mime = MIME_TYPES[ext] || 'application/octet-stream';
   let content = fs.readFileSync(targetPath);
-  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache, no-store, must-revalidate' });
-  res.end(content);
+  res.writeHead(200, createStaticFileHeaders(targetPath));
+  res.end(method === 'HEAD' ? undefined : content);
 }
 
 /**
@@ -237,7 +265,7 @@ export function startWebServer(projectRoot) {
     }
 
     // Static files
-    serveStaticFile(url.pathname, res);
+    serveStaticFile(url.pathname, req.method, res);
   });
 
   server.on('upgrade', (req, socket, head) => {

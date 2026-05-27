@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Portal</title>
 <meta name="description" content="Unified control center for MCP servers and AI agents">
+<script>
+  (() => {
+    let basePath = window.AGENT_PORTAL_BASE_PATH;
+    if (!basePath) {
+      basePath = location.pathname.endsWith('/')
+        ? location.pathname
+        : location.pathname.replace(/\/[^/]*$/, '/');
+    }
+    document.write(`<base href="${basePath || '/'}">`);
+  })();
+</script>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
 	<link rel="stylesheet" href="/packages/symbiote-node/themes/default-provider.css">
@@ -26,7 +37,8 @@
 	        "symbiote-node/display/markdown-formatter": "/packages/symbiote-node/display/markdown-formatter.js",
 	        "symbiote-node/display/format-utils": "/packages/symbiote-node/display/format-utils.js",
 	        "symbiote-node/display/icons": "/packages/symbiote-node/display/icons.js",
-	        "symbiote-node/display/event-feed-adapter": "/packages/symbiote-node/display/event-feed-adapter.js"
+	        "symbiote-node/display/event-feed-adapter": "/packages/symbiote-node/display/event-feed-adapter.js",
+	        "three": "/vendor/three/build/three.module.js?v=0-170-0"
 	      }
     }
   </script>
@@ -51,6 +63,6 @@
 </div>
 </div>
 </div>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=xr-spatial-readiness"></script>
 </body>
 </html>

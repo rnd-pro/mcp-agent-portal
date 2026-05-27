@@ -5,10 +5,8 @@ import {
   findClusterForPath,
   normalizeProjectGraphMetadata,
   pathMatchesPattern,
-} from '../../web/services/project-graph-metadata.js';
-import {
-  normalizeProjectGraphMetadata as normalizeServerProjectGraphMetadata,
-} from '../../src/iso/project-graph-metadata.js';
+  validateProjectGraphMetadata,
+} from 'symbiote-node/graph';
 
 describe('project graph metadata', () => {
   it('normalizes clusters and filters unusable entries', () => {
@@ -61,22 +59,33 @@ describe('project graph metadata', () => {
     ]);
   });
 
-  it('keeps browser and server metadata normalization aligned', () => {
+  it('validates and normalizes metadata through the provider contract', () => {
     const fixture = {
       version: 1,
       clusters: [
         { label: 'One', path: 'web/' },
         { label: 'Two', pattern: ['src/**/*.js'] },
         { label: 'Three', node: 'packages/project-graph-mcp/' },
-        { label: 'Bad Color', color: 'url(javascript:alert(1))', match: 'test/' },
+        { label: 'Themed', color: 'var(--sn-graph-cluster-4)', match: 'test/' },
       ],
-      stories: [{ id: 'flow' }],
+      stories: [{ id: 'flow', beats: [{ id: 'entry', nodes: ['web/app.js'] }] }],
       hiddenNodes: ['vendor/'],
     };
 
     assert.deepEqual(
       normalizeProjectGraphMetadata(fixture),
-      normalizeServerProjectGraphMetadata(fixture),
+      validateProjectGraphMetadata(fixture),
+    );
+  });
+
+  it('rejects invalid metadata before normalization', () => {
+    assert.throws(
+      () => validateProjectGraphMetadata({ clusters: [{ label: 'Missing Paths' }] }),
+      /clusters\[0\] must define at least one path/,
+    );
+    assert.throws(
+      () => validateProjectGraphMetadata({ stories: [{ id: 'bad', beats: [{ nodes: [123] }] }] }),
+      /beats\[0\]\.nodes/,
     );
   });
 

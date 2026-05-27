@@ -1,32 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { register } from 'node:module';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const symbioteNodeGraphUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'graph', 'index.js')).href;
-const loaderSource = `
-export async function resolve(specifier, context, nextResolve) {
-  if (specifier === 'symbiote-node/graph') {
-    return { url: ${JSON.stringify(symbioteNodeGraphUrl)}, shortCircuit: true };
-  }
-  return nextResolve(specifier, context);
-}
-`;
-
-register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url);
-
-const {
-  buildCanvasGraphModelFromSkeleton,
-  buildGraphModelFromSkeleton,
-} = await import('../../web/services/project-graph-canvas-model.js?unit-test');
 import {
   baseName,
+  buildCanvasGraphModelFromSkeleton,
+  buildGraphModelFromSkeleton,
   collectSkeletonFiles,
   dirOf,
   resolveImport,
-} from '../../web/services/project-graph-skeleton-utils.js';
+} from 'symbiote-node/graph';
 
 describe('canvas graph project model adapter', () => {
   it('builds a flat canvas model from project skeleton data', () => {

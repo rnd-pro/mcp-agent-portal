@@ -9,16 +9,13 @@ import {
   resolveFlatHashChange,
   resolveGraphNodeClick,
   resolveToolbarAction,
-  selectLabelMode,
+  selectGraphLabelMode as selectLabelMode,
   shouldClearFocusOnSelection,
   shouldFitForceLayoutInitialTick,
   shouldRestoreFlatFocus,
-} from '../../web/panels/dep-graph-ui.js';
-import {
-  mountDepGraphTemplate,
   renderClusterPanel,
   renderGraphStats,
-} from '../../web/panels/dep-graph-dom.js';
+} from 'symbiote-node/ui';
 
 function createElement(tagName) {
   return {
@@ -54,13 +51,6 @@ const testDocument = {
     };
   },
 };
-
-test('mountDepGraphTemplate replaces host content with parsed template fragment', () => {
-  const host = createElement('host');
-  mountDepGraphTemplate(host, '<node-canvas></node-canvas>', testDocument);
-
-  assert.deepEqual(host.children, [{ template: '<node-canvas></node-canvas>' }]);
-});
 
 test('renderClusterPanel hides unavailable flat legend and clears rows', () => {
   const panel = createElement('div');

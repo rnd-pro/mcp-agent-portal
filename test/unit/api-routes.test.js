@@ -40,6 +40,9 @@ function makeRoutes(projectRoot = '/tmp') {
   return {
     proxyManager: { servers: new Map(), config: {}, getStatus() { return []; } },
     projectRoot,
+    env: {
+      AGENT_PORTAL_RUNTIME_DIR: path.join(os.tmpdir(), 'agent-portal-api-routes-test-runtime'),
+    },
   };
 }
 
@@ -103,12 +106,258 @@ describe('api-routes', () => {
     let routes = createRoutes(makeRoutes('/tmp/project'));
 
     let req = makeReq('POST', '/api/xr-diagnostics/log', {
+      clientId: 'quest-client-1',
       event: 'support-detected',
-      pageUrl: 'http://192.168.1.20:51615/xr-diagnostics.html',
+      pageUrl: 'http://192.168.1.20:51615/xr-diagnostics.html?token=must-not-leak#graph?authorization=must-not-leak',
       secureContext: false,
       navigatorXr: true,
       modes: { inline: true, immersiveVr: false, immersiveAr: false },
       launch: { canLaunch: false, reason: 'insecure-context' },
+      session: {
+        version: 'xr-three-session-telemetry-v1',
+        status: 'preflight',
+        mode: null,
+        active: false,
+        visibilityState: 'visible',
+        environmentBlendMode: 'opaque',
+        interactionMode: 'world-space',
+        enabledFeatures: ['local-floor', 'dom-overlay'],
+        inputSources: [{ handedness: 'right', targetRayMode: 'tracked-pointer', profiles: ['oculus-touch'] }],
+        sessionOptions: {
+          referenceSpaceType: 'local-floor',
+          optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
+          requiredFeatures: [],
+          domOverlay: true,
+        },
+        frames: 12,
+        controllers: 1,
+        controllerRayVisuals: 1,
+        hitReticleVisuals: 1,
+        selectedPanelId: 'front',
+        hover: { panelId: 'front', point: { x: 0.4, y: 0.6 }, distance: 1.7, reticleVisible: true },
+        drag: {
+          active: false,
+          panelId: 'front',
+          frameTarget: { panelId: 'front', operation: 'resize', zone: 'resize', handle: 'east' },
+          size: [1.4, 0.72],
+          resize: { operation: 'resize', handle: 'east', size: [1.4, 0.72], delta: { x: 0.2, y: 0 } },
+        },
+        panelCount: 4,
+        health: {
+          version: 'xr-three-session-health-v1',
+          status: 'warning',
+          reason: 'low-fps',
+          checks: { running: true, active: true, frames: 12, panelCount: 4, controllers: 1, fps: 38 },
+          issues: [{ severity: 'warning', code: 'low-fps', value: 38 }],
+        },
+        token: 'must-not-leak',
+      },
+      details: {
+        controller: { status: 'fallback', scene: { panelCount: 4 } },
+        htmlCanvas: {
+          supported: false,
+          availability: 'origin-trial-or-flag-required',
+          recommendation: 'enable-CanvasDrawElement',
+          requiredFlag: 'CanvasDrawElement',
+          renderTargetAvailable: false,
+          textureUploadAvailable: false,
+          missing: ['layoutsubtree', 'render-target-api'],
+          blockingMissing: ['layoutsubtree', 'render-target-api'],
+          missingCore: ['layoutsubtree', 'render-target-api'],
+          missingTexture: ['texElementImage2D', 'copyElementImageToTexture'],
+          originTrial: {
+            status: 'origin-trial',
+            chromeMilestoneRange: '148-150',
+            localTestBrowser: 'Chrome Canary 149+',
+            flagUrl: 'chrome://flags/#canvas-draw-element',
+            source: 'https://developer.chrome.com/blog/html-in-canvas-origin-trial',
+          },
+          enablement: {
+            version: 'xr-html-in-canvas-enablement-v1',
+            secureContext: true,
+            originTrialMetaPresent: true,
+            originTrialMetaCount: 1,
+            originTrialTokenPresent: true,
+            originTrialConfigured: true,
+            requiredFlag: 'CanvasDrawElement',
+            flagUrl: 'chrome://flags/#canvas-draw-element',
+            source: 'https://developer.chrome.com/blog/html-in-canvas-origin-trial',
+          },
+          responseHeader: {
+            checked: true,
+            originTrialPresent: true,
+            diagnosticHeader: 'html-in-canvas',
+            token: 'must-not-leak',
+          },
+        },
+        sceneQuality: {
+          version: 'xr-scene-quality-summary-v1',
+          status: 'warning',
+          total: 4,
+          lowQualityCount: 1,
+          comfortWarningCount: 0,
+          facingWarningCount: 1,
+          panels: [
+            {
+              panelId: 'front',
+              textureStatus: 'low',
+              comfortStatus: 'ok',
+              facingStatus: 'warning',
+              pixelsPerMeter: 720,
+              distance: 1.75,
+              position: [0, 1.42, -1.75],
+              rotation: [0, 0, 0],
+            },
+          ],
+        },
+        readiness: {
+          version: 'xr-readiness-summary-v1',
+          ready: false,
+          running: false,
+          status: 'blocked',
+          reason: 'html-in-canvas-unsupported',
+          mode: 'immersive-vr',
+          blockingChecks: [
+            { id: 'launch', status: 'blocked', reason: 'html-in-canvas-unsupported' },
+            { id: 'html-canvas', status: 'origin-trial-or-flag-required', reason: 'enable-CanvasDrawElement' },
+            { id: 'texture', status: 'blocked', reason: 'html-in-canvas-unsupported' },
+          ],
+        },
+        visualReadiness: {
+          version: 'xr-visual-agent-readiness-v1',
+          ready: true,
+          status: 'pass',
+          reason: 'ready',
+          expectedStatus: 'pass',
+          issueIds: [],
+          checks: [
+            { id: 'visual-status', status: 'pass' },
+            { id: 'visual-maps-present', status: 'pass' },
+          ],
+        },
+        interactionReadiness: {
+          version: 'xr-three-interaction-readiness-v1',
+          ready: false,
+          status: 'blocked',
+          reason: 'texture-upload-ready',
+          issueCodes: ['texture-upload-ready'],
+          checks: [
+            { id: 'texture-upload-ready', status: 'blocked', reason: 'html-in-canvas-unsupported' },
+          ],
+          frameTarget: { panelId: 'front', operation: 'resize', zone: 'resize', handle: 'east' },
+        },
+        texture: {
+          strict: true,
+          debugMode: {
+            version: 'xr-texture-debug-mode-v1',
+            mode: 'strict',
+            strict: true,
+            requireTextureUpload: true,
+            hideStrictTextureFailures: true,
+            allowMaterialFallback: false,
+            reason: 'validate-live-html-textures',
+          },
+          total: 4,
+          ready: 0,
+          blocked: true,
+          reason: 'html-in-canvas-unsupported',
+          stage: 'html-in-canvas-support',
+          requiredApi: ['layoutsubtree', 'render-target-api'],
+          bridgeVersion: 'xr-three-panel-texture-bridge-v1',
+          bridgeStages: [
+            {
+              panelId: 'front',
+              stage: 'html-in-canvas-support',
+              source: 'unsupported',
+              mode: 'unsupported',
+              ok: false,
+              reason: 'html-in-canvas-unsupported',
+              textureApplied: false,
+            },
+          ],
+          resolverVersion: 'xr-three-html-canvas-texture-resolver-v1',
+          resolverTextures: 0,
+          resolverStages: [
+            {
+              panelId: 'front',
+              stage: 'html-canvas-preview',
+              ok: false,
+              reason: 'html-in-canvas-unsupported',
+              textureApplied: false,
+              width: 1280,
+              height: 720,
+              mode: 'canvas2d',
+            },
+          ],
+        },
+        launchGate: {
+          version: 'webxr-launch-gate-summary-v1',
+          canStart: false,
+          blocked: true,
+          reason: 'html-in-canvas-unsupported',
+          mode: 'immersive-vr',
+          blockingChecks: [
+            { id: 'strict-texture', reason: 'html-in-canvas-unsupported' },
+          ],
+        },
+        deepGraph: {
+          version: 'xr-deep-graph-diagnostics-v1',
+          sceneVersion: 'xr-deep-graph-v1',
+          nodeCount: 379,
+          edgeCount: 304,
+          connectedNodeCount: 320,
+          orphanNodeCount: 59,
+          maxDepth: 5,
+          focusNodeId: 'src/node/server/demo-mode.js',
+          focus: {
+            nodeId: 'src/node/server/demo-mode.js',
+            found: true,
+            depth: 3,
+            incoming: 2,
+            outgoing: 3,
+          },
+          edgeTypes: {
+            'project.import': 220,
+            'project.export': 84,
+          },
+        },
+        deepGraphPreview: {
+          version: 'xr-deep-graph-preview-v1',
+          nodes: 20,
+          edges: 24,
+          source: {
+            nodeCount: 379,
+            edgeCount: 304,
+          },
+          summary: {
+            version: 'xr-deep-graph-preview-summary-v1',
+            status: 'limited',
+            nodes: {
+              visible: 20,
+              source: 379,
+              hidden: 359,
+              coverage: 0.0528,
+              limit: 20,
+            },
+            edges: {
+              visible: 24,
+              source: 304,
+              hidden: 280,
+              coverage: 0.0789,
+              limit: 60,
+            },
+            focus: {
+              nodeId: 'src/node/server/demo-mode.js',
+              visible: true,
+              edges: {
+                visible: 3,
+                source: 5,
+              },
+            },
+          },
+        },
+        token: 'must-not-leak',
+      },
     });
     req.headers = {
       host: '192.168.1.20:51615',
@@ -120,12 +369,128 @@ describe('api-routes', () => {
 
     let getRes = makeRes();
     routes['GET /api/xr-diagnostics/logs'](makeReq('GET', '/api/xr-diagnostics/logs'), getRes);
+    let summaryRes = makeRes();
+    routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), summaryRes);
 
     assert.equal(postRes.status, 200);
     assert.equal(postRes.json().entry.address, '192.168.1.55');
+    assert.equal(postRes.json().entry.clientId, 'quest-client-1');
     assert.equal(getRes.status, 200);
     assert.equal(getRes.json().logs.at(-1).event, 'support-detected');
     assert.equal(getRes.json().logs.at(-1).launch.reason, 'insecure-context');
+    assert.equal(getRes.json().logs.at(-1).session.status, 'preflight');
+    assert.deepEqual(getRes.json().logs.at(-1).session.drag.size, [1.4, 0.72]);
+    assert.equal(getRes.json().logs.at(-1).session.drag.resize.handle, 'east');
+    assert.equal('token' in getRes.json().logs.at(-1).session, false);
+    assert.equal(getRes.json().logs.at(-1).details.controller.scene.panelCount, 4);
+    assert.equal('token' in getRes.json().logs.at(-1).details, false);
+    assert.equal(summaryRes.status, 200);
+    assert.equal(summaryRes.json().version, 'xr-diagnostics-summary-v1');
+    assert.equal(summaryRes.json().count, 1);
+    assert.equal(summaryRes.json().clientCount, 1);
+    assert.equal(summaryRes.json().latest.clientId, 'quest-client-1');
+    assert.equal(summaryRes.json().latest.pageUrl.includes('must-not-leak'), false);
+    assert.equal(summaryRes.json().latest.pageUrl.includes('token=%5Bredacted%5D'), true);
+    assert.equal(summaryRes.json().latest.pageUrl.includes('authorization=%5Bredacted%5D'), true);
+    assert.equal(summaryRes.json().latestClient.clientId, 'quest-client-1');
+    assert.equal(summaryRes.json().latestClient.eventCount, 1);
+    assert.equal(typeof summaryRes.json().generatedAt, 'string');
+    assert.equal(summaryRes.json().staleAfterMs, 15000);
+    assert.equal(typeof summaryRes.json().latestClient.ageMs, 'number');
+    assert.equal(summaryRes.json().latestClient.stale, false);
+    assert.equal(summaryRes.json().latestClient.staleAfterMs, 15000);
+    assert.equal(summaryRes.json().latestClient.phase, 'blocked');
+    assert.equal(summaryRes.json().visualReadiness.status, 'pass');
+    assert.equal(summaryRes.json().interactionReadiness.status, 'blocked');
+    assert.equal(summaryRes.json().latestClient.visualReadiness.checks[0].id, 'visual-status');
+    assert.equal(summaryRes.json().latestClient.interactionReadiness.issueCodes[0], 'texture-upload-ready');
+    assert.equal(summaryRes.json().latestClient.interactionReadiness.frameTarget.handle, 'east');
+    assert.equal(summaryRes.json().latestClient.session.status, 'preflight');
+    assert.equal(summaryRes.json().latestClient.session.mode, null);
+    assert.equal(summaryRes.json().latestClient.session.frames, 12);
+    assert.equal(summaryRes.json().latestClient.session.inputSources[0].targetRayMode, 'tracked-pointer');
+    assert.equal(summaryRes.json().latestClient.session.sessionOptions.referenceSpaceType, 'local-floor');
+    assert.equal(summaryRes.json().latestClient.session.hover.panelId, 'front');
+    assert.equal(summaryRes.json().latestClient.session.health.status, 'warning');
+    assert.equal(summaryRes.json().latestClient.session.health.issues[0].code, 'low-fps');
+    assert.equal('token' in summaryRes.json().latestClient.session, false);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.availability, 'origin-trial-or-flag-required');
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.originTrial.flagUrl, 'chrome://flags/#canvas-draw-element');
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.enablement.originTrialMetaPresent, true);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.enablement.originTrialMetaCount, 1);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.enablement.originTrialConfigured, true);
+    assert.equal('originTrialTokenPresent' in summaryRes.json().latestClient.htmlCanvas.enablement, false);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.responseHeader.checked, true);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.responseHeader.originTrialPresent, true);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.responseHeader.diagnosticHeader, 'html-in-canvas');
+    assert.equal('token' in summaryRes.json().latestClient.htmlCanvas.responseHeader, false);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.textureUploadAvailable, false);
+    assert.deepEqual(summaryRes.json().latestClient.htmlCanvas.missingCore, ['layoutsubtree', 'render-target-api']);
+    assert.deepEqual(summaryRes.json().latestClient.htmlCanvas.missingTexture, ['texElementImage2D', 'copyElementImageToTexture']);
+    assert.equal(summaryRes.json().htmlCanvas.availability, 'origin-trial-or-flag-required');
+    assert.equal(summaryRes.json().latestClient.sceneQuality.status, 'warning');
+    assert.equal(summaryRes.json().latestClient.sceneQuality.lowQualityCount, 1);
+    assert.equal(summaryRes.json().latestClient.sceneQuality.facingWarningCount, 1);
+    assert.equal(summaryRes.json().latestClient.sceneQuality.panels[0].panelId, 'front');
+    assert.equal(summaryRes.json().sceneQuality.status, 'warning');
+    assert.equal(summaryRes.json().latestClient.readiness.status, 'blocked');
+    assert.equal(summaryRes.json().latestClient.readiness.reason, 'html-in-canvas-unsupported');
+    assert.equal(summaryRes.json().latestClient.readiness.blockingChecks[1].id, 'html-canvas');
+    assert.equal(summaryRes.json().readiness.status, 'blocked');
+    assert.equal(summaryRes.json().latestClient.texture.stage, 'html-in-canvas-support');
+    assert.equal(summaryRes.json().latestClient.texture.debugMode.mode, 'strict');
+    assert.equal(summaryRes.json().latestClient.texture.debugMode.requireTextureUpload, true);
+    assert.equal(summaryRes.json().latestClient.texture.ready, 0);
+    assert.equal(summaryRes.json().latestClient.texture.total, 4);
+    assert.deepEqual(summaryRes.json().latestClient.texture.requiredApi, ['layoutsubtree', 'render-target-api']);
+    assert.equal(summaryRes.json().latestClient.texture.bridgeStages[0].panelId, 'front');
+    assert.equal(summaryRes.json().latestClient.texture.resolverVersion, 'xr-three-html-canvas-texture-resolver-v1');
+    assert.equal(summaryRes.json().latestClient.texture.resolverTextures, 0);
+    assert.equal(summaryRes.json().latestClient.texture.resolverStages[0].stage, 'html-canvas-preview');
+    assert.equal(summaryRes.json().latestClient.texture.resolverStages[0].width, 1280);
+    assert.equal(summaryRes.json().texture.stage, 'html-in-canvas-support');
+    assert.equal(summaryRes.json().latestClient.launchGate.reason, 'html-in-canvas-unsupported');
+    assert.equal(summaryRes.json().latestClient.launchGate.blockingChecks[0].id, 'strict-texture');
+    assert.equal(summaryRes.json().launchGate.reason, 'html-in-canvas-unsupported');
+    assert.equal(summaryRes.json().latestClient.deepGraph.nodeCount, 379);
+    assert.equal(summaryRes.json().latestClient.deepGraph.edgeCount, 304);
+    assert.equal(summaryRes.json().latestClient.deepGraph.focus.nodeId, 'src/node/server/demo-mode.js');
+    assert.equal(summaryRes.json().latestClient.deepGraph.focus.incoming, 2);
+    assert.equal(summaryRes.json().latestClient.deepGraph.edgeTypes['project.import'], 220);
+    assert.equal(summaryRes.json().deepGraph.focusNodeId, 'src/node/server/demo-mode.js');
+    assert.equal(summaryRes.json().latestClient.deepGraphPreview.summary.status, 'limited');
+    assert.equal(summaryRes.json().latestClient.deepGraphPreview.summary.focus.visible, true);
+    assert.equal(summaryRes.json().latestClient.deepGraphPreview.summary.focus.edges.visible, 3);
+    assert.equal(summaryRes.json().deepGraphPreview.summary.focus.nodeId, 'src/node/server/demo-mode.js');
+    assert.equal(summaryRes.json().troubleshooting.version, 'xr-three-troubleshooting-summary-v1');
+    assert.equal(summaryRes.json().troubleshooting.status, 'blocked');
+    assert.equal(summaryRes.json().troubleshooting.primaryIssue.code, 'launch-gate-blocked');
+    assert.ok(summaryRes.json().troubleshooting.issueCodes.includes('texture-gate-blocked'));
+    assert.equal(summaryRes.json().troubleshooting.textureReady, 0);
+    assert.equal(summaryRes.json().troubleshooting.textureTotal, 4);
+    assert.deepEqual(summaryRes.json().latestClient.recentEvents.map((item) => item.event), ['support-detected']);
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].mode, null);
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].htmlCanvasAvailability, 'origin-trial-or-flag-required');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].htmlCanvasRecommendation, 'enable-CanvasDrawElement');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].sceneQualityStatus, 'warning');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].sceneQualityLowPanels, 1);
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].readinessStatus, 'blocked');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].readinessReason, 'html-in-canvas-unsupported');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].textureStage, 'html-in-canvas-support');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].textureResolverStage, 'html-canvas-preview');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].textureResolverReason, 'html-in-canvas-unsupported');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].textureMode, 'strict');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].launchGateReason, 'html-in-canvas-unsupported');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphNodes, 379);
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphEdges, 304);
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphFocus, 'src/node/server/demo-mode.js');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphPreviewStatus, 'limited');
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphFocusVisible, true);
+    assert.equal(summaryRes.json().immersiveClientCount, 0);
+    assert.equal(summaryRes.json().latestImmersiveClient, null);
+    assert.equal(summaryRes.json().latest.event, 'support-detected');
+    assert.equal(summaryRes.json().launch.reason, 'insecure-context');
+    assert.equal(summaryRes.json().eventCounts['support-detected'], 1);
   });
 
   it('POST /api/ui rejects non-UI state paths', async () => {

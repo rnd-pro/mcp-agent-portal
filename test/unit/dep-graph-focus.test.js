@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { findConnectionPath, resolveSymbolFile } from '../../web/panels/dep-graph-focus.js';
+import { findConnectionPath, resolveSymbolFile } from 'symbiote-node/graph';
 
 test('resolveSymbolFile returns the file for a skeleton symbol', () => {
   const skeleton = {
