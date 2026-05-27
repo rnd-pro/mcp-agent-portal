@@ -328,6 +328,7 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   assert.ok(script.includes('getWebXRSupport'), 'Three baseline must use provider support detection');
   assert.ok(script.includes('createWebXRLaunchRecommendation'), 'Three baseline must use provider launch mode selection');
   assert.ok(script.includes('createWebXRLaunchGateSummary'), 'Three baseline must use provider launch gate diagnostics');
+  assert.equal(script.includes('texture: options.texture || getTextureDiagnosticsPayload()'), false, 'Three baseline must keep session launch separate from texture readiness diagnostics');
   assert.ok(script.includes('createXRTextureGateSummary'), 'Three baseline must use provider texture gate diagnostics');
   assert.ok(script.includes('createXRSpatialScene'), 'Three baseline must build panel placement through the provider spatial scene contract');
   assert.ok(script.includes('layoutRoot'), 'Three baseline must feed runtime layout data into the provider spatial scene contract');
