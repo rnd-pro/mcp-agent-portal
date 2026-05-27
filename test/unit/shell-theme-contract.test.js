@@ -671,6 +671,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('renderCanvasPreview'), 'SpatialLayout must request provider-owned HTML-in-Canvas preview rendering through the workbench');
     assert.ok(logic.includes('createWebXRLaunchRecommendation'), 'SpatialLayout must use provider WebXR launch recommendation logic');
     assert.ok(logic.includes('createWebXRLaunchGateSummary'), 'SpatialLayout must use provider WebXR launch gate diagnostics');
+    assert.ok(logic.includes('allowUnsupportedModeProbe: true'), 'SpatialLayout must keep the XR launch action available for provider-owned requestSession diagnostics when mode detection is inconclusive');
     assert.equal(logic.includes('texture: this._createTextureGate()'), false, 'SpatialLayout must not disable the WebXR launch button on texture readiness');
     assert.ok(logic.includes('createXRTextureDebugModeSummary'), 'SpatialLayout must normalize texture debug mode through the provider');
     assert.ok(logic.includes('createXRTextureGateSummary'), 'SpatialLayout must use provider texture gate diagnostics');

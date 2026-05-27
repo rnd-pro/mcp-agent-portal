@@ -1050,9 +1050,13 @@ export class SpatialLayout extends Symbiote {
 
   _createLaunchGate(options = {}) {
     let launch = this._launchRecommendation || this._createLaunchRecommendation();
+    let selectedMode = this.ref.xrModeSelect?.value || 'auto';
+    let preferredMode = selectedMode === 'auto' ? null : selectedMode;
     return createWebXRLaunchGateSummary(this._support, {
-      preferredMode: this.ref.xrModeSelect?.value === 'auto' ? null : this.ref.xrModeSelect?.value,
-      selectedMode: launch.mode,
+      preferredMode,
+      selectedMode: preferredMode || launch.mode || WEBXR_MODES.immersiveVr,
+      probeMode: preferredMode || WEBXR_MODES.immersiveVr,
+      allowUnsupportedModeProbe: true,
       launch,
       userActivation: window.navigator?.userActivation || null,
       requireUserActivation: options.requireUserActivation === true,
