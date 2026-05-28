@@ -218,6 +218,11 @@ function deriveNextAction(report) {
   if (failed.includes('client-selected') && report?.clientId) return 'check-requested-diagnostic-client';
   if (failed.includes('client-selected')) return 'check-diagnostic-client';
   if (failed.includes('client-fresh')) return 'refresh-headset-client';
+  if ((failed.includes('texture-readiness') || failed.includes('material-textures')) &&
+    Array.isArray(report?.htmlCanvasMissingCore) &&
+    report.htmlCanvasMissingCore.length) {
+    return 'enable-html-in-canvas-on-headset';
+  }
   if (failed.includes('immersive-client') || failed.includes('wait-timeout')) {
     let trail = report?.requestSessionTrail || {};
     if (trail.enterClicked && !trail.sessionStartRequested) return 'inspect-launch-gate-at-click';
@@ -355,6 +360,19 @@ function createHeadsetSummaryReport(summary, options = {}) {
       ? `${diagnostics.currentTexture.ready}/${diagnostics.currentTexture.total}:${diagnostics.currentTexture.reason || diagnostics.currentTexture.stage || 'ready'}`
       : null,
     htmlCanvasAvailability: diagnostics.currentHtmlCanvas?.availability || null,
+    htmlCanvasRecommendation: diagnostics.currentHtmlCanvas?.recommendation || null,
+    htmlCanvasRequiredFlag: diagnostics.currentHtmlCanvas?.requiredFlag || null,
+    htmlCanvasFlagUrl: diagnostics.currentHtmlCanvas?.originTrial?.flagUrl ||
+      diagnostics.currentHtmlCanvas?.enablement?.flagUrl ||
+      null,
+    htmlCanvasLocalTestBrowser: diagnostics.currentHtmlCanvas?.originTrial?.localTestBrowser || null,
+    htmlCanvasOriginTrialConfigured: diagnostics.currentHtmlCanvas?.enablement?.originTrialConfigured ?? null,
+    htmlCanvasOriginTrialMetaPresent: diagnostics.currentHtmlCanvas?.enablement?.originTrialMetaPresent ?? null,
+    htmlCanvasOriginTrialHeader: diagnostics.currentHtmlCanvas?.responseHeader
+      ? (diagnostics.currentHtmlCanvas.responseHeader.originTrialPresent ? 'present' : diagnostics.currentHtmlCanvas.responseHeader.error || 'missing')
+      : null,
+    htmlCanvasMissingCore: diagnostics.currentHtmlCanvas?.missingCore || [],
+    htmlCanvasMissingTexture: diagnostics.currentHtmlCanvas?.missingTexture || [],
     threeHtmlTexture: diagnostics.currentHtmlCanvas?.threeTexture
       ? `${diagnostics.currentHtmlCanvas.threeTexture.htmlTextureAvailable ? 'available' : 'missing'}:${diagnostics.currentHtmlCanvas.threeTexture.reason || diagnostics.currentHtmlCanvas.threeTexture.threeRevision || '-'}`
       : null,

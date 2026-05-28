@@ -698,11 +698,15 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('XR resize size', this._formatMeters(summary.three.drag?.resize?.size)),
       this._statusItem('HTML Canvas', htmlDiagnostics.supported ? 'supported' : htmlDiagnostics.recommendation || 'unsupported'),
       this._statusItem('HTML Canvas availability', summary.htmlCanvas.availability || '-'),
+      this._statusItem('HTML Canvas required browser', htmlDiagnostics.originTrial?.localTestBrowser || '-'),
       this._statusItem('HTML Canvas flag', htmlDiagnostics.originTrial?.flagUrl || '-'),
+      this._statusItem('HTML Canvas origin trial configured', htmlDiagnostics.enablement?.originTrialConfigured ? 'yes' : 'no'),
       this._statusItem('HTML Canvas origin trial header', this._originTrialHeaderStatus.checked
         ? (this._originTrialHeaderStatus.present ? 'present' : this._originTrialHeaderStatus.error || 'missing')
         : 'checking'),
       this._statusItem('HTML Canvas origin trial route', this._originTrialHeaderStatus.diagnosticHeader || '-'),
+      this._statusItem('HTML Canvas missing core', htmlDiagnostics.missingCore?.length ? htmlDiagnostics.missingCore.join(', ') : '-'),
+      this._statusItem('HTML Canvas missing texture', htmlDiagnostics.missingTexture?.length ? htmlDiagnostics.missingTexture.join(', ') : '-'),
       this._statusItem('HTML Canvas texture upload', summary.htmlCanvas.textureUploadAvailable ? 'available' : 'missing'),
       this._statusItem('Three HTMLTexture usable', summary.htmlCanvas.threeTexture?.htmlTextureUsable ? 'yes' : summary.htmlCanvas.threeTexture?.reason || 'no'),
       this._statusItem('Canvas preview', summary.canvasPreview?.rendered ? summary.canvasPreview.panelId : summary.canvasPreview?.reason || '-'),

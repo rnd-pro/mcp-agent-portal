@@ -689,6 +689,9 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('readXRHtmlCanvasOriginTrialHeaderStatus'), 'SpatialLayout must use provider origin-trial response-header diagnostics');
     assert.ok(logic.includes('_createHtmlCanvasDiagnosticsPayload'), 'SpatialLayout must post HTML-in-Canvas response-header diagnostics to the server');
     assert.ok(logic.includes('HTML Canvas origin trial header'), 'SpatialLayout must display HTML-in-Canvas response-header status');
+    assert.ok(logic.includes('HTML Canvas required browser'), 'SpatialLayout must display HTML-in-Canvas browser requirement status');
+    assert.ok(logic.includes('HTML Canvas missing core'), 'SpatialLayout must display missing core HTML-in-Canvas APIs');
+    assert.ok(logic.includes('HTML Canvas missing texture'), 'SpatialLayout must display missing texture HTML-in-Canvas APIs');
     assert.ok(logic.includes('Origin-Trial header'), 'SpatialLayout geometry diagnostics must include response-header status');
     assert.ok(logic.includes('_diagnosticClientId'), 'SpatialLayout must tag XR diagnostics with a stable per-page client id');
     assert.ok(logic.includes('createStableXRDiagnosticClientId'), 'SpatialLayout must use provider-owned stable XR diagnostic ids');

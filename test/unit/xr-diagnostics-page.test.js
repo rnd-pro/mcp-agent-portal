@@ -240,6 +240,13 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
         texture: { ready: 4, total: 4, reason: null },
         htmlCanvas: {
           availability: 'origin-trial-or-flag-required',
+          recommendation: 'enable-CanvasDrawElement',
+          requiredFlag: 'CanvasDrawElement',
+          originTrial: { flagUrl: 'chrome://flags/#canvas-draw-element', localTestBrowser: 'Chrome Canary 149+' },
+          enablement: { originTrialConfigured: true, originTrialMetaPresent: false },
+          responseHeader: { originTrialPresent: true },
+          missingCore: [],
+          missingTexture: [],
           threeTexture: { htmlTextureAvailable: true, ready: true, threeRevision: '184' },
         },
         recentEvents: [
@@ -280,6 +287,9 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.ok(script.includes('summaryClientCount'), 'headset smoke must expose server client counts');
   assert.ok(script.includes('summaryImmersiveClientCount'), 'headset smoke must expose immersive client counts');
   assert.ok(script.includes('requestSessionTrail'), 'headset smoke must expose the Quest launch event trail');
+  assert.ok(script.includes('enable-html-in-canvas-on-headset'), 'headset smoke must guide agents to enable HTML-in-Canvas when core APIs are missing');
+  assert.ok(script.includes('htmlCanvasMissingCore'), 'headset smoke must expose missing core HTML-in-Canvas APIs');
+  assert.ok(script.includes('htmlCanvasMissingTexture'), 'headset smoke must expose missing texture HTML-in-Canvas APIs');
   assert.ok(script.includes('spatial-three-session-start-requested'), 'headset smoke must distinguish requestSession attempts');
   assert.ok(script.includes('inspect-request-session-error'), 'headset smoke must guide agents to requestSession failures');
   assert.ok(script.includes('open-xr-demo-page'), 'headset smoke must direct agents to open the XR page when no diagnostic client exists');
@@ -323,6 +333,15 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.equal(report.visualReadiness, 'pass:ready');
   assert.equal(report.interactionReadiness, 'blocked:texture-upload-ready');
   assert.equal(report.threeHtmlTexture, 'available:184');
+  assert.equal(report.htmlCanvasRecommendation, 'enable-CanvasDrawElement');
+  assert.equal(report.htmlCanvasRequiredFlag, 'CanvasDrawElement');
+  assert.equal(report.htmlCanvasFlagUrl, 'chrome://flags/#canvas-draw-element');
+  assert.equal(report.htmlCanvasLocalTestBrowser, 'Chrome Canary 149+');
+  assert.equal(report.htmlCanvasOriginTrialConfigured, true);
+  assert.equal(report.htmlCanvasOriginTrialMetaPresent, false);
+  assert.equal(report.htmlCanvasOriginTrialHeader, 'present');
+  assert.deepEqual(report.htmlCanvasMissingCore, []);
+  assert.deepEqual(report.htmlCanvasMissingTexture, []);
   assert.equal(report.baseLayer, 'present:1832x1920');
   assert.equal(report.viewports, '2');
   assert.equal(report.materialMaps, '4/4');
@@ -383,6 +402,51 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.equal(failedSessionReport.requestSessionTrail.sessionFailed, true);
   assert.equal(failedSessionReport.requestSessionTrail.lastFailureEvent, 'spatial-three-session-failed');
   assert.equal(failedSessionReport.nextAction, 'inspect-request-session-error');
+
+  let missingApiFixturePath = path.join(tempDir, 'missing-api-summary.json');
+  let missingApiReportPath = path.join(tempDir, 'missing-api-report.json');
+  fs.writeFileSync(missingApiFixturePath, JSON.stringify({
+    version: 'xr-diagnostics-summary-v1',
+    clientCount: 1,
+    immersiveClientCount: 0,
+    latestClient: { clientId: 'quest-missing-api-client' },
+    latestImmersiveClient: null,
+    clients: [
+      {
+        clientId: 'quest-missing-api-client',
+        stale: false,
+        ageMs: 150,
+        phase: 'blocked',
+        surface: {
+          surfaceKind: 'production',
+          entrypoint: 'spatial-layout',
+          projectId: 'agent-portal',
+          targetSection: 'graph',
+        },
+        session: { status: 'idle', mode: null, frames: 0, panelCount: 4 },
+        visualReadiness: { status: 'pass', reason: 'ready' },
+        texture: { ready: 0, total: 4, reason: 'html-in-canvas-unsupported' },
+        htmlCanvas: {
+          availability: 'origin-trial-or-flag-required',
+          missingCore: ['layoutsubtree', 'render-target-api'],
+          missingTexture: ['texElementImage2D', 'copyElementImageToTexture'],
+          threeTexture: { htmlTextureAvailable: true, ready: false, reason: 'html-in-canvas-texture-upload-missing' },
+        },
+      },
+    ],
+  }));
+  let missingApiRun = spawnSync(process.execPath, [
+    path.join(ROOT, 'scripts/diagnostics/xr-headset-summary-smoke.js'),
+    '--fixture',
+    missingApiFixturePath,
+    '--report',
+    missingApiReportPath,
+  ], { cwd: ROOT, encoding: 'utf8' });
+  assert.notEqual(missingApiRun.status, 0, 'missing HTML-in-Canvas APIs should fail the production headset gate');
+  let missingApiReport = JSON.parse(missingApiRun.stdout);
+  assert.deepEqual(missingApiReport.htmlCanvasMissingCore, ['layoutsubtree', 'render-target-api']);
+  assert.deepEqual(missingApiReport.htmlCanvasMissingTexture, ['texElementImage2D', 'copyElementImageToTexture']);
+  assert.equal(missingApiReport.nextAction, 'enable-html-in-canvas-on-headset');
 
   let harnessFixturePath = path.join(tempDir, 'harness-summary.json');
   let harnessReportPath = path.join(tempDir, 'harness-report.json');
