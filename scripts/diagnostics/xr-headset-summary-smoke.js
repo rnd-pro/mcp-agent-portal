@@ -171,15 +171,17 @@ function compactRecentEvent(event = {}) {
   };
 }
 
-function createRequestSessionTrail(events = [], session = {}) {
+function createRequestSessionTrail(events = [], session = {}, attemptSummary = null) {
   let allEvents = Array.isArray(events) ? events : [];
-  let attemptId = [...allEvents].reverse().find((event) => event?.attemptId)?.attemptId || null;
+  let attemptId = attemptSummary?.attemptId ||
+    [...allEvents].reverse().find((event) => event?.attemptId)?.attemptId ||
+    null;
   let attemptEvents = attemptId
     ? allEvents.filter((event) => event?.attemptId === attemptId)
     : allEvents;
-  let eventNames = attemptEvents
+  let eventNames = (attemptSummary?.events?.length ? attemptSummary.events : attemptEvents
     .map((event) => event?.event)
-    .filter(Boolean);
+    .filter(Boolean));
   let allEventNames = allEvents
     .map((event) => event?.event)
     .filter(Boolean);
@@ -206,6 +208,8 @@ function createRequestSessionTrail(events = [], session = {}) {
     lastFailureEvent: lastFailure?.event || null,
     lastFailureError: lastFailure?.error || null,
     lastFailureStage: lastFailure?.failureStage || null,
+    persistentEventCount: Number(attemptSummary?.eventCount || 0),
+    persistentStages: attemptSummary?.stages || [],
     eventNames,
     allEventNames,
   };
@@ -258,7 +262,7 @@ function createHeadsetSummaryReport(summary, options = {}) {
   let materialDiagnostics = session.materialDiagnostics || {};
   let recentEvents = Array.isArray(client?.recentEvents) ? client.recentEvents : [];
   let compactEvents = recentEvents.map(compactRecentEvent);
-  let requestSessionTrail = createRequestSessionTrail(recentEvents, session);
+  let requestSessionTrail = createRequestSessionTrail(recentEvents, session, client?.latestAttempt || null);
   let latestEvent = compactEvents.at(-1) || null;
 
   addCheck(checks, 'summary-available', Boolean(summary?.version), { version: summary?.version || null });
@@ -342,6 +346,7 @@ function createHeadsetSummaryReport(summary, options = {}) {
     recentEvents: compactEvents,
     recentEventTrailText: diagnostics.currentTimeline?.text || null,
     requestSessionTrail,
+    latestAttempt: client?.latestAttempt || null,
     eventCounts: summary?.eventCounts || {},
     phase: client?.phase || null,
     stale: client?.stale ?? null,

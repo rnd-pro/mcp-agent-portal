@@ -419,6 +419,8 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().latest.pageUrl.includes('authorization=%5Bredacted%5D'), true);
     assert.equal(summaryRes.json().latestClient.clientId, 'quest-client-1');
     assert.equal(summaryRes.json().latestClient.eventCount, 1);
+    assert.deepEqual(summaryRes.json().latestClient.attempts, {});
+    assert.equal(summaryRes.json().latestClient.latestAttempt, null);
     assert.equal(typeof summaryRes.json().generatedAt, 'string');
     assert.equal(summaryRes.json().staleAfterMs, 15000);
     assert.equal(typeof summaryRes.json().latestClient.ageMs, 'number');
@@ -605,6 +607,16 @@ describe('api-routes', () => {
     };
 
     await post({
+      event: 'spatial-enter-clicked',
+      attemptId: 'quest-starting-client:1',
+      session: { status: 'preflight', mode: 'immersive-vr', active: false, frames: 0 },
+    });
+    await post({
+      event: 'spatial-three-session-start-intent',
+      attemptId: 'quest-starting-client:1',
+      session: { status: 'preflight', mode: 'immersive-vr', active: false, frames: 0 },
+    });
+    await post({
       event: 'spatial-three-session-start-requested',
       attemptId: 'quest-starting-client:1',
       session: { status: 'starting', mode: 'immersive-vr', active: false, frames: 0 },
@@ -613,6 +625,13 @@ describe('api-routes', () => {
     routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), startingSummary);
     assert.equal(startingSummary.json().latestClient.phase, 'starting');
     assert.equal(startingSummary.json().latestClient.recentEvents.at(-1).attemptId, 'quest-starting-client:1');
+    assert.equal(startingSummary.json().latestClient.latestAttempt.attemptId, 'quest-starting-client:1');
+    assert.deepEqual(startingSummary.json().latestClient.latestAttempt.events, [
+      'spatial-enter-clicked',
+      'spatial-three-session-start-intent',
+      'spatial-three-session-start-requested',
+    ]);
+    assert.ok(startingSummary.json().latestClient.latestAttempt.stages.includes('spatial-three-session-start-intent'));
 
     await post({
       event: 'spatial-three-session-started',

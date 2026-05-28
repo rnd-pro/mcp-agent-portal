@@ -143,6 +143,13 @@ export class SpatialLayout extends Symbiote {
   _gestureState = null;
   _lastTransactionId = null;
   _lastXrDiagnosticAt = 0;
+  _diagnosticPostStatus = {
+    status: 'pending',
+    httpStatus: null,
+    event: null,
+    error: null,
+    updatedAt: null,
+  };
   _panelBuildErrors = [];
   _diagnosticClientId = createStableXRDiagnosticClientId({
     prefix: 'spatial',
@@ -736,6 +743,7 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('XR gate', launchGate.blocked ? `blocked:${launchGate.reason}` : 'ready'),
       this._statusItem('XR gate checks', launchGate.blockingChecks?.length ? launchGate.blockingChecks.map((check) => check.id).join(', ') : '-'),
       this._statusItem('XR error', summary.error || '-'),
+      this._statusItem('XR diagnostics post', this._formatDiagnosticPostStatus()),
       this._statusItem('Pointer', hit),
       this._statusItem('Gesture', summary.gesture.status),
       this._statusItem('Last tx', summary.lastTransactionId || '-'),
@@ -799,6 +807,15 @@ export class SpatialLayout extends Symbiote {
         });
       }
       let mode = this._launchGate.mode || this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
+      this._postXRDiagnostic('spatial-three-session-start-intent', {
+        details: {
+          attemptId: this._xrAttemptId,
+          requestedMode: mode,
+          requestSessionAvailable: typeof navigator.xr?.requestSession === 'function',
+          rendererHost: this._threeXRRenderHost?.getDiagnostics?.() || null,
+          controller: this._createSceneDiagnostics(),
+        },
+      });
       let threeResult = await this._enterThreeXR(mode, { attemptId: this._xrAttemptId });
       this._postXRDiagnostic(threeResult.ok ? 'spatial-three-session-result' : 'spatial-three-session-failed', {
         details: {
@@ -981,12 +998,39 @@ export class SpatialLayout extends Symbiote {
       visualReadiness: options.visualReadiness || visualReadiness,
       interactionReadiness: options.interactionReadiness || interactionReadiness,
     });
+    this._diagnosticPostStatus = {
+      status: 'sending',
+      httpStatus: null,
+      event,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    };
+    this.dataset.xrDiagnosticPost = 'sending';
+    let body = JSON.stringify(payload);
     fetch('/api/xr-diagnostics/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch(() => {});
+      body,
+      keepalive: body.length < 60000,
+    }).then((response) => {
+      this._diagnosticPostStatus = {
+        status: response.ok ? 'ok' : 'http-error',
+        httpStatus: response.status || null,
+        event,
+        error: response.ok ? null : 'diagnostic-post-http-error',
+        updatedAt: new Date().toISOString(),
+      };
+      this.dataset.xrDiagnosticPost = this._diagnosticPostStatus.status;
+    }).catch((error) => {
+      this._diagnosticPostStatus = {
+        status: 'network-error',
+        httpStatus: null,
+        event,
+        error: error?.name || 'diagnostic-post-failed',
+        updatedAt: new Date().toISOString(),
+      };
+      this.dataset.xrDiagnosticPost = 'network-error';
+    });
   }
 
   _statusItem(label, value) {
@@ -1001,6 +1045,15 @@ export class SpatialLayout extends Symbiote {
     let zone = frameTarget.zone || frameTarget.handle || frameTarget.action || '-';
     let panelId = frameTarget.panelId || '-';
     return `${panelId}:${operation}/${zone}`;
+  }
+
+  _formatDiagnosticPostStatus() {
+    let status = this._diagnosticPostStatus;
+    if (!status?.event) return status?.status || 'pending';
+    if (status.status === 'ok') return `${status.event}:ok`;
+    if (status.status === 'http-error') return `${status.event}:http-${status.httpStatus || 'error'}`;
+    if (status.status === 'network-error') return `${status.event}:${status.error || 'network-error'}`;
+    return `${status.event}:${status.status || 'pending'}`;
   }
 
   _formatMeters(values) {

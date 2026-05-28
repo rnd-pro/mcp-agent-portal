@@ -285,7 +285,7 @@ async function readSpatialState(client) {
           rows[text.slice(0, separator).trim()] = text.slice(separator + 1).trim();
         }
       }
-      livePanelCount += root.querySelectorAll('.live-panel-source').length;
+      livePanelCount += root.querySelectorAll('.psl-panel-live').length;
       enterButton ||= root.querySelector('[data-ref="enterButton"], .psl-enter');
     }
     return {

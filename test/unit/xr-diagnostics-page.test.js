@@ -180,6 +180,8 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes("entrypoint === 'spatial-layout'"), 'production smoke must reject baseline harness diagnostics');
   assert.ok(script.includes('live-panels'), 'production smoke must fail when live runtime panels are not mounted');
   assert.ok(script.includes('three-rendered-panels'), 'production smoke must fail when Three panels are not rendered');
+  assert.ok(script.includes('.psl-panel-live'), 'production smoke must count SpatialLayout live panels, not harness source panels');
+  assert.equal(script.includes('.live-panel-source'), false, 'production smoke must not count Three harness live panel sources');
   assert.ok(script.includes('no-diagnostic-panels'), 'production smoke must fail when strict diagnostic panels replace live textures');
   assert.ok(script.includes('inspect-production-texture-upload'), 'production smoke must route diagnostic panel failures to texture upload work');
   assert.ok(script.includes('enable-html-in-canvas-on-headset'), 'production smoke must route hidden strict texture panels to headset HTML-in-Canvas enablement');
@@ -288,6 +290,8 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.ok(script.includes('summaryClientCount'), 'headset smoke must expose server client counts');
   assert.ok(script.includes('summaryImmersiveClientCount'), 'headset smoke must expose immersive client counts');
   assert.ok(script.includes('requestSessionTrail'), 'headset smoke must expose the Quest launch event trail');
+  assert.ok(script.includes('latestAttempt'), 'headset smoke must use persistent attempt summaries when recent events roll over');
+  assert.ok(script.includes('persistentStages'), 'headset smoke must expose persistent attempt stages');
   assert.ok(script.includes('enable-html-in-canvas-on-headset'), 'headset smoke must guide agents to enable HTML-in-Canvas when core APIs are missing');
   assert.ok(script.includes('htmlCanvasMissingCore'), 'headset smoke must expose missing core HTML-in-Canvas APIs');
   assert.ok(script.includes('htmlCanvasMissingTexture'), 'headset smoke must expose missing texture HTML-in-Canvas APIs');

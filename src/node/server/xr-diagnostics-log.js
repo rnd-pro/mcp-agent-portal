@@ -152,6 +152,42 @@ function createTimelineEntry(entry) {
   };
 }
 
+function updateAttemptSummary(client, timelineEntry) {
+  let attemptId = timelineEntry.attemptId;
+  if (!attemptId) return;
+  let attempts = client.attempts || {};
+  let attempt = attempts[attemptId] || {
+    attemptId,
+    firstSeenAt: timelineEntry.receivedAt,
+    lastSeenAt: timelineEntry.receivedAt,
+    eventCount: 0,
+    events: [],
+    stages: [],
+    failureStage: null,
+    lastError: null,
+    lastEvent: null,
+  };
+  attempt.lastSeenAt = timelineEntry.receivedAt;
+  attempt.eventCount += 1;
+  attempt.lastEvent = timelineEntry.event;
+  attempt.failureStage = timelineEntry.failureStage || attempt.failureStage;
+  attempt.lastError = timelineEntry.error || attempt.lastError;
+  attempt.events = [...attempt.events, timelineEntry.event].slice(-24);
+  attempt.stages = [...new Set([
+    ...attempt.stages,
+    timelineEntry.event,
+    timelineEntry.failureStage,
+    timelineEntry.textureStage,
+    timelineEntry.textureResolverStage,
+  ].filter(Boolean))].slice(-32);
+  attempts[attemptId] = attempt;
+  let sorted = Object.values(attempts)
+    .sort((a, b) => a.lastSeenAt < b.lastSeenAt ? 1 : -1)
+    .slice(0, 8);
+  client.attempts = Object.fromEntries(sorted.map((item) => [item.attemptId, item]));
+  client.latestAttempt = sorted[0] || null;
+}
+
 function sanitizeStringList(value, limit = 16) {
   return Array.isArray(value)
     ? value.slice(0, limit).map((item) => String(item).slice(0, 120))
@@ -757,6 +793,8 @@ function createXrDiagnosticSummary(logs = []) {
       deepGraphPreview: null,
       lastError: null,
       recentEvents: [],
+      attempts: {},
+      latestAttempt: null,
     };
     client.lastSeenAt = entry.receivedAt;
     client.eventCount += 1;
@@ -804,7 +842,9 @@ function createXrDiagnosticSummary(logs = []) {
       lastDeepGraphPreview = client.deepGraphPreview;
     }
     if (entry.error) client.lastError = entry.error;
-    client.recentEvents = [...client.recentEvents, createTimelineEntry(entry)].slice(-8);
+    let timelineEntry = createTimelineEntry(entry);
+    client.recentEvents = [...client.recentEvents, timelineEntry].slice(-8);
+    updateAttemptSummary(client, timelineEntry);
     client.phase = resolveClientPhase(client);
     clientsById.set(entry.clientId, client);
     if (entry.session) lastSession = entry.session;

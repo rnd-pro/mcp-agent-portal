@@ -704,6 +704,10 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('this.ref.enterButton.disabled'), 'SpatialLayout must disable XR launch when provider diagnostics say launch is blocked');
     assert.ok(logic.includes('spatial-session-blocked'), 'SpatialLayout must log provider launch gate blocks before starting XR');
     assert.ok(logic.includes('spatial-strict-texture-preflight-blocked'), 'SpatialLayout must log strict live-texture blocks before immersive entry while still allowing session diagnostics');
+    assert.ok(logic.includes('spatial-three-session-start-intent'), 'SpatialLayout must log session start intent before provider start can fail early');
+    assert.ok(logic.includes('XR diagnostics post'), 'SpatialLayout must expose server diagnostic POST status for headset debugging');
+    assert.ok(logic.includes('this.dataset.xrDiagnosticPost'), 'SpatialLayout must expose diagnostic POST status on the host element');
+    assert.ok(logic.includes('keepalive: body.length < 60000'), 'SpatialLayout must not use keepalive for oversized XR diagnostic payloads');
     assert.ok(logic.includes('textureGate.strict && textureGate.blocked'), 'SpatialLayout must use provider texture gate data before starting immersive XR');
     assert.ok(logic.includes('texture,'), 'SpatialLayout must post provider texture diagnostics beside launch gate diagnostics');
     assert.ok(logic.includes('debugMode: this._textureDebugMode'), 'SpatialLayout must include provider texture debug mode in texture diagnostics');
