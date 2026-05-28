@@ -333,6 +333,7 @@ function selectProductionClient(summary, options) {
 function deriveNextAction(failedChecks = [], rows = {}) {
   if (failedChecks.includes('production-client')) return 'open-production-spatial-url';
   if (failedChecks.includes('production-surface')) return 'open-spatial-layout-production-route';
+  if (failedChecks.includes('ar-only-launch')) return 'select-production-ar-mode';
   if (failedChecks.includes('no-diagnostic-panels')) return 'inspect-production-texture-upload';
   if (failedChecks.includes('strict-blocked-panels-hidden')) return 'hide-strict-texture-failures';
   if ((failedChecks.includes('three-rendered-panels') || failedChecks.includes('strict-blocked-panels-hidden')) &&
@@ -372,6 +373,12 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
       panelContent: rows['Panel content'] || null,
     },
     { id: 'production-client', status: productionClient ? 'pass' : 'fail' },
+    {
+      id: 'ar-only-launch',
+      status: String(rows['XR launch'] || '').includes('immersive-ar') ? 'pass' : 'fail',
+      value: rows['XR launch'] || null,
+      reason: 'production-headset-debugging-is-ar-only',
+    },
     {
       id: 'live-panels',
       status: panelsLive.complete && (panels == null || panelsLive.total === panels) ? 'pass' : 'fail',

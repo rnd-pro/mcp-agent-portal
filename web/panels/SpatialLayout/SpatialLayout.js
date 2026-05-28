@@ -58,6 +58,7 @@ import cssLocal from './SpatialLayout.css.js';
 import template from './SpatialLayout.tpl.js';
 
 const HTML_IN_CANVAS_ORIGIN_TRIAL_DIAGNOSTIC_HEADER = 'X-Agent-Portal-Origin-Trial';
+const PRODUCTION_XR_MODE = WEBXR_MODES.immersiveAr;
 
 function readProjectId() {
   let route = getRoute();
@@ -660,7 +661,7 @@ export class SpatialLayout extends Symbiote {
     this.ref.enterButton.disabled = !launchGate.canStart;
     this.ref.enterButton.dataset.available = String(Boolean(launchGate.canStart));
     this.ref.enterButton.title = launchGate.canStart
-      ? `Start ${launchGate.mode || launch.mode || WEBXR_MODES.immersiveVr}`
+      ? `Start ${launchGate.mode || launch.mode || PRODUCTION_XR_MODE}`
       : `XR unavailable: ${launchGate.reason}`;
 
     this.ref.status.replaceChildren(
@@ -741,7 +742,7 @@ export class SpatialLayout extends Symbiote {
       this._statusItem('Tokens', `${summary.theme.resolvedTokens}/${summary.theme.totalTokens}`),
       this._statusItem('XR', summary.support.status),
       this._statusItem('XR launch', launchGate.canProbeMode
-        ? `probe:${launchGate.mode || WEBXR_MODES.immersiveVr}`
+        ? `probe:${launchGate.mode || PRODUCTION_XR_MODE}`
         : launch.canLaunch ? launch.mode : launch.reason),
       this._statusItem('XR gate', launchGate.blocked ? `blocked:${launchGate.reason}` : 'ready'),
       this._statusItem('XR gate checks', launchGate.blockingChecks?.length ? launchGate.blockingChecks.map((check) => check.id).join(', ') : '-'),
@@ -809,7 +810,7 @@ export class SpatialLayout extends Symbiote {
           error: this._lastThreeXRError,
         });
       }
-      let mode = this._launchGate.mode || this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
+      let mode = this._launchGate.mode || this._launchRecommendation.mode || PRODUCTION_XR_MODE;
       this._postXRDiagnostic('spatial-three-session-start-intent', {
         details: {
           attemptId: this._xrAttemptId,
@@ -1068,10 +1069,8 @@ export class SpatialLayout extends Symbiote {
   }
 
   _createLaunchRecommendation() {
-    let selectedMode = this.ref.xrModeSelect?.value || 'auto';
-    let preferredMode = selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode;
     return createWebXRLaunchRecommendation(this._support, {
-      preferredMode,
+      preferredMode: PRODUCTION_XR_MODE,
     });
   }
 
@@ -1193,12 +1192,10 @@ export class SpatialLayout extends Symbiote {
 
   _createLaunchGate(options = {}) {
     let launch = this._launchRecommendation || this._createLaunchRecommendation();
-    let selectedMode = this.ref.xrModeSelect?.value || 'auto';
-    let preferredMode = selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode;
     return createWebXRLaunchGateSummary(this._support, {
-      preferredMode,
-      selectedMode: preferredMode || launch.mode || WEBXR_MODES.immersiveVr,
-      probeMode: preferredMode || WEBXR_MODES.immersiveVr,
+      preferredMode: PRODUCTION_XR_MODE,
+      selectedMode: PRODUCTION_XR_MODE,
+      probeMode: PRODUCTION_XR_MODE,
       allowUnsupportedModeProbe: true,
       launch,
       userActivation: window.navigator?.userActivation || null,
@@ -1211,17 +1208,13 @@ export class SpatialLayout extends Symbiote {
     if (!select) return;
     let modes = this._support?.modes || {};
     for (let option of select.options) {
-      if (option.value === 'auto') {
-        option.disabled = false;
-      } else if (option.value === WEBXR_MODES.immersiveAr) {
+      if (option.value === PRODUCTION_XR_MODE) {
         option.disabled = !modes.immersiveAr;
-      } else if (option.value === WEBXR_MODES.immersiveVr) {
-        option.disabled = !modes.immersiveVr;
+      } else {
+        option.disabled = true;
       }
     }
-    if (select.value !== 'auto' && select.selectedOptions[0]?.disabled) {
-      select.value = 'auto';
-    }
+    select.value = PRODUCTION_XR_MODE;
   }
 
   _renderGeometryDiagnostics() {

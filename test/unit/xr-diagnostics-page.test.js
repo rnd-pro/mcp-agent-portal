@@ -187,6 +187,9 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes('three-rendered-panels'), 'production smoke must check rendered Three panels when texture upload is available');
   assert.ok(script.includes('strict-blocked-panels-hidden'), 'production smoke must accept strict blocked diagnostics only when panels are hidden');
   assert.ok(script.includes('strict-texture-block-hidden'), 'production smoke must classify unsupported HTML-in-Canvas as a hidden strict texture block');
+  assert.ok(script.includes('ar-only-launch'), 'production smoke must verify the temporary Quest production path is AR-only');
+  assert.ok(script.includes("'XR launch'"), 'production smoke must require the visible XR launch row');
+  assert.ok(script.includes("includes('immersive-ar')"), 'production smoke must fail when production launch does not use immersive-ar');
   assert.ok(script.includes('.psl-panel-live'), 'production smoke must count SpatialLayout live panels, not harness source panels');
   assert.equal(script.includes('.live-panel-source'), false, 'production smoke must not count Three harness live panel sources');
   assert.ok(script.includes('no-diagnostic-panels'), 'production smoke must fail when strict diagnostic panels replace live textures');
@@ -214,6 +217,8 @@ test('README documents the Quest pre-headset production gate', () => {
   assert.ok(readme.includes('`Panel content`: `portal-runtime-layout`'), 'README must list the live runtime panel content row');
   assert.ok(readme.includes('`Panels live`: `4/4`'), 'README must list the live panel count');
   assert.ok(readme.includes('`XR texture mode`: `strict`'), 'README must list strict texture mode');
+  assert.ok(readme.includes('AR-only'), 'README must describe the temporary Quest production AR-only policy');
+  assert.ok(readme.includes('`XR launch`: `probe:immersive-ar`'), 'README must list the expected AR launch probe');
   assert.ok(readme.includes('`XR gate`: `ready`'), 'README must list the launch gate state before headset smoke');
   assert.ok(readme.includes('`Three diagnostic panels`: `0`'), 'README must list that diagnostic panels are not production UI');
   assert.ok(readme.includes('`pageErrorCount`: `0`'), 'README must list the browser error gate');

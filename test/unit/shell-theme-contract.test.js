@@ -667,6 +667,7 @@ describe('portal shell theme contract', () => {
 
   it('keeps spatial layout as a thin symbiote-node XR consumer', () => {
     let logic = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.js'), 'utf8');
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.tpl.js'), 'utf8');
     let css = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.css.js'), 'utf8');
     let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
     let workspace = fs.readFileSync(path.join(ROOT, 'web/components/PgWorkspace/PgWorkspace.js'), 'utf8');
@@ -733,7 +734,13 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRThreeSessionController'), 'SpatialLayout must delegate Three/WebXR session lifecycle to symbiote-node/xr');
     assert.ok(logic.includes("this._postXRDiagnostic('spatial-three-frame'"), 'SpatialLayout must post throttled provider frame diagnostics during immersive sessions');
     assert.ok(logic.includes('createXRThreeSessionOptions'), 'SpatialLayout must build Three/WebXR session options through symbiote-node/xr');
-    assert.ok(logic.includes("selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode"), 'SpatialLayout Auto mode must prefer immersive-vr for the Quest MVP production path');
+    assert.ok(logic.includes('const PRODUCTION_XR_MODE = WEBXR_MODES.immersiveAr'), 'SpatialLayout production headset path must be pinned to immersive-ar while Quest texture timing is debugged');
+    assert.ok(logic.includes('preferredMode: PRODUCTION_XR_MODE'), 'SpatialLayout launch recommendation must use the AR-only production mode');
+    assert.ok(logic.includes('probeMode: PRODUCTION_XR_MODE'), 'SpatialLayout launch gate must probe the same AR-only production mode');
+    assert.equal(logic.includes("selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode"), false, 'SpatialLayout must not keep the old Auto-to-VR mode path for Quest production debugging');
+    assert.ok(template.includes('<option value="immersive-ar" selected>AR</option>'), 'SpatialLayout XR control must expose only the AR production mode');
+    assert.equal(template.includes('<option value="auto">Auto</option>'), false, 'SpatialLayout must not expose Auto mode while Quest production debugging is AR-only');
+    assert.equal(template.includes('<option value="immersive-vr">VR</option>'), false, 'SpatialLayout must not expose VR mode while Quest production debugging is AR-only');
     assert.ok(logic.includes('createPortalXRDeepGraphScene'), 'SpatialLayout must adapt project graph data through the portal XR deep-graph adapter');
     assert.ok(logic.includes("events.addEventListener('skeleton-loaded'"), 'SpatialLayout must rebuild deep graph diagnostics when project skeleton data arrives');
     assert.ok(logic.includes('deepGraph: this._deepGraph?.diagnostics'), 'SpatialLayout must expose XR deep-graph diagnostics without owning graph projection logic');

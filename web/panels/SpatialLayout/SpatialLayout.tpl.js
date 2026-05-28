@@ -23,14 +23,12 @@ export default html`
       <label class="psl-control">
         <span>XR</span>
         <select ref="xrModeSelect">
-          <option value="auto">Auto</option>
-          <option value="immersive-ar">AR</option>
-          <option value="immersive-vr">VR</option>
+          <option value="immersive-ar" selected>AR</option>
         </select>
       </label>
       <button class="psl-enter" ref="enterButton" type="button">
         <span class="material-symbols-outlined">view_in_ar</span>
-        Enter VR/AR
+        Enter AR
       </button>
     </div>
   </div>
