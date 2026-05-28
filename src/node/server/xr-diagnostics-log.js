@@ -699,9 +699,11 @@ function resolveClientPhase(client = {}) {
 
   if (client.lastError || latestEvent.includes('error') || latestEvent.includes('failed')) return 'failed';
   if (latestEvent === 'spatial-three-session-ended') return 'ended';
+  if (latestEvent === 'spatial-session-frame-check' && Number(client.session?.frames || 0) <= 0) return 'no-frames';
   if (latestEvent === 'three-panels-session-no-frames') return 'no-frames';
+  if (latestEvent === 'spatial-three-session-start-requested') return 'starting';
   if (latestEvent === 'three-panels-session-still-starting') return 'starting';
-  if (sessionStatus === 'running' || latestEvent === 'three-panels-session-telemetry') return 'running';
+  if (sessionStatus === 'running' || latestEvent === 'spatial-three-frame' || latestEvent === 'spatial-three-session-started' || latestEvent === 'three-panels-session-telemetry') return 'running';
   if (sessionStatus === 'starting' || latestEvent === 'three-panels-session-start-requested') return 'starting';
   if (client.launch?.canLaunch) return 'ready';
   if (health === 'blocked' || client.launch?.reason) return 'blocked';

@@ -40,6 +40,10 @@ test('XR empty panels baseline starts from world-space panels before live UI', (
   assert.ok(script.includes("from 'symbiote-node/xr'"), 'empty panel baseline must consume public provider exports');
   assert.ok(script.includes('createXRWebGLLayerPanelRenderer'), 'empty panel baseline must render XRWebGLLayer panels through the provider renderer');
   assert.ok(script.includes('empty-panels-session-started'), 'empty panel baseline must log server diagnostics');
+  assert.ok(script.includes("surfaceKind: 'harness'"), 'empty panel baseline diagnostics must be classified as a non-production harness');
+  assert.ok(script.includes("entrypoint: 'xr-panels-baseline'"), 'empty panel baseline diagnostics must expose a stable harness entrypoint');
+  assert.ok(script.includes("panelContentKind: 'empty-frame-baseline'"), 'empty panel baseline must not look like live production panel content');
+  assert.ok(script.includes("['Production', 'no']"), 'empty panel baseline must visibly mark itself as non-production');
   assert.ok(script.includes('XRWebGLLayer'), 'empty panel baseline must test the XRWebGLLayer path');
   assert.ok(script.includes('panels = ['), 'empty panel baseline must define provider-neutral panels');
   assert.ok(script.includes('WEBXR_MODES.immersiveAr'), 'empty panel baseline must prefer AR when supported');
@@ -174,6 +178,10 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes("texture: 'strict'"), 'production smoke must verify strict production texture mode');
   assert.ok(script.includes("surfaceKind === 'production'"), 'production smoke must require production diagnostics');
   assert.ok(script.includes("entrypoint === 'spatial-layout'"), 'production smoke must reject baseline harness diagnostics');
+  assert.ok(script.includes('live-panels'), 'production smoke must fail when live runtime panels are not mounted');
+  assert.ok(script.includes('three-rendered-panels'), 'production smoke must fail when Three panels are not rendered');
+  assert.ok(script.includes('no-diagnostic-panels'), 'production smoke must fail when strict diagnostic panels replace live textures');
+  assert.ok(script.includes('inspect-production-texture-upload'), 'production smoke must route diagnostic panel failures to texture upload work');
   assert.ok(script.includes('launch-texture-gate-separated'), 'production smoke must ensure WebXR launch is not blocked by live texture readiness');
   assert.ok(script.includes('inspect-production-launch-texture-separation'), 'production smoke must report launch/texture coupling regressions explicitly');
   assert.ok(script.includes('missingRows'), 'production smoke must report stale or incomplete public pages with missing rows');
@@ -234,8 +242,20 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
           availability: 'origin-trial-or-flag-required',
           threeTexture: { htmlTextureAvailable: true, ready: true, threeRevision: '184' },
         },
+        recentEvents: [
+          { event: 'spatial-enter-clicked', receivedAt: '2026-05-27T10:00:00.000Z', mode: 'immersive-vr' },
+          { event: 'spatial-three-session-start-requested', receivedAt: '2026-05-27T10:00:01.000Z', mode: 'immersive-vr' },
+          { event: 'spatial-three-session-started', receivedAt: '2026-05-27T10:00:02.000Z', mode: 'immersive-vr', status: 'running' },
+          { event: 'spatial-three-frame', receivedAt: '2026-05-27T10:00:03.000Z', mode: 'immersive-vr', status: 'running' },
+        ],
       },
     ],
+    eventCounts: {
+      'spatial-enter-clicked': 1,
+      'spatial-three-session-start-requested': 1,
+      'spatial-three-session-started': 1,
+      'spatial-three-frame': 1,
+    },
   }));
 
   assert.equal(pkg.scripts['xr:headset-summary'], 'node scripts/diagnostics/xr-headset-summary-smoke.js');
@@ -259,6 +279,9 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.ok(script.includes('deriveNextAction'), 'headset smoke must expose a machine-readable next action');
   assert.ok(script.includes('summaryClientCount'), 'headset smoke must expose server client counts');
   assert.ok(script.includes('summaryImmersiveClientCount'), 'headset smoke must expose immersive client counts');
+  assert.ok(script.includes('requestSessionTrail'), 'headset smoke must expose the Quest launch event trail');
+  assert.ok(script.includes('spatial-three-session-start-requested'), 'headset smoke must distinguish requestSession attempts');
+  assert.ok(script.includes('inspect-request-session-error'), 'headset smoke must guide agents to requestSession failures');
   assert.ok(script.includes('open-xr-demo-page'), 'headset smoke must direct agents to open the XR page when no diagnostic client exists');
   assert.ok(script.includes('check-requested-diagnostic-client'), 'headset smoke must distinguish missing explicit client ids');
   assert.ok(script.includes('production-surface'), 'headset smoke must require production SpatialLayout diagnostics by default');
@@ -283,6 +306,14 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.equal(report.summaryClientCount, 1);
   assert.equal(report.summaryImmersiveClientCount, 1);
   assert.equal(report.selectedClientId, 'quest-client');
+  assert.equal(report.latestEvent, 'spatial-three-frame');
+  assert.equal(report.recentEvents.length, 4);
+  assert.equal(report.requestSessionTrail.enterClicked, true);
+  assert.equal(report.requestSessionTrail.sessionStartRequested, true);
+  assert.equal(report.requestSessionTrail.sessionStarted, true);
+  assert.equal(report.requestSessionTrail.framesSeen, true);
+  assert.equal(report.eventCounts['spatial-three-session-start-requested'], 1);
+  assert.match(report.recentEventTrailText, /spatial-three-session-start-requested/);
   assert.equal(report.frames, 42);
   assert.equal(report.panels, 4);
   assert.equal(report.surfaceKind, 'production');
@@ -308,6 +339,50 @@ test('XR headset summary smoke verifies server-confirmed headset diagnostics', (
   assert.equal(report.checks.find((check) => check.id === 'interaction-readiness').status, 'pass');
   assert.equal(report.checks.find((check) => check.id === 'interaction-readiness').readinessStatus, 'blocked');
   assert.equal(JSON.parse(fs.readFileSync(reportPath, 'utf8')).ok, true);
+
+  let failedSessionFixturePath = path.join(tempDir, 'failed-session-summary.json');
+  let failedSessionReportPath = path.join(tempDir, 'failed-session-report.json');
+  fs.writeFileSync(failedSessionFixturePath, JSON.stringify({
+    version: 'xr-diagnostics-summary-v1',
+    clientCount: 1,
+    immersiveClientCount: 0,
+    latestClient: { clientId: 'quest-failed-client' },
+    latestImmersiveClient: null,
+    clients: [
+      {
+        clientId: 'quest-failed-client',
+        stale: false,
+        ageMs: 150,
+        phase: 'failed',
+        surface: {
+          surfaceKind: 'production',
+          entrypoint: 'spatial-layout',
+          projectId: 'agent-portal',
+          targetSection: 'graph',
+        },
+        session: { status: 'failed', mode: null, frames: 0, panelCount: 0 },
+        recentEvents: [
+          { event: 'spatial-enter-clicked', receivedAt: '2026-05-27T10:01:00.000Z', mode: 'immersive-vr' },
+          { event: 'spatial-three-session-start-requested', receivedAt: '2026-05-27T10:01:01.000Z', mode: 'immersive-vr' },
+          { event: 'spatial-three-session-failed', receivedAt: '2026-05-27T10:01:02.000Z', mode: 'immersive-vr', error: 'NotAllowedError' },
+        ],
+      },
+    ],
+  }));
+  let failedSessionRun = spawnSync(process.execPath, [
+    path.join(ROOT, 'scripts/diagnostics/xr-headset-summary-smoke.js'),
+    '--fixture',
+    failedSessionFixturePath,
+    '--report',
+    failedSessionReportPath,
+  ], { cwd: ROOT, encoding: 'utf8' });
+  assert.notEqual(failedSessionRun.status, 0, 'failed requestSession path should fail the headset summary gate');
+  let failedSessionReport = JSON.parse(failedSessionRun.stdout);
+  assert.equal(failedSessionReport.requestSessionTrail.enterClicked, true);
+  assert.equal(failedSessionReport.requestSessionTrail.sessionStartRequested, true);
+  assert.equal(failedSessionReport.requestSessionTrail.sessionFailed, true);
+  assert.equal(failedSessionReport.requestSessionTrail.lastFailureEvent, 'spatial-three-session-failed');
+  assert.equal(failedSessionReport.nextAction, 'inspect-request-session-error');
 
   let harnessFixturePath = path.join(tempDir, 'harness-summary.json');
   let harnessReportPath = path.join(tempDir, 'harness-report.json');

@@ -15,6 +15,13 @@ import {
 const enterButton = document.querySelector('#enter');
 const statusList = document.querySelector('#status');
 const canvas = document.querySelector('#canvas');
+const clientId = `xr-panels-baseline-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+const surface = {
+  surfaceKind: 'harness',
+  entrypoint: 'xr-panels-baseline',
+  targetSection: 'xr-empty-panels',
+  panelContentKind: 'empty-frame-baseline',
+};
 
 const panels = [
   { id: 'front', position: [0, 1.34, -1.75], rotation: [0, 0, 0], size: [0.84, 0.52] },
@@ -38,10 +45,12 @@ function postDiagnostic(event, extra = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      clientId,
       event,
       pageUrl: location.href,
       secureContext: window.isSecureContext,
       navigatorXr: Boolean(window.navigator?.xr),
+      surface,
       panels: panels.map((panel) => ({
         id: panel.id,
         position: panel.position,
@@ -67,6 +76,8 @@ function setRows(rows) {
 function renderStatus(extra = {}) {
   setRows([
     ['URL', location.href],
+    ['Surface', `${surface.surfaceKind}:${surface.entrypoint}`],
+    ['Production', 'no'],
     ['Secure context', String(window.isSecureContext)],
     ['navigator.xr', String(Boolean(window.navigator?.xr))],
     ['XRWebGLLayer', String(typeof window.XRWebGLLayer === 'function')],

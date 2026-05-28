@@ -576,6 +576,58 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().latestClient.launch.mode, 'immersive-vr');
   });
 
+  it('classifies production XR session startup and no-frame phases from spatial events', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let routes = createRoutes(makeRoutes('/tmp/project-production-xr-phase'));
+
+    let base = {
+      clientId: 'quest-starting-client',
+      pageUrl: 'https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph',
+      secureContext: true,
+      navigatorXr: true,
+      surface: {
+        surfaceKind: 'production',
+        entrypoint: 'spatial-layout',
+        projectId: 'agent-portal',
+        targetSection: 'graph',
+        panelContentKind: 'portal-runtime-layout',
+      },
+    };
+    let post = async (body) => {
+      let req = makeReq('POST', '/api/xr-diagnostics/log', { ...base, ...body });
+      req.headers = { host: 'playground.rnd-pro.com', 'user-agent': 'Quest Browser' };
+      req.socket = { remoteAddress: '192.168.1.56' };
+      let res = makeRes();
+      await routes['POST /api/xr-diagnostics/log'](req, res);
+      assert.equal(res.status, 200);
+    };
+
+    await post({
+      event: 'spatial-three-session-start-requested',
+      session: { status: 'starting', mode: 'immersive-vr', active: false, frames: 0 },
+    });
+    let startingSummary = makeRes();
+    routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), startingSummary);
+    assert.equal(startingSummary.json().latestClient.phase, 'starting');
+
+    await post({
+      event: 'spatial-three-session-started',
+      session: { status: 'running', mode: 'immersive-vr', active: true, frames: 0 },
+    });
+    let runningSummary = makeRes();
+    routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), runningSummary);
+    assert.equal(runningSummary.json().latestClient.phase, 'running');
+    assert.equal(runningSummary.json().immersiveClientCount, 1);
+
+    await post({
+      event: 'spatial-session-frame-check',
+      session: { status: 'running', mode: 'immersive-vr', active: true, frames: 0 },
+    });
+    let noFramesSummary = makeRes();
+    routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), noFramesSummary);
+    assert.equal(noFramesSummary.json().latestClient.phase, 'no-frames');
+  });
+
   it('POST /api/ui rejects non-UI state paths', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
 

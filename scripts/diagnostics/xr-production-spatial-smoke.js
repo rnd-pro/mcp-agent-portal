@@ -10,15 +10,20 @@ import { WebSocket } from 'ws';
 
 const REQUIRED_ROWS = [
   'Source',
+  'Panels',
   'Panels live',
   'Mode',
   'Renderer',
+  'Three panels',
+  'Three rendered panels',
+  'Three diagnostic panels',
   'XR texture mode',
   'XR texture gate',
   'XR texture ready',
   'XR launch',
   'XR gate',
   'XR readiness',
+  'Panel errors',
 ];
 
 function parseArgs(argv) {
@@ -140,6 +145,18 @@ async function stopProcess(child) {
   child.kill('SIGTERM');
   await delay(800);
   if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
+}
+
+async function removeDirectoryWithRetry(dirPath) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 4) throw error;
+      await delay(150);
+    }
+  }
 }
 
 class CdpClient {
@@ -288,6 +305,19 @@ function getMissingRows(rows = {}) {
   return REQUIRED_ROWS.filter((row) => !rows[row] || rows[row] === '-');
 }
 
+function parseCount(value) {
+  let match = String(value ?? '').match(/^\s*(\d+)\s*$/);
+  return match ? Number(match[1]) : null;
+}
+
+function parseRatio(value) {
+  let match = String(value ?? '').match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+  if (!match) return { ready: null, total: null, complete: false };
+  let ready = Number(match[1]);
+  let total = Number(match[2]);
+  return { ready, total, complete: total > 0 && ready === total };
+}
+
 function selectProductionClient(summary, options) {
   let clients = Array.isArray(summary?.clients) ? summary.clients : [];
   return clients.find((client) => (
@@ -298,11 +328,25 @@ function selectProductionClient(summary, options) {
   )) || null;
 }
 
+function deriveNextAction(failedChecks = []) {
+  if (failedChecks.includes('production-client')) return 'open-production-spatial-url';
+  if (failedChecks.includes('no-diagnostic-panels')) return 'inspect-production-texture-upload';
+  if (failedChecks.includes('live-panels') || failedChecks.includes('three-rendered-panels')) return 'inspect-production-panel-mount';
+  if (failedChecks.includes('launch-texture-gate-separated')) return 'inspect-production-launch-texture-separation';
+  return failedChecks.length ? 'inspect-production-spatial-diagnostics' : 'production-spatial-diagnostics-ready';
+}
+
 function buildReport({ options, url, inspected, summary, productionClient, pageErrors, error = null }) {
   let rows = inspected?.rows || {};
   let missingRows = getMissingRows(rows);
   let textureGate = rows['XR texture gate'] || null;
   let launchGate = rows['XR gate'] || null;
+  let panels = parseCount(rows.Panels);
+  let panelsLive = parseRatio(rows['Panels live']);
+  let threePanels = parseCount(rows['Three panels']);
+  let threeRenderedPanels = parseRatio(rows['Three rendered panels']);
+  let threeDiagnosticPanels = parseCount(rows['Three diagnostic panels']);
+  let panelErrors = parseCount(rows['Panel errors']);
   let strictTextureBlocked = textureGate?.startsWith('blocked:');
   let launchGateBlocked = launchGate?.startsWith('blocked:');
   let launchTextureSeparated = strictTextureBlocked && !launchGateBlocked;
@@ -310,6 +354,31 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
     { id: 'spatial-page-loaded', status: inspected?.hasSpatialLayout ? 'pass' : 'fail' },
     { id: 'diagnostics-rows', status: missingRows.length ? 'fail' : 'pass', missingRows },
     { id: 'production-client', status: productionClient ? 'pass' : 'fail' },
+    {
+      id: 'live-panels',
+      status: panelsLive.complete && (panels == null || panelsLive.total === panels) ? 'pass' : 'fail',
+      value: rows['Panels live'] || null,
+      panels,
+    },
+    {
+      id: 'three-rendered-panels',
+      status: threeRenderedPanels.complete && (threePanels == null || threeRenderedPanels.total === threePanels) ? 'pass' : 'fail',
+      value: rows['Three rendered panels'] || null,
+      threePanels,
+    },
+    {
+      id: 'panel-errors',
+      status: panelErrors === 0 ? 'pass' : 'fail',
+      value: rows['Panel errors'] || null,
+    },
+    {
+      id: 'no-diagnostic-panels',
+      status: threeDiagnosticPanels === 0 ? 'pass' : 'fail',
+      value: rows['Three diagnostic panels'] || null,
+      reason: threeDiagnosticPanels === 0
+        ? 'production-panels-use-live-textures'
+        : 'production-is-rendering-provider-diagnostic-materials',
+    },
     { id: 'strict-texture-mode', status: rows['XR texture mode'] === 'strict' ? 'pass' : 'fail', value: rows['XR texture mode'] || null },
     {
       id: 'launch-texture-gate-separated',
@@ -329,11 +398,7 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
     url,
     summaryUrl: createSummaryUrl(options.baseUrl).href,
     stage: failedChecks.length ? 'production-spatial-not-ready' : 'production-spatial-ready',
-    nextAction: failedChecks.includes('production-client')
-      ? 'open-production-spatial-url'
-      : failedChecks.includes('launch-texture-gate-separated')
-        ? 'inspect-production-launch-texture-separation'
-        : failedChecks.length ? 'inspect-production-spatial-diagnostics' : 'production-spatial-diagnostics-ready',
+    nextAction: deriveNextAction(failedChecks),
     pageTitle: inspected?.pageTitle || null,
     bodySnippet: inspected?.bodySnippet || null,
     rows,
@@ -434,7 +499,7 @@ async function main() {
     client?.close();
     await stopProcess(chrome);
     await stopProcess(server);
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    await removeDirectoryWithRetry(userDataDir);
   }
 }
 

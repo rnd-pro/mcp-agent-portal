@@ -145,6 +145,61 @@ function addCheck(checks, id, pass, details = {}) {
   checks.push({ id, ...details, status: pass ? 'pass' : 'fail' });
 }
 
+function compactRecentEvent(event = {}) {
+  return {
+    receivedAt: event.receivedAt || null,
+    event: event.event || null,
+    mode: event.mode || null,
+    status: event.status || null,
+    health: event.health || null,
+    htmlCanvasAvailability: event.htmlCanvasAvailability || null,
+    readinessStatus: event.readinessStatus || null,
+    readinessReason: event.readinessReason || null,
+    visualReadinessStatus: event.visualReadinessStatus || null,
+    visualReadinessReason: event.visualReadinessReason || null,
+    interactionReadinessStatus: event.interactionReadinessStatus || null,
+    interactionReadinessReason: event.interactionReadinessReason || null,
+    textureMode: event.textureMode || null,
+    textureStage: event.textureStage || null,
+    textureReason: event.textureReason || null,
+    textureResolverStage: event.textureResolverStage || null,
+    textureResolverReason: event.textureResolverReason || null,
+    launchGateReason: event.launchGateReason || null,
+    error: event.error || null,
+  };
+}
+
+function createRequestSessionTrail(events = [], session = {}) {
+  let eventNames = Array.isArray(events)
+    ? events.map((event) => event?.event).filter(Boolean)
+    : [];
+  let hasEvent = (name) => eventNames.includes(name);
+  let sessionFailed = hasEvent('spatial-three-session-failed') || hasEvent('spatial-session-failed');
+  let sessionStarted = (
+    hasEvent('spatial-three-session-started') ||
+    hasEvent('spatial-session-started') ||
+    session?.status === 'running' ||
+    session?.active === true
+  );
+  let framesSeen = Number(session?.frames || 0) > 0 || hasEvent('spatial-three-frame');
+  let lastFailure = Array.isArray(events)
+    ? [...events].reverse().find((event) => event?.event?.includes?.('failed') || event?.error)
+    : null;
+
+  return {
+    enterClicked: hasEvent('spatial-enter-clicked'),
+    launchGateBlocked: hasEvent('spatial-session-blocked'),
+    strictTexturePreflightBlocked: hasEvent('spatial-strict-texture-preflight-blocked'),
+    sessionStartRequested: hasEvent('spatial-three-session-start-requested'),
+    sessionStarted,
+    sessionFailed,
+    framesSeen,
+    lastFailureEvent: lastFailure?.event || null,
+    lastFailureError: lastFailure?.error || null,
+    eventNames,
+  };
+}
+
 function deriveNextAction(report) {
   let failed = Array.isArray(report?.failedChecks) ? report.failedChecks : [];
   if (failed.includes('summary-available') || failed.includes('summary-fetch')) return 'check-summary-endpoint';
@@ -152,7 +207,14 @@ function deriveNextAction(report) {
   if (failed.includes('client-selected') && report?.clientId) return 'check-requested-diagnostic-client';
   if (failed.includes('client-selected')) return 'check-diagnostic-client';
   if (failed.includes('client-fresh')) return 'refresh-headset-client';
-  if (failed.includes('immersive-client') || failed.includes('wait-timeout')) return 'enter-xr-in-headset';
+  if (failed.includes('immersive-client') || failed.includes('wait-timeout')) {
+    let trail = report?.requestSessionTrail || {};
+    if (trail.enterClicked && !trail.sessionStartRequested) return 'inspect-launch-gate-at-click';
+    if (trail.sessionStartRequested && trail.sessionFailed) return 'inspect-request-session-error';
+    if (trail.sessionStarted && !trail.framesSeen) return 'inspect-xr-frame-loop';
+    if (!trail.enterClicked) return 'press-enter-xr-in-headset';
+    return 'enter-xr-in-headset';
+  }
   if (failed.includes('production-surface')) return 'open-production-spatial-url';
   if (failed.includes('xr-frames')) return 'inspect-xr-render-loop';
   if (failed.includes('xr-panels')) return 'inspect-panel-scene-mount';
@@ -178,6 +240,10 @@ function createHeadsetSummaryReport(summary, options = {}) {
   let interactionReadiness = diagnostics.currentInteractionReadiness || null;
   let surface = client?.surface || {};
   let materialDiagnostics = session.materialDiagnostics || {};
+  let recentEvents = Array.isArray(client?.recentEvents) ? client.recentEvents : [];
+  let compactEvents = recentEvents.map(compactRecentEvent);
+  let requestSessionTrail = createRequestSessionTrail(recentEvents, session);
+  let latestEvent = compactEvents.at(-1) || null;
 
   addCheck(checks, 'summary-available', Boolean(summary?.version), { version: summary?.version || null });
   addCheck(checks, 'client-selected', Boolean(client), { clientId });
@@ -255,6 +321,12 @@ function createHeadsetSummaryReport(summary, options = {}) {
     selectedClientId: client?.clientId || null,
     latestClientId: summary?.latestClient?.clientId || null,
     latestImmersiveClientId: summary?.latestImmersiveClient?.clientId || null,
+    latestEvent: latestEvent?.event || summary?.latest?.event || null,
+    latestEventDetails: latestEvent,
+    recentEvents: compactEvents,
+    recentEventTrailText: diagnostics.currentTimeline?.text || null,
+    requestSessionTrail,
+    eventCounts: summary?.eventCounts || {},
     phase: client?.phase || null,
     stale: client?.stale ?? null,
     ageMs: client?.ageMs ?? null,
