@@ -806,8 +806,10 @@ export class SpatialLayout extends Symbiote {
           resultOk: Boolean(threeResult.ok),
           handled: Boolean(threeResult.handled),
           reason: threeResult.reason || null,
+          failureStage: threeResult.failureStage || null,
           controller: this._createSceneDiagnostics(),
         },
+        failureStage: threeResult.failureStage || null,
         error: threeResult.ok ? null : threeResult.reason || 'three-session-failed',
       });
       if (!threeResult.handled) {
@@ -821,8 +823,10 @@ export class SpatialLayout extends Symbiote {
             attemptId: this._xrAttemptId,
             requestedMode: mode,
             reason: threeResult.reason || 'three-webxr-unavailable',
+            failureStage: threeResult.failureStage || null,
             controller: this._createSceneDiagnostics(),
           },
+          failureStage: threeResult.failureStage || null,
           error: threeResult.reason || 'three-webxr-unavailable',
         });
       }
@@ -841,8 +845,10 @@ export class SpatialLayout extends Symbiote {
           attemptId: this._xrAttemptId,
           resultOk: Boolean(threeResult.ok),
           reason: threeResult.reason || null,
+          failureStage: threeResult.failureStage || null,
           controller: this._createSceneDiagnostics(),
         },
+        failureStage: threeResult.failureStage || null,
       });
       this._renderStatus();
     } catch (error) {
