@@ -178,8 +178,15 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes("texture: 'strict'"), 'production smoke must verify strict production texture mode');
   assert.ok(script.includes("surfaceKind === 'production'"), 'production smoke must require production diagnostics');
   assert.ok(script.includes("entrypoint === 'spatial-layout'"), 'production smoke must reject baseline harness diagnostics');
+  assert.ok(script.includes("'Surface'"), 'production smoke must require the visible production surface row');
+  assert.ok(script.includes("'Panel content'"), 'production smoke must require the visible production content row');
+  assert.ok(script.includes('production-surface'), 'production smoke must fail when the page is not SpatialLayout production UI');
+  assert.ok(script.includes("rows.Surface === 'production:spatial-layout'"), 'production smoke must verify the visible production surface value');
+  assert.ok(script.includes("rows['Panel content'] === 'portal-runtime-layout'"), 'production smoke must verify live portal runtime content');
   assert.ok(script.includes('live-panels'), 'production smoke must fail when live runtime panels are not mounted');
-  assert.ok(script.includes('three-rendered-panels'), 'production smoke must fail when Three panels are not rendered');
+  assert.ok(script.includes('three-rendered-panels'), 'production smoke must check rendered Three panels when texture upload is available');
+  assert.ok(script.includes('strict-blocked-panels-hidden'), 'production smoke must accept strict blocked diagnostics only when panels are hidden');
+  assert.ok(script.includes('strict-texture-block-hidden'), 'production smoke must classify unsupported HTML-in-Canvas as a hidden strict texture block');
   assert.ok(script.includes('.psl-panel-live'), 'production smoke must count SpatialLayout live panels, not harness source panels');
   assert.equal(script.includes('.live-panel-source'), false, 'production smoke must not count Three harness live panel sources');
   assert.ok(script.includes('no-diagnostic-panels'), 'production smoke must fail when strict diagnostic panels replace live textures');
@@ -190,6 +197,7 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes('missingRows'), 'production smoke must report stale or incomplete public pages with missing rows');
   assert.equal(script.includes('xr-three-panels-baseline.html'), false, 'production smoke must not target the Three harness page');
   assert.equal(script.includes('xr-panels-baseline.html'), false, 'production smoke must not target the empty-panel harness page');
+  assert.equal(script.includes('xr-htmltexture-minimal.html'), false, 'production smoke must not target the HTMLTexture minimal harness page');
   assert.equal(script.includes('playwright'), false, 'production smoke must not add Playwright as a hidden dependency');
   assert.equal(script.includes('puppeteer'), false, 'production smoke must not add Puppeteer as a hidden dependency');
 });
@@ -813,6 +821,9 @@ test('XR HTMLTexture minimal harness follows the official canvas-child texture p
   assert.ok(script.includes('texElementImage2D'), 'minimal harness must report the WebGL HTML-in-Canvas upload capability');
   assert.ok(script.includes('canvas.requestPaint()'), 'minimal harness must request a platform paint when available');
   assert.ok(script.includes('source.parentNode === canvas'), 'minimal harness must verify the DOM source stays under the renderer canvas');
+  assert.ok(script.includes("surfaceKind: 'harness'"), 'minimal harness diagnostics must be classified as non-production');
+  assert.ok(script.includes("entrypoint: 'xr-htmltexture-minimal'"), 'minimal harness diagnostics must expose a stable harness entrypoint');
+  assert.ok(script.includes("panelContentKind: 'single-htmltexture-canvas-child'"), 'minimal harness must expose its single-source texture content kind');
   assert.ok(script.includes('createXRThreeDiagnosticPayload'), 'minimal harness must send provider-shaped server diagnostics');
   assert.ok(script.includes('createXRThreeTextureCapabilitySummary'), 'minimal harness must use provider texture capability summaries');
   assert.ok(script.includes('readXRHtmlCanvasOriginTrialHeaderStatus'), 'minimal harness must report origin-trial header status without token values');

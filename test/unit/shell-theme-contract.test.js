@@ -678,6 +678,8 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRDomPanelWorkbench'), 'SpatialLayout must delegate DOM-backed XR panel source preparation to symbiote-node/xr');
     assert.ok(logic.includes('mountPreviewPanel'), 'SpatialLayout DOM preview must be built through the provider XR panel workbench');
     assert.ok(logic.includes('createXRThreePanelTextureBridge'), 'SpatialLayout XR texture sources must be bridged through the provider Three/WebXR path');
+    assert.ok(logic.includes("this._statusItem('Surface', 'production:spatial-layout')"), 'SpatialLayout must visibly label itself as the production XR surface');
+    assert.ok(logic.includes("this._statusItem('Panel content', 'portal-runtime-layout')"), 'SpatialLayout must visibly distinguish live portal layouts from diagnostic harness panels');
     assert.ok(logic.includes('resolvePortalSectionLayout'), 'SpatialLayout must resolve target layouts through the same saved-layout policy as routed sections');
     assert.ok(logic.includes('layoutMatchesSection'), 'SpatialLayout must not bypass section layout validation when projecting XR scenes');
     assert.ok(logic.includes('readTargetSectionParam'), 'SpatialLayout must expose its projected section as route state instead of silently diverging');

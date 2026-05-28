@@ -664,6 +664,8 @@ export class SpatialLayout extends Symbiote {
       : `XR unavailable: ${launchGate.reason}`;
 
     this.ref.status.replaceChildren(
+      this._statusItem('Surface', 'production:spatial-layout'),
+      this._statusItem('Panel content', 'portal-runtime-layout'),
       this._statusItem('Source', summary.source || '-'),
       this._statusItem('Panels', String(summary.panels.total)),
       this._statusItem('Panels live', `${summary.panels.live}/${summary.panels.total}`),

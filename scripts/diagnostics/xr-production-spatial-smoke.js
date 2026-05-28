@@ -9,6 +9,8 @@ import process from 'node:process';
 import { WebSocket } from 'ws';
 
 const REQUIRED_ROWS = [
+  'Surface',
+  'Panel content',
   'Source',
   'Panels',
   'Panels live',
@@ -330,8 +332,10 @@ function selectProductionClient(summary, options) {
 
 function deriveNextAction(failedChecks = [], rows = {}) {
   if (failedChecks.includes('production-client')) return 'open-production-spatial-url';
+  if (failedChecks.includes('production-surface')) return 'open-spatial-layout-production-route';
   if (failedChecks.includes('no-diagnostic-panels')) return 'inspect-production-texture-upload';
-  if (failedChecks.includes('three-rendered-panels') &&
+  if (failedChecks.includes('strict-blocked-panels-hidden')) return 'hide-strict-texture-failures';
+  if ((failedChecks.includes('three-rendered-panels') || failedChecks.includes('strict-blocked-panels-hidden')) &&
     String(rows['XR texture gate'] || '').startsWith('blocked:') &&
     String(rows['HTML Canvas'] || '').includes('enable-CanvasDrawElement')) {
     return 'enable-html-in-canvas-on-headset';
@@ -353,11 +357,20 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
   let threeDiagnosticPanels = parseCount(rows['Three diagnostic panels']);
   let panelErrors = parseCount(rows['Panel errors']);
   let strictTextureBlocked = textureGate?.startsWith('blocked:');
+  let strictMode = rows['XR texture mode'] === 'strict';
   let launchGateBlocked = launchGate?.startsWith('blocked:');
   let launchTextureSeparated = strictTextureBlocked && !launchGateBlocked;
+  let renderedPanelsHiddenForStrictBlock = strictMode && strictTextureBlocked && threeRenderedPanels.ready === 0;
+  let renderedPanelsReady = threeRenderedPanels.complete && (threePanels == null || threeRenderedPanels.total === threePanels);
   let checks = [
     { id: 'spatial-page-loaded', status: inspected?.hasSpatialLayout ? 'pass' : 'fail' },
     { id: 'diagnostics-rows', status: missingRows.length ? 'fail' : 'pass', missingRows },
+    {
+      id: 'production-surface',
+      status: rows.Surface === 'production:spatial-layout' && rows['Panel content'] === 'portal-runtime-layout' ? 'pass' : 'fail',
+      surface: rows.Surface || null,
+      panelContent: rows['Panel content'] || null,
+    },
     { id: 'production-client', status: productionClient ? 'pass' : 'fail' },
     {
       id: 'live-panels',
@@ -367,9 +380,25 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
     },
     {
       id: 'three-rendered-panels',
-      status: threeRenderedPanels.complete && (threePanels == null || threeRenderedPanels.total === threePanels) ? 'pass' : 'fail',
+      status: renderedPanelsReady || renderedPanelsHiddenForStrictBlock ? 'pass' : 'fail',
       value: rows['Three rendered panels'] || null,
       threePanels,
+      reason: renderedPanelsReady
+        ? 'production-panels-rendered'
+        : renderedPanelsHiddenForStrictBlock
+          ? 'strict-texture-block-hidden'
+          : 'production-panels-not-rendered',
+    },
+    {
+      id: 'strict-blocked-panels-hidden',
+      status: strictMode && strictTextureBlocked
+        ? renderedPanelsHiddenForStrictBlock ? 'pass' : 'fail'
+        : 'pass',
+      value: rows['Three rendered panels'] || null,
+      textureGate,
+      reason: strictMode && strictTextureBlocked
+        ? 'strict-mode-must-not-render-empty-or-material-fallback-panels'
+        : 'texture-gate-ready-or-nonstrict',
     },
     {
       id: 'panel-errors',
