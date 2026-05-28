@@ -144,7 +144,7 @@ let indexHtml = `<!DOCTYPE html>
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+	<link rel="stylesheet" href="/packages/symbiote-node/icons/material-symbols.css">
 	<link rel="stylesheet" href="${basePath}packages/symbiote-node/themes/default-provider.css">
 	<link rel="stylesheet" href="${basePath}web/style.css">
 <script type="importmap">

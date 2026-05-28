@@ -48,6 +48,15 @@ describe('portal shell theme contract', () => {
       assert.equal(css.includes(literal), false, `web/style.css must not copy provider color ${literal}`);
     }
     assert.equal(index.includes('style='), false, 'web/index.html must not carry inline visual styles');
+    assert.ok(
+      index.includes('/packages/symbiote-node/icons/material-symbols.css'),
+      'web/index.html must use the provider-hosted Material Symbols stylesheet for deterministic icon rendering',
+    );
+    assert.equal(
+      index.includes('fonts.googleapis.com/css2?family=Material+Symbols'),
+      false,
+      'web/index.html must not rely on Google-hosted Material Symbols for app chrome icons',
+    );
     assert.equal(icons.includes('style='), false, 'markdown icon rendering must use theme classes');
     assert.equal(icons.includes('hsl('), false, 'markdown icon rendering must not hard-code colors');
     for (let token of [
