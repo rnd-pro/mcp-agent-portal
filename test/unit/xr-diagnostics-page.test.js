@@ -202,6 +202,28 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.equal(script.includes('puppeteer'), false, 'production smoke must not add Puppeteer as a hidden dependency');
 });
 
+test('README documents the Quest pre-headset production gate', () => {
+  let readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+
+  assert.ok(readme.includes('Quest pre-headset gate'), 'README must expose the pre-headset gate as the next agent checklist');
+  assert.ok(readme.includes('npm run xr:production-smoke -- --base-url https://playground.rnd-pro.com/demos/agent-portal-vr --no-start-server'), 'README must show the public production smoke command');
+  assert.ok(readme.includes('https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict'), 'README must give the exact production public URL');
+  assert.ok(readme.includes('`stage`: `production-spatial-ready`'), 'README must list the expected production stage');
+  assert.ok(readme.includes('`nextAction`: `production-spatial-diagnostics-ready`'), 'README must list the expected next action');
+  assert.ok(readme.includes('`Surface`: `production:spatial-layout`'), 'README must list the production surface row');
+  assert.ok(readme.includes('`Panel content`: `portal-runtime-layout`'), 'README must list the live runtime panel content row');
+  assert.ok(readme.includes('`Panels live`: `4/4`'), 'README must list the live panel count');
+  assert.ok(readme.includes('`XR texture mode`: `strict`'), 'README must list strict texture mode');
+  assert.ok(readme.includes('`XR gate`: `ready`'), 'README must list the launch gate state before headset smoke');
+  assert.ok(readme.includes('`Three diagnostic panels`: `0`'), 'README must list that diagnostic panels are not production UI');
+  assert.ok(readme.includes('`pageErrorCount`: `0`'), 'README must list the browser error gate');
+  assert.ok(readme.includes('`strict-blocked-panels-hidden`: `pass`'), 'README must list the strict hidden-panel gate');
+  assert.ok(readme.includes('`XR texture gate: blocked:html-in-canvas-unsupported`'), 'README must list the expected desktop unsupported texture status');
+  assert.ok(readme.includes('`Three rendered panels: 0/4`'), 'README must list the expected hidden texture panel status');
+  assert.ok(readme.includes('not presenting empty or material-fallback panels as production UI'), 'README must explain why blocked texture readiness can still pass pre-headset');
+  assert.ok(readme.includes('npm run xr:headset-wait -- --base-url https://playground.rnd-pro.com/demos/agent-portal-vr'), 'README must point to the next headset command after pre-headset pass');
+});
+
 test('XR headset summary smoke verifies server-confirmed headset diagnostics', () => {
   let script = fs.readFileSync(path.join(ROOT, 'scripts/diagnostics/xr-headset-summary-smoke.js'), 'utf8');
   let pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));

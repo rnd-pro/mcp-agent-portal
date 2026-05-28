@@ -161,6 +161,28 @@ The production XR demo URL is `https://playground.rnd-pro.com/demos/agent-portal
 
 Use `npm run xr:production-smoke` for the local production route gate and `npm run xr:three-smoke` only for the Three/WebXR harness. Public headset debugging starts after the public production smoke confirms the deployed route is current.
 
+Quest pre-headset gate:
+
+```bash
+npm run xr:production-smoke -- --base-url https://playground.rnd-pro.com/demos/agent-portal-vr --no-start-server
+```
+
+The expected public pre-headset status is:
+
+- URL: `https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict`
+- `stage`: `production-spatial-ready`
+- `nextAction`: `production-spatial-diagnostics-ready`
+- `Surface`: `production:spatial-layout`
+- `Panel content`: `portal-runtime-layout`
+- `Panels live`: `4/4`
+- `XR texture mode`: `strict`
+- `XR gate`: `ready`
+- `Three diagnostic panels`: `0`
+- `pageErrorCount`: `0`
+- `strict-blocked-panels-hidden`: `pass`
+
+When HTML-in-Canvas texture upload is unavailable on the checking browser, the expected strict-mode status is `XR texture gate: blocked:html-in-canvas-unsupported` with `Three rendered panels: 0/4`. That is a valid pre-headset diagnostic state: it proves the app is not presenting empty or material-fallback panels as production UI. Headset acceptance starts only after this gate passes; the headset run is then checked with `npm run xr:headset-wait -- --base-url https://playground.rnd-pro.com/demos/agent-portal-vr`.
+
 ### Public Demo Mode
 
 Set `AGENT_PORTAL_DEMO_MODE=1` to serve Agent Portal against safe public data instead of private local workspaces. When `AGENT_PORTAL_PUBLIC_PROJECTS_ROOT` points at synchronized public repository snapshots, demo MCP `get_skeleton` responses expose allowlisted files plus import, export, line, and asset metadata. The graph and XR spatial views consume that same skeleton through the shared `graph-model-v1` pipeline, so public demos can show real project structure without exposing secrets, ignored directories, or local machine paths.
