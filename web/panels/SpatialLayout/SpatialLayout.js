@@ -601,7 +601,10 @@ export class SpatialLayout extends Symbiote {
       this._threeXRAdapter?.getDiagnostics?.() ||
       this._threeXRAdapter?.getState?.() ||
       {};
-    let htmlDiagnostics = this._htmlCanvasSupport.diagnostics || this._htmlCanvasDiagnostics || {};
+    let htmlDiagnostics = this._createHtmlCanvasDiagnosticsPayload() ||
+      this._htmlCanvasSupport.diagnostics ||
+      this._htmlCanvasDiagnostics ||
+      {};
     let launch = this._launchRecommendation || this._createLaunchRecommendation();
     let launchGate = this._launchGate || this._createLaunchGate();
     let textureGate = this._createTextureGate();
@@ -623,7 +626,7 @@ export class SpatialLayout extends Symbiote {
       threeDiagnostics,
       threeAdapterName: this._threeXRAdapter?.name,
       htmlCanvasSupport: this._htmlCanvasSupport,
-      htmlCanvasDiagnostics: this._htmlCanvasDiagnostics,
+      htmlCanvasDiagnostics: htmlDiagnostics,
       themeSnapshot: this._themeSnapshot,
       support: this._support,
       launch,
@@ -699,6 +702,7 @@ export class SpatialLayout extends Symbiote {
         : 'checking'),
       this._statusItem('HTML Canvas origin trial route', this._originTrialHeaderStatus.diagnosticHeader || '-'),
       this._statusItem('HTML Canvas texture upload', summary.htmlCanvas.textureUploadAvailable ? 'available' : 'missing'),
+      this._statusItem('Three HTMLTexture usable', summary.htmlCanvas.threeTexture?.htmlTextureUsable ? 'yes' : summary.htmlCanvas.threeTexture?.reason || 'no'),
       this._statusItem('Canvas preview', summary.canvasPreview?.rendered ? summary.canvasPreview.panelId : summary.canvasPreview?.reason || '-'),
       this._statusItem('XR texture mode', textureGate.debugMode?.mode || this._textureDebugMode.mode),
       this._statusItem('XR texture gate', textureGate.blocked ? `blocked:${textureGate.reason}` : 'ready'),
@@ -1181,7 +1185,10 @@ export class SpatialLayout extends Symbiote {
   }
 
   _renderHtmlCanvasDiagnostics() {
-    let diagnostics = this._htmlCanvasSupport.diagnostics || this._htmlCanvasDiagnostics || {};
+    let diagnostics = this._createHtmlCanvasDiagnosticsPayload() ||
+      this._htmlCanvasSupport.diagnostics ||
+      this._htmlCanvasDiagnostics ||
+      {};
     let row = document.createElement('div');
     row.className = 'psl-html-canvas';
     row.replaceChildren(
@@ -1191,7 +1198,7 @@ export class SpatialLayout extends Symbiote {
       this._htmlCanvasChip('paint', diagnostics.apis?.paintEvent),
       this._htmlCanvasChip('WebGL texture', diagnostics.apis?.webglTextureUpload),
       this._htmlCanvasChip('WebGPU texture', diagnostics.apis?.webgpuTextureCopy),
-      this._htmlCanvasChip('Three HTMLTexture', diagnostics.threeTexture?.htmlTextureAvailable),
+      this._htmlCanvasChip('Three HTMLTexture usable', diagnostics.threeTexture?.htmlTextureUsable),
       this._htmlCanvasChip('Origin-Trial header', this._originTrialHeaderStatus.present),
       this._htmlCanvasChip('Preview', this._canvasPreviewResult?.rendered),
     );

@@ -174,6 +174,7 @@ function normalizeHtmlCanvasDiagnosticSummary(htmlCanvas = null) {
         renderer: htmlCanvas.threeTexture.renderer ? String(htmlCanvas.threeTexture.renderer).slice(0, 80) : null,
         threeRevision: htmlCanvas.threeTexture.threeRevision ? String(htmlCanvas.threeTexture.threeRevision).slice(0, 40) : null,
         htmlTextureAvailable: htmlCanvas.threeTexture.htmlTextureAvailable === true,
+        htmlTextureUsable: htmlCanvas.threeTexture.htmlTextureUsable === true,
         htmlTextureRequired: htmlCanvas.threeTexture.htmlTextureRequired === true,
         textureUploadAvailable: htmlCanvas.threeTexture.textureUploadAvailable === true,
         ready: htmlCanvas.threeTexture.ready === true,

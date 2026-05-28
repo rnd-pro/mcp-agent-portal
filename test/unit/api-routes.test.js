@@ -184,9 +184,10 @@ describe('api-routes', () => {
           threeTexture: {
             version: 'xr-three-texture-capability-v1',
             htmlTextureAvailable: false,
+            htmlTextureUsable: false,
             textureUploadAvailable: false,
             ready: false,
-            reason: 'three-html-texture-api-missing',
+            reason: 'html-in-canvas-texture-upload-missing',
             threeRevision: '184',
           },
           originTrial: {
@@ -462,7 +463,8 @@ describe('api-routes', () => {
     assert.deepEqual(summaryRes.json().latestClient.htmlCanvas.missingCore, ['layoutsubtree', 'render-target-api']);
     assert.deepEqual(summaryRes.json().latestClient.htmlCanvas.missingTexture, ['texElementImage2D', 'copyElementImageToTexture']);
     assert.equal(summaryRes.json().latestClient.htmlCanvas.threeTexture.htmlTextureAvailable, false);
-    assert.equal(summaryRes.json().latestClient.htmlCanvas.threeTexture.reason, 'three-html-texture-api-missing');
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.threeTexture.htmlTextureUsable, false);
+    assert.equal(summaryRes.json().latestClient.htmlCanvas.threeTexture.reason, 'html-in-canvas-texture-upload-missing');
     assert.equal(summaryRes.json().htmlCanvas.availability, 'origin-trial-or-flag-required');
     assert.equal(summaryRes.json().latestClient.sceneQuality.status, 'warning');
     assert.equal(summaryRes.json().latestClient.sceneQuality.lowQualityCount, 1);
