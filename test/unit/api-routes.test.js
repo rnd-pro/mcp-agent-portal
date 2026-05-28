@@ -122,8 +122,8 @@ describe('api-routes', () => {
       },
       session: {
         version: 'xr-three-session-telemetry-v1',
-        status: 'preflight',
-        mode: null,
+        status: 'running',
+        mode: 'immersive-vr',
         active: false,
         visibilityState: 'visible',
         environmentBlendMode: 'opaque',
@@ -402,7 +402,7 @@ describe('api-routes', () => {
     assert.equal(getRes.status, 200);
     assert.equal(getRes.json().logs.at(-1).event, 'support-detected');
     assert.equal(getRes.json().logs.at(-1).launch.reason, 'insecure-context');
-    assert.equal(getRes.json().logs.at(-1).session.status, 'preflight');
+    assert.equal(getRes.json().logs.at(-1).session.status, 'running');
     assert.deepEqual(getRes.json().logs.at(-1).session.drag.size, [1.4, 0.72]);
     assert.equal(getRes.json().logs.at(-1).session.drag.resize.handle, 'east');
     assert.equal('token' in getRes.json().logs.at(-1).session, false);
@@ -423,14 +423,14 @@ describe('api-routes', () => {
     assert.equal(typeof summaryRes.json().latestClient.ageMs, 'number');
     assert.equal(summaryRes.json().latestClient.stale, false);
     assert.equal(summaryRes.json().latestClient.staleAfterMs, 15000);
-    assert.equal(summaryRes.json().latestClient.phase, 'blocked');
+    assert.equal(summaryRes.json().latestClient.phase, 'running');
     assert.equal(summaryRes.json().visualReadiness.status, 'pass');
     assert.equal(summaryRes.json().interactionReadiness.status, 'blocked');
     assert.equal(summaryRes.json().latestClient.visualReadiness.checks[0].id, 'visual-status');
     assert.equal(summaryRes.json().latestClient.interactionReadiness.issueCodes[0], 'texture-upload-ready');
     assert.equal(summaryRes.json().latestClient.interactionReadiness.frameTarget.handle, 'east');
-    assert.equal(summaryRes.json().latestClient.session.status, 'preflight');
-    assert.equal(summaryRes.json().latestClient.session.mode, null);
+    assert.equal(summaryRes.json().latestClient.session.status, 'running');
+    assert.equal(summaryRes.json().latestClient.session.mode, 'immersive-vr');
     assert.equal(summaryRes.json().latestClient.session.frames, 12);
     assert.equal(summaryRes.json().latestClient.session.inputSources[0].targetRayMode, 'tracked-pointer');
     assert.equal(summaryRes.json().latestClient.session.sessionOptions.referenceSpaceType, 'local-floor');
@@ -505,7 +505,7 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().troubleshooting.textureReady, 0);
     assert.equal(summaryRes.json().troubleshooting.textureTotal, 4);
     assert.deepEqual(summaryRes.json().latestClient.recentEvents.map((item) => item.event), ['support-detected']);
-    assert.equal(summaryRes.json().latestClient.recentEvents[0].mode, null);
+    assert.equal(summaryRes.json().latestClient.recentEvents[0].mode, 'immersive-vr');
     assert.equal(summaryRes.json().latestClient.recentEvents[0].htmlCanvasAvailability, 'origin-trial-or-flag-required');
     assert.equal(summaryRes.json().latestClient.recentEvents[0].htmlCanvasRecommendation, 'enable-CanvasDrawElement');
     assert.equal(summaryRes.json().latestClient.recentEvents[0].sceneQualityStatus, 'warning');
@@ -522,11 +522,58 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphFocus, 'src/node/server/demo-mode.js');
     assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphPreviewStatus, 'limited');
     assert.equal(summaryRes.json().latestClient.recentEvents[0].deepGraphFocusVisible, true);
-    assert.equal(summaryRes.json().immersiveClientCount, 0);
-    assert.equal(summaryRes.json().latestImmersiveClient, null);
+    assert.equal(summaryRes.json().immersiveClientCount, 1);
+    assert.equal(summaryRes.json().latestImmersiveClient.clientId, 'quest-client-1');
     assert.equal(summaryRes.json().latest.event, 'support-detected');
     assert.equal(summaryRes.json().launch.reason, 'insecure-context');
     assert.equal(summaryRes.json().eventCounts['support-detected'], 1);
+  });
+
+  it('does not classify XR capability preflight as an immersive client', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let routes = createRoutes(makeRoutes('/tmp/project-preflight'));
+
+    let req = makeReq('POST', '/api/xr-diagnostics/log', {
+      clientId: 'quest-preflight-client',
+      event: 'support-detected',
+      pageUrl: 'https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph',
+      secureContext: true,
+      navigatorXr: true,
+      modes: { inline: true, immersiveVr: true, immersiveAr: false },
+      launch: { canLaunch: true, mode: 'immersive-vr', reason: 'ready' },
+      surface: {
+        surfaceKind: 'production',
+        entrypoint: 'spatial-layout',
+        projectId: 'agent-portal',
+        targetSection: 'graph',
+        panelContentKind: 'portal-runtime-layout',
+      },
+      session: {
+        version: 'xr-three-session-telemetry-v1',
+        status: 'preflight',
+        mode: null,
+        active: false,
+        frames: 0,
+      },
+    });
+    req.headers = {
+      host: 'playground.rnd-pro.com',
+      'user-agent': 'Quest Browser',
+    };
+    req.socket = { remoteAddress: '192.168.1.56' };
+
+    let postRes = makeRes();
+    await routes['POST /api/xr-diagnostics/log'](req, postRes);
+    let summaryRes = makeRes();
+    routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), summaryRes);
+
+    assert.equal(postRes.status, 200);
+    assert.equal(summaryRes.status, 200);
+    assert.equal(summaryRes.json().clientCount, 1);
+    assert.equal(summaryRes.json().immersiveClientCount, 0);
+    assert.equal(summaryRes.json().latestImmersiveClient, null);
+    assert.equal(summaryRes.json().latestClient.session.status, 'preflight');
+    assert.equal(summaryRes.json().latestClient.launch.mode, 'immersive-vr');
   });
 
   it('POST /api/ui rejects non-UI state paths', async () => {

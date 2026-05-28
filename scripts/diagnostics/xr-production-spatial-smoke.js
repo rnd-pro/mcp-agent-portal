@@ -129,6 +129,12 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
+function getLocalSecureOriginArg(baseUrl) {
+  let url = new URL(baseUrl);
+  if (url.protocol !== 'http:') return null;
+  return `--unsafely-treat-insecure-origin-as-secure=${url.origin}`;
+}
+
 async function stopProcess(child) {
   if (!child || child.exitCode != null || child.signalCode != null) return;
   child.kill('SIGTERM');
@@ -297,16 +303,22 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
   let missingRows = getMissingRows(rows);
   let textureGate = rows['XR texture gate'] || null;
   let launchGate = rows['XR gate'] || null;
+  let strictTextureBlocked = textureGate?.startsWith('blocked:');
+  let launchGateBlocked = launchGate?.startsWith('blocked:');
+  let launchTextureSeparated = strictTextureBlocked && !launchGateBlocked;
   let checks = [
     { id: 'spatial-page-loaded', status: inspected?.hasSpatialLayout ? 'pass' : 'fail' },
     { id: 'diagnostics-rows', status: missingRows.length ? 'fail' : 'pass', missingRows },
     { id: 'production-client', status: productionClient ? 'pass' : 'fail' },
     { id: 'strict-texture-mode', status: rows['XR texture mode'] === 'strict' ? 'pass' : 'fail', value: rows['XR texture mode'] || null },
     {
-      id: 'launch-texture-gate-aligned',
-      status: textureGate?.startsWith('blocked:') && launchGate?.startsWith('blocked:') ? 'pass' : 'fail',
+      id: 'launch-texture-gate-separated',
+      status: launchTextureSeparated ? 'pass' : 'fail',
       textureGate,
       launchGate,
+      reason: launchTextureSeparated
+        ? 'session-launch-can-collect-quest-evidence'
+        : 'texture-readiness-is-blocking-session-launch',
     },
     { id: 'page-errors', status: pageErrors.length ? 'fail' : 'pass', count: pageErrors.length },
   ];
@@ -319,8 +331,8 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
     stage: failedChecks.length ? 'production-spatial-not-ready' : 'production-spatial-ready',
     nextAction: failedChecks.includes('production-client')
       ? 'open-production-spatial-url'
-      : failedChecks.includes('launch-texture-gate-aligned')
-        ? 'inspect-production-texture-launch-gate'
+      : failedChecks.includes('launch-texture-gate-separated')
+        ? 'inspect-production-launch-texture-separation'
         : failedChecks.length ? 'inspect-production-spatial-diagnostics' : 'production-spatial-diagnostics-ready',
     pageTitle: inspected?.pageTitle || null,
     bodySnippet: inspected?.bodySnippet || null,
@@ -354,6 +366,7 @@ async function main() {
       server = spawnProcess('npm', ['run', 'dev']);
       await waitFor(() => requestText(options.baseUrl), options.waitMs);
     }
+    let localSecureOriginArg = getLocalSecureOriginArg(options.baseUrl);
     chrome = spawnProcess(options.chrome, [
       '--headless=new',
       '--disable-gpu',
@@ -361,6 +374,7 @@ async function main() {
       '--use-gl=swiftshader',
       '--no-first-run',
       '--no-default-browser-check',
+      ...(localSecureOriginArg ? [localSecureOriginArg] : []),
       `--window-size=${options.viewportWidth},${options.viewportHeight}`,
       `--remote-debugging-port=${options.port}`,
       `--user-data-dir=${userDataDir}`,

@@ -301,6 +301,7 @@ describe('server demo mode', () => {
       navigatorXr: true,
       modes: { inline: true, immersiveVr: true, immersiveAr: false },
       launch: { canLaunch: true, mode: 'immersive-vr', reason: 'ready' },
+      session: { status: 'running', mode: 'immersive-vr', active: true, frames: 1 },
       details: {
         controller: { status: 'running', scene: { panelCount: 4 }, frameCount: 0 },
         secret: 'must-not-leak',
@@ -347,7 +348,7 @@ describe('server demo mode', () => {
     assert.equal(summary.staleAfterMs, 15000);
     assert.equal(typeof summary.latestClient.ageMs, 'number');
     assert.equal(summary.latestClient.stale, false);
-    assert.equal(summary.latestClient.phase, 'ready');
+    assert.equal(summary.latestClient.phase, 'running');
     assert.deepEqual(summary.latestClient.recentEvents.map((item) => item.event), ['spatial-session-frame-check']);
     assert.equal(summary.latestClient.recentEvents[0].mode, 'immersive-vr');
     assert.equal(summary.immersiveClientCount, 1);

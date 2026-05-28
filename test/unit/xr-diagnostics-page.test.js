@@ -174,7 +174,8 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes("texture: 'strict'"), 'production smoke must verify strict production texture mode');
   assert.ok(script.includes("surfaceKind === 'production'"), 'production smoke must require production diagnostics');
   assert.ok(script.includes("entrypoint === 'spatial-layout'"), 'production smoke must reject baseline harness diagnostics');
-  assert.ok(script.includes('launch-texture-gate-aligned'), 'production smoke must catch button/click gate divergence');
+  assert.ok(script.includes('launch-texture-gate-separated'), 'production smoke must ensure WebXR launch is not blocked by live texture readiness');
+  assert.ok(script.includes('inspect-production-launch-texture-separation'), 'production smoke must report launch/texture coupling regressions explicitly');
   assert.ok(script.includes('missingRows'), 'production smoke must report stale or incomplete public pages with missing rows');
   assert.equal(script.includes('xr-three-panels-baseline.html'), false, 'production smoke must not target the Three harness page');
   assert.equal(script.includes('xr-panels-baseline.html'), false, 'production smoke must not target the empty-panel harness page');

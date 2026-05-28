@@ -774,7 +774,7 @@ export class SpatialLayout extends Symbiote {
       let textureGate = this._createTextureGate();
       if (textureGate.strict && textureGate.blocked) {
         this._lastThreeXRError = textureGate.reason || 'strict-texture-blocked';
-        this._postXRDiagnostic('spatial-strict-texture-blocked', {
+        this._postXRDiagnostic('spatial-strict-texture-preflight-blocked', {
           details: {
             launchGate: this._launchGate,
             texture: textureGate,
@@ -782,8 +782,6 @@ export class SpatialLayout extends Symbiote {
           },
           error: this._lastThreeXRError,
         });
-        this._renderStatus();
-        return;
       }
       let mode = this._launchGate.mode || this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
       let threeResult = await this._enterThreeXR(mode);
@@ -1113,14 +1111,12 @@ export class SpatialLayout extends Symbiote {
     let launch = this._launchRecommendation || this._createLaunchRecommendation();
     let selectedMode = this.ref.xrModeSelect?.value || 'auto';
     let preferredMode = selectedMode === 'auto' ? null : selectedMode;
-    let texture = options.texture || this._createTextureGate();
     return createWebXRLaunchGateSummary(this._support, {
       preferredMode,
       selectedMode: preferredMode || launch.mode || WEBXR_MODES.immersiveVr,
       probeMode: preferredMode || WEBXR_MODES.immersiveVr,
       allowUnsupportedModeProbe: true,
       launch,
-      texture,
       userActivation: window.navigator?.userActivation || null,
       requireUserActivation: options.requireUserActivation === true,
     });

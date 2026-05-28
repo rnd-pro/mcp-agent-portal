@@ -135,10 +135,9 @@ function resolveClientId(summary, explicitClientId, options = {}) {
 function isImmersiveClient(client) {
   return Boolean(
     client?.session?.active ||
+    client?.session?.status === 'running' ||
     client?.session?.mode?.startsWith?.('immersive-') ||
-    client?.launch?.mode?.startsWith?.('immersive-') ||
-    client?.modes?.immersiveVr ||
-    client?.modes?.immersiveAr
+    Number(client?.session?.frames || 0) > 0
   );
 }
 

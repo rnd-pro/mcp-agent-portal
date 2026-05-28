@@ -677,8 +677,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createWebXRLaunchGateSummary'), 'SpatialLayout must use provider WebXR launch gate diagnostics');
     assert.ok(logic.includes('allowUnsupportedModeProbe: true'), 'SpatialLayout must keep the XR launch action available for provider-owned requestSession diagnostics when mode detection is inconclusive');
     assert.ok(logic.includes('launchGate.canProbeMode'), 'SpatialLayout must label provider launch probe mode distinctly from confirmed WebXR launch support');
-    assert.ok(logic.includes('let texture = options.texture || this._createTextureGate()'), 'SpatialLayout launch gate must create provider texture readiness before launch gating');
-    assert.ok(logic.includes('texture,'), 'SpatialLayout launch gate must pass provider texture readiness so the button and click behavior stay aligned');
+    assert.equal(logic.includes('let texture = options.texture || this._createTextureGate()'), false, 'SpatialLayout launch gate must not merge WebXR session launch with live texture readiness');
     assert.ok(logic.includes('createXRTextureDebugModeSummary'), 'SpatialLayout must normalize texture debug mode through the provider');
     assert.ok(logic.includes('createXRTextureGateSummary'), 'SpatialLayout must use provider texture gate diagnostics');
     assert.ok(logic.includes('createXRPointerRayFromDomEvent'), 'SpatialLayout must use provider DOM pointer ray projection');
@@ -701,7 +700,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRThreeSessionHealthSummary'), 'SpatialLayout must compose readiness from provider session health diagnostics');
     assert.ok(logic.includes('this.ref.enterButton.disabled'), 'SpatialLayout must disable XR launch when provider diagnostics say launch is blocked');
     assert.ok(logic.includes('spatial-session-blocked'), 'SpatialLayout must log provider launch gate blocks before starting XR');
-    assert.ok(logic.includes('spatial-strict-texture-blocked'), 'SpatialLayout must block immersive entry with a provider diagnostic instead of showing empty strict-texture XR panels');
+    assert.ok(logic.includes('spatial-strict-texture-preflight-blocked'), 'SpatialLayout must log strict live-texture blocks before immersive entry while still allowing session diagnostics');
     assert.ok(logic.includes('textureGate.strict && textureGate.blocked'), 'SpatialLayout must use provider texture gate data before starting immersive XR');
     assert.ok(logic.includes('texture,'), 'SpatialLayout must post provider texture diagnostics beside launch gate diagnostics');
     assert.ok(logic.includes('debugMode: this._textureDebugMode'), 'SpatialLayout must include provider texture debug mode in texture diagnostics');
