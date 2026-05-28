@@ -115,6 +115,7 @@ function addClientFreshness(client, nowMs) {
 }
 
 function createTimelineEntry(entry) {
+  let errorMessage = entry.details?.message || entry.details?.errorMessage || null;
   return {
     receivedAt: entry.receivedAt,
     event: entry.event,
@@ -149,6 +150,7 @@ function createTimelineEntry(entry) {
     deepGraphPreviewStatus: entry.details?.deepGraphPreview?.summary?.status || null,
     deepGraphFocusVisible: entry.details?.deepGraphPreview?.summary?.focus?.visible ?? null,
     error: entry.error || entry.session?.lastError || null,
+    errorMessage: errorMessage ? String(errorMessage).slice(0, 500) : null,
   };
 }
 
@@ -165,6 +167,7 @@ function updateAttemptSummary(client, timelineEntry) {
     stages: [],
     failureStage: null,
     lastError: null,
+    lastErrorMessage: null,
     lastEvent: null,
   };
   attempt.lastSeenAt = timelineEntry.receivedAt;
@@ -172,6 +175,7 @@ function updateAttemptSummary(client, timelineEntry) {
   attempt.lastEvent = timelineEntry.event;
   attempt.failureStage = timelineEntry.failureStage || attempt.failureStage;
   attempt.lastError = timelineEntry.error || attempt.lastError;
+  attempt.lastErrorMessage = timelineEntry.errorMessage || attempt.lastErrorMessage || null;
   attempt.events = [...attempt.events, timelineEntry.event].slice(-24);
   attempt.stages = [...new Set([
     ...attempt.stages,

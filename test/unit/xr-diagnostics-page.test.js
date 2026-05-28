@@ -794,3 +794,31 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   assert.equal(script.includes('packages/symbiote-node'), false, 'Three baseline script must not deep-import provider files');
   assert.equal(script.includes('navigator.userAgent'), false, 'Three baseline must not sniff browser versions');
 });
+
+test('XR HTMLTexture minimal harness follows the official canvas-child texture path', () => {
+  let html = fs.readFileSync(path.join(ROOT, 'web/xr-htmltexture-minimal.html'), 'utf8');
+  let script = fs.readFileSync(path.join(ROOT, 'web/xr-htmltexture-minimal.js'), 'utf8');
+
+  assert.ok(html.includes('XR HTMLTexture Minimal'), 'minimal harness must be clearly scoped');
+  assert.ok(html.includes('"three": "/vendor/three/build/three.module.js?v=0-184-0"'), 'minimal harness must use the reviewed local Three bundle');
+  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr/index.js"'), 'minimal harness must consume public provider exports');
+  assert.ok(html.includes('<canvas id="xr-canvas" layoutsubtree>'), 'minimal harness must make the WebGL canvas the layoutsubtree root');
+  assert.ok(html.includes('<section id="html-source">'), 'minimal harness must keep the DOM source as a direct canvas child');
+  assert.ok(html.includes('src="xr-htmltexture-minimal.js"'), 'minimal harness script must load inside the public demo route prefix');
+  assert.ok(script.includes("import * as THREE from 'three'"), 'minimal harness must use the import-map Three specifier');
+  assert.ok(script.includes("from 'symbiote-node/xr'"), 'minimal harness must use public provider exports');
+  assert.ok(script.includes('new THREE.WebGLRenderer({'), 'minimal harness must use a direct WebGL canvas for the platform probe');
+  assert.ok(script.includes('canvas,'), 'minimal harness renderer must be bound to the layoutsubtree canvas');
+  assert.ok(script.includes('new THREE.HTMLTexture(source)'), 'minimal harness must test native Three HTMLTexture directly');
+  assert.ok(script.includes('texElementImage2D'), 'minimal harness must report the WebGL HTML-in-Canvas upload capability');
+  assert.ok(script.includes('canvas.requestPaint()'), 'minimal harness must request a platform paint when available');
+  assert.ok(script.includes('source.parentNode === canvas'), 'minimal harness must verify the DOM source stays under the renderer canvas');
+  assert.ok(script.includes('createXRThreeDiagnosticPayload'), 'minimal harness must send provider-shaped server diagnostics');
+  assert.ok(script.includes('createXRThreeTextureCapabilitySummary'), 'minimal harness must use provider texture capability summaries');
+  assert.ok(script.includes('readXRHtmlCanvasOriginTrialHeaderStatus'), 'minimal harness must report origin-trial header status without token values');
+  assert.ok(script.includes('htmltexture-minimal-render-error'), 'minimal harness must post exact render failure diagnostics');
+  assert.equal(script.includes('CanvasTexture'), false, 'minimal harness must not fall back to screenshot/canvas texture mode');
+  assert.equal(script.includes('createXRPanelHost'), false, 'minimal harness must not mix in production panel host complexity');
+  assert.equal(script.includes('packages/symbiote-node'), false, 'minimal harness script must not deep-import provider files');
+  assert.equal(script.includes('navigator.userAgent'), false, 'minimal harness must not sniff browser versions');
+});

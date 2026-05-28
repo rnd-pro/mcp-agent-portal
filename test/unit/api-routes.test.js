@@ -580,6 +580,62 @@ describe('api-routes', () => {
     assert.equal(summaryRes.json().latestClient.launch.mode, 'immersive-vr');
   });
 
+  it('keeps XR render error messages in the sanitized timeline and attempt summary', async () => {
+    let { createRoutes } = await import('../../src/node/server/api-routes.js');
+    let routes = createRoutes(makeRoutes('/tmp/project-xr-render-error'));
+
+    let req = makeReq('POST', '/api/xr-diagnostics/log', {
+      clientId: 'quest-render-error-client',
+      event: 'spatial-three-frame-error',
+      pageUrl: 'https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal',
+      secureContext: true,
+      navigatorXr: true,
+      modes: { inline: true, immersiveVr: true, immersiveAr: false },
+      surface: {
+        surfaceKind: 'production',
+        entrypoint: 'spatial-layout',
+        projectId: 'agent-portal',
+        targetSection: 'graph',
+        panelContentKind: 'portal-runtime-layout',
+      },
+      session: {
+        version: 'xr-three-session-telemetry-v1',
+        status: 'running',
+        mode: 'immersive-vr',
+        active: true,
+        frames: 24,
+      },
+      error: 'TypeError',
+      details: {
+        attemptId: 'spatial-client:render-error',
+        failureStage: 'render',
+        message: 'changed.includes is not a function',
+        token: 'must-not-leak',
+      },
+    });
+    req.headers = {
+      host: 'playground.rnd-pro.com',
+      'user-agent': 'Quest Browser',
+    };
+    req.socket = { remoteAddress: '192.168.1.57' };
+
+    let postRes = makeRes();
+    await routes['POST /api/xr-diagnostics/log'](req, postRes);
+    let summaryRes = makeRes();
+    routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), summaryRes);
+
+    let summary = summaryRes.json();
+    assert.equal(postRes.status, 200);
+    assert.equal(summary.latestClient.recentEvents[0].event, 'spatial-three-frame-error');
+    assert.equal(summary.latestClient.recentEvents[0].failureStage, 'render');
+    assert.equal(summary.latestClient.recentEvents[0].error, 'TypeError');
+    assert.equal(summary.latestClient.recentEvents[0].errorMessage, 'changed.includes is not a function');
+    assert.equal(summary.latestClient.latestAttempt.failureStage, 'render');
+    assert.equal(summary.latestClient.latestAttempt.lastError, 'TypeError');
+    assert.equal(summary.latestClient.latestAttempt.lastErrorMessage, 'changed.includes is not a function');
+    assert.equal(JSON.stringify(summary).includes('must-not-leak'), false);
+  });
+
   it('classifies production XR session startup and no-frame phases from spatial events', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let routes = createRoutes(makeRoutes('/tmp/project-production-xr-phase'));
