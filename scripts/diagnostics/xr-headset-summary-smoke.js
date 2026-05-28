@@ -149,6 +149,8 @@ function compactRecentEvent(event = {}) {
   return {
     receivedAt: event.receivedAt || null,
     event: event.event || null,
+    attemptId: event.attemptId || null,
+    failureStage: event.failureStage || null,
     mode: event.mode || null,
     status: event.status || null,
     health: event.health || null,
@@ -170,9 +172,17 @@ function compactRecentEvent(event = {}) {
 }
 
 function createRequestSessionTrail(events = [], session = {}) {
-  let eventNames = Array.isArray(events)
-    ? events.map((event) => event?.event).filter(Boolean)
-    : [];
+  let allEvents = Array.isArray(events) ? events : [];
+  let attemptId = [...allEvents].reverse().find((event) => event?.attemptId)?.attemptId || null;
+  let attemptEvents = attemptId
+    ? allEvents.filter((event) => event?.attemptId === attemptId)
+    : allEvents;
+  let eventNames = attemptEvents
+    .map((event) => event?.event)
+    .filter(Boolean);
+  let allEventNames = allEvents
+    .map((event) => event?.event)
+    .filter(Boolean);
   let hasEvent = (name) => eventNames.includes(name);
   let sessionFailed = hasEvent('spatial-three-session-failed') || hasEvent('spatial-session-failed');
   let sessionStarted = (
@@ -182,11 +192,10 @@ function createRequestSessionTrail(events = [], session = {}) {
     session?.active === true
   );
   let framesSeen = Number(session?.frames || 0) > 0 || hasEvent('spatial-three-frame');
-  let lastFailure = Array.isArray(events)
-    ? [...events].reverse().find((event) => event?.event?.includes?.('failed') || event?.error)
-    : null;
+  let lastFailure = [...attemptEvents].reverse().find((event) => event?.event?.includes?.('failed') || event?.error) || null;
 
   return {
+    attemptId,
     enterClicked: hasEvent('spatial-enter-clicked'),
     launchGateBlocked: hasEvent('spatial-session-blocked'),
     strictTexturePreflightBlocked: hasEvent('spatial-strict-texture-preflight-blocked'),
@@ -196,7 +205,9 @@ function createRequestSessionTrail(events = [], session = {}) {
     framesSeen,
     lastFailureEvent: lastFailure?.event || null,
     lastFailureError: lastFailure?.error || null,
+    lastFailureStage: lastFailure?.failureStage || null,
     eventNames,
+    allEventNames,
   };
 }
 

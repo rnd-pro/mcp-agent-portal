@@ -606,14 +606,17 @@ describe('api-routes', () => {
 
     await post({
       event: 'spatial-three-session-start-requested',
+      attemptId: 'quest-starting-client:1',
       session: { status: 'starting', mode: 'immersive-vr', active: false, frames: 0 },
     });
     let startingSummary = makeRes();
     routes['GET /api/xr-diagnostics/summary'](makeReq('GET', '/api/xr-diagnostics/summary'), startingSummary);
     assert.equal(startingSummary.json().latestClient.phase, 'starting');
+    assert.equal(startingSummary.json().latestClient.recentEvents.at(-1).attemptId, 'quest-starting-client:1');
 
     await post({
       event: 'spatial-three-session-started',
+      attemptId: 'quest-starting-client:1',
       session: { status: 'running', mode: 'immersive-vr', active: true, frames: 0 },
     });
     let runningSummary = makeRes();

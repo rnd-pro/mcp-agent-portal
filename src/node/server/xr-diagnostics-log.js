@@ -61,6 +61,7 @@ function normalizeXrDiagnosticLog(req, body = {}, options = {}) {
     host: String(req.headers.host || '').slice(0, 160),
     userAgent: String(req.headers['user-agent'] || '').slice(0, 240),
     clientId: sanitizeXrDiagnosticId(body.clientId, 'anonymous-client'),
+    attemptId: body.attemptId ? sanitizeXrDiagnosticId(body.attemptId, null) : null,
     event: String(body.event || 'diagnostic').slice(0, 80),
     surface: {
       surfaceKind: String(body.surfaceKind || surface.surfaceKind || '').slice(0, 80) || null,
@@ -117,6 +118,8 @@ function createTimelineEntry(entry) {
   return {
     receivedAt: entry.receivedAt,
     event: entry.event,
+    attemptId: entry.attemptId || entry.details?.attemptId || null,
+    failureStage: entry.details?.failureStage || null,
     mode: entry.session?.mode || entry.launch?.mode || null,
     status: entry.session?.status || null,
     health: entry.session?.health?.status || null,

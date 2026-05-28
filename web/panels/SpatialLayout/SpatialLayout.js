@@ -148,6 +148,8 @@ export class SpatialLayout extends Symbiote {
     prefix: 'spatial',
     globalThis: window,
   }).id;
+  _xrAttemptSeq = 0;
+  _xrAttemptId = null;
   _refreshHandler = () => this._refresh();
 
   initCallback() {
@@ -751,8 +753,11 @@ export class SpatialLayout extends Symbiote {
   }
 
   async _enterXR() {
+    this._xrAttemptSeq += 1;
+    this._xrAttemptId = `${this._diagnosticClientId}:${this._xrAttemptSeq}`;
     this._postXRDiagnostic('spatial-enter-clicked', {
       details: {
+        attemptId: this._xrAttemptId,
         launch: this._launchRecommendation,
         launchGate: this._launchGate,
         controller: this._createSceneDiagnostics(),
@@ -767,6 +772,7 @@ export class SpatialLayout extends Symbiote {
       if (!this._launchGate.canStart) {
         this._postXRDiagnostic('spatial-session-blocked', {
           details: {
+            attemptId: this._xrAttemptId,
             launchGate: this._launchGate,
           },
           error: this._launchGate.reason,
@@ -780,6 +786,7 @@ export class SpatialLayout extends Symbiote {
         this._lastThreeXRError = textureGate.reason || 'strict-texture-blocked';
         this._postXRDiagnostic('spatial-strict-texture-preflight-blocked', {
           details: {
+            attemptId: this._xrAttemptId,
             launchGate: this._launchGate,
             texture: textureGate,
             controller: this._createSceneDiagnostics(),
@@ -788,9 +795,10 @@ export class SpatialLayout extends Symbiote {
         });
       }
       let mode = this._launchGate.mode || this._launchRecommendation.mode || WEBXR_MODES.immersiveVr;
-      let threeResult = await this._enterThreeXR(mode);
+      let threeResult = await this._enterThreeXR(mode, { attemptId: this._xrAttemptId });
       this._postXRDiagnostic(threeResult.ok ? 'spatial-three-session-result' : 'spatial-three-session-failed', {
         details: {
+          attemptId: this._xrAttemptId,
           resultOk: Boolean(threeResult.ok),
           handled: Boolean(threeResult.handled),
           reason: threeResult.reason || null,
@@ -806,6 +814,7 @@ export class SpatialLayout extends Symbiote {
         };
         this._postXRDiagnostic('spatial-production-xr-blocked', {
           details: {
+            attemptId: this._xrAttemptId,
             requestedMode: mode,
             reason: threeResult.reason || 'three-webxr-unavailable',
             controller: this._createSceneDiagnostics(),
@@ -817,6 +826,7 @@ export class SpatialLayout extends Symbiote {
         window.setTimeout(() => {
           this._postXRDiagnostic('spatial-session-frame-check', {
             details: {
+              attemptId: this._xrAttemptId,
               controller: this._createSceneDiagnostics(),
             },
           });
@@ -824,6 +834,7 @@ export class SpatialLayout extends Symbiote {
       }
       this._postXRDiagnostic(threeResult.ok ? 'spatial-session-started' : 'spatial-session-failed', {
         details: {
+          attemptId: this._xrAttemptId,
           resultOk: Boolean(threeResult.ok),
           reason: threeResult.reason || null,
           controller: this._createSceneDiagnostics(),
@@ -834,6 +845,7 @@ export class SpatialLayout extends Symbiote {
       this._lastThreeXRError = error?.name || 'spatial-enter-failed';
       this._postXRDiagnostic('spatial-enter-failed', {
         details: {
+          attemptId: this._xrAttemptId,
           controller: this._createSceneDiagnostics(),
           message: error?.message || '',
         },
@@ -843,13 +855,14 @@ export class SpatialLayout extends Symbiote {
     }
   }
 
-  async _enterThreeXR(mode) {
+  async _enterThreeXR(mode, options = {}) {
     let target = this._ensureThreeXRRenderer();
     let sessionOptions = createXRThreeSessionOptions(mode, {
       domOverlayRoot: this,
     });
     let result = await this._threeXRSessionController.start(mode, {
       target,
+      attemptId: options.attemptId || this._xrAttemptId,
       ...sessionOptions,
     });
     this._lastThreeXRError = result.ok ? null : result.reason || null;
@@ -938,6 +951,7 @@ export class SpatialLayout extends Symbiote {
       modes: this._support?.modes || null,
       launch,
 	      clientId: this._diagnosticClientId,
+      attemptId: options.attemptId || details?.attemptId || this._xrAttemptId || null,
 	      surface: {
 	        surfaceKind: 'production',
 	        entrypoint: 'spatial-layout',
