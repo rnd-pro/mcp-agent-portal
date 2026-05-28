@@ -1066,7 +1066,7 @@ export class SpatialLayout extends Symbiote {
 
   _createLaunchRecommendation() {
     let selectedMode = this.ref.xrModeSelect?.value || 'auto';
-    let preferredMode = selectedMode === 'auto' ? null : selectedMode;
+    let preferredMode = selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode;
     return createWebXRLaunchRecommendation(this._support, {
       preferredMode,
     });
@@ -1191,7 +1191,7 @@ export class SpatialLayout extends Symbiote {
   _createLaunchGate(options = {}) {
     let launch = this._launchRecommendation || this._createLaunchRecommendation();
     let selectedMode = this.ref.xrModeSelect?.value || 'auto';
-    let preferredMode = selectedMode === 'auto' ? null : selectedMode;
+    let preferredMode = selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode;
     return createWebXRLaunchGateSummary(this._support, {
       preferredMode,
       selectedMode: preferredMode || launch.mode || WEBXR_MODES.immersiveVr,

@@ -722,6 +722,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRThreeSessionController'), 'SpatialLayout must delegate Three/WebXR session lifecycle to symbiote-node/xr');
     assert.ok(logic.includes("this._postXRDiagnostic('spatial-three-frame'"), 'SpatialLayout must post throttled provider frame diagnostics during immersive sessions');
     assert.ok(logic.includes('createXRThreeSessionOptions'), 'SpatialLayout must build Three/WebXR session options through symbiote-node/xr');
+    assert.ok(logic.includes("selectedMode === 'auto' ? WEBXR_MODES.immersiveVr : selectedMode"), 'SpatialLayout Auto mode must prefer immersive-vr for the Quest MVP production path');
     assert.ok(logic.includes('createPortalXRDeepGraphScene'), 'SpatialLayout must adapt project graph data through the portal XR deep-graph adapter');
     assert.ok(logic.includes("events.addEventListener('skeleton-loaded'"), 'SpatialLayout must rebuild deep graph diagnostics when project skeleton data arrives');
     assert.ok(logic.includes('deepGraph: this._deepGraph?.diagnostics'), 'SpatialLayout must expose XR deep-graph diagnostics without owning graph projection logic');
