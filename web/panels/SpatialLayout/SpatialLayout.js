@@ -173,6 +173,7 @@ export class SpatialLayout extends Symbiote {
       getPanelElement: (panelId) => this._htmlCanvasPanelHost?.getPanelElement(panelId),
       requireTextureUpload: this._textureDebugMode.requireTextureUpload,
       textureResolver: this._threeTextureResolver.resolve,
+      textureResolverDispose: () => this._threeTextureResolver.dispose(),
     });
     this._threeXRRenderHost = createXRThreeRenderHost({
       THREE,
