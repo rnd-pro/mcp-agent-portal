@@ -328,9 +328,14 @@ function selectProductionClient(summary, options) {
   )) || null;
 }
 
-function deriveNextAction(failedChecks = []) {
+function deriveNextAction(failedChecks = [], rows = {}) {
   if (failedChecks.includes('production-client')) return 'open-production-spatial-url';
   if (failedChecks.includes('no-diagnostic-panels')) return 'inspect-production-texture-upload';
+  if (failedChecks.includes('three-rendered-panels') &&
+    String(rows['XR texture gate'] || '').startsWith('blocked:') &&
+    String(rows['HTML Canvas'] || '').includes('enable-CanvasDrawElement')) {
+    return 'enable-html-in-canvas-on-headset';
+  }
   if (failedChecks.includes('live-panels') || failedChecks.includes('three-rendered-panels')) return 'inspect-production-panel-mount';
   if (failedChecks.includes('launch-texture-gate-separated')) return 'inspect-production-launch-texture-separation';
   return failedChecks.length ? 'inspect-production-spatial-diagnostics' : 'production-spatial-diagnostics-ready';
@@ -398,7 +403,7 @@ function buildReport({ options, url, inspected, summary, productionClient, pageE
     url,
     summaryUrl: createSummaryUrl(options.baseUrl).href,
     stage: failedChecks.length ? 'production-spatial-not-ready' : 'production-spatial-ready',
-    nextAction: deriveNextAction(failedChecks),
+    nextAction: deriveNextAction(failedChecks, rows),
     pageTitle: inspected?.pageTitle || null,
     bodySnippet: inspected?.bodySnippet || null,
     rows,

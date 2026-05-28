@@ -182,6 +182,7 @@ test('XR production spatial smoke verifies the production route instead of a har
   assert.ok(script.includes('three-rendered-panels'), 'production smoke must fail when Three panels are not rendered');
   assert.ok(script.includes('no-diagnostic-panels'), 'production smoke must fail when strict diagnostic panels replace live textures');
   assert.ok(script.includes('inspect-production-texture-upload'), 'production smoke must route diagnostic panel failures to texture upload work');
+  assert.ok(script.includes('enable-html-in-canvas-on-headset'), 'production smoke must route hidden strict texture panels to headset HTML-in-Canvas enablement');
   assert.ok(script.includes('launch-texture-gate-separated'), 'production smoke must ensure WebXR launch is not blocked by live texture readiness');
   assert.ok(script.includes('inspect-production-launch-texture-separation'), 'production smoke must report launch/texture coupling regressions explicitly');
   assert.ok(script.includes('missingRows'), 'production smoke must report stale or incomplete public pages with missing rows');
