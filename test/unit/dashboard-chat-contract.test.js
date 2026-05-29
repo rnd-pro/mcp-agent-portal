@@ -47,6 +47,16 @@ describe('dashboard chat route', () => {
     assert.match(treeSource, /if \(!projectId\)\s*\{/);
   });
 
+  it('shows project group dividers only outside a concrete project chat scope', () => {
+    let source = readSource('web/components/ChatSidebar/ChatSidebar.js');
+
+    assert.match(
+      source,
+      /this\.setGroupDividers\(!dashState\.activeProjectId\);/,
+      'Project-scoped chat navigation must not render global project group dividers'
+    );
+  });
+
   it('preserves recursive project chat trees on the global dashboard route', () => {
     let tree = buildChatNavTree({
       activeChatId: 'grandchild',

@@ -139,6 +139,7 @@ export class ChatSidebar extends ChatSidebarShell {
   }
 
   _renderNavItems() {
+    this.setGroupDividers(!dashState.activeProjectId);
     this.setChats(buildChatNavTree({
       chats: dashState.chats || [],
       projectId: dashState.activeProjectId,
