@@ -253,6 +253,7 @@ function auditSymbioteImportMaps() {
 	    '"symbiote-node/core/base-path.js":',
 	    '"symbiote-node/ui":',
 	    '"symbiote-node/graph":',
+	    '"symbiote-node/locale":',
 	    '"symbiote-node/layout":',
 	    '"symbiote-node/chat/chat-context.js":',
 	    '"symbiote-node/display/highlight":',

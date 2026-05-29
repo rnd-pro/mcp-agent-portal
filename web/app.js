@@ -1,5 +1,6 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
+import "./common/localization.js";
 import { LayoutTree as t, applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
 import { waitForElementApi } from "symbiote-node/core";
 import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
