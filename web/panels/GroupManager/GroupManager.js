@@ -7,9 +7,9 @@ import cssLocal from './GroupManager.css.js';
 const PROVIDERS = ['codex', 'claude', 'opencode', 'gemini'];
 const DEFAULT_MODELS = {
   codex: ['default'],
-  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro'],
-  opencode: ['default'],
-  gemini: ['default'],
+  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-sonnet-4-6'],
+  opencode: ['default', 'openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
+  gemini: ['default', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
 };
 
 function cloneGroup(group) {
@@ -115,18 +115,23 @@ export class GroupManager extends Symbiote {
     let rotation = group.rotation_mode || 'error_fallback';
     let provider = group.provider || 'codex';
     let models = this._modelsFor(provider);
+    let agents = Array.isArray(group.agents) ? group.agents : [];
 
     let column = makeElement('section', 'gm-column');
     column.dataset.group = group.name;
+    column.dataset.status = group.status || 'idle';
 
     let header = makeElement('header', 'gm-column-head');
     let titleWrap = document.createElement('div');
     let title = makeElement('h2', '', group.name);
+    let description = group.description ? makeElement('p', 'gm-description', group.description) : null;
     let meta = makeElement('div', 'gm-meta');
     meta.append(makeElement('span', '', group.model_tier || 'resource group'));
+    meta.append(makeElement('span', '', `${profiles.length} model${profiles.length === 1 ? '' : 's'}`));
+    if (agents.length) meta.append(makeElement('span', '', `${agents.length} agent${agents.length === 1 ? '' : 's'}`));
     if (group.max_agents) meta.append(makeElement('span', '', `${group.max_agents} max`));
     if (group.policy) meta.append(makeElement('span', '', group.policy));
-    titleWrap.replaceChildren(title, meta);
+    titleWrap.replaceChildren(...[title, description, meta].filter(Boolean));
 
     let saveButton = makeIconButton('gm-column-save');
     saveButton.title = 'Save group';
@@ -166,6 +171,12 @@ export class GroupManager extends Symbiote {
       ...profiles.map((profile, index) => this._renderProfile(group, profile, index)),
     );
 
+    let agentList = null;
+    if (agents.length) {
+      agentList = makeElement('div', 'gm-agent-list');
+      agentList.replaceChildren(...agents.map(agent => makeElement('span', 'gm-agent-chip', agent)));
+    }
+
     let addProfile = makeElement('div', 'gm-add-profile');
     let providerSelect = document.createElement('select');
     providerSelect.dataset.addProvider = group.name;
@@ -181,7 +192,7 @@ export class GroupManager extends Symbiote {
     addButton.replaceChildren(makeIcon('add'));
     addProfile.replaceChildren(providerSelect, modelSelect, addButton);
 
-    column.replaceChildren(header, config, profileList, addProfile);
+    column.replaceChildren(...[header, config, agentList, profileList, addProfile].filter(Boolean));
     return column;
   }
 
@@ -204,7 +215,7 @@ export class GroupManager extends Symbiote {
     iconWrap.replaceChildren(makeIcon(iconName));
 
     let main = makeElement('div', 'gm-profile-main');
-    let providerNode = makeElement('div', 'gm-profile-provider', provider);
+    let providerNode = makeElement('div', 'gm-profile-provider', profile.label || provider);
     let modelNode = makeElement('div', 'gm-profile-model', model);
     modelNode.title = model;
     main.replaceChildren(providerNode, modelNode);

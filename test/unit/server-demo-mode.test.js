@@ -441,6 +441,18 @@ describe('server demo mode', () => {
       let parsed = JSON.parse(res.json().result.content[0].text);
       assert.equal(Array.isArray(parsed), true, `${toolName} should return an array`);
       assert.ok(parsed.length > 0, `${toolName} should have demo rows`);
+      if (toolName === 'list_groups') {
+        assert.ok(parsed.length >= 5, 'list_groups should expose enough lanes for the public resource-groups board');
+        assert.ok(
+          parsed.every(group => Array.isArray(group.profiles) && group.profiles.length >= 2),
+          'list_groups should expose kanban groups with multiple model profile cells'
+        );
+        assert.equal(
+          parsed.some(group => group.name === 'test-group' || group.name === 'profile-group'),
+          false,
+          'list_groups must not expose local test resource groups'
+        );
+      }
     }
   });
 

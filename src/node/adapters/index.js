@@ -30,8 +30,8 @@ export function resolveAdapter(type) {
 
 // Default (fallback) models per provider — used only if no CLI / user config
 const DEFAULT_MODELS = {
-  gemini: ['default', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
+  gemini: ['default', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
   codex: ['default'],
   opencode: ['default'],
 };

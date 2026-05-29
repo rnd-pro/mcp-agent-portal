@@ -46,7 +46,7 @@ pg-group-manager {
   flex: 1;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 280px);
+  grid-auto-columns: minmax(248px, 312px);
   gap: 12px;
   overflow: auto;
   padding: 12px;
@@ -82,6 +82,13 @@ pg-group-manager {
   white-space: nowrap;
 }
 
+.gm-description {
+  margin: 0 0 8px;
+  color: var(--sn-text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .gm-meta {
   display: flex;
   flex-wrap: wrap;
@@ -107,6 +114,28 @@ pg-group-manager {
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--sn-node-border);
+}
+
+.gm-agent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.gm-agent-chip {
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 999px;
+  color: var(--sn-text-dim);
+  background: var(--sn-panel-bg);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gm-column-config label,
@@ -190,6 +219,9 @@ pg-group-manager {
 }
 
 .gm-profile-provider {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--sn-text-dim);
   text-transform: uppercase;

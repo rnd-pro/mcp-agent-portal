@@ -163,7 +163,7 @@ function demoSubagentSpecs(parent) {
       name: 'Browser smoke',
       agent: 'browser-reviewer',
       provider: 'deepseek',
-      model: 'deepseek-reasoner',
+      model: 'deepseek-v4-flash',
       icon: 'smart_display',
       color: 'var(--sn-provider-google-color)',
       status: 'done',
@@ -256,8 +256,8 @@ function demoSettings() {
           type: 'anthropic-compatible',
           baseUrl: 'https://api.deepseek.com/anthropic',
           apiKeyEnv: 'DEEPSEEK_API_KEY',
-          defaultModel: 'deepseek-reasoner',
-          plannerModel: 'deepseek-chat',
+          defaultModel: 'deepseek-v4-flash',
+          plannerModel: 'deepseek-v4-pro',
         },
       },
     },
@@ -267,15 +267,15 @@ function demoSettings() {
 function demoModels() {
   return {
     userModels: {
-      opencode: ['deepseek/deepseek-chat', 'deepseek/deepseek-reasoner'],
-      gemini: ['gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview'],
-      claude: ['claude-sonnet-4'],
+      opencode: ['openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
+      gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+      claude: ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash', 'claude-sonnet-4-6'],
       codex: ['gpt-5-codex'],
     },
     cliModels: [
       {
-        id: 'deepseek/deepseek-chat',
-        name: 'DeepSeek Chat',
+        id: 'openrouter/deepseek/deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro',
         context: 128000,
         maxOutput: 8192,
         pricePrompt: '0.27',
@@ -286,8 +286,8 @@ function demoModels() {
         created: 1764547200,
       },
       {
-        id: 'deepseek/deepseek-reasoner',
-        name: 'DeepSeek Reasoner',
+        id: 'openrouter/deepseek/deepseek-v4-flash',
+        name: 'DeepSeek V4 Flash',
         context: 128000,
         maxOutput: 8192,
         pricePrompt: '0.55',
@@ -298,8 +298,8 @@ function demoModels() {
         created: 1764547200,
       },
       {
-        id: 'gemini/gemini-3.1-pro-preview',
-        name: 'Gemini 3.1 Pro Preview',
+        id: 'gemini/gemini-2.5-pro',
+        name: 'Gemini 2.5 Pro',
         context: 1000000,
         maxOutput: 65536,
         pricePrompt: '1.25',

@@ -322,7 +322,7 @@ export class AgentChat extends Symbiote {
             } else if (p.id === 'approval_mode') {
               paramValue = this._getAgentDefaultApprovalMode(currentParams.agent);
             } else if (p.id === 'model') {
-              let defMap = { 'gemini': 'gemini-3.1-pro-preview', 'opencode': 'DeepSeek: DeepSeek V4 Pro' };
+              let defMap = { 'gemini': 'gemini-2.5-pro', 'opencode': 'openrouter/deepseek/deepseek-v4-pro' };
               let currentCtx = adapter === 'pool' ? currentParams.provider : adapter;
               let expectedDef = defMap[currentCtx];
               let found = expectedDef ? p.options.find(o => (typeof o === 'string' ? o : o.val) === expectedDef) : null;
