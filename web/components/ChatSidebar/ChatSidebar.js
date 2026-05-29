@@ -131,8 +131,8 @@ export class ChatSidebar extends ChatSidebarShell {
   }
 
   _selectChat(chatId) {
-    if (!chatId || dashState.activeChatId === chatId) return;
-    dashState.activeChatId = chatId;
+    if (!chatId) return;
+    if (dashState.activeChatId !== chatId) dashState.activeChatId = chatId;
     setGlobalParam('chat', chatId);
     dashEmit('active-chat-changed', { id: chatId });
     this._fetchChats();

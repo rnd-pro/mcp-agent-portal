@@ -80,7 +80,7 @@ async function openProject(id, proj, el) {
   let data = await res.json();
   if (data.ok) {
     if (!dashState.openProjectIds.includes(id)) dashState.openProjectIds.push(id);
-    navigate('agent-chat', '', { project: id });
+    navigate('agent-chat', '', { project: id, chat: null });
     renderProjectTabs(el);
   }
 }
@@ -96,7 +96,7 @@ async function openNewProject(projectPath, el) {
   if (data.ok) {
     await fetchHistory();
     if (!dashState.openProjectIds.includes(data.id)) dashState.openProjectIds.push(data.id);
-    navigate('agent-chat', '', { project: data.id });
+    navigate('agent-chat', '', { project: data.id, chat: null });
     renderProjectTabs(el);
   }
 }
@@ -132,7 +132,7 @@ function configureProjectTabs(el) {
   el.addEventListener('project-tabs-select', (event) => {
     let id = event.detail?.id;
     if (!id || id === getProjectIdFromRoute()) return;
-    navigate('agent-chat', '', { project: id });
+    navigate('agent-chat', '', { project: id, chat: null });
     renderProjectTabs(el);
   });
   el.addEventListener('project-tabs-close', async (event) => {

@@ -73,6 +73,26 @@ describe('dashboard chat route', () => {
     assert.equal(tree[0].subChats[0].subChats[0].subChats[0].isActive, true);
   });
 
+  it('selects project root chats independently from their subagent chats', () => {
+    let tree = buildChatNavTree({
+      projectId: 'agent-portal',
+      activeChatId: 'root',
+      projectHistory: [{ id: 'agent-portal', name: 'Agent Portal', color: '#4c8bf5' }],
+      chats: [
+        { id: 'root', projectId: 'agent-portal', name: 'Root chat', updatedAt: 3 },
+        { id: 'child', parentChatId: 'root', projectId: 'agent-portal', name: 'Child chat', updatedAt: 2 },
+      ],
+    });
+
+    assert.equal(tree.length, 1);
+    assert.equal(tree[0].id, 'root');
+    assert.equal(tree[0].isActive, true);
+    assert.equal(tree[0].isExpanded, true);
+    assert.equal(tree[0].subChats.length, 1);
+    assert.equal(tree[0].subChats[0].id, 'child');
+    assert.equal(tree[0].subChats[0].isActive, false);
+  });
+
   it('keeps project chat links active on the global dashboard route', () => {
     let source = readSource('web/app.js');
 
@@ -81,5 +101,14 @@ describe('dashboard chat route', () => {
       /if \(projectId && dashState\.activeChatId\) \{[\s\S]*updateParams\(\{ chat: null \}\);/,
       'Global dashboard must not clear ?chat links just because the selected chat belongs to a project'
     );
+  });
+
+  it('resynchronizes the chat panel when a visible chat row is selected again', () => {
+    let source = readSource('web/components/ChatSidebar/ChatSidebar.js');
+
+    assert.equal(source.includes('dashState.activeChatId === chatId) return'), false);
+    assert.match(source, /if \(!chatId\) return;/);
+    assert.match(source, /setGlobalParam\('chat', chatId\);/);
+    assert.match(source, /dashEmit\('active-chat-changed', \{ id: chatId \}\);/);
   });
 });

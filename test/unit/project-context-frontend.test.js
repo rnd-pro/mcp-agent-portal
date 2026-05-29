@@ -70,6 +70,13 @@ describe('project scoped frontend data loading', () => {
     assert.match(projectTabsSource, /root\.style\.removeProperty\('--sn-composer-send-hover-bg'\);/);
   });
 
+  it('clears the selected chat when switching project tabs', () => {
+    let projectTabsSource = readSource('web/components/ProjectTabs/ProjectTabs.js');
+
+    assert.match(projectTabsSource, /navigate\('agent-chat', '', \{ project: id, chat: null \}\);/);
+    assert.match(projectTabsSource, /navigate\('agent-chat', '', \{ project: data\.id, chat: null \}\);/);
+  });
+
   it('declares a runtime base path before API calls are patched', () => {
     let indexSource = readSource('web/index.html');
     let appSource = readSource('web/app.js');
