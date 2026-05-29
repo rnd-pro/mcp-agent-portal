@@ -2,7 +2,8 @@ import { Symbiote, html } from '@symbiotejs/symbiote';
 import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 const css = `
-:host {
+:host,
+mp-context-card {
   display: block;
 }
 
@@ -57,7 +58,8 @@ const css = `
   min-height: 14px;
 }
 
-:host([status-error]) .mp-form-status {
+:host([status-error]) .mp-form-status,
+mp-context-card[status-error] .mp-form-status  {
   color: var(--sn-danger-color);
 }
 

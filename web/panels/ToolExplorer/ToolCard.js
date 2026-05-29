@@ -21,7 +21,8 @@ ToolCard.template = html`
 `;
 
 ToolCard.rootStyles = `
-:host {
+:host,
+te-tool-card {
   display: block;
 }
 .te-tool-name {

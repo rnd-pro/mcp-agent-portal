@@ -40,9 +40,9 @@ export const panelTypes = {
   'runtime-control': { title: 'Runtime',    icon: 'memory',        component: 'pg-runtime-control' },
   'spatial-layout': { title: 'Spatial',     icon: 'view_in_ar',    component: 'pg-spatial-layout' },
   'settings':     { title: 'Settings',      icon: 'settings',      component: 'pg-settings-panel' },
-  'project-list': { title: 'Servers',       icon: 'dashboard',     component: 'pg-project-list' },
+  'project-list': { title: 'Workspaces',    icon: 'dashboard',     component: 'pg-project-list' },
   'action-board': { title: 'Action Board',  icon: 'monitor_heart', component: 'pg-action-board' },
-  'agent-chat':   { title: 'Agent Chat',    icon: 'smart_toy',     component: 'pg-agent-chat' },
+  'agent-chat':   { title: 'Chats',         icon: 'smart_toy',     component: 'pg-agent-chat' },
   'marketplace':  { title: 'Marketplace',   icon: 'storefront',    component: 'pg-marketplace' },
   'topology-panel':{ title: 'Topology',     icon: 'hub',           component: 'topology-panel' },
   'tool-explorer':{ title: 'Tool Explorer', icon: 'build',         component: 'pg-tool-explorer' },
@@ -72,23 +72,23 @@ export function registerPanelType(id, definition) {
  * @param {boolean} [isExpanded=false]
  * @returns {Function}
  */
-function withChat(layoutFn, isExpanded = false) {
+function withChat(layoutFn, isExpanded = false, options = {}) {
   return withGlobalPanel(layoutFn, 'agent-chat', {
     collapsed: !isExpanded,
-    ratio: 0.65,
+    ratio: options.ratio ?? 0.65,
   });
 }
 
 // ── Core Sections ───────────────────────────────────────────────
 
 registerSection('dashboard', {
-  icon: 'dashboard', label: 'Servers', order: 10, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('project-list'), true)
+  icon: 'forum', label: 'Chats', order: 10, scope: 'home',
+  layout: () => LayoutTree.createPanel('agent-chat')
 });
 
 registerSection('action-board', {
   icon: 'monitor_heart', label: 'Action Board', order: 20, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('action-board'), false)
+  layout: withChat(() => LayoutTree.createPanel('action-board'), false, { ratio: 0.78 })
 });
 
 registerSection('marketplace', {

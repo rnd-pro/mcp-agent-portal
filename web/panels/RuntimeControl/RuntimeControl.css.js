@@ -1,5 +1,7 @@
 export default /*css*/ `
-:host {
+:host,
+pg-runtime-control,
+rc-instance-item {
   display: flex;
   flex-direction: column;
   height: 100%;

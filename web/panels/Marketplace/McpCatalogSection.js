@@ -1,7 +1,8 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
 
 const css = `
-:host {
+:host,
+mp-catalog-section {
   display: block;
 }
 

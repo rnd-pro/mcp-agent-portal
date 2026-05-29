@@ -427,6 +427,12 @@ export class DepGraph extends Symbiote {
     this._onHashChange = () => {
       const hash = window.location.hash;
       if (!hash.startsWith('#graph')) return;
+
+      const routeMode = resolveInitialViewMode(getGraphUrlParams());
+      if (routeMode !== this._viewMode) {
+        this._setMode(routeMode);
+        return;
+      }
       
       if (this._viewMode === 'flat') {
         const flatHash = resolveFlatHashChange(hash);

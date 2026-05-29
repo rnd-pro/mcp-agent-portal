@@ -1,5 +1,6 @@
 export default `
-:host {
+:host,
+pg-workflow-explorer {
   display: block;
   height: 100%;
 }

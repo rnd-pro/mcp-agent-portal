@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { getGraphUrlParams, parseGraphHash, updateHashParam } from 'symbiote-node/ui';
+
+const ROOT = path.resolve(import.meta.dirname, '../..');
 
 describe('dep-graph-routing', () => {
   it('parseGraphHash returns drill path and query params', () => {
@@ -50,5 +54,12 @@ describe('dep-graph-routing', () => {
     );
 
     assert.equal(replaceCount, 0);
+  });
+
+  it('GraphFlows does not auto-publish the first story beat on load', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/GraphFlows/GraphFlows.js'), 'utf8');
+
+    assert.match(source, /button\.onclick = \(\) => \{\s*this\._activeStoryIndex = Number\(button\.dataset\.storyIndex\);[\s\S]*?this\._publishCurrentBeat\(\);[\s\S]*?\};/);
+    assert.doesNotMatch(source, /metadata\.stories\.length\s*>\s*0\)\s*this\._publishCurrentBeat\(\)/);
   });
 });

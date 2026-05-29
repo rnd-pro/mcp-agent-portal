@@ -1,5 +1,6 @@
 export default `
-:host {
+:host,
+pg-pipeline-mgr {
   display: block;
   height: 100%;
 }

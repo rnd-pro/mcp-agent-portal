@@ -1,5 +1,6 @@
 export default /*css*/ `
-:host {
+:host,
+topology-panel {
   display: block;
   height: 100%;
 }

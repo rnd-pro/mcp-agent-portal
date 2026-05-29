@@ -40,7 +40,8 @@ WorkflowItem.template = html`
 `;
 
 WorkflowItem.rootStyles = `
-:host {
+:host,
+we-workflow-item {
   display: block;
 }
 sn-list-item {
@@ -49,7 +50,8 @@ sn-list-item {
   --sn-list-item-label-size: 13px;
   --sn-list-item-description-size: 11px;
 }
-:host([active]) sn-list-item {
+:host([active]) sn-list-item,
+we-workflow-item[active] sn-list-item  {
   --sn-list-item-label-color: var(--sn-node-selected);
   --sn-list-item-padding: 10px 14px 10px 11px;
 }

@@ -37,7 +37,8 @@ PipelineItem.template = html`
 `;
 
 PipelineItem.rootStyles = `
-:host {
+:host,
+pm-pipeline-item {
   display: block;
 }
 sn-list-item {
@@ -46,7 +47,8 @@ sn-list-item {
   --sn-list-item-padding: 10px 14px;
   --sn-list-item-label-size: 13px;
 }
-:host([active]) sn-list-item {
+:host([active]) sn-list-item,
+pm-pipeline-item[active] sn-list-item  {
   --sn-list-item-label-color: var(--sn-node-selected);
   --sn-list-item-padding: 10px 14px 10px 11px;
 }

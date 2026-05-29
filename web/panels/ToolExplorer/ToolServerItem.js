@@ -41,7 +41,8 @@ ToolServerItem.template = html`
 `;
 
 ToolServerItem.rootStyles = `
-:host {
+:host,
+te-server-item {
   display: block;
 }
 sn-list-item {
@@ -51,7 +52,8 @@ sn-list-item {
   --sn-list-item-label-size: 13px;
   --sn-list-item-description-size: 11px;
 }
-:host([active]) sn-list-item {
+:host([active]) sn-list-item,
+te-server-item[active] sn-list-item {
   --sn-list-item-label-color: var(--sn-node-selected);
   --sn-list-item-padding: 10px 14px 10px 11px;
 }

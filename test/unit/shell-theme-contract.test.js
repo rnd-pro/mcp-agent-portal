@@ -7,17 +7,22 @@ import { fileURLToPath } from 'node:url';
 let ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 
 describe('portal shell theme contract', () => {
-  it('applies the symbiote-node default theme at the document root', () => {
+  it('applies the symbiote-node default provider theme at the document root', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
-    assert.ok(source.includes('DEFAULT_THEME'), 'web/app.js must import DEFAULT_THEME from symbiote-node/ui');
+    assert.ok(source.includes('DEFAULT_PROVIDER_THEME'), 'web/app.js must import DEFAULT_PROVIDER_THEME from symbiote-node/ui');
     assert.ok(source.includes('applyTheme'), 'web/app.js must import applyTheme from symbiote-node/ui');
     assert.match(
       source,
       /\b[a-zA-Z_$][\w$]*\(document\.documentElement,\s*[a-zA-Z_$][\w$]*\)/,
       'web/app.js must apply the provider theme to document.documentElement so tokens cascade into every layout',
     );
+    assert.match(
+      source,
+      /document\.documentElement\.dataset\.themeScope\s*=\s*['"]default-provider['"]/,
+      'web/app.js must publish the default-provider theme scope for visual audits and shell contracts',
+    );
 
-    let theme = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/themes/default-dark.js'), 'utf8');
+    let theme = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/themes/default-provider.js'), 'utf8');
     for (let token of [
       '--sn-theme-hue',
       '--sn-theme-chroma',
@@ -91,12 +96,17 @@ describe('portal shell theme contract', () => {
   it('keeps runtime event rows on the provider event feed primitive', () => {
     let actionTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.tpl.js'), 'utf8');
     let actionLogic = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.js'), 'utf8');
+    let actionCss = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.css.js'), 'utf8');
     let opsTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.tpl.js'), 'utf8');
     let eventFeedCss = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/display/EventFeed/EventFeed.css.js'), 'utf8');
 
     assert.ok(actionTemplate.includes('<sn-event-feed'), 'ActionBoard must compose the provider event feed');
     assert.ok(opsTemplate.includes('<sn-event-feed'), 'OpsPanel must compose the provider event feed');
     assert.ok(actionLogic.includes('toToolEventFeedItems'), 'ActionBoard must adapt portal events into provider event feed data');
+    assert.ok(actionLogic.includes('cssShared + cssLocal'), 'ActionBoard must include local layout CSS with shared provider styles');
+    assert.equal(actionCss.includes("import { css }"), false, 'ActionBoard local CSS must stay string-based so shared + local rootStyles injects correctly');
+    assert.ok(actionLogic.includes("emptyText: EMPTY_ACTIVITY_TEXT"), 'ActionBoard must set a useful provider event feed empty state');
+    assert.equal(actionLogic.includes('eventFeed.hidden'), false, 'ActionBoard must keep the provider event feed visible so its empty state has real layout height');
     assert.equal(actionTemplate.includes('pg-event-item'), false, 'ActionBoard must not render local event item widgets');
     for (let token of [
       '--sn-font-mono',
@@ -626,6 +636,14 @@ describe('portal shell theme contract', () => {
 
     let actionBoardTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.tpl.js'), 'utf8');
     assert.ok(actionBoardTemplate.includes('<sn-metric'), 'ActionBoard must compose library metrics');
+    assert.ok(actionBoardTemplate.includes('<sn-banner'), 'ActionBoard must compose library status banners');
+    assert.ok(actionBoardTemplate.includes('<sn-empty-state'), 'ActionBoard must compose library empty states');
+    assert.ok(actionBoardTemplate.includes('Tool calls'), 'ActionBoard metrics must use public operations language');
+    assert.ok(actionBoardTemplate.includes('Avg latency'), 'ActionBoard metrics must use public operations language');
+    assert.ok(actionBoardTemplate.includes('Generated skills'), 'ActionBoard metrics must use public operations language');
+    for (let internalLabel of ['Flywheel Invocations', 'Avg Duration', 'Skills Created']) {
+      assert.equal(actionBoardTemplate.includes(internalLabel), false, `ActionBoard must not expose internal label ${internalLabel}`);
+    }
     assert.equal(actionBoardTemplate.includes('style="'), false, 'ActionBoard template must keep visual styling in CSS');
     assert.equal(actionBoardTemplate.includes('ab-stat-value'), false, 'ActionBoard must not copy metric value shell classes');
     assert.equal(actionBoardTemplate.includes('ab-stat-label'), false, 'ActionBoard must not copy metric label shell classes');

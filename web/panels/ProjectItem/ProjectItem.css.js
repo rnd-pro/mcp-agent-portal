@@ -1,5 +1,6 @@
 export default`
-:host {
+:host,
+pg-project-item {
   display: block;
 }
 sn-card {
@@ -32,7 +33,7 @@ sn-card:hover {
 .token-badge:empty {
   display: none;
 }
-sn-button[variant="icon"] {
+.project-remove[variant="icon"] {
   --sn-button-size: 24px;
   --sn-button-padding: 0;
   --sn-button-bg: transparent;
@@ -42,13 +43,13 @@ sn-button[variant="icon"] {
   opacity: 0;
   transition: opacity 0.2s;
 }
-sn-button[variant="icon"] .material-symbols-outlined {
+.project-remove[variant="icon"] .material-symbols-outlined {
   font-size: 16px;
 }
-sn-card:hover sn-button[variant="icon"] {
+sn-card:hover .project-remove[variant="icon"] {
   opacity: 1;
 }
-sn-button[variant="icon"]:hover {
+.project-remove[variant="icon"]:hover {
   --sn-button-color: var(--sn-danger-color);
 }
 .path {

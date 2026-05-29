@@ -1,5 +1,6 @@
 export default `
-:host {
+:host,
+pg-group-manager {
   display: block;
 }
 

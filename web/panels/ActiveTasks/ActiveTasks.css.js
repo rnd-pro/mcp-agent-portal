@@ -1,5 +1,6 @@
 export default `
-:host {
+:host,
+pg-active-tasks {
   display: block;
   height: 100%;
 }

@@ -1,7 +1,8 @@
 import { css } from '@symbiotejs/symbiote';
 
 export default css`
-:host {
+:host,
+pg-skill-list-item {
   display: block;
 }
 

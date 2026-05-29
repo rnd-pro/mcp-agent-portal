@@ -1,5 +1,6 @@
 export default `
-:host {
+:host,
+pg-tool-explorer {
   display: block;
   height: 100%;
 }

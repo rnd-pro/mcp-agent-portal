@@ -2,7 +2,8 @@ import { Symbiote, html } from '@symbiotejs/symbiote';
 import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 
 const css = `
-:host {
+:host,
+mp-server-card {
   display: block;
 }
 

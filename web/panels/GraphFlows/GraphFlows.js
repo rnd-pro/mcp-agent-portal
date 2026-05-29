@@ -63,14 +63,15 @@ export class GraphFlows extends Symbiote {
       if (!res.ok) throw new Error(`metadata load failed: ${res.status}`);
       let data = await res.json();
       let metadata = normalizeProjectGraphMetadata(data.metadata || {});
+      this._metadata = metadata;
       this.$.stories = metadata.stories;
       this._activeStoryIndex = metadata.stories.length > 0 ? 0 : -1;
       this._activeBeatIndex = 0;
       this._renderStories();
       this._renderBeat();
-      if (metadata.stories.length > 0) this._publishCurrentBeat();
     } catch (err) {
       this.$.stories = [];
+      this._metadata = normalizeProjectGraphMetadata();
       this._activeStoryIndex = -1;
       this._activeBeatIndex = 0;
       this.ref.storyList.replaceChildren(makeMessage('flows-error', err.message));

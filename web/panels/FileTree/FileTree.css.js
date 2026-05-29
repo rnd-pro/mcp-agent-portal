@@ -1,5 +1,6 @@
 export default `
-:host {
+:host,
+pg-file-tree {
   display: flex;
   flex-direction: column;
   height: 100%;

@@ -1,5 +1,6 @@
 export default `
-  :host {
+  :host,
+  pg-agent-portal-tree {
     display: flex;
     flex-direction: column;
     height: 100%;

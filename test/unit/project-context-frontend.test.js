@@ -61,6 +61,15 @@ describe('project scoped frontend data loading', () => {
     assert.match(styleSource, /#active-project-path\s*\{[\s\S]*text-overflow: ellipsis;/);
   });
 
+  it('projects the active tab accent into chat composer hover styling', () => {
+    let projectTabsSource = readSource('web/components/ProjectTabs/ProjectTabs.js');
+
+    assert.match(projectTabsSource, /let activeProject = history\.find\(\(p\) => p\.id === activeId\);/);
+    assert.match(projectTabsSource, /root\.style\.setProperty\('--project-accent', activeColor\);/);
+    assert.match(projectTabsSource, /root\.style\.setProperty\('--sn-composer-send-hover-bg', activeColor\);/);
+    assert.match(projectTabsSource, /root\.style\.removeProperty\('--sn-composer-send-hover-bg'\);/);
+  });
+
   it('declares a runtime base path before API calls are patched', () => {
     let indexSource = readSource('web/index.html');
     let appSource = readSource('web/app.js');

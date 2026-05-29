@@ -35,7 +35,8 @@ WorkflowStep.template = html`
 `;
 
 WorkflowStep.rootStyles = `
-:host {
+:host,
+we-workflow-step {
   display: block;
   color: var(--sn-text);
   font-family: var(--sn-font);
@@ -75,10 +76,12 @@ WorkflowStep.rootStyles = `
   border-top: 1px solid var(--sn-node-border);
   display: none;
 }
-:host([expanded]) .step-content {
+:host([expanded]) .step-content,
+we-workflow-step[expanded] .step-content  {
   display: block;
 }
-:host([expanded]) .step-header {
+:host([expanded]) .step-header,
+we-workflow-step[expanded] .step-header  {
   background: var(--sn-node-hover);
 }
 .step-description {

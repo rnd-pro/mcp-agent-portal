@@ -1,7 +1,8 @@
 import { css } from '@symbiotejs/symbiote';
 
 export default css`
-:host {
+:host,
+pg-agent-list-item {
   display: block;
 }
 
@@ -18,12 +19,14 @@ sn-list-item {
   --sn-list-item-meta-size: 10px;
 }
 
-:host([active]) sn-list-item {
+:host([active]) sn-list-item,
+pg-agent-list-item[active] sn-list-item  {
   --sn-list-item-padding: 8px 10px 8px 7px;
   --sn-list-item-active-border: var(--sn-node-selected);
 }
 
-:host([active]) {
+:host([active]),
+pg-agent-list-item[active]  {
   color: var(--sn-node-selected);
 }
 `;

@@ -24,17 +24,28 @@ function getProjectIdFromRoute() {
   return globals.project || null;
 }
 
+function applyActiveProjectAccent(activeColor) {
+  let root = document.documentElement;
+  if (activeColor) {
+    root.style.setProperty('--project-accent', activeColor);
+    root.style.setProperty('--sn-composer-send-hover-bg', activeColor);
+  } else {
+    root.style.removeProperty('--project-accent');
+    root.style.removeProperty('--sn-composer-send-hover-bg');
+  }
+}
+
 function renderProjectTabs(el) {
   let openIds = dashState.openProjectIds || [];
   let history = dashState.projectHistory || [];
   let activeId = getProjectIdFromRoute();
-  let activeColor = null;
+  let activeProject = history.find((p) => p.id === activeId);
+  let activeColor = activeProject?.color || null;
   let tabs = [];
 
   for (let id of openIds) {
     let proj = history.find((p) => p.id === id);
     if (!proj) continue;
-    if (id === activeId) activeColor = proj.color;
     tabs.push({
       id,
       name: proj.name,
@@ -44,6 +55,7 @@ function renderProjectTabs(el) {
   }
 
   el.setTabs(tabs, activeId);
+  applyActiveProjectAccent(activeColor);
   updateFavicon(activeColor);
 }
 

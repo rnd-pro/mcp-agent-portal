@@ -28,7 +28,8 @@ PipelineStep.template = html`
 `;
 
 PipelineStep.rootStyles = `
-:host {
+:host,
+pm-pipeline-step {
   display: block;
 }
 

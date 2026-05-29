@@ -7,28 +7,12 @@ import {
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import { stateSync } from '../../state-sync.js';
 import { persistUiValue, readUiValue } from '../../common/ui-state.js';
+import { buildChatNavTree } from './chat-tree.js';
 
 const STORAGE_COLLAPSED_PATH = 'ui/preferences/chatNavCollapsed';
 const STORAGE_COLLAPSED_KEY = 'pg-chat-sidebar-collapsed';
 const STORAGE_WIDTH_PATH = 'ui/preferences/chatNavWidth';
 const STORAGE_WIDTH_KEY = 'pg-chat-sidebar-width';
-
-function getCleanName(name) {
-  return (name || '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '').trim();
-}
-
-function getStatusMeta(chat) {
-  if (chat.pendingTaskId) {
-    return { statusKind: 'running', statusIcon: 'hourglass_empty', statusTitle: 'Running task...' };
-  }
-  if (chat.lastTaskStatus === 'done') {
-    return { statusKind: 'done', statusIcon: 'check_circle', statusTitle: 'Completed' };
-  }
-  if (chat.lastTaskStatus === 'error') {
-    return { statusKind: 'error', statusIcon: 'error', statusTitle: 'Error' };
-  }
-  return { statusKind: '', statusIcon: '', statusTitle: '' };
-}
 
 export class ChatSidebar extends ChatSidebarShell {
   initCallback() {
@@ -155,63 +139,12 @@ export class ChatSidebar extends ChatSidebarShell {
   }
 
   _renderNavItems() {
-    let chats = dashState.chats || [];
-
-    let projectId = dashState.activeProjectId;
-    if (projectId) {
-      chats = chats.filter((chat) => chat.projectId === projectId);
-    }
-
-    let childMap = new Map();
-    let rootChats = [];
-
-    for (let chat of chats) {
-      if (chat.parentChatId) {
-        if (!childMap.has(chat.parentChatId)) childMap.set(chat.parentChatId, []);
-        childMap.get(chat.parentChatId).push({
-          ...chat,
-          cleanName: getCleanName(chat.name),
-          icon: chat.agentIcon || 'subdirectory_arrow_right',
-          agentColor: chat.agentColor || '',
-          ...getStatusMeta(chat),
-          agentType: chat.adapter,
-          isActive: chat.id === dashState.activeChatId,
-        });
-      } else {
-        rootChats.push(chat);
-      }
-    }
-
-    let processedChats = [];
-    for (let chat of rootChats) {
-      let children = childMap.get(chat.id) || [];
-      let shouldExpand = chat.id === dashState.activeChatId
-        || children.some((child) => child.id === dashState.activeChatId)
-        || children.some((child) => child.pendingTaskId);
-      processedChats.push({
-        ...chat,
-        cleanName: getCleanName(chat.name),
-        icon: chat.agentIcon || 'chat',
-        agentColor: chat.agentColor || '',
-        ...getStatusMeta(chat),
-        isActive: chat.id === dashState.activeChatId,
-        isExpanded: shouldExpand,
-        subChats: children,
-      });
-    }
-
-    for (let [parentId, children] of childMap) {
-      if (rootChats.some((chat) => chat.id === parentId)) continue;
-      for (let child of children) {
-        processedChats.push({
-          ...child,
-          icon: child.agentIcon || 'chat',
-          subChats: [],
-        });
-      }
-    }
-
-    this.setChats(processedChats);
+    this.setChats(buildChatNavTree({
+      chats: dashState.chats || [],
+      projectId: dashState.activeProjectId,
+      projectHistory: dashState.projectHistory || [],
+      activeChatId: dashState.activeChatId,
+    }));
   }
 }
 

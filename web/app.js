@@ -1,6 +1,6 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
-import { LayoutTree as t, applyTheme as n, DEFAULT_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
+import { LayoutTree as t, applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
 import { waitForElementApi } from "symbiote-node/core";
 import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
 import { applyPortalProjectTransaction, getPortalProjectRuntime, getPortalRuntimeLayout } from "./services/portal-runtime.js";
@@ -266,7 +266,7 @@ function handleProjectSwitch(projectId) {
   persistUiValue('ui/activeProjectId', projectId || null, 'pg-active-project-id');
 
   // Clear active chat if it does not belong to the new project
-  if (dashState.activeChatId) {
+  if (projectId && dashState.activeChatId) {
     let routeChatId = parseQuery(getRoute().query || '').chat || null;
     let chat = (dashState.chats || []).find(c => c.id === dashState.activeChatId);
     if ((!chat && routeChatId !== dashState.activeChatId) || (chat && chat.projectId !== projectId)) {
@@ -386,6 +386,7 @@ function applyRuntimeTransaction(projectId, transaction) {
 
 async function u() {
   n(document.documentElement, o);
+  document.documentElement.dataset.themeScope = 'default-provider';
   let runtimeApi = {
     getProject: (projectId = null) => getPortalProjectRuntime(projectId).getProject(),
     applyTransaction: applyRuntimeTransaction,
