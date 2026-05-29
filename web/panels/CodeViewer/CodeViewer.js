@@ -8,9 +8,12 @@ import {
   resolveProjectPath,
 } from "../../app.js";
 import {
+  buildHash,
   buildDirectoryInfo,
+  getRoute,
   getSourceLanguage,
   isDirectoryLikePath,
+  parseQuery,
 } from "symbiote-node/ui";
 import template from "./CodeViewer.tpl.js";
 import css from "./CodeViewer.css.js";
@@ -89,7 +92,11 @@ export class CodeViewer extends Symbiote {
   initCallback() {
     this.addEventListener("source-viewer-show-graph", (event) => {
       const path = event.detail?.path;
-      if (path) window.location.hash = `#graph?focus=${encodeURIComponent(path)}`;
+      if (path) {
+        let route = getRoute();
+        let params = { ...parseQuery(route.query || ''), focus: path };
+        window.location.hash = buildHash('graph', '', params);
+      }
     });
 
     events.addEventListener("file-selected", (event) => this._loadFile(event.detail.path));

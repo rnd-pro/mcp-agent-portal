@@ -1,7 +1,10 @@
 // @ctx .context/web/components/quick-open.ctx
 import {
   QuickOpen as BaseQuickOpen,
+  buildHash,
   collectQuickOpenFilesFromSkeleton,
+  getRoute,
+  parseQuery,
 } from 'symbiote-node/ui';
 import { state, events, emit } from '../../app.js';
 
@@ -33,10 +36,13 @@ export class QuickOpen extends BaseQuickOpen {
     state.activeFile = file;
     emit('file-selected', { path: file });
 
+    let route = getRoute();
+    let params = parseQuery(route.query || '');
+    let nextHash = buildHash('explorer', file, params);
     if (location.hash.startsWith('#explorer')) {
-      history.replaceState(null, '', `#explorer/${file}`);
+      history.replaceState(null, '', `#${nextHash}`);
     } else {
-      location.hash = `explorer/${file}`;
+      location.hash = nextHash;
     }
   }
 }

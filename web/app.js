@@ -265,13 +265,19 @@ function handleProjectSwitch(projectId) {
   dashState.activeProjectId = projectId;
   persistUiValue('ui/activeProjectId', projectId || null, 'pg-active-project-id');
 
-  // Clear active chat if it does not belong to the new project
-  if (projectId && dashState.activeChatId) {
+  // Clear route and memory chat state if either points outside the active project.
+  if (projectId) {
     let routeChatId = parseQuery(getRoute().query || '').chat || null;
-    let chat = (dashState.chats || []).find(c => c.id === dashState.activeChatId);
-    if ((!chat && routeChatId !== dashState.activeChatId) || (chat && chat.projectId !== projectId)) {
+    let routeChat = routeChatId ? (dashState.chats || []).find(c => c.id === routeChatId) : null;
+    let activeChat = dashState.activeChatId
+      ? (dashState.chats || []).find(c => c.id === dashState.activeChatId)
+      : null;
+    let routeChatMismatch = routeChatId && (!routeChat || routeChat.projectId !== projectId);
+    let activeChatMismatch = dashState.activeChatId && (!activeChat || activeChat.projectId !== projectId);
+
+    if (routeChatMismatch || activeChatMismatch) {
       dashState.activeChatId = null;
-      updateParams({ chat: null });
+      if (routeChatId) updateParams({ chat: null });
       dashEmit('active-chat-changed', { id: null });
     }
   }
@@ -402,8 +408,8 @@ async function u() {
   });
 
   requestAnimationFrame(async () => {
-    // Register project & chat as global params — they persist across section switches
-    registerGlobalParam('project', 'chat');
+    // Project is global route context; chat is section-scoped and should not leak across menu sections.
+    registerGlobalParam('project');
 
     // Register all panel types on the single layout
     let layout = document.getElementById('app-layout');

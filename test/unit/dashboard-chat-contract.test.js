@@ -98,7 +98,7 @@ describe('dashboard chat route', () => {
 
     assert.match(
       source,
-      /if \(projectId && dashState\.activeChatId\) \{[\s\S]*updateParams\(\{ chat: null \}\);/,
+      /if \(projectId\) \{[\s\S]*if \(routeChatId\) updateParams\(\{ chat: null \}\);/,
       'Global dashboard must not clear ?chat links just because the selected chat belongs to a project'
     );
   });
@@ -108,7 +108,7 @@ describe('dashboard chat route', () => {
 
     assert.equal(source.includes('dashState.activeChatId === chatId) return'), false);
     assert.match(source, /if \(!chatId\) return;/);
-    assert.match(source, /setGlobalParam\('chat', chatId\);/);
+    assert.match(source, /updateParams\(\{ chat: chatId \}\);/);
     assert.match(source, /dashEmit\('active-chat-changed', \{ id: chatId \}\);/);
   });
 });

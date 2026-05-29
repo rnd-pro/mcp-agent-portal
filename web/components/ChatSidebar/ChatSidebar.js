@@ -2,7 +2,7 @@ import {
   ChatSidebarShell,
   DEFAULT_NAV_WIDTH,
   clampChatSidebarWidth,
-  setGlobalParam,
+  updateParams,
 } from 'symbiote-node/ui';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import { stateSync } from '../../state-sync.js';
@@ -95,7 +95,7 @@ export class ChatSidebar extends ChatSidebarShell {
       let data = await res.json();
       if (data.ok) {
         dashState.activeChatId = data.id;
-        setGlobalParam('chat', data.id);
+        updateParams({ chat: data.id });
         dashEmit('active-chat-changed', { id: data.id });
         await this._fetchChats();
       }
@@ -124,7 +124,7 @@ export class ChatSidebar extends ChatSidebarShell {
     });
     if (dashState.activeChatId === chatId) {
       dashState.activeChatId = null;
-      setGlobalParam('chat', null);
+      updateParams({ chat: null });
       dashEmit('active-chat-changed', { id: null });
     }
     this._fetchChats();
@@ -133,7 +133,7 @@ export class ChatSidebar extends ChatSidebarShell {
   _selectChat(chatId) {
     if (!chatId) return;
     if (dashState.activeChatId !== chatId) dashState.activeChatId = chatId;
-    setGlobalParam('chat', chatId);
+    updateParams({ chat: chatId });
     dashEmit('active-chat-changed', { id: chatId });
     this._fetchChats();
   }

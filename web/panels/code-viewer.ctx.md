@@ -12,4 +12,4 @@
 
 ## Decisions
 - File loading stays in CodeViewer; rendering stays in CodeBlock.
-- `Show in Graph` navigates by setting `#graph?focus=...`.
+- `Show in Graph` navigates to `#graph` with `focus` while preserving the active route query, including `project`.

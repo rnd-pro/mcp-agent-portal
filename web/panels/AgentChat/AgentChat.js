@@ -6,7 +6,7 @@ import {
   escapeHtml,
   getRoute,
   parseQuery,
-  setGlobalParam,
+  updateParams,
 } from 'symbiote-node/ui';
 import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
@@ -73,7 +73,7 @@ export class AgentChat extends Symbiote {
       let chatId = event.detail?.linkId;
       if (!chatId) return;
       dashState.activeChatId = chatId;
-      setGlobalParam('chat', chatId);
+      updateParams({ chat: chatId });
       dashEmit('active-chat-changed', { id: chatId });
     });
 
@@ -415,6 +415,15 @@ export class AgentChat extends Symbiote {
     let route = getRoute();
     let globals = parseQuery(route.query || '');
     let chatId = globals.chat || null;
+    if (!chatId) {
+      if (dashState.activeChatId) {
+        dashState.activeChatId = null;
+        dashEmit('active-chat-changed', { id: null, fromRoute: true });
+        return;
+      }
+      if (this._loadedChatId) this._loadChat(null);
+      return;
+    }
     if (chatId && chatId !== dashState.activeChatId) {
       dashState.activeChatId = chatId;
       dashEmit('active-chat-changed', { id: chatId, fromRoute: true });
@@ -512,8 +521,7 @@ export class AgentChat extends Symbiote {
         if (data.ok) {
           chatId = data.id;
           dashState.activeChatId = chatId;
-          setGlobalParam('chat', chatId);
-          dashEmit('active-chat-changed', { id: chatId });
+          updateParams({ chat: chatId });
           dashEmit('active-chat-changed', { id: chatId });
         } else {
           return;

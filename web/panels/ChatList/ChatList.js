@@ -1,5 +1,5 @@
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
-import { ChatList as BaseChatList, setGlobalParam } from 'symbiote-node/ui';
+import { ChatList as BaseChatList, updateParams } from 'symbiote-node/ui';
 import { uiConfirm } from 'symbiote-node/ui';
 
 export class ChatList extends BaseChatList {
@@ -53,7 +53,7 @@ export class ChatList extends BaseChatList {
       let data = await res.json();
       if (data.ok) {
         dashState.activeChatId = data.id;
-        setGlobalParam('chat', data.id);
+        updateParams({ chat: data.id });
         dashEmit('active-chat-changed', { id: data.id });
         await this._fetchChats();
       }
@@ -65,7 +65,7 @@ export class ChatList extends BaseChatList {
   _selectChat(host) {
     if (!host?.$.id || dashState.activeChatId === host.$.id) return;
     dashState.activeChatId = host.$.id;
-    setGlobalParam('chat', host.$.id);
+    updateParams({ chat: host.$.id });
     dashEmit('active-chat-changed', { id: host.$.id });
   }
 
@@ -79,7 +79,7 @@ export class ChatList extends BaseChatList {
     });
     if (dashState.activeChatId === host.$.id) {
       dashState.activeChatId = null;
-      setGlobalParam('chat', null);
+      updateParams({ chat: null });
       dashEmit('active-chat-changed', { id: null });
     }
     this._fetchChats();
