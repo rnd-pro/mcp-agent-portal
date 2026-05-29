@@ -62,4 +62,13 @@ describe('dep-graph-routing', () => {
     assert.match(source, /button\.onclick = \(\) => \{\s*this\._activeStoryIndex = Number\(button\.dataset\.storyIndex\);[\s\S]*?this\._publishCurrentBeat\(\);[\s\S]*?\};/);
     assert.doesNotMatch(source, /metadata\.stories\.length\s*>\s*0\)\s*this\._publishCurrentBeat\(\)/);
   });
+
+  it('dep graph keeps readonly editing while allowing node selection and drag', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/dep-graph.js'), 'utf8');
+
+    assert.match(
+      source,
+      /this\._canvas\.setReadonly\(true\);\s*this\._canvas\.setReadonlyNodeDragging\(true\);/,
+    );
+  });
 });

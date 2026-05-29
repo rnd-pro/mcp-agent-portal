@@ -1009,6 +1009,7 @@ export class DepGraph extends Symbiote {
 
     // Apply settings
     this._canvas.setReadonly(true);
+    this._canvas.setReadonlyNodeDragging(true);
     const urlParams = getGraphUrlParams();
     this._canvas.setPathStyle(urlParams.get('style') || readUiValue('ui/preferences/graphStyle', 'connection-style', 'pcb'));
 
