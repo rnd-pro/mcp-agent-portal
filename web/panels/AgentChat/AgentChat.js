@@ -22,6 +22,7 @@ import {
   applyProjectTransactions,
   applyProjectTransactionsFromMessages,
 } from '../../services/project-transaction-messages.js';
+import { getAgentChatInputState } from './input-state.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
@@ -41,6 +42,7 @@ export class AgentChat extends Symbiote {
     chatParams: {},
     attachedContext: [],
     isInputDisabled: true,
+    isSubagentChat: false,
     inputPlaceholder: 'Ask anything, @ to mention, / for workflows',
     sessionMetaHtml: '',
   };
@@ -138,6 +140,7 @@ export class AgentChat extends Symbiote {
       if (!this._updatingOptions) this._updateComposerFooter();
       this._updateInputState();
     });
+    this.sub('isSubagentChat', () => this._updateInputState());
     this.sub('inputVal', () => this._syncComposerComponent());
     this.sub('attachedContext', () => this._syncComposerComponent());
     this.sub('isInputDisabled', () => this._syncComposerComponent());
@@ -242,15 +245,13 @@ export class AgentChat extends Symbiote {
   }
 
   _updateInputState() {
-    let adapter = this.$.chatAdapter || 'pool';
-    let isModelRequired = adapter === 'pool' || adapter === 'opencode';
-    let hasModel = !!this.$.chatParams?.model;
-    
-    let disabled = isModelRequired && !hasModel;
-    this.$.isInputDisabled = disabled;
-    this.$.inputPlaceholder = disabled 
-      ? 'Select a model to start...' 
-      : 'Ask anything, @ to mention, / for workflows';
+    let state = getAgentChatInputState({
+      adapter: this.$.chatAdapter || 'pool',
+      chatParams: this.$.chatParams || {},
+      isSubagentChat: this.$.isSubagentChat,
+    });
+    this.$.isInputDisabled = state.disabled;
+    this.$.inputPlaceholder = state.placeholder;
   }
 
   _attachContext(item) {
@@ -504,6 +505,7 @@ export class AgentChat extends Symbiote {
 
   async _sendMessage() {
     this._syncComposerParamsFromDom();
+    if (this.$.isInputDisabled) return;
     let chatId = this._loadedChatId || dashState.activeChatId;
 
     // Auto-create chat on first message (quick-start flow)
@@ -663,6 +665,7 @@ export class AgentChat extends Symbiote {
       this.$.chatName = 'New Chat';
       this.$.chatAdapter = 'pool';
       this.$.chatParams = {};
+      this.$.isSubagentChat = false;
       this._sessionId = null;
       this.$.sessionMetaHtml = '';
       this._updateComposerFooter();
@@ -689,6 +692,7 @@ export class AgentChat extends Symbiote {
 
       this.$.chatName = chat.name || 'Chat';
       this.$.chatAdapter = chat.adapter || 'pool';
+      this.$.isSubagentChat = Boolean(chat.parentChatId);
       // Filter out stale transient status messages (process artifacts, not conversation content)
       let msgs = (chat.messages || []).filter(m => {
         if (m.role !== 'system') return true;
@@ -704,7 +708,7 @@ export class AgentChat extends Symbiote {
       
       // Load saved params — collect all non-base keys that have values
       let params = {};
-      let baseProps = ['id', 'projectId', 'name', 'adapter', 'messages', 'projectTransactions', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
+      let baseProps = ['id', 'projectId', 'parentChatId', 'name', 'adapter', 'messages', 'projectTransactions', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
       for (let key in chat) {
         if (!baseProps.includes(key) && chat[key] != null) {
           params[key] = chat[key];
