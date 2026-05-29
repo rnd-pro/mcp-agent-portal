@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import 'symbiote-node/ui';
 import { events, emit, state } from '../../app.js';
+import { tPortal } from '../../common/localization.js';
 import {
   collapseTree,
   highlightTreePath,
@@ -64,7 +65,7 @@ export class AgentPortalTree extends Symbiote {
 
   async loadTree() {
     this.#setupTreeView();
-    this.#showPlaceholder('Loading .agent-portal...');
+    this.#showPlaceholder(tPortal('text.loadingAgentPortal'));
     try {
       let res = await fetch(`/api/agent-portal/tree${activeProjectQuery()}`);
       let data = await res.json();
@@ -73,15 +74,15 @@ export class AgentPortalTree extends Symbiote {
       this.renderTree({ scrollActive: true });
     } catch (err) {
       let message = /ENOENT|no such file or directory/.test(err.message)
-        ? 'Team memory is not initialized for this project. Add or sync the .agent-portal submodule to edit agents, skills, and workflows here.'
-        : `Error: ${err.message}`;
+        ? tPortal('text.teamMemoryMissing')
+        : tPortal('text.errorWithMessage', { message: err.message });
       this.#showPlaceholder(message);
     }
   }
 
   renderTree({ scrollActive = false } = {}) {
     if (!this._tree.length) {
-      this.#showPlaceholder('No files found');
+      this.#showPlaceholder(tPortal('text.noFilesFound'));
       return;
     }
     let tree = this.ref.panel || this.ref.tree;

@@ -3,6 +3,12 @@ import { sharedUiStyles as cssShared } from "symbiote-node/ui";
 import cssLocal from "./SettingsPanel.css.js";
 import template from "./SettingsPanel.tpl.js";
 import { uiConfirm } from 'symbiote-node/ui';
+import {
+  getPortalLocaleOptions,
+  setPortalLocaleMode,
+  tPortal,
+} from '../../common/localization.js';
+import { getLocalization } from 'symbiote-node/locale';
 
 function renderMetric(label, value, status = "") {
   let metric = document.createElement("sn-metric");
@@ -83,6 +89,8 @@ export class SettingsPanel extends Symbiote {
     this.ref.saveSettingsBtn.onclick = () => this.saveSettings();
     this.ref.lanAccessInput.onchange = () => this.saveNetworkAccessSettings();
     this.ref.gatewayTestBtn.onclick = () => this.testGateway();
+    this.ref.localeModeInput.onchange = () => this.saveLocalizationSettings();
+    this._renderLocaleModeOptions();
     this.fetchInfo();
     this.fetchSettings();
     this._startStatusPolling();
@@ -98,6 +106,7 @@ export class SettingsPanel extends Symbiote {
         this.ref.telegramChatIdInput.value = r.telegramChatId;
       }
       this._settings = r || {};
+      this._applyLocalizationSettings(r.localization || {});
       this._applyAgentPortalSettings(r.agentPortal || {});
       if (this._lastNetworkAccess) this._renderNetworkAccess(this._lastNetworkAccess);
       this._applyGatewaySettings(r.anthropicGateway || {});
@@ -111,21 +120,65 @@ export class SettingsPanel extends Symbiote {
       let telegramToken = this.ref.telegramTokenInput.value.trim();
       let telegramChatId = this.ref.telegramChatIdInput.value.trim();
       let agentPortal = this._readAgentPortalSettings();
+      let localization = this._readLocalizationSettings();
       let anthropicGateway = this._readGatewaySettings();
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramToken, telegramChatId, agentPortal, anthropicGateway })
+        body: JSON.stringify({ telegramToken, telegramChatId, localization, agentPortal, anthropicGateway })
       });
-      this._settings = { ...this._settings, telegramToken, telegramChatId, agentPortal, anthropicGateway };
+      this._settings = { ...this._settings, telegramToken, telegramChatId, localization, agentPortal, anthropicGateway };
       let btn = this.ref.saveSettingsBtn;
-      btn.textContent = "Saved! Please click Restart.";
+      btn.textContent = tPortal('text.savedRestart');
       setTimeout(() => {
-        btn.textContent = "Save";
+        btn.textContent = tPortal('text.save');
       }, 4000);
     } catch (e) {
       console.error('Failed to save settings:', e);
     }
+  }
+
+  async saveLocalizationSettings() {
+    let localization = this._readLocalizationSettings();
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ localization }),
+      });
+      this._settings = { ...this._settings, localization };
+      setPortalLocaleMode(localization.mode);
+      setStatus(this.ref.languageStatus, tPortal('settings.language.saved'), 'success');
+      setTimeout(() => globalThis.location?.reload?.(), 250);
+    } catch (e) {
+      setStatus(
+        this.ref.languageStatus,
+        tPortal('settings.language.saveFailed', { message: e.message }),
+        'error',
+      );
+    }
+  }
+
+  _renderLocaleModeOptions(selected = getLocalization().mode) {
+    let options = getPortalLocaleOptions().map((item) => {
+      let option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label;
+      option.selected = item.value === selected;
+      return option;
+    });
+    this.ref.localeModeInput.replaceChildren(...options);
+  }
+
+  _applyLocalizationSettings(raw) {
+    let mode = raw.mode || getLocalization().mode;
+    this._renderLocaleModeOptions(mode);
+  }
+
+  _readLocalizationSettings() {
+    return {
+      mode: this.ref.localeModeInput.value || 'auto',
+    };
   }
 
   async saveNetworkAccessSettings() {
@@ -138,7 +191,7 @@ export class SettingsPanel extends Symbiote {
       });
       this._settings = { ...this._settings, agentPortal };
       this._renderNetworkAccess(this._lastNetworkAccess || null);
-      setStatus(this.ref.restartStatus, "Network setting saved. Restart to apply the listening address.", "warning");
+      setStatus(this.ref.restartStatus, tPortal('text.networkSettingSaved'), "warning");
     } catch (e) {
       setStatus(this.ref.restartStatus, `Failed to save network setting: ${e.message}`, "error");
     }
@@ -214,10 +267,10 @@ export class SettingsPanel extends Symbiote {
     let t = this.ref.gatewayStatus;
     let gateway = this._readGatewaySettings();
     if (!gateway.enabled) {
-      setStatus(t, 'Enable and save the gateway before testing.', 'warning');
+      setStatus(t, tPortal('text.gatewayEnableBeforeTesting'), 'warning');
       return;
     }
-    setStatus(t, 'Testing gateway...', 'muted');
+    setStatus(t, tPortal('text.testingGateway'), 'muted');
     let headers = gateway.authToken ? { Authorization: `Bearer ${gateway.authToken}` } : {};
     try {
       let [healthRes, modelsRes] = await Promise.all([
@@ -263,7 +316,10 @@ export class SettingsPanel extends Symbiote {
         this.ref.shutdownMetric.setAttribute("status", "warning");
       } else {
         let clients = r.agents + r.monitors;
-        this.ref.shutdownTimer.textContent = `Active (${clients} client${clients !== 1 ? "s" : ""})`;
+        this.ref.shutdownTimer.textContent = tPortal(
+          clients === 1 ? 'text.activeClientCount' : 'text.activeClientsCount',
+          { count: clients },
+        );
         this.ref.shutdownMetric.setAttribute("status", "success");
       }
     } catch {
@@ -298,15 +354,15 @@ export class SettingsPanel extends Symbiote {
 
       let title = document.createElement('div');
       title.className = 'pg-network-request-title';
-      title.textContent = `Approve browser ${request.id}`;
+      title.textContent = tPortal('text.approveBrowser', { id: request.id });
 
       let address = document.createElement('div');
       address.className = 'pg-network-request-meta';
-      address.textContent = request.address || 'unknown address';
+      address.textContent = request.address || tPortal('text.unknownAddress');
 
       let userAgent = document.createElement('div');
       userAgent.className = 'pg-network-request-meta';
-      userAgent.textContent = request.userAgent || 'unknown browser';
+      userAgent.textContent = request.userAgent || tPortal('text.unknownBrowser');
       main.append(title, address, userAgent);
 
       let actions = document.createElement('div');
@@ -314,12 +370,12 @@ export class SettingsPanel extends Symbiote {
 
       let approve = document.createElement('sn-button');
       approve.setAttribute('variant', 'primary');
-      approve.textContent = 'Approve';
+      approve.textContent = tPortal('text.approve');
       approve.onclick = () => this._resolveNetworkApproval(request.id, true);
 
       let reject = document.createElement('sn-button');
       reject.setAttribute('variant', 'danger');
-      reject.textContent = 'Reject';
+      reject.textContent = tPortal('text.reject');
       reject.onclick = () => this._resolveNetworkApproval(request.id, false);
 
       actions.append(approve, reject);
@@ -340,36 +396,36 @@ export class SettingsPanel extends Symbiote {
   }
 
   async stopServer() {
-    if (!(await uiConfirm("Stop the server? It will not restart automatically."))) return;
+    if (!(await uiConfirm(tPortal('text.stopServerConfirm')))) return;
     try {
       let res = await fetch("/api/stop", { method: "POST" });
       if (!res.ok) {
         let body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      setStatus(this.ref.restartStatus, "Server stopped.", "error");
+      setStatus(this.ref.restartStatus, tPortal('text.serverStopped'), "error");
     } catch (e) {
-      setStatus(this.ref.restartStatus, `Error: ${e.message}`, "error");
+      setStatus(this.ref.restartStatus, tPortal('text.errorWithMessage', { message: e.message }), "error");
     }
   }
 
   async restartServer() {
     let t = this.ref.restartStatus;
-    setStatus(t, "Restarting server...", "warning");
+    setStatus(t, tPortal('text.restartingServer'), "warning");
     try {
       let res = await fetch("/api/restart", { method: "POST" });
       if (!res.ok) {
         let body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      setStatus(t, "Server stopped. Reconnecting...", "warning");
+      setStatus(t, tPortal('text.serverStoppedReconnecting'), "warning");
       let retries = 0;
       let timer = setInterval(async () => {
         retries++;
         try {
           if ((await fetch("/api/project-info")).ok) {
             clearInterval(timer);
-            setStatus(t, "Server restarted successfully", "success");
+            setStatus(t, tPortal('text.serverRestarted'), "success");
             this.fetchInfo();
             setTimeout(() => { setStatus(t, "", "muted"); }, 3000);
             return;
@@ -377,16 +433,16 @@ export class SettingsPanel extends Symbiote {
         } catch (e) { /* expected — server is restarting */ }
         if (retries > 15) {
           clearInterval(timer);
-          setStatus(t, "Server did not come back. Refresh the page manually.", "error");
+          setStatus(t, tPortal('text.serverRestartFailed'), "error");
         }
       }, 1000);
     } catch (e) {
-      setStatus(t, `Error: ${e.message}`, "error");
+      setStatus(t, tPortal('text.errorWithMessage', { message: e.message }), "error");
     }
   }
 
   async fetchInfo() {
-    let loading = renderEmptyState("Loading…");
+    let loading = renderEmptyState(tPortal('text.loading'));
     loading.classList.add("pg-stg-pulse");
     this.ref.backendCard.replaceChildren(loading);
     try {
@@ -401,11 +457,11 @@ export class SettingsPanel extends Symbiote {
       this._renderProviderTabs();
       
       this.ref.backendCard.replaceChildren(
-        renderMetric("Status", "Running", "success"),
-        renderMetric("Project", info.name || "—"),
-        renderMetric("Path", info.path || "—"),
+        renderMetric(tPortal('text.status'), tPortal('text.running'), "success"),
+        renderMetric(tPortal('text.project'), info.name || "—"),
+        renderMetric(tPortal('text.path'), info.path || "—"),
         renderMetric("PID", info.pid || "—"),
-        renderMetric("Connected Agents", info.agents ?? "—"),
+        renderMetric(tPortal('text.connectedAgents'), info.agents ?? "—"),
       );
       this._renderNetworkAccess(info.networkAccess || null);
 
@@ -416,21 +472,21 @@ export class SettingsPanel extends Symbiote {
           let uptimeStr = inst.startedAt ? Math.round((Date.now() - inst.startedAt) / 60000) : "?";
           let s = document.createElement("sn-card");
           s.replaceChildren(
-            renderMetric("Name", inst.name || "unknown"),
-            renderMetric("Path", inst.project || "—"),
+            renderMetric(tPortal('text.name'), inst.name || "unknown"),
+            renderMetric(tPortal('text.path'), inst.project || "—"),
             renderMetric("PID", inst.pid),
-            renderMetric("Port", inst.port ?? "—"),
-            renderMetric("Uptime", `${uptimeStr} min`),
+            renderMetric(tPortal('text.port'), inst.port ?? "—"),
+            renderMetric(tPortal('text.uptime'), `${uptimeStr} min`),
           );
           n.appendChild(s);
         }
       } else {
-        n.replaceChildren(renderEmptyState("No active instances"));
+        n.replaceChildren(renderEmptyState(tPortal('text.noActiveInstances')));
       }
     } catch (t) {
       console.error("[SettingsPanel] fetch error:", t);
       this.ref.backendCard.replaceChildren(
-        renderEmptyState(`Error: ${t.message}`, "error"),
+        renderEmptyState(tPortal('text.errorWithMessage', { message: t.message }), "error"),
       );
     }
   }
@@ -438,7 +494,7 @@ export class SettingsPanel extends Symbiote {
   _renderNetworkAccess(networkAccess) {
     this._lastNetworkAccess = networkAccess;
     if (!networkAccess) {
-      setStatus(this.ref.networkStatus, "Network status is unavailable.", "warning");
+      setStatus(this.ref.networkStatus, tPortal('text.networkUnavailable'), "warning");
       this.ref.networkLinks.replaceChildren();
       return;
     }
@@ -448,18 +504,18 @@ export class SettingsPanel extends Symbiote {
     setStatus(
       this.ref.networkStatus,
       pending
-        ? `Saved setting differs from the running server; restart to bind ${requested ? "LAN" : "loopback only"}.`
+        ? tPortal('text.networkPendingRestart', { target: requested ? 'LAN' : tPortal('text.loopbackOnly') })
         : active
-          ? `LAN enabled; bound to ${networkAccess.bindHost || "—"}. HTTPS is still required for immersive WebXR.`
-          : `LAN disabled; bound to ${networkAccess.bindHost || "127.0.0.1"}.`,
+          ? tPortal('text.networkLanEnabled', { host: networkAccess.bindHost || "—" })
+          : tPortal('text.networkLanDisabled', { host: networkAccess.bindHost || "127.0.0.1" }),
       pending ? "warning" : active ? "success" : "muted",
     );
 
     let links = [];
-    if (networkAccess.localUrl) links.push(renderLink(networkAccess.localUrl, `Current local: ${networkAccess.localUrl}`));
-    for (let url of networkAccess.lanUrls || []) links.push(renderLink(url, `Current LAN: ${url}`));
+    if (networkAccess.localUrl) links.push(renderLink(networkAccess.localUrl, tPortal('text.currentLocalUrl', { url: networkAccess.localUrl })));
+    for (let url of networkAccess.lanUrls || []) links.push(renderLink(url, tPortal('text.currentLanUrl', { url })));
     if (requested && !active) {
-      for (let url of networkAccess.availableLanUrls || []) links.push(renderLink(url, `After restart: ${url}`));
+      for (let url of networkAccess.availableLanUrls || []) links.push(renderLink(url, tPortal('text.afterRestartUrl', { url })));
     }
     this.ref.networkLinks.replaceChildren(...links);
   }
@@ -522,7 +578,7 @@ export class SettingsPanel extends Symbiote {
       let suggestions = document.createElement('div');
       suggestions.className = 'pm-model-suggestions';
       let label = document.createElement('span');
-      label.textContent = 'Gateway models:';
+      label.textContent = tPortal('text.gatewayModels');
       suggestions.append(label);
       for (let defaultModel of DEFAULT_GATEWAY.providers.deepseek.models) {
         let model = `deepseek/${defaultModel}`;
@@ -536,7 +592,7 @@ export class SettingsPanel extends Symbiote {
     }
 
     if (models.length === 0) {
-      let state = renderEmptyState('No custom models. Showing defaults.');
+      let state = renderEmptyState(tPortal('text.noCustomModels'));
       state.classList.add('pm-model-empty');
       children.push(state);
     } else {
@@ -580,7 +636,7 @@ export class SettingsPanel extends Symbiote {
   _renderDirectory() {
     if (!this._cliModels || this._cliModels.length === 0) {
       this.ref.directoryList.replaceChildren(
-        renderEmptyState("No models discovered. Click 'Discover & Update'."),
+        renderEmptyState(tPortal('text.noModelsDiscovered')),
       );
       return;
     }
@@ -686,8 +742,8 @@ export class SettingsPanel extends Symbiote {
       nameCol.append(name, id);
 
       let tags = [];
-      if (m.isVision) tags.push(this._modelTag('visibility', 'Vision'));
-      if (m.isTools) tags.push(this._modelTag('build', 'Tools'));
+      if (m.isVision) tags.push(this._modelTag('visibility', tPortal('text.vision')));
+      if (m.isTools) tags.push(this._modelTag('build', tPortal('text.tools')));
       if (m.maxOutput) tags.push(this._modelTag('timer', `${Math.round(m.maxOutput / 1000)}k Out`));
       if (tags.length > 0) {
         let tagsEl = document.createElement('div');
@@ -709,7 +765,7 @@ export class SettingsPanel extends Symbiote {
       if (m.isFree) {
         let free = document.createElement('span');
         free.className = 'pm-price-free';
-        free.textContent = 'FREE';
+        free.textContent = tPortal('text.free');
         promptPrice.append(free);
       } else {
         promptPrice.textContent = pp;
@@ -755,14 +811,14 @@ export class SettingsPanel extends Symbiote {
   }
 
   async _saveProviderModels() {
-    this._setModelStatus("Saving...", "muted");
+    this._setModelStatus(tPortal('text.saving'), "muted");
     try {
       await fetch('/api/settings/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: this._activeProvider, models: this._userModels[this._activeProvider] || [] })
       });
-      this._setModelStatus("Saved successfully", "success");
+      this._setModelStatus(tPortal('text.saveSuccessful'), "success");
     } catch (e) {
       this._setModelStatus(`Error: ${e.message}`, "error");
     }
@@ -770,7 +826,7 @@ export class SettingsPanel extends Symbiote {
 
   async _syncFromCli() {
     let btn = this.ref.syncCliBtn;
-    renderIconTextButton(btn, "sync", "Discovering...", true);
+    renderIconTextButton(btn, "sync", tPortal('text.discovering'), true);
     btn.disabled = true;
     try {
       let r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
@@ -780,7 +836,7 @@ export class SettingsPanel extends Symbiote {
     } catch (e) {
       this._setModelStatus(`Sync failed: ${e.message}`, "error");
     } finally {
-      renderIconTextButton(btn, "sync", "Discover & Update");
+      renderIconTextButton(btn, "sync", tPortal('text.discoverUpdate'));
       btn.disabled = false;
     }
   }

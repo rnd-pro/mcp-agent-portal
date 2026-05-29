@@ -1,6 +1,7 @@
 import Symbiote from '@symbiotejs/symbiote';
 import { emit as dashEmit } from '../../dashboard-state.js';
 import { emit as appEmit, resolveProjectPath } from '../../app.js';
+import { tPortal } from '../../common/localization.js';
 import { normalizeProjectGraphMetadata } from 'symbiote-node/graph';
 import template from './GraphFlows.tpl.js';
 import css from './GraphFlows.css.js';
@@ -28,7 +29,7 @@ function makeStoryButton(story, index, isActive) {
 
   let count = document.createElement('span');
   count.className = 'flows-story-count';
-  count.textContent = `${story.beats.length} beats`;
+  count.textContent = tPortal('text.beatsCount', { count: story.beats.length });
 
   button.replaceChildren(title, desc, count);
   return button;
@@ -57,7 +58,7 @@ export class GraphFlows extends Symbiote {
 
   async loadStories() {
     try {
-      this.ref.storyList.replaceChildren(makeMessage('flows-empty', 'Loading flows...'));
+      this.ref.storyList.replaceChildren(makeMessage('flows-empty', tPortal('text.loadingFlows')));
       let url = `/api/project-graph-metadata?projectPath=${encodeURIComponent(resolveProjectPath('.'))}`;
       let res = await fetch(url);
       if (!res.ok) throw new Error(`metadata load failed: ${res.status}`);
@@ -83,7 +84,7 @@ export class GraphFlows extends Symbiote {
     let stories = this.$.stories || [];
     if (stories.length === 0) {
       this.ref.storyList.replaceChildren(
-        makeMessage('flows-empty', 'No graph stories in .portal/project-graph.json'),
+        makeMessage('flows-empty', tPortal('text.noGraphStories')),
       );
       this.ref.beatPanel.hidden = true;
       return;
@@ -126,7 +127,7 @@ export class GraphFlows extends Symbiote {
 
     let cluster = this._metadata?.clusters?.find((item) => item.id === beat.clusterId);
     let tags = [
-      cluster ? `Semantic: ${cluster.label}` : '',
+      cluster ? tPortal('text.semanticValue', { value: cluster.label }) : '',
       beat.focusPath || '',
       ...beat.nodes,
     ].filter(Boolean);

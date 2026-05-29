@@ -1,16 +1,18 @@
+import { tPortal } from '../../common/localization.js';
+
 function getCleanName(name) {
   return (name || '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '').trim();
 }
 
 function getStatusMeta(chat) {
   if (chat.pendingTaskId) {
-    return { statusKind: 'running', statusIcon: 'hourglass_empty', statusTitle: 'Running task...' };
+    return { statusKind: 'running', statusIcon: 'hourglass_empty', statusTitle: tPortal('text.runningTask') };
   }
   if (chat.lastTaskStatus === 'done') {
-    return { statusKind: 'done', statusIcon: 'check_circle', statusTitle: 'Completed' };
+    return { statusKind: 'done', statusIcon: 'check_circle', statusTitle: tPortal('text.completed') };
   }
   if (chat.lastTaskStatus === 'error') {
-    return { statusKind: 'error', statusIcon: 'error', statusTitle: 'Error' };
+    return { statusKind: 'error', statusIcon: 'error', statusTitle: tPortal('text.error') };
   }
   return { statusKind: '', statusIcon: '', statusTitle: '' };
 }
@@ -19,7 +21,7 @@ function getProjectMeta(projectId, projectHistory) {
   let project = (projectHistory || []).find((item) => item.id === projectId);
   return {
     id: projectId || 'global',
-    name: project?.name || (projectId ? getCleanName(projectId) : 'General'),
+    name: project?.name || (projectId ? getCleanName(projectId) : tPortal('text.general')),
     color: project?.color || '',
   };
 }

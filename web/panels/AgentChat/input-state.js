@@ -1,6 +1,4 @@
-const SUBAGENT_PLACEHOLDER = 'This sub-agent chat is controlled by the orchestrator.';
-const MISSING_MODEL_PLACEHOLDER = 'Select a model to start...';
-const READY_PLACEHOLDER = 'Ask anything, @ to mention, / for workflows';
+import { tPortal } from '../../common/localization.js';
 
 export function getAgentChatInputState({
   adapter = 'pool',
@@ -10,7 +8,7 @@ export function getAgentChatInputState({
   if (isSubagentChat) {
     return {
       disabled: true,
-      placeholder: SUBAGENT_PLACEHOLDER,
+      placeholder: tPortal('chat.placeholder.subagent'),
     };
   }
 
@@ -20,6 +18,8 @@ export function getAgentChatInputState({
 
   return {
     disabled,
-    placeholder: disabled ? MISSING_MODEL_PLACEHOLDER : READY_PLACEHOLDER,
+    placeholder: disabled
+      ? tPortal('chat.placeholder.missingModel')
+      : tPortal('chat.placeholder.ready'),
   };
 }

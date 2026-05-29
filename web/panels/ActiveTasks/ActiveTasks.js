@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { stateSync } from '../../state-sync.js';
+import { tPortal } from '../../common/localization.js';
 import template from './ActiveTasks.tpl.js';
 import { sharedUiStyles as cssShared, uiConfirm } from 'symbiote-node/ui';
 import css from './ActiveTasks.css.js';
@@ -79,7 +80,7 @@ export class ActiveTasks extends Symbiote {
             merged[p.taskId] = {
               ...(merged[p.taskId] || {}),
               status: 'stale',
-              prompt: `Tracked process without matching task state: ${p.label || 'process'}`,
+              prompt: tPortal('text.trackedProcessWithoutTask', { label: p.label || 'process' }),
               pid: p.pid,
               startedAt: p.startTime,
               eventCount: 0,
@@ -99,7 +100,7 @@ export class ActiveTasks extends Symbiote {
   }
 
   async cancelTask(taskId) {
-    if (!(await uiConfirm(`Cancel task ${taskId.substring(0, 8)}?`))) return;
+    if (!(await uiConfirm(tPortal('text.cancelTaskConfirm', { id: taskId.substring(0, 8) })))) return;
     try {
       await fetch('/api/mcp-call', {
         method: 'POST',
@@ -112,12 +113,12 @@ export class ActiveTasks extends Symbiote {
       });
       await this._forceRefresh();
     } catch (err) {
-      alert(`Failed to cancel: ${err.message}`);
+      alert(tPortal('text.cancelTaskFailed', { message: err.message }));
     }
   }
 
   async finishTask(taskId) {
-    if (!(await uiConfirm(`Finish task ${taskId.substring(0, 8)} and clean up tracked processes?`))) return;
+    if (!(await uiConfirm(tPortal('text.finishTaskConfirm', { id: taskId.substring(0, 8) })))) return;
     try {
       await fetch('/api/mcp-call', {
         method: 'POST',
@@ -130,7 +131,7 @@ export class ActiveTasks extends Symbiote {
       });
       await this._forceRefresh();
     } catch (err) {
-      alert(`Failed to finish task: ${err.message}`);
+      alert(tPortal('text.finishTaskFailed', { message: err.message }));
     }
   }
 
@@ -142,7 +143,7 @@ export class ActiveTasks extends Symbiote {
     let entries = Object.entries(tasks || {});
     if (entries.length === 0) {
       this.ref.emptyState.hidden = false;
-      this.ref.emptyState.textContent = 'No active tasks.';
+      this.ref.emptyState.textContent = tPortal('text.noActiveTasks');
       return;
     }
 

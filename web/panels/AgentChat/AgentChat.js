@@ -23,6 +23,7 @@ import {
   applyProjectTransactionsFromMessages,
 } from '../../services/project-transaction-messages.js';
 import { getAgentChatInputState } from './input-state.js';
+import { tPortal } from '../../common/localization.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
@@ -34,7 +35,7 @@ export class AgentChat extends Symbiote {
     messages: [],
     messageItems: [],
     inputVal: '',
-    chatName: 'Select a chat',
+    chatName: tPortal('text.selectChat'),
     chatAdapter: '',
     adapterMeta: {},
     adapterOptionsHtml: '',
@@ -43,7 +44,7 @@ export class AgentChat extends Symbiote {
     attachedContext: [],
     isInputDisabled: true,
     isSubagentChat: false,
-    inputPlaceholder: 'Ask anything, @ to mention, / for workflows',
+    inputPlaceholder: tPortal('chat.placeholder.ready'),
     sessionMetaHtml: '',
   };
 
@@ -299,7 +300,7 @@ export class AgentChat extends Symbiote {
       let currentProvider = currentParams.provider ?? providers[0];
 
       paramsToMap.push({
-        id: 'provider', label: 'Provider', type: 'select', options: providers
+        id: 'provider', label: tPortal('text.provider'), type: 'select', options: providers
       });
 
       if (currentProvider && meta[currentProvider]?.parameters) {
@@ -358,7 +359,7 @@ export class AgentChat extends Symbiote {
           
           let disabledAttr = '';
           if ((p.id === 'provider' || p.id === 'agent') && this.$.messages && this.$.messages.length > 0) {
-            disabledAttr = 'disabled title="Locked"';
+            disabledAttr = `disabled title="${escapeHtml(tPortal('text.locked'))}"`;
           }
 
           let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
@@ -467,7 +468,7 @@ export class AgentChat extends Symbiote {
           id: taskId,
           title: `${String(taskId).substring(0, 8)}...`,
           status: msg.streaming ? 'running' : 'idle',
-          statusText: msg.streaming ? 'Running...' : 'Queued',
+          statusText: msg.streaming ? tPortal('text.runningTask') : tPortal('text.queued'),
         })),
       };
     });
@@ -577,7 +578,7 @@ export class AgentChat extends Symbiote {
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
-        this.$.messages = [...this.$.messages, { role: 'system', text: 'Processing...' }];
+        this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.processing') }];
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
         let payload = { type: adapter, prompt, timeout: 300, ...this.$.chatParams };
@@ -587,15 +588,15 @@ export class AgentChat extends Symbiote {
           body: JSON.stringify(payload),
         });
         let data = await res.json();
-        this.$.messages = this.$.messages.filter(m => m.text !== 'Processing...');
+        this.$.messages = this.$.messages.filter(m => m.text !== tPortal('text.processing'));
 
         if (data.error) {
-          reply = `Error: ${data.error}`;
+          reply = tPortal('text.errorWithMessage', { message: data.error });
         } else {
           reply = data.response;
           structuredEvents = data.events;
         }
-        if (data.errors?.length) reply += `\n\n[Warnings]:\n${data.errors.join('\n')}`;
+        if (data.errors?.length) reply += `\n\n${tPortal('text.warningsLabel')}:\n${data.errors.join('\n')}`;
       }
 
       // If we got structured events from HTTP adapter, render them
@@ -631,7 +632,7 @@ export class AgentChat extends Symbiote {
         dashEmit('chats-updated');
       }
     } catch (err) {
-      this.$.messages = [...this.$.messages, { role: 'system', text: `Error: ${err.message}` }];
+      this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.errorWithMessage', { message: err.message }) }];
     }
     this._setSending(false);
     if (this.ref.cellBg) this.ref.cellBg.toggle(false);
@@ -662,7 +663,7 @@ export class AgentChat extends Symbiote {
     this._setSending(false);
     if (!chatId) {
       this.$.messages = [];
-      this.$.chatName = 'New Chat';
+      this.$.chatName = tPortal('text.newChat');
       this.$.chatAdapter = 'pool';
       this.$.chatParams = {};
       this.$.isSubagentChat = false;
@@ -697,7 +698,7 @@ export class AgentChat extends Symbiote {
       let msgs = (chat.messages || []).filter(m => {
         if (m.role !== 'system') return true;
         let t = m.text || '';
-        return !t.startsWith(ICONS.WAIT) && !t.startsWith(ICONS.OK) && !t.startsWith(ICONS.WARN) && t !== 'Processing...';
+        return !t.startsWith(ICONS.WAIT) && !t.startsWith(ICONS.OK) && !t.startsWith(ICONS.WARN) && t !== tPortal('text.processing');
       });
       this.$.messages = msgs;
       this._applyProjectTransactionEvent({

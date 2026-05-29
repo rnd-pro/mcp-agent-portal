@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
+import { tPortal } from '../../common/localization.js';
 import template from './WorkflowExplorer.tpl.js';
 import css from './WorkflowExplorer.css.js';
 import { sharedUiStyles as sharedCss } from 'symbiote-node/ui';
@@ -14,7 +15,7 @@ export class WorkflowExplorer extends Symbiote {
     selectedWorkflowId: null,
     selectedWorkflowName: '',
     workflowListEmptyText: '',
-    mainEmptyText: 'Select a workflow to view details',
+    mainEmptyText: tPortal('text.selectWorkflowDetails'),
     hasSelectedWorkflow: false,
     hasSteps: false,
     loadingStep: null,
@@ -62,7 +63,7 @@ export class WorkflowExplorer extends Symbiote {
   async loadWorkflows() {
     try {
       this.$.workflows = [];
-      this.$.workflowListEmptyText = 'Loading...';
+      this.$.workflowListEmptyText = tPortal('text.loadingDots');
       
       let data = await this._mcpCall('list_workflows', {});
       if (typeof data === 'string') {
@@ -75,7 +76,7 @@ export class WorkflowExplorer extends Symbiote {
       console.error('Failed to load workflows:', err);
       this._workflows = [];
       this.$.workflows = [];
-      this.$.workflowListEmptyText = `Error: ${err.message}`;
+      this.$.workflowListEmptyText = tPortal('text.errorWithMessage', { message: err.message });
     }
   }
 
@@ -83,14 +84,14 @@ export class WorkflowExplorer extends Symbiote {
     let workflows = this._workflows;
     if (!workflows || workflows.length === 0) {
       this.$.workflows = [];
-      this.$.workflowListEmptyText = 'No workflows found';
+      this.$.workflowListEmptyText = tPortal('text.noWorkflowsFound');
       return;
     }
     
     this.$.workflowListEmptyText = '';
     this.$.workflows = workflows.map((w) => ({
       name: w.name,
-      stepCountText: `${w.steps?.length || 0} steps`,
+      stepCountText: tPortal('text.stepsCount', { count: w.steps?.length || 0 }),
       isActive: this.$.selectedWorkflowId === w.name,
     }));
   }
@@ -104,7 +105,7 @@ export class WorkflowExplorer extends Symbiote {
       this.$.steps = workflow.steps.map((step) => ({
         id: step.id,
         name: step.name,
-        description: step.description || 'No description provided.',
+        description: step.description || tPortal('text.noDescriptionProvided'),
         toolsText: this._formatTools(step.tools),
         isExpanded: false,
         contentLoaded: false,
@@ -119,13 +120,13 @@ export class WorkflowExplorer extends Symbiote {
     if (!tools) return '';
     let toolList = Array.isArray(tools) ? tools : [tools];
     let names = toolList.map((tool) => typeof tool === 'string' ? tool : tool.name).filter(Boolean);
-    return names.length ? `Tools: ${names.join(', ')}` : '';
+    return names.length ? tPortal('text.toolsValue', { value: names.join(', ') }) : '';
   }
 
   async loadStepContent(stepEl) {
     let containerElement = stepEl.ref.markdownContainer;
     let nodeId = stepEl.$.id;
-    containerElement.replaceChildren(this.createEmptyState('Fetching markdown content...'));
+    containerElement.replaceChildren(this.createEmptyState(tPortal('text.fetchingMarkdownContent')));
     try {
       let data = await this._mcpCall('get_workflow_content', { nodeId });
       let md = data;
@@ -140,7 +141,7 @@ export class WorkflowExplorer extends Symbiote {
         codeBlock.setContent(md, 'markdown');
       });
     } catch (err) {
-      let errorElement = this.createEmptyState(`Failed to load content: ${err.message}`);
+      let errorElement = this.createEmptyState(tPortal('text.failedLoadContent', { message: err.message }));
       errorElement.setAttribute('variant', 'error');
       containerElement.replaceChildren(errorElement);
     }

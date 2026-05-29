@@ -3,6 +3,7 @@ import cssLocal from "./ProjectItem.css.js";
 import { sharedUiStyles as cssShared } from "symbiote-node/ui";
 import template from "./ProjectItem.tpl.js";
 import { uiConfirm } from 'symbiote-node/ui';
+import { tPortal } from '../../common/localization.js';
 
 export class ProjectItem extends Symbiote {
   init$ = { prefix: "", projectName: "", projectPath: "" };
@@ -15,7 +16,7 @@ export class ProjectItem extends Symbiote {
       ev.preventDefault();
       ev.stopPropagation();
       const prefix = this.$.prefix;
-      if (!prefix || !(await uiConfirm(`Remove ${this.$.projectName}?`))) return;
+      if (!prefix || !(await uiConfirm(tPortal('text.removeProjectConfirm', { name: this.$.projectName })))) return;
       await fetch("/api/remove-project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

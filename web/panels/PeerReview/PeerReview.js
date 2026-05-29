@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
+import { tPortal } from '../../common/localization.js';
 import template from './PeerReview.tpl.js';
 import { sharedUiStyles as css } from 'symbiote-node/ui';
 import localCss from './PeerReview.css.js';
@@ -78,21 +79,21 @@ export class PeerReview extends Symbiote {
       
       let task = tasks.find(t => t.id === this.$.taskId);
       if (!task) {
-        this.updateBanner('error', 'Task not found');
+        this.updateBanner('error', tPortal('text.taskNotFound'));
         return;
       }
       
       this.$.status = task.status;
       
       if (task.status === 'running') {
-        this.updateBanner('running', 'Peer is reviewing your proposal (Running...)');
+        this.updateBanner('running', tPortal('text.peerReviewRunning'));
       } else if (task.status === 'done') {
-        this.updateBanner('success', 'Review Complete');
+        this.updateBanner('success', tPortal('text.reviewComplete'));
         this.renderResult(task);
       } else if (task.status === 'error') {
-        this.updateBanner('error', 'Task failed: ' + task.error);
+        this.updateBanner('error', tPortal('text.taskFailed', { message: task.error }));
       } else {
-        this.updateBanner('error', 'Task ' + task.status);
+        this.updateBanner('error', tPortal('text.taskStatus', { status: task.status }));
       }
     } catch (err) {
       console.error('Poll error', err);

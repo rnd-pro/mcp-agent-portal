@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { events } from '../../app.js';
+import { tPortal } from '../../common/localization.js';
 import 'symbiote-node/ui';
 import './SkillMetadata.js';
 import template from './SkillManager.tpl.js';
@@ -34,7 +35,7 @@ function withActiveProject(url) {
 
 export class SkillManager extends Symbiote {
   init$ = {
-    filename: 'Select a file',
+    filename: tPortal('text.selectFile'),
     statusText: '',
     dirty: false,
     hasFile: false,
@@ -71,14 +72,14 @@ export class SkillManager extends Symbiote {
   }
 
   async loadFile(path, { source = 'team' } = {}) {
-    if (this.$.dirty && !confirm('Current file has unsaved changes. Open another file?')) return;
+    if (this.$.dirty && !confirm(tPortal('text.unsavedOpenConfirm'))) return;
     this._currentPath = path;
     this._currentSource = source;
     this.$.filename = path;
     this.$.hasFile = false;
     this.$.canEdit = false;
     this.$.canInstall = false;
-    this.$.statusText = 'Loading...';
+    this.$.statusText = tPortal('text.loadingDots');
     try {
       let relPath = portalRelativePath(path.replace(/^\.open-library\/?/, ''));
       let url = source === 'open-library'
@@ -96,24 +97,24 @@ export class SkillManager extends Symbiote {
       this.setDirty(false);
       this.dispatchMetadata();
     } catch (err) {
-      this.ref.editor.setContent(`Error: ${err.message}`);
+      this.ref.editor.setContent(tPortal('text.errorWithMessage', { message: err.message }));
       this.ref.editor.disabled = true;
       this.$.hasFile = true;
       this.$.canEdit = false;
       this.$.canInstall = false;
-      this.$.statusText = 'Error';
+      this.$.statusText = tPortal('text.error');
     }
   }
 
   setDirty(dirty) {
     this.$.dirty = dirty;
-    this.$.statusText = dirty ? 'Modified' : '';
+    this.$.statusText = dirty ? tPortal('text.modified') : '';
     this.dispatchMetadata();
   }
 
   setEditMode(editMode) {
     this.$.editMode = !!editMode;
-    this.$.modeLabel = this.$.editMode ? 'view' : 'edit';
+    this.$.modeLabel = this.$.editMode ? tPortal('text.view') : tPortal('text.edit');
     this.toggleAttribute('mode-edit', this.$.editMode);
     if (this.$.editMode) {
       requestAnimationFrame(() => this.ref.editor.focus());
@@ -151,7 +152,7 @@ export class SkillManager extends Symbiote {
 
   async saveCurrentFile() {
     if (!this._currentPath || this.ref.editor.disabled) return;
-    this.$.statusText = 'Saving...';
+    this.$.statusText = tPortal('text.saving');
     try {
       await this.fetchJson(withActiveProject('/api/agent-portal/file'), {
         method: 'POST',
@@ -164,19 +165,19 @@ export class SkillManager extends Symbiote {
       });
       this.setDirty(false);
       if (isMarkdown(this._currentPath)) this.setEditMode(false);
-      this.$.statusText = 'Saved';
+      this.$.statusText = tPortal('text.saved');
       setTimeout(() => {
         if (!this.$.dirty) this.$.statusText = '';
       }, 1200);
     } catch (err) {
-      this.$.statusText = `Error: ${err.message}`;
+      this.$.statusText = tPortal('text.errorWithMessage', { message: err.message });
     }
   }
 
   async installCurrentOpenFile() {
     if (!this._currentPath?.startsWith('.open-library/')) return;
     let sourcePath = this._currentPath.replace(/^\.open-library\/?/, '');
-    this.$.statusText = 'Installing...';
+    this.$.statusText = tPortal('text.installing');
     try {
       let data = await this.fetchJson(withActiveProject('/api/agent-portal/open-library/install'), {
         method: 'POST',
@@ -187,11 +188,11 @@ export class SkillManager extends Symbiote {
         })
       });
       events.dispatchEvent(new CustomEvent('agent-portal-tree-refresh'));
-      this.$.statusText = 'Installed';
+      this.$.statusText = tPortal('text.installed');
       let teamPath = `.agent-portal/${data.targetPath || sourcePath}`;
       setTimeout(() => this.loadFile(teamPath), 150);
     } catch (err) {
-      this.$.statusText = `Error: ${err.message}`;
+      this.$.statusText = tPortal('text.errorWithMessage', { message: err.message });
     }
   }
 }

@@ -23,7 +23,7 @@ describe('dashboard chat route', () => {
     let source = readSource('web/router-registry.js');
     let dashboard = sectionBlock(source, 'dashboard');
 
-    assert.match(dashboard, /label:\s*'Chats'/);
+    assert.match(dashboard, /label:\s*tPortal\('text\.chats'\)/);
     assert.match(dashboard, /icon:\s*'forum'/);
     assert.match(dashboard, /scope:\s*'home'/);
     assert.match(dashboard, /LayoutTree\.createPanel\('agent-chat'\)/);
@@ -31,7 +31,7 @@ describe('dashboard chat route', () => {
     assert.equal(dashboard.includes("createPanel('project-list')"), false);
     assert.equal(dashboard.includes('withChat'), false);
 
-    assert.match(source, /'agent-chat':\s*\{\s*title:\s*'Chats'/);
+    assert.match(source, /'agent-chat':\s*\{\s*title:\s*tPortal\('text\.chats'\)/);
   });
 
   it('groups global chat navigation by project metadata', () => {

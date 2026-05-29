@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { tPortal } from '../../common/localization.js';
 import cssLocal from './RuntimeControl.css.js';
 import template from './RuntimeControl.tpl.js';
 import './InstanceItem.js';
@@ -95,7 +96,7 @@ export class RuntimeControl extends Symbiote {
   }
 
   async loadRuntime(options = {}) {
-    if (!options.silent) this._setBanner('loading', 'Loading runtime status...');
+    if (!options.silent) this._setBanner('loading', tPortal('text.loadingRuntimeStatus'));
 
     let [statusResult, instancesResult] = await Promise.allSettled([
       fetchJson('/api/server-status'),
@@ -117,12 +118,12 @@ export class RuntimeControl extends Symbiote {
     this._renderInstances(instances, hasInstances);
 
     if (errors.length) {
-      this._setBanner('error', `Some runtime data is unavailable: ${errors.join('; ')}`);
+      this._setBanner('error', tPortal('text.runtimeDataUnavailable', { errors: errors.join('; ') }));
     } else {
       this._clearBanner();
     }
 
-    this.ref.updatedAt.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    this.ref.updatedAt.textContent = tPortal('text.updatedAt', { time: new Date().toLocaleTimeString() });
   }
 
   _renderSummary(status, instances, hasInstances) {
@@ -131,10 +132,14 @@ export class RuntimeControl extends Symbiote {
     let monitors = readCount(status?.monitors);
 
     this.ref.summaryGrid.replaceChildren(
-      summaryCard('Uptime', formatDuration(Number(status?.uptime)), status ? 'Portal process' : 'Status unavailable'),
-      summaryCard('Agents', status ? formatNumber(agents) : '-', 'Connected MCP clients'),
-      summaryCard('Monitors', status ? formatNumber(monitors) : '-', 'Open monitor sessions'),
-      summaryCard('Instances', hasInstances ? formatNumber(activeInstances.length) : '-', hasInstances ? `${instances.length} registered` : 'Instances unavailable'),
+      summaryCard(tPortal('text.uptime'), formatDuration(Number(status?.uptime)), status ? tPortal('text.portalProcess') : tPortal('text.statusUnavailable')),
+      summaryCard(tPortal('text.agents'), status ? formatNumber(agents) : '-', tPortal('text.connectedMcpClients')),
+      summaryCard(tPortal('text.monitors'), status ? formatNumber(monitors) : '-', tPortal('text.openMonitorSessions')),
+      summaryCard(
+        tPortal('text.instances'),
+        hasInstances ? formatNumber(activeInstances.length) : '-',
+        hasInstances ? tPortal('text.registeredCount', { count: instances.length }) : tPortal('text.instancesUnavailable'),
+      ),
     );
   }
 
@@ -145,23 +150,23 @@ export class RuntimeControl extends Symbiote {
     this.ref.instanceEmpty.textContent = '';
 
     if (!hasInstances) {
-      this._setInstancesEmpty('Instances endpoint is unavailable.');
+      this._setInstancesEmpty(tPortal('text.instancesEndpointUnavailable'));
       return;
     }
 
     if (!instances.length) {
-      this._setInstancesEmpty('No instances reported by the runtime.');
+      this._setInstancesEmpty(tPortal('text.noInstancesReported'));
       return;
     }
 
     if (!activeInstances.length) {
-      this._setInstancesEmpty('No active instances.');
+      this._setInstancesEmpty(tPortal('text.noActiveInstancesDots'));
       return;
     }
 
     this.$.instances = activeInstances.map((instance) => ({
       name: instance.name || 'unknown',
-      status: instance.status || 'Active',
+      status: instance.status || tPortal('text.active'),
       pid: instance.pid ?? '-',
       port: instance.port ?? '-',
       agents: instance.agents ?? 0,

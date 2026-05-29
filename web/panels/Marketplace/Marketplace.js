@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './Marketplace.tpl.js';
 import { uiConfirm } from 'symbiote-node/ui';
+import { tPortal } from '../../common/localization.js';
 import cssLocal from './Marketplace.css.js';
 import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import './McpServerCard.js';
@@ -156,7 +157,7 @@ class Marketplace extends Symbiote {
     } catch (err) {
       console.error('[ERROR] [marketplace] Failed to load:', err);
       this.$.installedItems = [];
-      this.ref.installedGrid.replaceChildren(makeEmptyState('Failed to load MCP servers'));
+      this.ref.installedGrid.replaceChildren(makeEmptyState(tPortal('text.failedLoadMcpServers')));
     }
   }
 
@@ -181,10 +182,10 @@ class Marketplace extends Symbiote {
       icon,
       gradient,
       sourceHost: this._getSourceHost(server.source),
-      envHint: server.envHint ? `Requires: ${server.envHint.join(', ')}` : '',
-      status: isInstalled ? 'Running' : 'Available',
+      envHint: server.envHint ? tPortal('text.requiresList', { items: server.envHint.join(', ') }) : '',
+      status: isInstalled ? tPortal('text.running') : tPortal('text.available'),
       action: isInstalled ? 'remove' : 'install',
-      actionLabel: isInstalled ? 'Remove' : 'Install',
+      actionLabel: isInstalled ? tPortal('text.remove') : tPortal('text.install'),
       isInstalled: isInstalled ? 'true' : 'false',
     };
   }
@@ -193,7 +194,7 @@ class Marketplace extends Symbiote {
     if (!servers.length) {
       this.$.installedItems = [];
       let grid = this.ref.installedGrid;
-      grid.replaceChildren(makeEmptyState('No MCP servers installed', 'inventory_2'));
+      grid.replaceChildren(makeEmptyState(tPortal('text.noMcpServersInstalled'), 'inventory_2'));
       return;
     }
 
@@ -242,7 +243,7 @@ class Marketplace extends Symbiote {
   async _installFromCatalog(name, btn, card) {
     if (!btn) return;
     btn.disabled = true;
-    btn.textContent = 'Installing...';
+    btn.textContent = tPortal('text.installing');
     try {
       let res = await fetch('/api/marketplace/install', {
         method: 'POST',
@@ -250,10 +251,10 @@ class Marketplace extends Symbiote {
         body: JSON.stringify({ name }),
       });
       let data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Install failed');
+      if (!res.ok) throw new Error(data.error || tPortal('text.installFailed'));
 
       // Hot success — update UI
-      btn.textContent = '✓ Installed';
+      btn.textContent = tPortal('text.installedCheck');
       card.classList.add('mp-card-installed');
       this._installedNames.add(name);
       this.$.serverCount = this._installedNames.size;
@@ -261,17 +262,17 @@ class Marketplace extends Symbiote {
       this.loadServers();
     } catch (err) {
       btn.disabled = false;
-      btn.textContent = 'Install';
-      alert('Install failed: ' + err.message);
+      btn.textContent = tPortal('text.install');
+      alert(tPortal('text.installFailedWithMessage', { message: err.message }));
     }
   }
 
   async _removeServer(name, card, btn = null) {
-    if (!(await uiConfirm(`Remove "${name}"? The server will be stopped immediately.`))) return;
+    if (!(await uiConfirm(tPortal('text.removeServerConfirm', { name })))) return;
     btn ||= card.shadowRoot?.querySelector('.mp-card-toggle');
     if (!btn) return;
     btn.disabled = true;
-    btn.textContent = 'Removing...';
+    btn.textContent = tPortal('text.removing');
     try {
       let res = await fetch('/api/marketplace/remove', {
         method: 'POST',
@@ -279,7 +280,7 @@ class Marketplace extends Symbiote {
         body: JSON.stringify({ name }),
       });
       let data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Remove failed');
+      if (!res.ok) throw new Error(data.error || tPortal('text.removeFailed'));
 
       card.classList.add('mp-card-removing');
       setTimeout(() => {
@@ -295,8 +296,8 @@ class Marketplace extends Symbiote {
       this._renderCatalog();
     } catch (err) {
       btn.disabled = false;
-      btn.textContent = 'Remove';
-      alert('Remove failed: ' + err.message);
+      btn.textContent = tPortal('text.remove');
+      alert(tPortal('text.removeFailedWithMessage', { message: err.message }));
     }
   }
 
@@ -312,7 +313,7 @@ class Marketplace extends Symbiote {
 
     if (!name || !command) {
       status.className = 'mp-form-status error';
-      status.textContent = 'Name and command are required.';
+      status.textContent = tPortal('text.nameCommandRequired');
       return;
     }
 
@@ -338,10 +339,10 @@ class Marketplace extends Symbiote {
         body: JSON.stringify(body),
       });
       let data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Install failed');
+      if (!res.ok) throw new Error(data.error || tPortal('text.installFailed'));
 
       status.className = 'mp-form-status success';
-      status.textContent = `✓ "${name}" installed and started.`;
+      status.textContent = tPortal('text.installedAndStarted', { name });
       this.ref.customName.value = '';
       this.ref.customCommand.value = '';
       this.ref.customArgs.value = '';
@@ -359,14 +360,14 @@ class Marketplace extends Symbiote {
   async loadOpenMemory() {
     this.$.contextItems = [];
     this.ref.contextGrid.replaceChildren(makeEmptyState(
-      'Open Memory marketplace is not connected. Use project skills and workflows from .agent-portal.',
+      tPortal('text.openMemoryNotConnected'),
     ));
   }
 
   _renderContextItems(paths) {
     if (!paths || paths.length === 0) {
       this.$.contextItems = [];
-      this.ref.contextGrid.replaceChildren(makeEmptyState('No context items found in open memory'));
+      this.ref.contextGrid.replaceChildren(makeEmptyState(tPortal('text.noContextItemsFound')));
       return;
     }
 
@@ -406,10 +407,10 @@ class Marketplace extends Symbiote {
       let projectPath = activeProject ? activeProject.path : '';
       
       if (destination === 'project' && !projectPath) {
-        throw new Error('No active project selected to install into.');
+        throw new Error(tPortal('text.noActiveProjectInstall'));
       }
       
-      throw new Error('Open Memory installation is no longer available.');
+      throw new Error(tPortal('text.openMemoryUnavailable'));
       
     } catch (err) {
       console.error(err);

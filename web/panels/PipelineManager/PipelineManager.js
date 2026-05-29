@@ -1,5 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
+import { tPortal } from '../../common/localization.js';
 import template from './PipelineManager.tpl.js';
 import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
 import css from './PipelineManager.css.js';
@@ -17,7 +18,7 @@ export class PipelineManager extends Symbiote {
     hasPipelineDetail: false,
     hasCreateDetail: false,
     hasSteps: false,
-    mainEmptyText: 'Select a pipeline or create a new one',
+    mainEmptyText: tPortal('text.selectPipelineOrCreate'),
   };
 
   _pipelines = [];
@@ -39,7 +40,7 @@ export class PipelineManager extends Symbiote {
   async loadPipelines() {
     try {
       this.$.pipelines = [];
-      this._setPipelineState('Loading...');
+      this._setPipelineState(tPortal('text.loadingDots'));
       
       let data = await this._mcpCall('list_pipelines', { json: true });
       if (typeof data === 'string') {
@@ -51,7 +52,7 @@ export class PipelineManager extends Symbiote {
     } catch (err) {
       console.error('Failed to load pipelines:', err);
       this.$.pipelines = [];
-      this._setPipelineState(`Error: ${err.message}`, true);
+      this._setPipelineState(tPortal('text.errorWithMessage', { message: err.message }), true);
     }
   }
 
@@ -61,7 +62,7 @@ export class PipelineManager extends Symbiote {
     let pipelines = this._pipelines;
     if (!pipelines || pipelines.length === 0) {
       this.$.pipelines = [];
-      this._setPipelineState('No pipelines found');
+      this._setPipelineState(tPortal('text.noPipelinesFound'));
       return;
     }
     
@@ -86,15 +87,18 @@ export class PipelineManager extends Symbiote {
       hasPipelineDetail: true,
       hasCreateDetail: false,
       selectedPipelineName: pipeline.name ?? '',
-      selectedPipelineDescription: `Steps: ${steps.length} | On Error: ${pipeline.on_error || 'stop'}`,
+      selectedPipelineDescription: tPortal('text.stepsOnError', {
+        steps: steps.length,
+        onError: pipeline.on_error || 'stop',
+      }),
       hasSteps: steps.length > 0,
       steps: steps.map((step) => ({
         name: step.name ?? '',
         prompt: step.prompt || '',
-        triggerText: step.trigger ? `Trigger: ${step.trigger}` : '',
-        skillText: step.skill ? `Skill: ${step.skill}` : '',
-        timeoutText: step.timeout ? `Timeout: ${step.timeout}s` : '',
-        maxBouncesText: step.max_bounces ? `Max Bounces: ${step.max_bounces}` : '',
+        triggerText: step.trigger ? tPortal('text.triggerValue', { value: step.trigger }) : '',
+        skillText: step.skill ? tPortal('text.skillValue', { value: step.skill }) : '',
+        timeoutText: step.timeout ? tPortal('text.timeoutSeconds', { value: step.timeout }) : '',
+        maxBouncesText: step.max_bounces ? tPortal('text.maxBouncesValue', { value: step.max_bounces }) : '',
       })),
     });
   }
@@ -106,7 +110,7 @@ export class PipelineManager extends Symbiote {
       hasDetail: true,
       hasPipelineDetail: false,
       hasCreateDetail: true,
-      selectedPipelineName: 'Create New Pipeline',
+      selectedPipelineName: tPortal('text.createNewPipeline'),
       selectedPipelineDescription: '',
       hasSteps: false,
       steps: [],
@@ -127,9 +131,9 @@ export class PipelineManager extends Symbiote {
     if (!this.$.selectedPipelineId) return;
     try {
       await this._mcpCall('run_pipeline', { pipeline_id: this.$.selectedPipelineId });
-      alert(`Pipeline ${this.$.selectedPipelineId} started successfully!`);
+      alert(tPortal('text.pipelineStarted', { name: this.$.selectedPipelineId }));
     } catch (err) {
-      alert('Failed to start pipeline: ' + err.message);
+      alert(tPortal('text.pipelineStartFailed', { message: err.message }));
     }
   }
 }

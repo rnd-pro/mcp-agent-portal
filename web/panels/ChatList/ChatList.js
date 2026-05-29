@@ -1,4 +1,5 @@
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
+import { tPortal } from '../../common/localization.js';
 import { ChatList as BaseChatList, updateParams } from 'symbiote-node/ui';
 import { uiConfirm } from 'symbiote-node/ui';
 
@@ -42,7 +43,7 @@ export class ChatList extends BaseChatList {
       projectName = proj?.name;
     }
 
-    let name = projectName ? `${projectName} — Chat` : 'New Chat';
+    let name = projectName ? `${projectName} — Chat` : tPortal('text.newChat');
 
     try {
       let res = await fetch('/api/chats', {
@@ -71,7 +72,7 @@ export class ChatList extends BaseChatList {
 
   async _deleteChat(host) {
     if (!host?.$.id) return;
-    if (!(await uiConfirm(`Delete "${host.$.name}"?`))) return;
+    if (!(await uiConfirm(tPortal('text.deleteNamedChatConfirm', { name: host.$.name })))) return;
     await fetch('/api/chats/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -113,7 +114,7 @@ export class ChatList extends BaseChatList {
     let chats = this._getFilteredChats();
 
     if (chats.length === 0) {
-      this.setEmptyMessage('No chats yet. Click "New" to start.');
+      this.setEmptyMessage(tPortal('text.noChatsNew'));
       this.setItems([]);
       return;
     }
@@ -142,7 +143,7 @@ export class ChatList extends BaseChatList {
         name: chat.name,
         project: projectName && depth === 0 ? projectName : '',
         adapter: chat.adapter,
-        status: `${chat.messageCount || 0} msgs`,
+        status: tPortal('text.messageCountShort', { count: chat.messageCount || 0 }),
         time: this._formatTime(chat.updatedAt),
         lastMessage: chat.lastMessage || '',
         depth,

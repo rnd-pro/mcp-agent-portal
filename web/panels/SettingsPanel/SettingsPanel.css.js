@@ -20,6 +20,7 @@ pg-settings-panel {
 }
 
 .stg-status[data-status="warning"],
+.pg-language-status[data-status="warning"],
 .pg-network-status[data-status="warning"],
 .pg-gateway-status[data-status="warning"],
 .pm-status[data-status="warning"] {
@@ -27,6 +28,7 @@ pg-settings-panel {
 }
 
 .stg-status[data-status="success"],
+.pg-language-status[data-status="success"],
 .pg-network-status[data-status="success"],
 .pg-gateway-status[data-status="success"],
 .pm-status[data-status="success"] {
@@ -34,6 +36,7 @@ pg-settings-panel {
 }
 
 .stg-status[data-status="error"],
+.pg-language-status[data-status="error"],
 .pg-network-status[data-status="error"],
 .pg-gateway-status[data-status="error"],
 .pm-status[data-status="error"] {
@@ -83,11 +86,16 @@ pg-settings-panel {
 
 /* Claude Gateway */
 .pg-library-settings,
+.pg-language-settings,
 .pg-network-settings,
 .pg-gateway {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.pg-language-settings select {
+  font-family: var(--sn-font);
 }
 
 .pg-library-settings input,
@@ -96,6 +104,8 @@ pg-settings-panel {
   font-family: var(--sn-font-mono);
 }
 
+.pg-language-note,
+.pg-language-status,
 .pg-library-note {
   font-size: 11px;
   line-height: 1.4;

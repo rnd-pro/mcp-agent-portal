@@ -2,6 +2,7 @@
 import Symbiote from '@symbiotejs/symbiote';
 import 'symbiote-node/ui';
 import { api, state, events, emit, getActiveRouteProjectId, skeletonMatchesProject } from '../../app.js';
+import { tPortal } from '../../common/localization.js';
 import { events as dashEvents, state as dashState } from '../../dashboard-state.js';
 import {
   collapseTree,
@@ -213,14 +214,14 @@ export class FileTree extends Symbiote {
 
   _renderTree(skeleton) {
     if (!skeleton) {
-      this._setPlaceholder('No files found');
+      this._setPlaceholder(tPortal('text.noFilesFound'));
       return;
     }
 
     this._treeData = this._buildTree(skeleton);
     let count = Object.keys(this._treeData.children).length + this._treeData.files.length;
     if (count === 0) {
-      this._setPlaceholder('No files found');
+      this._setPlaceholder(tPortal('text.noFilesFound'));
       return;
     }
 

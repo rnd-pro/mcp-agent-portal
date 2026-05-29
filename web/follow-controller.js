@@ -1,4 +1,5 @@
 import { FocusController } from 'symbiote-node/ui';
+import { tPortal } from './common/localization.js';
 
 class FollowController extends FocusController {
   constructor() {
@@ -74,7 +75,7 @@ class FollowController extends FocusController {
             return `Navigating graph`;
           }
           case 'get_skeleton': return `Scanning project structure`;
-          case 'get_ai_context': return `Loading AI context`;
+          case 'get_ai_context': return tPortal('text.loadingAiContext');
           case 'get_focus_zone': return `Analyzing recent changes`;
           case 'compact': return `Reading ${short}`;
           case 'analyze': return `Analyzing: ${args.action || ''}`;
@@ -82,7 +83,7 @@ class FollowController extends FocusController {
           case 'jsdoc': return `JSDoc: ${args.action || ''}`;
           case 'db': return `Database: ${args.action || ''}`;
           case 'testing': return `Tests: ${args.action || ''}`;
-          case 'filters': return `Filters: ${args.action || ''}`;
+          case 'filters': return tPortal('text.filters', { action: args.action || '' });
           default: return tool ? `${tool}` : '';
         }
       },

@@ -1,6 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import 'symbiote-node/ui';
 import { emit } from '../../app.js';
+import { tPortal } from '../../common/localization.js';
 import {
   collapseTree,
   setTreeItems,
@@ -51,25 +52,25 @@ export class OpenLibraryTree extends Symbiote {
 
   async loadTree() {
     this.#setupTreeView();
-    this.#showPlaceholder('Loading Open Library...');
+    this.#showPlaceholder(tPortal('text.loadingOpenLibrary'));
     try {
       let res = await fetch('/api/agent-portal/open-library/tree');
       let data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       this._tree = data.tree || [];
       if (!data.configured) {
-        this.#showPlaceholder('Open Library source is not configured.');
+        this.#showPlaceholder(tPortal('text.openLibraryNotConfigured'));
         return;
       }
       this.renderTree();
     } catch (err) {
-      this.#showPlaceholder(`Error: ${err.message}`);
+      this.#showPlaceholder(tPortal('text.errorWithMessage', { message: err.message }));
     }
   }
 
   renderTree() {
     if (!this._tree.length) {
-      this.#showPlaceholder('No public items found');
+      this.#showPlaceholder(tPortal('text.noPublicItemsFound'));
       return;
     }
     let tree = this.ref.panel || this.ref.tree;

@@ -9,6 +9,16 @@ export default`
 </sn-card>
 <div ref="restartStatus" class="stg-status"></div>
 
+<sn-card class="pg-language-settings" ref="languageCard">
+  <span slot="title">Interface Language</span>
+  <sn-field variant="compact">
+    <span slot="label">Language Mode</span>
+    <select ref="localeModeInput"></select>
+  </sn-field>
+  <div class="pg-language-note" ref="languageNote">Choose automatic browser language or pin the demo UI to one language.</div>
+  <div class="pg-language-status" ref="languageStatus"></div>
+</sn-card>
+
 <sn-card>
   <span slot="title">Backend</span>
   <div ref="backendCard"></div>

@@ -1,6 +1,6 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
-import "./common/localization.js";
+import { tPortal } from "./common/localization.js";
 import { LayoutTree as t, applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
 import { waitForElementApi } from "symbiote-node/core";
 import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
@@ -310,7 +310,7 @@ function updateTopbarPath() {
     pathEl.textContent = formatProjectPathForTopbar(proj.path);
     pathEl.title = proj.path;
   } else {
-    pathEl.textContent = 'Workspace not selected';
+    pathEl.textContent = tPortal('topbar.workspaceNotSelected');
     pathEl.title = '';
   }
 }

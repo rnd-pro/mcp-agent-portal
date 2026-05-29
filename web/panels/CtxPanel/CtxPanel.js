@@ -2,6 +2,7 @@
 import Symbiote from '@symbiotejs/symbiote';
 import 'symbiote-node/ui';
 import { api, events, state } from '../../app.js';
+import { tPortal } from '../../common/localization.js';
 import template from './CtxPanel.tpl.js';
 import css from './CtxPanel.css.js';
 
@@ -29,7 +30,7 @@ function setListItem(item, data) {
 
 export class CtxPanel extends Symbiote {
   initCallback() {
-    this._renderContentEmpty('Select a file to view documentation');
+    this._renderContentEmpty(tPortal('text.selectFileDocumentation'));
 
     events.addEventListener('file-selected', (event) => {
       this._loadCtx(event.detail.path);
@@ -77,13 +78,13 @@ export class CtxPanel extends Symbiote {
   }
 
   async _loadCtx(file) {
-    this._renderContentEmpty('Loading docs...', 'pg-pulse');
+    this._renderContentEmpty(tPortal('text.loadingDocs'), 'pg-pulse');
 
     try {
       const response = await api('/api/docs', { file });
       const docs = response?.docs || response?.content || '';
       if (!docs) {
-        this._renderContentEmpty('No .ctx documentation');
+        this._renderContentEmpty(tPortal('text.noCtxDocumentation'));
         return;
       }
 
@@ -99,7 +100,7 @@ export class CtxPanel extends Symbiote {
         raw.setContent(JSON.stringify(docs, null, 2), 'json');
       });
     } catch (err) {
-      this._renderContentEmpty('No documentation available');
+      this._renderContentEmpty(tPortal('text.noDocumentationAvailable'));
     }
   }
 
@@ -114,7 +115,7 @@ export class CtxPanel extends Symbiote {
   _renderCtx(value) {
     let nodes = value.split('\n').map((line) => this._lineNode(line)).filter(Boolean);
     if (nodes.length === 0) {
-      this._renderContentEmpty('No documentation available');
+      this._renderContentEmpty(tPortal('text.noDocumentationAvailable'));
       return;
     }
     this.ref.content.replaceChildren(...nodes);
