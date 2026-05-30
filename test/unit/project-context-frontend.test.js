@@ -13,7 +13,12 @@ describe('project scoped frontend data loading', () => {
   it('passes active project id through skeleton and file API calls', () => {
     let source = readSource('web/app.js');
 
-    assert.match(source, /"\/api\/skeleton": \{ name: "get_skeleton", args: p => \(\{ path: resolveProjectPath\(p\.path\), projectId: p\.projectId \|\| dashState\.activeProjectId \|\| null \}\) \}/);
+    assert.match(source, /function getProjectScopedPathArgs\(params = \{\}\)/);
+    assert.match(source, /let projectId = getApiProjectId\(params\);/);
+    assert.match(source, /path: resolveProjectPath\(params\.path, projectId\)/);
+    assert.match(source, /"\/api\/skeleton": \{ name: "get_skeleton", args: p => getProjectScopedPathArgs\(p\) \}/);
+    assert.match(source, /"\/api\/file": \{ name: "compact", args: p => \(\{ action: "compact_file", \.\.\.getProjectScopedPathArgs\(p\), beautify: true \}\) \}/);
+    assert.match(source, /"\/api\/docs": \{ name: "docs", args: p => \(\{ action: "get", path: resolveProjectPath\('\.', getApiProjectId\(p\)\) \|\| '\.', file: p\.file \|\| p\.path, projectId: getApiProjectId\(p\) \}\) \}/);
     assert.match(source, /api\('\/api\/skeleton', \{ projectId \}\)/);
     assert.match(source, /if \(_currentProjectId !== projectId\) return;/);
     assert.match(source, /projectId === _currentProjectId && state\.skeleton && skeletonMatchesProject\(state\.skeleton, projectId\)/);
@@ -25,8 +30,31 @@ describe('project scoped frontend data loading', () => {
     assert.match(source, /location\.pathname\.includes\('\/demos\/agent-portal-vr\/'\) && Boolean\(projectId\)/);
     assert.match(source, /if \(!sourceProjectId\) return !requiresPublicSource;/);
     assert.match(source, /if \(!skeletonMatchesProject\(sk, projectId\)\) return;/);
+    assert.match(source, /routeProjectId \|\| dashState\.activeProjectId \|\| null/);
+    assert.match(source, /emit\('file-selected', \{ path: subPath, projectId, fromRoute: true \}\)/);
     assert.match(source, /new URL\(path, baseUrl\)/);
     assert.ok(source.includes("String(e.prefix || '').replace(/^\\/+/, '')"));
+  });
+
+  it('keeps explorer document loads scoped to the route project', () => {
+    let codeViewerSource = readSource('web/panels/CodeViewer/CodeViewer.js');
+    let ctxPanelSource = readSource('web/panels/CtxPanel/CtxPanel.js');
+    let localeSource = readSource('web/common/portal-locales.js');
+
+    assert.match(codeViewerSource, /_loadRequestId = 0;/);
+    assert.match(codeViewerSource, /this\._loadFile\(event\.detail\.path, event\.detail\.projectId\)/);
+    assert.match(codeViewerSource, /api\("\/api\/file", \{ path, projectId \}\)/);
+    assert.match(codeViewerSource, /if \(requestId !== this\._loadRequestId\) return;/);
+    assert.match(codeViewerSource, /resolveProjectPath\(path, projectId\)/);
+
+    assert.match(ctxPanelSource, /import \{ getSourceLanguage \} from 'symbiote-node\/ui';/);
+    assert.match(ctxPanelSource, /_loadRequestId = 0;/);
+    assert.match(ctxPanelSource, /let projectId = detail\.projectId \|\| getActiveRouteProjectId\(\);/);
+    assert.match(ctxPanelSource, /getSourceLanguage\(file\) === 'md'/);
+    assert.match(ctxPanelSource, /api\('\/api\/docs', \{ file, projectId \}\)/);
+    assert.match(ctxPanelSource, /if \(requestId !== this\._loadRequestId\) return;/);
+    assert.match(ctxPanelSource, /tPortal\('text\.markdownShownInViewer'\)/);
+    assert.match(localeSource, /'portal\.text\.markdownShownInViewer'/);
   });
 
   it('prevents panel self-fetches from accepting stale project skeletons', () => {

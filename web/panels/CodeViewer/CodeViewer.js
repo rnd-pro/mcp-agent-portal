@@ -5,6 +5,7 @@ import {
   events,
   state,
   formatStats,
+  getActiveRouteProjectId,
   resolveProjectPath,
 } from "../../app.js";
 import {
@@ -89,6 +90,8 @@ function directoryInfoFromSkeleton(path, skeleton = null) {
 }
 
 export class CodeViewer extends Symbiote {
+  _loadRequestId = 0;
+
   initCallback() {
     this.addEventListener("source-viewer-show-graph", (event) => {
       const path = event.detail?.path;
@@ -99,27 +102,28 @@ export class CodeViewer extends Symbiote {
       }
     });
 
-    events.addEventListener("file-selected", (event) => this._loadFile(event.detail.path));
+    events.addEventListener("file-selected", (event) => this._loadFile(event.detail.path, event.detail.projectId));
     events.addEventListener("follow-focus-changed", (event) => {
       const detail = event.detail;
       if (detail.type !== "file" || !detail.target) return;
-      this._loadFile(detail.target);
+      this._loadFile(detail.target, getActiveRouteProjectId());
       if (detail.meta?.startLine) {
         setTimeout(() => this._getSourceViewer()?.scrollToLine?.(detail.meta.startLine), 200);
       }
     });
 
-    if (state.activeFile) requestAnimationFrame(() => this._loadFile(state.activeFile));
+    if (state.activeFile) requestAnimationFrame(() => this._loadFile(state.activeFile, getActiveRouteProjectId()));
   }
 
   _getSourceViewer() {
     return this.querySelector("source-viewer");
   }
 
-  async _loadFile(path) {
+  async _loadFile(path, projectId = getActiveRouteProjectId()) {
     const viewer = this._getSourceViewer();
     if (!viewer) return;
 
+    const requestId = ++this._loadRequestId;
     viewer.showEmpty(path);
     const lang = getSourceLanguage(path);
 
@@ -141,9 +145,10 @@ export class CodeViewer extends Symbiote {
 
     try {
       const [file, rawFile] = await Promise.all([
-        api("/api/file", { path }),
-        api("/api/raw-file", { path }).catch(() => null),
+        api("/api/file", { path, projectId }),
+        api("/api/raw-file", { path, projectId }).catch(() => null),
       ]);
+      if (requestId !== this._loadRequestId) return;
 
       const code = typeof file.code === "string"
         ? file.code
@@ -159,32 +164,33 @@ export class CodeViewer extends Symbiote {
         lang,
         isReadable,
         statsText: file.codeTok && file.expanded ? formatStats(file) : "",
-        transform: (context) => this._transformFile(context),
+        transform: (context) => this._transformFile({ ...context, projectId }),
       });
 
-      this._lintCurrentFile(path);
+      this._lintCurrentFile(path, projectId);
     } catch (error) {
+      if (requestId !== this._loadRequestId) return;
       viewer.showError(path, error);
     }
   }
 
-  async _transformFile({ path, isReadable }) {
+  async _transformFile({ path, isReadable, projectId = getActiveRouteProjectId() }) {
     if (isReadable) {
-      const result = await api("/api/compact-file", { path });
+      const result = await api("/api/compact-file", { path, projectId });
       return {
         code: result?.code || "// Compression unavailable",
         statsText: result ? `Compressed: ${(result.compressed / 1000).toFixed(1)}K chars (${result.savings})` : "",
       };
     }
 
-    const result = await api("/api/expand-file", { path });
+    const result = await api("/api/expand-file", { path, projectId });
     return {
       code: result?.code || "// Expand unavailable",
       statsText: result ? `Expanded: ${(result.decompiled / 1000).toFixed(1)}K chars | JSDocs injected: ${result.injected || 0}` : "",
     };
   }
 
-  async _lintCurrentFile(path) {
+  async _lintCurrentFile(path, projectId = getActiveRouteProjectId()) {
     const lang = getSourceLanguage(path);
     if (lang !== "js" && lang !== "mjs") return;
 
@@ -195,7 +201,7 @@ export class CodeViewer extends Symbiote {
       const response = await fetch("/api/lint-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filePath: resolveProjectPath(path) }),
+        body: JSON.stringify({ filePath: resolveProjectPath(path, projectId) }),
       });
       const diagnostics = await response.json();
       if (Array.isArray(diagnostics) && diagnostics[0]?.messages?.length > 0) {

@@ -50,12 +50,28 @@ import { uiAlert } from "symbiote-node/ui";
 window.alert = (msg) => uiAlert(msg);
 export const baseUrl = new URL(".", import.meta.url).href;
 
-export function resolveProjectPath(p) {
+function getProjectRoot(projectId = dashState.activeProjectId) {
+  let proj = projectId
+    ? (dashState.projectHistory || []).find(p => p.id === projectId)
+    : null;
+  return proj?.path || null;
+}
+
+function getApiProjectId(params = {}) {
+  return params.projectId || dashState.activeProjectId || null;
+}
+
+function getProjectScopedPathArgs(params = {}) {
+  let projectId = getApiProjectId(params);
+  return {
+    path: resolveProjectPath(params.path, projectId),
+    projectId,
+  };
+}
+
+export function resolveProjectPath(p, projectId = dashState.activeProjectId) {
   let projectRoot = null;
-  if (dashState.activeProjectId) {
-    let proj = (dashState.projectHistory || []).find(p => p.id === dashState.activeProjectId);
-    if (proj) projectRoot = proj.path;
-  }
+  if (projectId) projectRoot = getProjectRoot(projectId);
   if (!p || p === '.') return projectRoot || '.';
   if (p.startsWith('/')) return p;
   if (projectRoot) return projectRoot + '/' + p;
@@ -72,29 +88,30 @@ export function skeletonMatchesProject(skeleton, projectId) {
 }
 
 export function getActiveRouteProjectId() {
-  if (dashState.activeProjectId) return dashState.activeProjectId;
   let query = String(location.hash || '').split('?')[1] || '';
-  return new URLSearchParams(query).get('project') || null;
+  let routeProjectId = new URLSearchParams(query).get('project') || null;
+  return routeProjectId || dashState.activeProjectId || null;
 }
 
 export async function api(endpoint, params = {}) {
   const urlParams = new URLSearchParams(window.location.search);
   const serverName = urlParams.get('server') || "project-graph";
-  let projectRoot = resolveProjectPath('.');
+  let requestProjectId = getApiProjectId(params);
+  let projectRoot = resolveProjectPath('.', requestProjectId);
 
   const map = {
-    "/api/skeleton": { name: "get_skeleton", args: p => ({ path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null }) },
-    "/api/file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: true }) },
-    "/api/compact-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: false }) },
-    "/api/expand-file": { name: "compact", args: p => ({ action: "expand_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: true }) },
-    "/api/raw-file": { name: "compact", args: p => ({ action: "compact_file", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null, beautify: false }) },
-    "/api/analysis": { name: "analyze", args: p => ({ action: "full_analysis", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null }) },
-    "/api/analysis-summary": { name: "analyze", args: p => ({ action: "analysis_summary", path: resolveProjectPath(p.path), projectId: p.projectId || dashState.activeProjectId || null }) },
+    "/api/skeleton": { name: "get_skeleton", args: p => getProjectScopedPathArgs(p) },
+    "/api/file": { name: "compact", args: p => ({ action: "compact_file", ...getProjectScopedPathArgs(p), beautify: true }) },
+    "/api/compact-file": { name: "compact", args: p => ({ action: "compact_file", ...getProjectScopedPathArgs(p), beautify: false }) },
+    "/api/expand-file": { name: "compact", args: p => ({ action: "expand_file", ...getProjectScopedPathArgs(p), beautify: true }) },
+    "/api/raw-file": { name: "compact", args: p => ({ action: "compact_file", ...getProjectScopedPathArgs(p), beautify: false }) },
+    "/api/analysis": { name: "analyze", args: p => ({ action: "full_analysis", ...getProjectScopedPathArgs(p) }) },
+    "/api/analysis-summary": { name: "analyze", args: p => ({ action: "analysis_summary", ...getProjectScopedPathArgs(p) }) },
     "/api/deps": { name: "navigate", args: p => ({ action: "deps", symbol: p.symbol, path: projectRoot }) },
     "/api/usages": { name: "navigate", args: p => ({ action: "usages", symbol: p.symbol, path: projectRoot }) },
     "/api/expand": { name: "navigate", args: p => ({ action: "expand", symbol: p.symbol, path: projectRoot }) },
     "/api/chain": { name: "navigate", args: p => ({ action: "call_chain", from: p.from, to: p.to, path: projectRoot }) },
-    "/api/docs": { name: "docs", args: p => ({ action: "get", path: projectRoot || '.', file: p.file || p.path }) }
+    "/api/docs": { name: "docs", args: p => ({ action: "get", path: resolveProjectPath('.', getApiProjectId(p)) || '.', file: p.file || p.path, projectId: getApiProjectId(p) }) }
   };
 
   const tool = map[endpoint];
@@ -241,7 +258,11 @@ function handleProjectSwitch(projectId) {
     updateTopbarPath();
     return;
   }
+  let previousProjectId = _currentProjectId;
   _currentProjectId = projectId;
+  if (previousProjectId !== undefined && previousProjectId !== projectId) {
+    state.activeFile = null;
+  }
 
   let sidebar = document.getElementById('app-sidebar');
   let baseSections = getSectionsForScope(projectId);
@@ -366,8 +387,9 @@ function handleRoute() {
 
   // Explorer file routing
   if (section === 'explorer' && subPath) {
+    state.activeFile = subPath;
     requestAnimationFrame(() => {
-      emit('file-selected', { path: subPath, fromRoute: true });
+      emit('file-selected', { path: subPath, projectId, fromRoute: true });
     });
   }
 }

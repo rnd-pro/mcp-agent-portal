@@ -1,7 +1,8 @@
 // @ctx .context/web/panels/ctx-panel.ctx
 import Symbiote from '@symbiotejs/symbiote';
 import 'symbiote-node/ui';
-import { api, events, state } from '../../app.js';
+import { getSourceLanguage } from 'symbiote-node/ui';
+import { api, events, getActiveRouteProjectId, state } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
 import template from './CtxPanel.tpl.js';
 import css from './CtxPanel.css.js';
@@ -29,13 +30,26 @@ function setListItem(item, data) {
 }
 
 export class CtxPanel extends Symbiote {
+  _loadRequestId = 0;
+
   initCallback() {
     this._renderContentEmpty(tPortal('text.selectFileDocumentation'));
 
     events.addEventListener('file-selected', (event) => {
-      this._loadCtx(event.detail.path);
-      this._loadOutline(event.detail.path);
+      this._handleFileSelected(event.detail);
     });
+  }
+
+  _handleFileSelected(detail = {}) {
+    let file = detail.path;
+    let projectId = detail.projectId || getActiveRouteProjectId();
+    if (getSourceLanguage(file) === 'md') {
+      this._clearOutline();
+      this._loadCtx(file, projectId);
+      return;
+    }
+    this._loadOutline(file);
+    this._loadCtx(file, projectId);
   }
 
   _loadOutline(file) {
@@ -77,11 +91,18 @@ export class CtxPanel extends Symbiote {
     this.ref.outline.replaceChildren(section);
   }
 
-  async _loadCtx(file) {
+  async _loadCtx(file, projectId = getActiveRouteProjectId()) {
+    const requestId = ++this._loadRequestId;
+    if (getSourceLanguage(file) === 'md') {
+      this._renderContentEmpty(tPortal('text.markdownShownInViewer'));
+      return;
+    }
+
     this._renderContentEmpty(tPortal('text.loadingDocs'), 'pg-pulse');
 
     try {
-      const response = await api('/api/docs', { file });
+      const response = await api('/api/docs', { file, projectId });
+      if (requestId !== this._loadRequestId) return;
       const docs = response?.docs || response?.content || '';
       if (!docs) {
         this._renderContentEmpty(tPortal('text.noCtxDocumentation'));
@@ -97,9 +118,11 @@ export class CtxPanel extends Symbiote {
       raw.className = 'pg-ctx-raw';
       this.ref.content.replaceChildren(raw);
       customElements.whenDefined('code-block').then(() => {
+        if (requestId !== this._loadRequestId) return;
         raw.setContent(JSON.stringify(docs, null, 2), 'json');
       });
     } catch (err) {
+      if (requestId !== this._loadRequestId) return;
       this._renderContentEmpty(tPortal('text.noDocumentationAvailable'));
     }
   }
