@@ -77,14 +77,4 @@ chat-composer .composer-body textarea::placeholder {
   opacity: 0.41;
 }
 
-/* Composer input and user message background */
-chat-composer .composer-body {
-  --chat-composer-bg: hsl(0 0% 20% / 1);
-  background: hsl(0 0% 20% / 1);
-}
-
-chat-message-item .message.user .msg-content {
-  background: hsl(0 0% 20% / 1);
-}
-
 `;
