@@ -88,6 +88,12 @@ describe('agent chat input state', () => {
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
     assert.match(source, /_matchesWakeCommand\(text = ''\)/);
     assert.match(source, /btn-wake-listen/);
+    assert.match(source, /btn-voice-response/);
+    assert.match(source, /speechSynthesis/);
+    assert.match(source, /_toggleVoiceResponseMode\(\)/);
+    assert.match(source, /_speakPendingAgentResponse\(\)/);
+    assert.match(source, /this\._voiceResponseLastAgentKey = current\?\.key \|\| ''/);
+    assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
     assert.match(source, /chat-composer-voice-command-toggle', \(\) => this\._toggleVoiceCommandMode\(\)/);

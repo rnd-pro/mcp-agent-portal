@@ -43,6 +43,9 @@ export class AgentChat extends Symbiote {
   _wakePausedForRecording = false;
   _wakeRecognition = null;
   _wakeTriggering = false;
+  _voiceResponseEnabled = false;
+  _voiceResponseLastAgentKey = '';
+  _speakingVoiceResponse = false;
   init$ = {
     messages: [],
     messageItems: [],
@@ -140,6 +143,8 @@ export class AgentChat extends Symbiote {
       this._renderMessages();
       this._applyProjectTransactions(_msgs);
       this._updateEmptyState();
+      this._syncVoiceResponseButton();
+      this._speakPendingAgentResponse();
       // Re-evaluate adapter options to lock provider when messages appear.
       queueMicrotask(() => this._updateComposerFooter());
     });
@@ -343,8 +348,18 @@ export class AgentChat extends Symbiote {
     body.insertBefore(wakeBtn, micBtn);
     this._wakeBtn = wakeBtn;
 
+    let responseBtn = document.createElement('button');
+    responseBtn.className = 'btn-voice-response';
+    responseBtn.type = 'button';
+    responseBtn.title = tPortal('settings.voice.speakResponse');
+    responseBtn.hidden = true;
+    responseBtn.innerHTML = '<span class="material-symbols-outlined">record_voice_over</span>';
+    body.insertBefore(responseBtn, micBtn);
+    this._voiceResponseBtn = responseBtn;
+
     micBtn.onclick = () => this._toggleRecording();
     wakeBtn.onclick = () => this._toggleWakeMode();
+    responseBtn.onclick = () => this._toggleVoiceResponseMode();
 
     // Live interim results callback
     this._audioRecorder.onInterim = (text, elapsed) => {
@@ -450,6 +465,101 @@ export class AgentChat extends Symbiote {
     this._wakeBtn.title = this._wakeModeEnabled
       ? tPortal('settings.voice.listeningFor', { command: this._getWakeCommandPhrase() })
       : tPortal('settings.voice.listenButton');
+    if (this._micBtn) this._micBtn.hidden = this._wakeModeEnabled;
+    this._syncVoiceResponseButton();
+  }
+
+  _syncVoiceResponseButton() {
+    if (!this._voiceResponseBtn) return;
+    let available = Boolean(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance);
+    this._voiceResponseBtn.hidden = !this._wakeModeEnabled;
+    this._voiceResponseBtn.disabled = !this._wakeModeEnabled || !available;
+    this._voiceResponseBtn.classList.toggle('enabled', this._voiceResponseEnabled);
+    this._voiceResponseBtn.classList.toggle('speaking', this._speakingVoiceResponse);
+    this._voiceResponseBtn.title = !available
+      ? tPortal('settings.voice.speakUnavailable')
+      : tPortal('settings.voice.speakResponse');
+  }
+
+  _toggleVoiceResponseMode() {
+    if (!this._wakeModeEnabled || !globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) return;
+    this._voiceResponseEnabled = !this._voiceResponseEnabled;
+    if (this._voiceResponseEnabled) {
+      let current = this._getLatestAgentSpeechMessage();
+      this._voiceResponseLastAgentKey = current?.key || '';
+    } else {
+      this._cancelVoiceResponseSpeech();
+    }
+    this._syncVoiceResponseButton();
+  }
+
+  _getLatestAgentSpeechMessage() {
+    let messages = this.$.messages || [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      let msg = messages[i];
+      if (msg?.role !== 'agent' || !msg.text) continue;
+      let text = this._cleanSpeechText(msg.text);
+      if (!text) continue;
+      return { key: `${i}:${text}`, text };
+    }
+    return null;
+  }
+
+  _cleanSpeechText(text) {
+    return String(text)
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[#*_>~-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+  }
+
+  _getLatestAgentSpeechText() {
+    return this._getLatestAgentSpeechMessage()?.text || '';
+  }
+
+  _speechLocale() {
+    let locale = getLocalization().locale;
+    if (locale === 'ru') return 'ru-RU';
+    if (locale === 'es') return 'es-ES';
+    return 'en-US';
+  }
+
+  _speakPendingAgentResponse() {
+    if (!this._voiceResponseEnabled || this._isSending) return;
+    let message = this._getLatestAgentSpeechMessage();
+    if (!message || message.key === this._voiceResponseLastAgentKey) return;
+    this._voiceResponseLastAgentKey = message.key;
+    this._speakAgentResponseText(message.text);
+  }
+
+  _cancelVoiceResponseSpeech() {
+    if (globalThis.speechSynthesis) globalThis.speechSynthesis.cancel();
+    this._speakingVoiceResponse = false;
+    this._resumeWakeListeningAfterRecording();
+  }
+
+  _speakAgentResponseText(text) {
+    if (!text || !globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) return;
+    if (this._speakingVoiceResponse) {
+      globalThis.speechSynthesis.cancel();
+      this._speakingVoiceResponse = false;
+    }
+
+    this._pauseWakeListeningForRecording();
+    let utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = this._speechLocale();
+    utterance.onend = () => {
+      this._speakingVoiceResponse = false;
+      this._syncVoiceResponseButton();
+      this._resumeWakeListeningAfterRecording();
+    };
+    utterance.onerror = utterance.onend;
+    this._speakingVoiceResponse = true;
+    this._syncVoiceResponseButton();
+    globalThis.speechSynthesis.cancel();
+    globalThis.speechSynthesis.speak(utterance);
   }
 
   _startWakeListening() {
@@ -504,8 +614,16 @@ export class AgentChat extends Symbiote {
   }
 
   _stopWakeListening({ disableMode = false } = {}) {
-    if (disableMode) this._wakeModeEnabled = false;
+    if (disableMode) {
+      this._wakeModeEnabled = false;
+      this._voiceResponseEnabled = false;
+      this._voiceResponseLastAgentKey = '';
+    }
     this._wakePausedForRecording = false;
+    if (disableMode && globalThis.speechSynthesis) {
+      globalThis.speechSynthesis.cancel();
+      this._speakingVoiceResponse = false;
+    }
     if (this._wakeRecognition) {
       this._wakeRecognition.onresult = null;
       this._wakeRecognition.onerror = null;
@@ -791,6 +909,7 @@ export class AgentChat extends Symbiote {
     this._isSending = active;
     this.ref.composer?.setSending?.(active);
     this._renderMessages();
+    if (!active) this._speakPendingAgentResponse();
   }
 
   _focusInput() {
