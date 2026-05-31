@@ -401,6 +401,10 @@ export class AgentChat extends Symbiote {
           optionsHtml += p.options.map(opt => {
             let val = typeof opt === 'string' ? opt : opt.val;
             let text = typeof opt === 'string' ? opt : opt.text;
+            // Show group metadata in option text for resource_group
+            if (p.id === 'resource_group' && typeof opt === 'object' && opt.subtitle) {
+              text += ` — ${opt.subtitle}`;
+            }
             let sel = val === paramValue ? 'selected' : '';
             return `<option value="${escapeHtml(val)}" ${sel}>${escapeHtml(text)}</option>`;
           }).join('');
