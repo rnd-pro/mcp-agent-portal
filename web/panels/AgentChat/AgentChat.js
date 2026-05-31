@@ -269,6 +269,7 @@ export class AgentChat extends Symbiote {
       adapter: this.$.chatAdapter || 'pool',
       chatParams: this.$.chatParams || {},
       isSubagentChat: this.$.isSubagentChat,
+      adapterMeta: this.$.adapterMeta || null,
     });
     this.$.isInputDisabled = state.disabled;
     this.$.inputPlaceholder = state.placeholder;
