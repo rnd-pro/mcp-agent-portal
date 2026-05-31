@@ -458,9 +458,9 @@ export class AgentChat extends Symbiote {
 
   _composerParamPriorityClass(paramId) {
     switch (paramId) {
-      case 'model': return 'composer-priority-5';
-      case 'agent': return 'composer-priority-4';
-      case 'resource_group': return 'composer-priority-3';
+      case 'agent': return 'composer-priority-5';
+      case 'resource_group': return 'composer-priority-4';
+      case 'model': return 'composer-priority-3';
       case 'provider': return 'composer-priority-2';
       case 'approval_mode': return 'composer-priority-2';
       case 'chatType': return 'composer-priority-1';
