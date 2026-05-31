@@ -6,7 +6,7 @@
  */
 export class AudioRecorder {
   constructor() {
-    this.state = 'idle'; // idle | recording | processing
+    this.state = 'idle'; // idle | starting | recording | processing
     this._onStateChange = null;
     this._onInterim = null;
     this._recognition = null;
@@ -15,6 +15,7 @@ export class AudioRecorder {
     this._stream = null;
     this._resultText = '';
     this._resolveStop = null;
+    this._resolved = false;
     this._startTime = 0;
     this._elapsedTimer = null;
   }
@@ -42,21 +43,30 @@ export class AudioRecorder {
 
   /**
    * Start recording.
-   * Returns a promise that resolves with { text, audioBase64?, mimeType? }
+   * Returns a promise that resolves once recording has actually started,
+   * or rejects if mic/permission fails.
    */
   async start() {
     if (this.state !== 'idle') return;
+    this._setState('starting');
 
-    if (this.hasSpeechRecognition) {
-      return this._startSpeechRecognition();
+    try {
+      if (this.hasSpeechRecognition) {
+        await this._startSpeechRecognition();
+      } else {
+        await this._startMediaRecorder();
+      }
+    } catch (err) {
+      this._setState('idle');
+      throw err;
     }
-    return this._startMediaRecorder();
   }
 
   /** Stop recording and return result. */
   async stop() {
     if (this.state !== 'recording') return { text: '' };
     this._setState('processing');
+    this._resolved = false;
 
     if (this._recognition) {
       return new Promise((resolve) => {
@@ -95,55 +105,90 @@ export class AudioRecorder {
     this._chunks = [];
     this._resultText = '';
     this._resolveStop = null;
+    this._resolved = false;
     this._setState('idle');
+  }
+
+  // ── Resolve helper (prevents double-resolve from onerror + onend) ──
+
+  _finish(result) {
+    if (this._resolved) return;
+    this._resolved = true;
+    this._recognition = null;
+    this._startTime = 0;
+    this._setState('idle');
+    this._resolveStop?.(result);
+    this._resolveStop = null;
   }
 
   // ── Web Speech API ──
 
   _startSpeechRecognition() {
-    let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition = new SpeechRecognition();
-    recognition.lang = navigator.language || 'en-US';
-    recognition.interimResults = true;
-    recognition.continuous = true;
+    return new Promise((resolveStart, rejectStart) => {
+      let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let recognition = new SpeechRecognition();
+      recognition.lang = navigator.language || 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = true;
 
-    this._resultText = '';
-    this._recognition = recognition;
+      this._resultText = '';
+      this._recognition = recognition;
+      let started = false;
 
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
+      recognition.onstart = () => {
+        if (started) return;
+        started = true;
+        this._startTime = Date.now();
+        this._setState('recording');
+        resolveStart();
+      };
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        this._resultText = transcript;
+        this._onInterim?.(transcript);
+      };
+
+      recognition.onend = () => {
+        let text = this._resultText.trim();
+        this._finish({ text });
+        if (!started) {
+          started = true;
+          rejectStart(new Error('Speech recognition ended before starting'));
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('[AudioRecorder] Speech recognition error:', event.error);
+        this._finish({ text: '' });
+        if (!started) {
+          started = true;
+          rejectStart(new Error(`Speech recognition error: ${event.error}`));
+        }
+      };
+
+      try {
+        recognition.start();
+      } catch (err) {
+        this._recognition = null;
+        rejectStart(err);
       }
-      this._resultText = transcript;
-      this._onInterim?.(transcript);
-    };
-
-    recognition.onend = () => {
-      let text = this._resultText.trim();
-      this._recognition = null;
-      this._setState('idle');
-      this._resolveStop?.({ text });
-      this._resolveStop = null;
-    };
-
-    recognition.onerror = (event) => {
-      console.warn('[AudioRecorder] Speech recognition error:', event.error);
-      this._recognition = null;
-      this._setState('idle');
-      this._resolveStop?.({ text: '' });
-      this._resolveStop = null;
-    };
-
-    recognition.start();
-    this._startTime = Date.now();
-    this._setState('recording');
+    });
   }
 
   // ── MediaRecorder fallback ──
 
   async _startMediaRecorder() {
     let stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Guard: if cancel() was called while waiting for getUserMedia
+    if (this.state !== 'starting') {
+      for (let track of stream.getTracks()) track.stop();
+      return;
+    }
+
     this._stream = stream;
 
     let mimeType = 'audio/webm;codecs=opus';
@@ -166,18 +211,14 @@ export class AudioRecorder {
       this._cleanupStream();
 
       this._blobToBase64(blob).then((audioBase64) => {
-        this._setState('idle');
-        this._resolveStop?.({ text: '', audioBase64, mimeType: recorder.mimeType });
-        this._resolveStop = null;
+        this._finish({ text: '', audioBase64, mimeType: recorder.mimeType });
       });
     };
 
     recorder.onerror = () => {
       this._mediaRecorder = null;
       this._cleanupStream();
-      this._setState('idle');
-      this._resolveStop?.({ text: '' });
-      this._resolveStop = null;
+      this._finish({ text: '' });
     };
 
     recorder.start();

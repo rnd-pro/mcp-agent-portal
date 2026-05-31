@@ -923,6 +923,14 @@ export class AgentChat extends Symbiote {
 
   async _loadChat(chatId) {
     this._loadedChatId = chatId;
+    // Clean up any active voice recording
+    this._removeVoicePreview();
+    this._audioRecorder.cancel();
+    if (this._micBtn) {
+      this._micBtn.classList.remove('recording', 'processing');
+      let icon = this._micBtn.querySelector('.material-symbols-outlined');
+      if (icon) icon.textContent = 'mic';
+    }
     // Reset sending state — each chat manages its own task lifecycle independently.
     // The correct state will be restored below if the chat has a pendingTaskId.
     this._setSending(false);
