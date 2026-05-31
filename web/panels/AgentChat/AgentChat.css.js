@@ -83,21 +83,24 @@ chat-composer .composer-body textarea::placeholder {
   50% { opacity: 0; }
 }
 
-chat-composer .composer-body {
-  position: relative;
-}
-
-chat-composer .composer-body:has(textarea:placeholder-shown)::after {
-  content: '|';
+chat-composer .composer-body:has(textarea:placeholder-shown)::before {
+  content: '';
   position: absolute;
-  left: 0;
-  top: 4px;
-  color: var(--sn-text-dim);
+  left: var(--sn-composer-body-padding-left, 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.5px;
+  height: 16px;
+  background: var(--sn-text-dim);
   opacity: 0.41;
-  font-size: 13px;
-  line-height: 1.4;
   pointer-events: none;
   animation: cursor-blink 1s step-end infinite;
+  z-index: 1;
+}
+
+/* Hide fake cursor when real cursor is active */
+chat-composer .composer-body:has(textarea:focus)::before {
+  display: none;
 }
 
 `;
