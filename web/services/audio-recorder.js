@@ -62,6 +62,18 @@ export class AudioRecorder {
     }
   }
 
+  /** Force MediaRecorder start (fallback when Speech API fails). */
+  async startMediaRecorder() {
+    if (this.state !== 'idle') return;
+    this._setState('starting');
+    try {
+      await this._startMediaRecorder();
+    } catch (err) {
+      this._setState('idle');
+      throw err;
+    }
+  }
+
   /** Stop recording and return result. */
   async stop() {
     if (this.state !== 'recording') return { text: '' };

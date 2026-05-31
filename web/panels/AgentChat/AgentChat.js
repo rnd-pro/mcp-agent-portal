@@ -389,12 +389,21 @@ export class AgentChat extends Symbiote {
       this._stopRecording();
     } else if (this._audioRecorder.state === 'idle') {
       try {
-        this._showVoicePreview('recording');
         await this._audioRecorder.start();
+        this._showVoicePreview('recording');
         this._micBtn?.classList.add('recording');
       } catch (err) {
-        console.error('[AgentChat] Mic start error:', err);
-        this._removeVoicePreview();
+        console.warn('[AgentChat] Primary mic start failed, trying fallback:', err.message);
+        // If Speech Recognition failed, try MediaRecorder fallback
+        if (this._audioRecorder.hasSpeechRecognition && this._audioRecorder.state === 'idle') {
+          try {
+            await this._audioRecorder.startMediaRecorder();
+            this._showVoicePreview('recording');
+            this._micBtn?.classList.add('recording');
+          } catch (err2) {
+            console.error('[AgentChat] Mic fallback also failed:', err2);
+          }
+        }
       }
     }
   }
