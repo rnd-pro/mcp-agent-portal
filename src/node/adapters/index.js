@@ -364,24 +364,28 @@ function buildAdapterMetadata() {
     },
     gemini: {
       name: 'Gemini CLI',
+      supportsAudio: true,
       parameters: [
         { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('gemini'), preferred: rgPrefs.byProvider['gemini'] || [] }
       ]
     },
     claude: {
       name: 'Claude CLI',
+      supportsAudio: false,
       parameters: [
         { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('claude'), preferred: rgPrefs.byProvider['claude'] || [] }
       ]
     },
     codex: {
       name: 'Codex CLI',
+      supportsAudio: false,
       parameters: [
         { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('codex'), preferred: rgPrefs.byProvider['codex'] || [] }
       ]
     },
     opencode: {
       name: 'OpenCode',
+      supportsAudio: true,
       parameters: [
         { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('opencode'), preferred: rgPrefs.byProvider['opencode'] || [] }
       ]

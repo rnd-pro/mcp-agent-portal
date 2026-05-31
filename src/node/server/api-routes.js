@@ -10,6 +10,7 @@ import { createCoreRoutes } from './routes/core-routes.js';
 import { createOperationRoutes } from './routes/operation-routes.js';
 import { createProjectGraphRoutes } from './routes/project-graph-routes.js';
 import { createSettingsRoutes } from './routes/settings-routes.js';
+import { createAudioTranscribeRoutes } from './routes/audio-transcribe-routes.js';
 import { createStateRoutes } from './routes/state-routes.js';
 
 /**
@@ -27,6 +28,7 @@ export function createRoutes(ctx) {
     ...createAgentPortalRoutes(ctx),
     ...createOperationRoutes(ctx),
     ...createStateRoutes(ctx),
+    ...createAudioTranscribeRoutes(),
   };
 }
 

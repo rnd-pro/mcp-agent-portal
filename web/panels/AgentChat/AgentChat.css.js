@@ -77,4 +77,56 @@ chat-composer .composer-body textarea::placeholder {
   opacity: 0.41;
 }
 
+/* ── Mic button ── */
+chat-composer .btn-mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--sn-text-dim);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  flex: 0 0 auto;
+}
+
+chat-composer .btn-mic:hover {
+  color: var(--sn-text);
+  background: var(--sn-node-hover);
+}
+
+chat-composer .btn-mic.recording {
+  color: var(--sn-danger-color);
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+chat-composer .btn-mic.recording .material-symbols-outlined {
+  font-variation-settings: 'FILL' 1;
+}
+
+chat-composer .btn-mic.processing {
+  color: var(--sn-text-dim);
+  pointer-events: none;
+}
+
+chat-composer .btn-mic.processing .material-symbols-outlined {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+chat-composer .btn-mic .material-symbols-outlined {
+  font-size: 18px;
+}
+
 `;

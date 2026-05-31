@@ -12,6 +12,7 @@ import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
 import { ICONS } from '../../common/icons.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
+import { AudioRecorder } from '../../services/audio-recorder.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import {
   formatAttachedContextBlock,
@@ -31,6 +32,7 @@ import '../../components/ChatSidebar/ChatSidebar.js';
  */
 export class AgentChat extends Symbiote {
   static isoMode = true;
+  _audioRecorder = new AudioRecorder();
   init$ = {
     messages: [],
     messageItems: [],
@@ -191,6 +193,7 @@ export class AgentChat extends Symbiote {
     });
 
     this._syncComposerComponent();
+    this._setupMicButton();
   }
 
   _syncComposerComponent() {
@@ -289,6 +292,67 @@ export class AgentChat extends Symbiote {
   }
 
   /** Toggle send button between arrow_upward and stop */
+  _setupMicButton() {
+    let composer = this.ref.composer;
+    if (!composer || !this._audioRecorder.isAvailable) return;
+    let body = composer.querySelector('.composer-body');
+    let sendBtn = body?.querySelector('.btn-send');
+    if (!body || !sendBtn || body.querySelector('.btn-mic')) return;
+
+    let micBtn = document.createElement('button');
+    micBtn.className = 'btn-mic';
+    micBtn.type = 'button';
+    micBtn.title = 'Voice input';
+    micBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
+    body.insertBefore(micBtn, sendBtn);
+    this._micBtn = micBtn;
+
+    micBtn.onclick = () => this._toggleRecording();
+  }
+
+  async _toggleRecording() {
+    if (this._audioRecorder.state === 'recording') {
+      this._micBtn?.classList.remove('recording');
+      this._micBtn?.classList.add('processing');
+      let icon = this._micBtn?.querySelector('.material-symbols-outlined');
+      if (icon) icon.textContent = 'progress_activity';
+
+      try {
+        let result = await this._audioRecorder.stop();
+        if (result.text) {
+          this.ref.composer?.setValue?.(result.text);
+          this.$.inputVal = result.text;
+          this._sendMessage();
+        } else if (result.audioBase64) {
+          let res = await fetch('/api/audio/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audio: result.audioBase64, mimeType: result.mimeType }),
+          });
+          let data = await res.json();
+          if (data.text) {
+            this.ref.composer?.setValue?.(data.text);
+            this.$.inputVal = data.text;
+            this._sendMessage();
+          }
+        }
+      } catch (err) {
+        console.error('[AgentChat] Transcription error:', err);
+      } finally {
+        this._micBtn?.classList.remove('processing');
+        let icon = this._micBtn?.querySelector('.material-symbols-outlined');
+        if (icon) icon.textContent = 'mic';
+      }
+    } else {
+      try {
+        await this._audioRecorder.start();
+        this._micBtn?.classList.add('recording');
+      } catch (err) {
+        console.error('[AgentChat] Mic start error:', err);
+      }
+    }
+  }
+
   _setSending(active) {
     this._isSending = active;
     this.ref.composer?.setSending?.(active);
