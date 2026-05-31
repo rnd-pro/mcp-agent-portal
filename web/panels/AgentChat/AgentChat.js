@@ -38,6 +38,11 @@ export class AgentChat extends Symbiote {
   _voiceCommandTriggered = false;
   _voiceCommandTextOverride = '';
   _voiceCommandPhrases = null;
+  _wakeCommandPhrases = null;
+  _wakeModeEnabled = false;
+  _wakePausedForRecording = false;
+  _wakeRecognition = null;
+  _wakeTriggering = false;
   init$ = {
     messages: [],
     messageItems: [],
@@ -161,6 +166,7 @@ export class AgentChat extends Symbiote {
   }
 
   disconnectedCallback() {
+    this._stopWakeListening({ disableMode: true });
     this._stopVoiceUiTimer();
     this._audioRecorder.cancel();
     this._removeVoicePreview();
@@ -324,7 +330,21 @@ export class AgentChat extends Symbiote {
     body.insertBefore(micBtn, sendBtn);
     this._micBtn = micBtn;
 
+    let wakeBtn = document.createElement('button');
+    wakeBtn.className = 'btn-wake-listen';
+    wakeBtn.type = 'button';
+    wakeBtn.title = tPortal('settings.voice.listenButton');
+    wakeBtn.setAttribute('aria-pressed', 'false');
+    wakeBtn.innerHTML = '<span class="material-symbols-outlined">hearing</span>';
+    if (!this._audioRecorder.hasSpeechRecognition) {
+      wakeBtn.disabled = true;
+      wakeBtn.title = tPortal('settings.voice.listenUnavailable');
+    }
+    body.insertBefore(wakeBtn, micBtn);
+    this._wakeBtn = wakeBtn;
+
     micBtn.onclick = () => this._toggleRecording();
+    wakeBtn.onclick = () => this._toggleWakeMode();
 
     // Live interim results callback
     this._audioRecorder.onInterim = (text, elapsed) => {
@@ -345,25 +365,47 @@ export class AgentChat extends Symbiote {
     };
   }
 
+  _defaultWakeCommandPhrases() {
+    return {
+      en: 'voice input',
+      ru: 'голосовой ввод',
+      es: 'entrada de voz',
+    };
+  }
+
   _getVoiceCommandPhrase() {
     let locale = getLocalization().locale;
     let phrases = this._voiceCommandPhrases || this._defaultVoiceCommandPhrases();
     return phrases[locale] || this._defaultVoiceCommandPhrases()[locale] || this._defaultVoiceCommandPhrases().en;
   }
 
+  _getWakeCommandPhrase() {
+    let locale = getLocalization().locale;
+    let phrases = this._wakeCommandPhrases || this._defaultWakeCommandPhrases();
+    return phrases[locale] || this._defaultWakeCommandPhrases()[locale] || this._defaultWakeCommandPhrases().en;
+  }
+
   async _loadVoiceInputSettings() {
     try {
       let settings = await fetch('/api/settings').then((res) => res.json());
-      let defaults = this._defaultVoiceCommandPhrases();
-      let saved = settings?.voiceInput?.sendCommands || {};
+      let sendDefaults = this._defaultVoiceCommandPhrases();
+      let wakeDefaults = this._defaultWakeCommandPhrases();
+      let savedSend = settings?.voiceInput?.sendCommands || {};
+      let savedWake = settings?.voiceInput?.wakeCommands || {};
       let legacy = String(settings?.voiceInput?.sendCommand || '').trim();
       this._voiceCommandPhrases = {
-        en: String(saved.en || legacy || defaults.en).trim() || defaults.en,
-        ru: String(saved.ru || defaults.ru).trim() || defaults.ru,
-        es: String(saved.es || defaults.es).trim() || defaults.es,
+        en: String(savedSend.en || legacy || sendDefaults.en).trim() || sendDefaults.en,
+        ru: String(savedSend.ru || sendDefaults.ru).trim() || sendDefaults.ru,
+        es: String(savedSend.es || sendDefaults.es).trim() || sendDefaults.es,
+      };
+      this._wakeCommandPhrases = {
+        en: String(savedWake.en || wakeDefaults.en).trim() || wakeDefaults.en,
+        ru: String(savedWake.ru || wakeDefaults.ru).trim() || wakeDefaults.ru,
+        es: String(savedWake.es || wakeDefaults.es).trim() || wakeDefaults.es,
       };
     } catch {
       this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
+      this._wakeCommandPhrases = this._defaultWakeCommandPhrases();
     }
   }
 
@@ -379,6 +421,132 @@ export class AgentChat extends Symbiote {
     if (!commandPattern.test(value)) return { matched: false, text: value };
     let cleaned = value.replace(commandPattern, '').trim();
     return { matched: Boolean(cleaned), text: cleaned };
+  }
+
+  _matchesWakeCommand(text = '') {
+    let value = String(text || '').trim();
+    if (!value) return false;
+    let command = this._escapeRegExp(this._getWakeCommandPhrase());
+    let commandPattern = new RegExp(`(?:[\\s,.;:!?]+|^)(${command})(?:[\\s,.;:!?]+|$)`, 'iu');
+    return commandPattern.test(value);
+  }
+
+  async _toggleWakeMode() {
+    if (this._wakeModeEnabled) {
+      this._stopWakeListening({ disableMode: true });
+      return;
+    }
+    await this._loadVoiceInputSettings();
+    this._wakeModeEnabled = true;
+    this._wakePausedForRecording = false;
+    this._syncWakeButton();
+    this._startWakeListening();
+  }
+
+  _syncWakeButton() {
+    if (!this._wakeBtn) return;
+    this._wakeBtn.classList.toggle('listening', this._wakeModeEnabled);
+    this._wakeBtn.setAttribute('aria-pressed', this._wakeModeEnabled ? 'true' : 'false');
+    this._wakeBtn.title = this._wakeModeEnabled
+      ? tPortal('settings.voice.listeningFor', { command: this._getWakeCommandPhrase() })
+      : tPortal('settings.voice.listenButton');
+  }
+
+  _startWakeListening() {
+    if (!this._wakeModeEnabled || this._wakeRecognition || this._audioRecorder.state !== 'idle') return;
+    let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      this._stopWakeListening({ disableMode: true });
+      this._showVoiceError('Continuous listening requires browser speech recognition.');
+      return;
+    }
+
+    let recognition = new SpeechRecognition();
+    recognition.lang = navigator.language || 'en-US';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    this._wakeRecognition = recognition;
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      if (this._matchesWakeCommand(transcript)) {
+        this._triggerVoiceInputFromWake();
+      }
+    };
+
+    recognition.onerror = (event) => {
+      this._wakeRecognition = null;
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        this._stopWakeListening({ disableMode: true });
+        return;
+      }
+      if (this._wakeModeEnabled && !this._wakePausedForRecording) {
+        this._syncWakeButton();
+      }
+    };
+
+    recognition.onend = () => {
+      this._wakeRecognition = null;
+      if (this._wakeModeEnabled && !this._wakePausedForRecording) {
+        setTimeout(() => this._startWakeListening(), 250);
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      this._wakeRecognition = null;
+      this._stopWakeListening({ disableMode: true });
+    }
+  }
+
+  _stopWakeListening({ disableMode = false } = {}) {
+    if (disableMode) this._wakeModeEnabled = false;
+    this._wakePausedForRecording = false;
+    if (this._wakeRecognition) {
+      this._wakeRecognition.onresult = null;
+      this._wakeRecognition.onerror = null;
+      this._wakeRecognition.onend = null;
+      try { this._wakeRecognition.abort(); } catch (_) { /* already stopped */ }
+      this._wakeRecognition = null;
+    }
+    this._syncWakeButton();
+  }
+
+  _pauseWakeListeningForRecording() {
+    if (!this._wakeModeEnabled) return;
+    this._wakePausedForRecording = true;
+    if (this._wakeRecognition) {
+      this._wakeRecognition.onresult = null;
+      this._wakeRecognition.onerror = null;
+      this._wakeRecognition.onend = null;
+      try { this._wakeRecognition.abort(); } catch (_) { /* already stopped */ }
+      this._wakeRecognition = null;
+    }
+    this._syncWakeButton();
+  }
+
+  _resumeWakeListeningAfterRecording() {
+    if (!this._wakeModeEnabled) return;
+    this._wakePausedForRecording = false;
+    this._syncWakeButton();
+    this._startWakeListening();
+  }
+
+  _triggerVoiceInputFromWake() {
+    if (this._wakeTriggering || this._audioRecorder.state !== 'idle') return;
+    this._wakeTriggering = true;
+    this._pauseWakeListeningForRecording();
+    setTimeout(async () => {
+      try {
+        await this._toggleRecording();
+      } finally {
+        this._wakeTriggering = false;
+      }
+    }, 200);
   }
 
   /** Show/update the live preview banner above the composer */
@@ -491,6 +659,7 @@ export class AgentChat extends Symbiote {
     } else if (this._audioRecorder.state === 'idle') {
       try {
         await this._loadVoiceInputSettings();
+        this._pauseWakeListeningForRecording();
         this._voiceInterimText = '';
         this._voiceCommandTriggered = false;
         this._voiceCommandTextOverride = '';
@@ -507,6 +676,7 @@ export class AgentChat extends Symbiote {
             this._voiceInterimText = '';
             this._voiceCommandTriggered = false;
             this._voiceCommandTextOverride = '';
+            this._pauseWakeListeningForRecording();
             await this._audioRecorder.startMediaRecorder();
             this._showVoicePreview('recording');
             this._startVoiceUiTimer();
@@ -514,9 +684,11 @@ export class AgentChat extends Symbiote {
           } catch (err2) {
             console.error('[AgentChat] Mic fallback also failed:', err2);
             this._showVoiceError('Microphone access denied. Check browser microphone permissions.');
+            this._resumeWakeListeningAfterRecording();
           }
         } else {
           this._showVoiceError('Microphone access denied. Check browser microphone permissions.');
+          this._resumeWakeListeningAfterRecording();
         }
       }
     }
@@ -580,6 +752,7 @@ export class AgentChat extends Symbiote {
       this._micBtn?.classList.remove('processing');
       let icon = this._micBtn?.querySelector('.material-symbols-outlined');
       if (icon) icon.textContent = 'mic';
+      this._resumeWakeListeningAfterRecording();
     }
   }
 
@@ -610,6 +783,7 @@ export class AgentChat extends Symbiote {
     this._micBtn?.classList.remove('recording', 'processing');
     let icon = this._micBtn?.querySelector('.material-symbols-outlined');
     if (icon) icon.textContent = 'mic';
+    this._resumeWakeListeningAfterRecording();
   }
 
 

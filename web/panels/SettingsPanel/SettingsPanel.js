@@ -77,9 +77,16 @@ const DEFAULT_GATEWAY = {
 
 function defaultVoiceCommands() {
   return {
-    en: 'send',
-    ru: 'отправить',
-    es: 'enviar',
+    send: {
+      en: 'send',
+      ru: 'отправить',
+      es: 'enviar',
+    },
+    wake: {
+      en: 'voice input',
+      ru: 'голосовой ввод',
+      es: 'entrada de voz',
+    },
   };
 }
 
@@ -194,19 +201,28 @@ export class SettingsPanel extends Symbiote {
   _applyVoiceInputSettings(raw) {
     let defaults = defaultVoiceCommands();
     let saved = raw.sendCommands || {};
+    let wake = raw.wakeCommands || {};
     let legacy = raw.sendCommand || '';
-    this.ref.voiceSendCommandEnInput.value = saved.en || legacy || defaults.en;
-    this.ref.voiceSendCommandRuInput.value = saved.ru || defaults.ru;
-    this.ref.voiceSendCommandEsInput.value = saved.es || defaults.es;
+    this.ref.voiceSendCommandEnInput.value = saved.en || legacy || defaults.send.en;
+    this.ref.voiceSendCommandRuInput.value = saved.ru || defaults.send.ru;
+    this.ref.voiceSendCommandEsInput.value = saved.es || defaults.send.es;
+    this.ref.voiceWakeCommandEnInput.value = wake.en || defaults.wake.en;
+    this.ref.voiceWakeCommandRuInput.value = wake.ru || defaults.wake.ru;
+    this.ref.voiceWakeCommandEsInput.value = wake.es || defaults.wake.es;
   }
 
   _readVoiceInputSettings() {
     let defaults = defaultVoiceCommands();
     return {
       sendCommands: {
-        en: this.ref.voiceSendCommandEnInput.value.trim() || defaults.en,
-        ru: this.ref.voiceSendCommandRuInput.value.trim() || defaults.ru,
-        es: this.ref.voiceSendCommandEsInput.value.trim() || defaults.es,
+        en: this.ref.voiceSendCommandEnInput.value.trim() || defaults.send.en,
+        ru: this.ref.voiceSendCommandRuInput.value.trim() || defaults.send.ru,
+        es: this.ref.voiceSendCommandEsInput.value.trim() || defaults.send.es,
+      },
+      wakeCommands: {
+        en: this.ref.voiceWakeCommandEnInput.value.trim() || defaults.wake.en,
+        ru: this.ref.voiceWakeCommandRuInput.value.trim() || defaults.wake.ru,
+        es: this.ref.voiceWakeCommandEsInput.value.trim() || defaults.wake.es,
       },
     };
   }

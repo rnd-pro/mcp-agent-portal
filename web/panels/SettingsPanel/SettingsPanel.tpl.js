@@ -21,6 +21,7 @@ export default`
 
 <sn-card class="pg-voice-settings" ref="voiceCard">
   <span slot="title">Voice Input</span>
+  <div class="pg-voice-group-title">Send recognized text</div>
   <div class="pg-voice-grid">
     <sn-field variant="compact">
       <span slot="label">English Command</span>
@@ -35,7 +36,22 @@ export default`
       <input type="text" ref="voiceSendCommandEsInput" placeholder="enviar">
     </sn-field>
   </div>
-  <div class="pg-voice-note">In Auto language mode, the recording panel uses the command for the detected interface language.</div>
+  <div class="pg-voice-group-title">Start voice input</div>
+  <div class="pg-voice-grid">
+    <sn-field variant="compact">
+      <span slot="label">English Start Command</span>
+      <input type="text" ref="voiceWakeCommandEnInput" placeholder="voice input">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Russian Start Command</span>
+      <input type="text" ref="voiceWakeCommandRuInput" placeholder="голосовой ввод">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Spanish Start Command</span>
+      <input type="text" ref="voiceWakeCommandEsInput" placeholder="entrada de voz">
+    </sn-field>
+  </div>
+  <div class="pg-voice-note">In Auto language mode, the recording panel uses commands for the detected interface language.</div>
 </sn-card>
 
 <sn-card>

@@ -106,6 +106,13 @@ pg-settings-panel {
   gap: 10px;
 }
 
+.pg-voice-group-title {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sn-text);
+}
+
 @media (max-width: 760px) {
   .pg-voice-grid {
     grid-template-columns: 1fr;

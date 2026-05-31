@@ -82,8 +82,13 @@ describe('agent chat input state', () => {
     assert.match(source, /_extractVoiceCommandText\(text = ''\)/);
     assert.match(source, /_loadVoiceInputSettings\(\)/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
+    assert.match(source, /settings\?\.voiceInput\?\.wakeCommands/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommand/);
     assert.match(source, /_defaultVoiceCommandPhrases\(\)/);
+    assert.match(source, /_defaultWakeCommandPhrases\(\)/);
+    assert.match(source, /_matchesWakeCommand\(text = ''\)/);
+    assert.match(source, /btn-wake-listen/);
+    assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
     assert.match(source, /chat-composer-voice-command-toggle', \(\) => this\._toggleVoiceCommandMode\(\)/);
     assert.match(source, /this\._stopRecording\(\{ autoSend: true, textOverride: command\.text \}\)/);

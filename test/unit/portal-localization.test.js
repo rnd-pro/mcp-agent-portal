@@ -94,6 +94,7 @@ describe('portal localization bootstrap', () => {
     assert.equal(tPortal('settings.language.title'), 'Язык интерфейса');
     assert.equal(tPortal('settings.voice.title'), 'Голосовой ввод');
     assert.equal(tPortal('settings.voice.commandRuLabel'), 'Команда на русском');
+    assert.equal(tPortal('settings.voice.wakeRuLabel'), 'Команда старта на русском');
     assert.deepEqual(
       getPortalLocaleOptions().map((option) => option.value),
       ['auto', 'en', 'ru', 'es'],
