@@ -308,7 +308,12 @@ export function createChat(opts = {}) {
     parentChatId: opts.parentChatId || null,
     name: opts.name || 'New Chat',
     adapter: opts.adapter || 'pool',
+    agent: opts.agent || opts.agent_slug || null,
+    provider: opts.provider || null,
     model: opts.model || null,
+    approval_mode: opts.approval_mode || null,
+    resource_group: opts.resource_group || null,
+    chatType: opts.chatType || null,
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -361,7 +366,7 @@ export function updateChat(chatId, updates) {
   if (!chat) return;
 
   // Whitelist of keys that can be updated via API
-  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'approval_mode', 'projectId', 'parentChatId']);
+  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId']);
 
   for (let key of Object.keys(updates)) {
     if (!allowedKeys.has(key)) continue;

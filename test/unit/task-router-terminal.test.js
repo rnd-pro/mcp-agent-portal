@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import path, { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isTerminalTaskNotificationType } from '../../src/node/proxy/task-router.js';
+import {
+  extractFinalAgentResponse,
+  isTerminalTaskNotificationType,
+} from '../../src/node/proxy/task-router.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TASK_ROUTER_PATH = resolve(__dirname, '../../src/node/proxy/task-router.js');
@@ -33,6 +36,29 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.match(source, /result: tRes \? \(tRes\.output \?\? tRes\.status\) : null,/);
     assert.doesNotMatch(source, /data\.output \|\| data\.status/);
     assert.doesNotMatch(source, /tRes\.output \|\| tRes\.status/);
+  });
+
+  it('extracts the final agent response without terminal report sections', () => {
+    let text = [
+      '# Task Result',
+      'Prompt echo that must not be rendered.',
+      '## Agent Response',
+      'pong',
+      '',
+      '---',
+      '## Stats',
+      '- Exit code: 0',
+    ].join('\n');
+
+    assert.equal(extractFinalAgentResponse(text), 'pong');
+  });
+
+  it('replaces streaming agent text with the normalized final response', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+
+    assert.match(source, /let body = extractFinalAgentResponse\(text\);/);
+    assert.match(source, /lastAgent\.text = body \|\| lastAgent\.text;/);
+    assert.match(source, /lastAgent\.streaming = false;/);
   });
 
   it('broadcasts live terminal events after final result persistence', () => {

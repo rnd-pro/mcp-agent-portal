@@ -154,6 +154,13 @@ export class AgentChat extends Symbiote {
     this._syncChatFromRouter();
   }
 
+  disconnectedCallback() {
+    this._stopVoiceUiTimer();
+    this._audioRecorder.cancel();
+    this._removeVoicePreview();
+    super.disconnectedCallback?.();
+  }
+
   _bindComposer() {
     let composer = this.ref.composer;
     if (!composer || this._composerBound) return;
@@ -183,6 +190,9 @@ export class AgentChat extends Symbiote {
 
     composer.addEventListener('chat-composer-submit', () => this._sendMessage());
     composer.addEventListener('chat-composer-send', () => this._handleComposerSend());
+    composer.addEventListener('chat-composer-voice-approve', () => this._stopRecording({ autoSend: true }));
+    composer.addEventListener('chat-composer-voice-cancel', () => this._cancelVoiceResult());
+    composer.addEventListener('chat-composer-voice-send', () => this._confirmVoiceResult());
     composer.addEventListener('chat-composer-param-change', (event) => this._handleComposerParamChange(event.detail));
     composer.addEventListener('chat-composer-context-remove', (event) => {
       this.$.attachedContext = removeAttachedContext(this.$.attachedContext, event.detail?.key);
@@ -295,7 +305,7 @@ export class AgentChat extends Symbiote {
   _setupMicButton() {
     let composer = this.ref.composer;
     if (!composer || !this._audioRecorder.isAvailable) return;
-    let body = composer.querySelector('.composer-body');
+    let body = composer.querySelector('.composer-body:not(.voice-preview)');
     let sendBtn = body?.querySelector('.btn-send');
     if (!body || !sendBtn || body.querySelector('.btn-mic')) return;
 
@@ -317,71 +327,89 @@ export class AgentChat extends Symbiote {
 
   /** Show/update the live preview banner above the composer */
   _updateVoicePreview(text, elapsed) {
+    if (this._audioRecorder.state === 'recording') {
+      this._ensureVoicePreview('recording');
+    }
     if (!this._voicePreview) return;
-    let body = this._voicePreview.querySelector('.voice-preview-body');
-    if (!body) return;
+    if (text) this._voiceInterimText = text;
+    let seconds = typeof elapsed === 'number' ? elapsed : this._audioRecorder.elapsed;
+    this.ref.composer?.setVoicePreview?.({
+      mode: 'recording',
+      status: this._formatVoiceElapsed(seconds),
+      text: this._voiceInterimText || '',
+      elapsed: true,
+    });
+    this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || this._voicePreview;
+  }
 
-    if (text) {
-      body.textContent = text;
-      body.classList.remove('voice-preview-elapsed');
-    } else if (typeof elapsed === 'number') {
-      let m = String(Math.floor(elapsed / 60)).padStart(2, '0');
-      let s = String(elapsed % 60).padStart(2, '0');
-      body.textContent = `● Recording ${m}:${s}`;
-      body.classList.add('voice-preview-elapsed');
+  _formatVoiceElapsed(elapsed = 0) {
+    let m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    let s = String(elapsed % 60).padStart(2, '0');
+    return `● Recording ${m}:${s}`;
+  }
+
+  _ensureVoicePreview(mode = 'recording') {
+    let composer = this.ref.composer;
+    if (!composer?.isConnected) return;
+
+    let needsPreview = !this._voicePreview?.isConnected || this._voicePreview?.hidden;
+    if (!needsPreview) {
+      let composerRect = composer.getBoundingClientRect();
+      let previewRect = this._voicePreview.getBoundingClientRect();
+      let composerVisible = composerRect.width > 0 && composerRect.height > 0;
+      needsPreview = composerVisible && (previewRect.width === 0 || previewRect.height === 0);
+    }
+
+    if (needsPreview) {
+      this._showVoicePreview(mode);
     }
   }
 
-  /** Create the preview banner element above the composer */
+  /** Show the composer-owned voice preview. */
   _showVoicePreview(mode = 'recording') {
-    this._removeVoicePreview();
-
     let composer = this.ref.composer;
     if (!composer) return;
+    let recording = mode === 'recording';
+    composer.setVoicePreview?.({
+      mode,
+      status: recording ? this._formatVoiceElapsed(this._audioRecorder.elapsed) : '',
+      text: recording ? this._voiceInterimText || '' : '',
+      elapsed: recording,
+    });
+    this._voicePreview = composer.getVoicePreviewElement?.() || null;
+  }
 
-    let preview = document.createElement('div');
-    preview.className = `voice-preview ${mode}`;
+  _startVoiceUiTimer() {
+    this._stopVoiceUiTimer();
+    this._voiceUiTimer = setInterval(() => {
+      if (this._audioRecorder.state === 'recording' || this._audioRecorder.state === 'starting') {
+        this._updateVoicePreview(null, this._audioRecorder.elapsed);
+      }
+    }, 500);
+  }
 
-    let body = document.createElement('div');
-    body.className = 'voice-preview-body voice-preview-elapsed';
-    body.textContent = mode === 'recording' ? '● Recording 00:00' : '';
-
-    let actions = document.createElement('div');
-    actions.className = 'voice-preview-actions';
-
-    if (mode === 'recording') {
-      let stopBtn = document.createElement('button');
-      stopBtn.className = 'voice-preview-btn stop';
-      stopBtn.title = 'Stop recording';
-      stopBtn.innerHTML = '<span class="material-symbols-outlined">stop</span>';
-      stopBtn.onclick = () => this._stopRecording();
-      actions.replaceChildren(stopBtn);
-    } else {
-      let cancelBtn = document.createElement('button');
-      cancelBtn.className = 'voice-preview-btn cancel';
-      cancelBtn.title = 'Cancel';
-      cancelBtn.innerHTML = '<span class="material-symbols-outlined">close</span>';
-      cancelBtn.onclick = () => this._cancelVoiceResult();
-
-      let sendBtn = document.createElement('button');
-      sendBtn.className = 'voice-preview-btn send';
-      sendBtn.title = 'Send';
-      sendBtn.innerHTML = '<span class="material-symbols-outlined">send</span>';
-      sendBtn.onclick = () => this._confirmVoiceResult();
-
-      actions.replaceChildren(cancelBtn, sendBtn);
+  _stopVoiceUiTimer() {
+    if (this._voiceUiTimer) {
+      clearInterval(this._voiceUiTimer);
+      this._voiceUiTimer = null;
     }
+  }
 
-    preview.replaceChildren(body, actions);
-    composer.parentElement.insertBefore(preview, composer);
-    this._voicePreview = preview;
+  _showVoiceError(message) {
+    this._stopVoiceUiTimer();
+    this.ref.composer?.setVoicePreview?.({ mode: 'error', text: message });
+    this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
+    this._voiceInterimText = '';
+    this._voiceResultText = '';
+    this._voiceAudioUrl = null;
+    this._micBtn?.classList.remove('recording', 'processing');
+    let icon = this._micBtn?.querySelector('.material-symbols-outlined');
+    if (icon) icon.textContent = 'mic';
   }
 
   _removeVoicePreview() {
-    if (this._voicePreview) {
-      this._voicePreview.remove();
-      this._voicePreview = null;
-    }
+    this.ref.composer?.clearVoicePreview?.();
+    this._voicePreview = null;
   }
 
   async _toggleRecording() {
@@ -389,26 +417,35 @@ export class AgentChat extends Symbiote {
       this._stopRecording();
     } else if (this._audioRecorder.state === 'idle') {
       try {
-        await this._audioRecorder.start();
+        this._voiceInterimText = '';
         this._showVoicePreview('recording');
+        this._startVoiceUiTimer();
+        await this._audioRecorder.start();
         this._micBtn?.classList.add('recording');
       } catch (err) {
         console.warn('[AgentChat] Primary mic start failed, trying fallback:', err.message);
+        this._stopVoiceUiTimer();
         // If Speech Recognition failed, try MediaRecorder fallback
         if (this._audioRecorder.hasSpeechRecognition && this._audioRecorder.state === 'idle') {
           try {
+            this._voiceInterimText = '';
             await this._audioRecorder.startMediaRecorder();
             this._showVoicePreview('recording');
+            this._startVoiceUiTimer();
             this._micBtn?.classList.add('recording');
           } catch (err2) {
             console.error('[AgentChat] Mic fallback also failed:', err2);
+            this._showVoiceError('Microphone access denied. Check browser microphone permissions.');
           }
+        } else {
+          this._showVoiceError('Microphone access denied. Check browser microphone permissions.');
         }
       }
     }
   }
 
-  async _stopRecording() {
+  async _stopRecording({ autoSend = false } = {}) {
+    this._stopVoiceUiTimer();
     this._micBtn?.classList.remove('recording');
     this._micBtn?.classList.add('processing');
     let icon = this._micBtn?.querySelector('.material-symbols-outlined');
@@ -420,9 +457,8 @@ export class AgentChat extends Symbiote {
 
       // If no text from Speech API, try server transcription
       if (!text && result.audioBase64) {
-        this._showVoicePreview('processing');
-        let body = this._voicePreview?.querySelector('.voice-preview-body');
-        if (body) { body.textContent = 'Transcribing...'; body.classList.add('voice-preview-elapsed'); }
+        this.ref.composer?.setVoicePreview?.({ mode: 'processing', status: 'Transcribing...', text: '', elapsed: true });
+        this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
 
         let res = await fetch('/api/audio/transcribe', {
           method: 'POST',
@@ -439,22 +475,23 @@ export class AgentChat extends Symbiote {
       }
 
       if (text) {
-        // Show approval preview with editable text
-        this._showVoicePreview('result');
-        let body = this._voicePreview?.querySelector('.voice-preview-body');
-        if (body) {
-          body.textContent = text;
-          body.classList.remove('voice-preview-elapsed');
-          body.contentEditable = 'true';
-          body.spellcheck = false;
-        }
+        this._voiceInterimText = '';
         this._voiceResultText = text;
+        if (autoSend) {
+          this._removeVoicePreview();
+          this.ref.composer?.setValue?.(text);
+          this.$.inputVal = text;
+          this._sendMessage();
+        } else {
+          this.ref.composer?.setVoicePreview?.({ mode: 'result', text, editable: true });
+          this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
+        }
       } else {
-        this._removeVoicePreview();
+        this._showVoiceError('No speech detected. Try again.');
       }
     } catch (err) {
       console.error('[AgentChat] Transcription error:', err);
-      this._removeVoicePreview();
+      this._showVoiceError('Transcription failed. Try again.');
     } finally {
       this._micBtn?.classList.remove('processing');
       let icon = this._micBtn?.querySelector('.material-symbols-outlined');
@@ -463,9 +500,10 @@ export class AgentChat extends Symbiote {
   }
 
   _confirmVoiceResult() {
-    let body = this._voicePreview?.querySelector('.voice-preview-body');
+    let body = this.ref.composer?.getVoicePreviewBody?.() || this._voicePreview?.querySelector('.voice-preview-body');
     let text = body?.textContent?.trim() || this._voiceResultText || '';
     this._removeVoicePreview();
+    this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
     if (!text) return;
@@ -475,7 +513,9 @@ export class AgentChat extends Symbiote {
   }
 
   _cancelVoiceResult() {
+    this._stopVoiceUiTimer();
     this._removeVoicePreview();
+    this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
     this._audioRecorder.cancel();
@@ -654,6 +694,14 @@ export class AgentChat extends Symbiote {
       // Batch-persist all defaults in a single reactive update
       if (paramsChanged) {
         this.$.chatParams = { ...currentParams };
+        let chatId = this._loadedChatId || dashState.activeChatId;
+        if (chatId) {
+          fetch('/api/chats/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: chatId, ...this._getPersistedChatParams(currentParams) }),
+          });
+        }
       }
     } else {
       this.$.composerFooterHtml = '';
@@ -782,13 +830,21 @@ export class AgentChat extends Symbiote {
     this._syncComposerParamsFromDom();
     if (this.$.isInputDisabled) return;
     let chatId = this._loadedChatId || dashState.activeChatId;
+    let prompt = this.$.inputVal.trim();
+    if (!prompt) return;
+    let sendParams = this._getChatSendParams();
+    let persistedParams = this._getPersistedChatParams(sendParams);
 
     // Auto-create chat on first message (quick-start flow)
     if (!chatId) {
       try {
         let adapter = this.$.chatAdapter || 'pool';
+        let routeParams = parseQuery(getRoute().query || '');
+        let projectId = dashState.activeProjectId || routeParams.project || null;
+        let project = projectId ? (dashState.projectHistory || []).find(p => p.id === projectId) : null;
+        let name = project?.name ? `${project.name} — Chat` : tPortal('text.newChat');
         // Include current chatParams (provider, model, etc.) in the new chat
-        let createPayload = { adapter, ...this.$.chatParams };
+        let createPayload = { ...persistedParams, adapter, projectId, name };
         let res = await fetch('/api/chats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -808,16 +864,17 @@ export class AgentChat extends Symbiote {
       }
     }
 
-    let prompt = this.$.inputVal.trim();
-    if (!prompt) return;
-
     // Sync any default/unsaved params from the UI dropdowns
     let changedParams = this._syncComposerParamsFromDom();
+    if (changedParams) {
+      sendParams = this._getChatSendParams();
+      persistedParams = this._getPersistedChatParams(sendParams);
+    }
     if (changedParams && chatId) {
       fetch('/api/chats/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: chatId, ...this.$.chatParams })
+        body: JSON.stringify({ id: chatId, ...persistedParams })
       });
     }
 
@@ -848,14 +905,15 @@ export class AgentChat extends Symbiote {
       if (adapter === 'pool') {
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
-        reply = await this._wsClient.send(chatId, prompt, this.$.chatParams, this._sessionId);
+        reply = await this._wsClient.send(chatId, prompt, sendParams, this._sessionId);
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
         this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.processing') }];
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
-        let payload = { type: adapter, prompt, timeout: 300, ...this.$.chatParams };
+        let payload = { ...sendParams, type: adapter, prompt };
+        if (!payload.timeout) payload.timeout = 300;
         let res = await fetch('/api/adapter/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -928,6 +986,36 @@ export class AgentChat extends Symbiote {
       this.$.chatParams = paramsObj;
     }
     return hasChanges;
+  }
+
+  _getChatSendParams() {
+    let params = { ...(this.$.chatParams || {}) };
+    delete params.chatId;
+    delete params.sessionId;
+    delete params.prompt;
+    delete params.type;
+    if (params.resource_group && params.resource_group !== 'none') {
+      delete params.provider;
+      delete params.model;
+    }
+    return params;
+  }
+
+  _getPersistedChatParams(params = this.$.chatParams || {}) {
+    let allowed = ['agent', 'provider', 'model', 'approval_mode', 'resource_group', 'chatType'];
+    let result = {};
+    let hasResourceGroup = params.resource_group && params.resource_group !== 'none';
+    for (let key of allowed) {
+      if (hasResourceGroup && (key === 'provider' || key === 'model')) continue;
+      let value = params[key];
+      if (value == null || value === '') continue;
+      result[key] = value;
+    }
+    if (hasResourceGroup) {
+      result.provider = null;
+      result.model = null;
+    }
+    return result;
   }
 
   async _loadChat(chatId) {

@@ -105,7 +105,8 @@ export class ChatWsClient {
       }
 
       let sendMsg = () => {
-        let params = { chatId, prompt, timeout: 600, ...chatParams };
+        let params = { ...chatParams, chatId, prompt };
+        if (!params.timeout) params.timeout = 600;
         if (sessionId) params.sessionId = sessionId;
         ws.send(JSON.stringify({ method: 'chat.send', params }));
       };

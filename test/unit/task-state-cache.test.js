@@ -173,7 +173,7 @@ describe('Task State Cache — StateGraph integration', () => {
     assert.ok(events.length === 250, `Should have 250 events, got ${events.length}`);
   });
 
-  it('preserves agent and approval mode in chat metadata updates', () => {
+  it('preserves agent, resource group, and approval mode in chat metadata updates', () => {
     let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 'chat-meta-snap.json'),
       walPath: path.join(tmpDir, 'chat-meta-wal.log'),
@@ -186,20 +186,42 @@ describe('Task State Cache — StateGraph integration', () => {
         id: 'chat-001',
         name: 'Chat',
         agent: null,
+        resource_group: null,
         approval_mode: null,
       },
     }], 'test');
 
     sg.updateChat('chat-001', {
       agent: 'code-reviewer',
+      resource_group: 'review',
       approval_mode: 'plan',
       unknown: 'ignored',
     }, 'test');
 
     let chat = sg.get('chats/chat-001');
     assert.equal(chat.agent, 'code-reviewer');
+    assert.equal(chat.resource_group, 'review');
     assert.equal(chat.approval_mode, 'plan');
     assert.equal(chat.unknown, undefined);
+  });
+
+  it('stores quick-start resource group in new chat metadata and file data', () => {
+    let sg = createStateGraph({
+      snapshotPath: path.join(tmpDir, 'chat-create-meta-snap.json'),
+      walPath: path.join(tmpDir, 'chat-create-meta-wal.log'),
+    });
+
+    let { id } = sg.createChat({
+      name: 'Quick start',
+      projectId: 'project-1',
+      agent: 'orchestrator',
+      resource_group: 'implementation',
+      approval_mode: 'auto_edit',
+    }, 'test');
+
+    assert.equal(sg.get(`chats/${id}`).resource_group, 'implementation');
+    assert.equal(sg.getChat(id).resource_group, 'implementation');
+    assert.equal(sg.getChat(id).agent, 'orchestrator');
   });
 
   it('keeps chat reads current while chat files persist asynchronously', async () => {

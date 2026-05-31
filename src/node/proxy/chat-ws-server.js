@@ -90,6 +90,11 @@ export class ChatWsServer {
         if ((!agentSlug || agentSlug === 'none') && chatData.agent) agentSlug = chatData.agent;
       }
     }
+
+    if (resource_group && resource_group !== 'none') {
+      provider = null;
+      model = null;
+    }
     
     let delegateArgs = { prompt, timeout: timeout || 600, cwd: resolvedCwd };
     if (sessionId) delegateArgs.session_id = sessionId;

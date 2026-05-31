@@ -11,6 +11,19 @@ export function isTerminalTaskNotificationType(type) {
   return TERMINAL_TYPES.has(type);
 }
 
+export function extractFinalAgentResponse(text = '') {
+  let body = text || '';
+  let startIdx = body.indexOf('## Agent Response');
+  if (startIdx >= 0) {
+    body = body.substring(startIdx + '## Agent Response'.length).trim();
+  }
+  let endIdx = body.search(/\n+(?:---|## Tools Used|## Errors|## Stats)/i);
+  if (endIdx > 0) {
+    body = body.substring(0, endIdx).trim();
+  }
+  return body;
+}
+
 /** Routes task notifications from child servers to WebSocket subscribers. */
 export class TaskRouter {
   /**
@@ -390,19 +403,12 @@ export class TaskRouter {
 
     let meta = {};
     if (text) {
+      let body = extractFinalAgentResponse(text);
       let lastAgent = [...msgs].reverse().find(m => m.role === 'agent');
       if (!lastAgent || !lastAgent.streaming) {
-        let body = text;
-        let startIdx = body.indexOf('## Agent Response');
-        if (startIdx >= 0) {
-          body = body.substring(startIdx + '## Agent Response'.length).trim();
-        }
-        let endIdx = body.search(/\n+(?:---|## Tools Used|## Errors|## Stats)/i);
-        if (endIdx > 0) {
-          body = body.substring(0, endIdx).trim();
-        }
         msgs.push({ role: 'agent', text: body, streaming: false });
       } else {
+        lastAgent.text = body || lastAgent.text;
         lastAgent.streaming = false;
       }
 

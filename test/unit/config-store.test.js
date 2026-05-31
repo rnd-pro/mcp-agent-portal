@@ -124,4 +124,44 @@ describe('config-store', () => {
     assert.equal(getChat(id), null);
     await flushChatWrites();
   });
+
+  it('preserves chat startup parameters used by Agent Portal quick-start', async () => {
+    let {
+      createChat,
+      flushChatWrites,
+      getChat,
+      updateChat,
+    } = await importConfigStore();
+
+    let { id } = createChat({
+      name: 'Configured chat',
+      projectId: 'project-1',
+      adapter: 'pool',
+      agent: 'orchestrator',
+      provider: 'codex',
+      model: 'gpt-5.1',
+      approval_mode: 'plan',
+      resource_group: 'review',
+      chatType: 'review',
+    });
+
+    assert.equal(getChat(id).resource_group, 'review');
+    assert.equal(getChat(id).agent, 'orchestrator');
+
+    updateChat(id, {
+      resource_group: 'implementation',
+      agent: 'backend-engineer',
+      provider: 'claude',
+    });
+
+    assert.equal(getChat(id).resource_group, 'implementation');
+    assert.equal(getChat(id).agent, 'backend-engineer');
+    assert.equal(getChat(id).provider, 'claude');
+
+    await flushChatWrites();
+    let raw = await fsp.readFile(path.join(process.env.PORTAL_CHATS_DIR, `${id}.json`), 'utf8');
+    let chat = JSON.parse(raw);
+    assert.equal(chat.resource_group, 'implementation');
+    assert.equal(chat.agent, 'backend-engineer');
+  });
 });

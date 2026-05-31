@@ -700,7 +700,7 @@ export class StateGraph extends EventEmitter {
 
   /**
    * Create a new chat.
-   * @param {Object|{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, agent?: string, agent_slug?: string, approval_mode?: string, chatType?: string }} opts
+   * @param {Object|{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, agent?: string, agent_slug?: string, approval_mode?: string, resource_group?: string, chatType?: string }} opts
    * @param {string} [source]
    * @returns {{ id: string }}
    */
@@ -718,6 +718,7 @@ export class StateGraph extends EventEmitter {
       provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'gemini' ? 'gemini-2.5-pro' : opts.adapter === 'opencode' ? 'openrouter/deepseek/deepseek-v4-pro' : null),
       approval_mode: opts.approval_mode || null,
+      resource_group: opts.resource_group || null,
       chatType: opts.chatType || null,
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
@@ -739,6 +740,7 @@ export class StateGraph extends EventEmitter {
       provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'gemini' ? 'gemini-2.5-pro' : opts.adapter === 'opencode' ? 'openrouter/deepseek/deepseek-v4-pro' : null),
       approval_mode: opts.approval_mode || null,
+      resource_group: opts.resource_group || null,
       chatType: opts.chatType || null,
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
@@ -832,7 +834,7 @@ export class StateGraph extends EventEmitter {
 
   // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
-    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'projectId', 'parentChatId', 'lastTaskStatus']);
+    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'lastTaskStatus']);
     let filtered = {};
     for (let [k, v] of Object.entries(updates)) {
       if (!allowed.has(k)) continue;

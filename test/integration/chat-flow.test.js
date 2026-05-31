@@ -111,6 +111,51 @@ async function run() {
     ws.close();
   });
 
+  await test('resource group routing does not leak manual provider/model overrides', async () => {
+    let ws = await connectChatClient();
+    let originalRequest = proxyManager.requestFromChild;
+    let capturedArgs = null;
+    proxyManager.requestFromChild = async (_server, _method, payload) => {
+      capturedArgs = payload.arguments;
+      return {
+        isError: false,
+        content: [{ type: 'text', text: 'Delegated task 11111111-2222-4333-8444-555555555555' }]
+      };
+    };
+
+    let receivedDelegated = new Promise((resolve, reject) => {
+      let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.delegated')), 10000);
+      ws.on('message', (data) => {
+        let msg = JSON.parse(data.toString());
+        if (msg.method === 'chat.delegated') {
+          clearTimeout(timer);
+          resolve(msg);
+        }
+      });
+    });
+
+    ws.send(JSON.stringify({
+      method: 'chat.send',
+      params: {
+        chatId: 'resource-group-chat',
+        prompt: 'test resource group routing',
+        agent: 'orchestrator',
+        resource_group: 'reasoning-heavy',
+        provider: 'gemini',
+        model: 'default',
+      }
+    }));
+
+    await receivedDelegated;
+    proxyManager.requestFromChild = originalRequest;
+
+    assert.equal(capturedArgs.resource_group, 'reasoning-heavy');
+    assert.equal(capturedArgs.agent_slug, 'orchestrator');
+    assert.equal(capturedArgs.provider, undefined);
+    assert.equal(capturedArgs.model, undefined);
+    ws.close();
+  });
+
   // Test 2: Success workflow propagation (streaming)
   await test('valid workflow triggers chat.delegated, streams metadata, and completes with chat.done', async () => {
     let ws = await connectChatClient();
