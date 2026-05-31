@@ -129,4 +129,115 @@ chat-composer .btn-mic .material-symbols-outlined {
   font-size: 18px;
 }
 
+/* ── Voice Preview Banner ── */
+.voice-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 0 0 4px;
+  border-radius: 12px;
+  background: var(--sn-node-hover);
+  border: 1px solid var(--sn-node-border);
+  animation: voice-preview-in 0.15s ease;
+}
+
+@keyframes voice-preview-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.voice-preview.recording {
+  border-color: color-mix(in srgb, var(--sn-danger-color) 40%, transparent);
+}
+
+.voice-preview.processing {
+  border-color: var(--sn-node-border);
+}
+
+.voice-preview.result {
+  border-color: color-mix(in srgb, var(--sn-node-selected) 40%, transparent);
+}
+
+.voice-preview-body {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sn-text);
+  min-height: 20px;
+  outline: none;
+  word-break: break-word;
+}
+
+.voice-preview-body.voice-preview-elapsed {
+  color: var(--sn-text-dim);
+  font-size: 12px;
+  font-family: var(--sn-font-mono);
+}
+
+.voice-preview.recording .voice-preview-body.voice-preview-elapsed {
+  color: var(--sn-danger-color);
+}
+
+.voice-preview-body[contenteditable="true"] {
+  cursor: text;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+.voice-preview-body[contenteditable="true"]:focus {
+  background: var(--sn-bg);
+}
+
+.voice-preview-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.voice-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.voice-preview-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.voice-preview-btn.stop {
+  background: var(--sn-danger-color);
+  color: var(--sn-bg);
+}
+
+.voice-preview-btn.stop:hover {
+  filter: brightness(1.15);
+}
+
+.voice-preview-btn.cancel {
+  background: transparent;
+  color: var(--sn-text-dim);
+}
+
+.voice-preview-btn.cancel:hover {
+  background: var(--sn-node-hover);
+  color: var(--sn-text);
+}
+
+.voice-preview-btn.send {
+  background: var(--sn-node-selected);
+  color: var(--sn-bg);
+}
+
+.voice-preview-btn.send:hover {
+  filter: brightness(1.15);
+}
+
 `;

@@ -8,12 +8,15 @@ export class AudioRecorder {
   constructor() {
     this.state = 'idle'; // idle | recording | processing
     this._onStateChange = null;
+    this._onInterim = null;
     this._recognition = null;
     this._mediaRecorder = null;
     this._chunks = [];
     this._stream = null;
     this._resultText = '';
     this._resolveStop = null;
+    this._startTime = 0;
+    this._elapsedTimer = null;
   }
 
   get isAvailable() {
@@ -25,6 +28,12 @@ export class AudioRecorder {
   }
 
   set onStateChange(fn) { this._onStateChange = fn; }
+  set onInterim(fn) { this._onInterim = fn; }
+
+  get elapsed() {
+    if (!this._startTime) return 0;
+    return Math.floor((Date.now() - this._startTime) / 1000);
+  }
 
   _setState(s) {
     this.state = s;
@@ -107,6 +116,7 @@ export class AudioRecorder {
         transcript += event.results[i][0].transcript;
       }
       this._resultText = transcript;
+      this._onInterim?.(transcript);
     };
 
     recognition.onend = () => {
@@ -126,6 +136,7 @@ export class AudioRecorder {
     };
 
     recognition.start();
+    this._startTime = Date.now();
     this._setState('recording');
   }
 
@@ -170,10 +181,19 @@ export class AudioRecorder {
     };
 
     recorder.start();
+    this._startTime = Date.now();
+    this._elapsedTimer = setInterval(() => {
+      this._onInterim?.(null, this.elapsed);
+    }, 500);
     this._setState('recording');
   }
 
   _cleanupStream() {
+    if (this._elapsedTimer) {
+      clearInterval(this._elapsedTimer);
+      this._elapsedTimer = null;
+    }
+    this._startTime = 0;
     if (this._stream) {
       for (let track of this._stream.getTracks()) track.stop();
       this._stream = null;

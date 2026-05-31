@@ -308,50 +308,170 @@ export class AgentChat extends Symbiote {
     this._micBtn = micBtn;
 
     micBtn.onclick = () => this._toggleRecording();
+
+    // Live interim results callback
+    this._audioRecorder.onInterim = (text, elapsed) => {
+      this._updateVoicePreview(text, elapsed);
+    };
+  }
+
+  /** Show/update the live preview banner above the composer */
+  _updateVoicePreview(text, elapsed) {
+    if (!this._voicePreview) return;
+    let body = this._voicePreview.querySelector('.voice-preview-body');
+    if (!body) return;
+
+    if (text) {
+      body.textContent = text;
+      body.classList.remove('voice-preview-elapsed');
+    } else if (typeof elapsed === 'number') {
+      let m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      let s = String(elapsed % 60).padStart(2, '0');
+      body.textContent = `● Recording ${m}:${s}`;
+      body.classList.add('voice-preview-elapsed');
+    }
+  }
+
+  /** Create the preview banner element above the composer */
+  _showVoicePreview(mode = 'recording') {
+    this._removeVoicePreview();
+
+    let composer = this.ref.composer;
+    if (!composer) return;
+
+    let preview = document.createElement('div');
+    preview.className = `voice-preview ${mode}`;
+
+    let body = document.createElement('div');
+    body.className = 'voice-preview-body voice-preview-elapsed';
+    body.textContent = mode === 'recording' ? '● Recording 00:00' : '';
+
+    let actions = document.createElement('div');
+    actions.className = 'voice-preview-actions';
+
+    if (mode === 'recording') {
+      let stopBtn = document.createElement('button');
+      stopBtn.className = 'voice-preview-btn stop';
+      stopBtn.title = 'Stop recording';
+      stopBtn.innerHTML = '<span class="material-symbols-outlined">stop</span>';
+      stopBtn.onclick = () => this._stopRecording();
+      actions.replaceChildren(stopBtn);
+    } else {
+      let cancelBtn = document.createElement('button');
+      cancelBtn.className = 'voice-preview-btn cancel';
+      cancelBtn.title = 'Cancel';
+      cancelBtn.innerHTML = '<span class="material-symbols-outlined">close</span>';
+      cancelBtn.onclick = () => this._cancelVoiceResult();
+
+      let sendBtn = document.createElement('button');
+      sendBtn.className = 'voice-preview-btn send';
+      sendBtn.title = 'Send';
+      sendBtn.innerHTML = '<span class="material-symbols-outlined">send</span>';
+      sendBtn.onclick = () => this._confirmVoiceResult();
+
+      actions.replaceChildren(cancelBtn, sendBtn);
+    }
+
+    preview.replaceChildren(body, actions);
+    composer.parentElement.insertBefore(preview, composer);
+    this._voicePreview = preview;
+  }
+
+  _removeVoicePreview() {
+    if (this._voicePreview) {
+      this._voicePreview.remove();
+      this._voicePreview = null;
+    }
   }
 
   async _toggleRecording() {
     if (this._audioRecorder.state === 'recording') {
-      this._micBtn?.classList.remove('recording');
-      this._micBtn?.classList.add('processing');
-      let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = 'progress_activity';
-
+      this._stopRecording();
+    } else if (this._audioRecorder.state === 'idle') {
       try {
-        let result = await this._audioRecorder.stop();
-        if (result.text) {
-          this.ref.composer?.setValue?.(result.text);
-          this.$.inputVal = result.text;
-          this._sendMessage();
-        } else if (result.audioBase64) {
-          let res = await fetch('/api/audio/transcribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audio: result.audioBase64, mimeType: result.mimeType }),
-          });
-          let data = await res.json();
-          if (data.text) {
-            this.ref.composer?.setValue?.(data.text);
-            this.$.inputVal = data.text;
-            this._sendMessage();
-          }
-        }
-      } catch (err) {
-        console.error('[AgentChat] Transcription error:', err);
-      } finally {
-        this._micBtn?.classList.remove('processing');
-        let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-        if (icon) icon.textContent = 'mic';
-      }
-    } else {
-      try {
+        this._showVoicePreview('recording');
         await this._audioRecorder.start();
         this._micBtn?.classList.add('recording');
       } catch (err) {
         console.error('[AgentChat] Mic start error:', err);
+        this._removeVoicePreview();
       }
     }
   }
+
+  async _stopRecording() {
+    this._micBtn?.classList.remove('recording');
+    this._micBtn?.classList.add('processing');
+    let icon = this._micBtn?.querySelector('.material-symbols-outlined');
+    if (icon) icon.textContent = 'progress_activity';
+
+    try {
+      let result = await this._audioRecorder.stop();
+      let text = result.text || '';
+
+      // If no text from Speech API, try server transcription
+      if (!text && result.audioBase64) {
+        this._showVoicePreview('processing');
+        let body = this._voicePreview?.querySelector('.voice-preview-body');
+        if (body) { body.textContent = 'Transcribing...'; body.classList.add('voice-preview-elapsed'); }
+
+        let res = await fetch('/api/audio/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio: result.audioBase64, mimeType: result.mimeType }),
+        });
+        let data = await res.json();
+        text = data.text || '';
+
+        // Store audio for potential playback
+        if (result.audioBase64 && result.mimeType) {
+          this._voiceAudioUrl = `data:${result.mimeType};base64,${result.audioBase64}`;
+        }
+      }
+
+      if (text) {
+        // Show approval preview with editable text
+        this._showVoicePreview('result');
+        let body = this._voicePreview?.querySelector('.voice-preview-body');
+        if (body) {
+          body.textContent = text;
+          body.classList.remove('voice-preview-elapsed');
+          body.contentEditable = 'true';
+          body.spellcheck = false;
+        }
+        this._voiceResultText = text;
+      } else {
+        this._removeVoicePreview();
+      }
+    } catch (err) {
+      console.error('[AgentChat] Transcription error:', err);
+      this._removeVoicePreview();
+    } finally {
+      this._micBtn?.classList.remove('processing');
+      let icon = this._micBtn?.querySelector('.material-symbols-outlined');
+      if (icon) icon.textContent = 'mic';
+    }
+  }
+
+  _confirmVoiceResult() {
+    let body = this._voicePreview?.querySelector('.voice-preview-body');
+    let text = body?.textContent?.trim() || this._voiceResultText || '';
+    this._removeVoicePreview();
+    this._voiceResultText = '';
+    this._voiceAudioUrl = null;
+    if (!text) return;
+    this.ref.composer?.setValue?.(text);
+    this.$.inputVal = text;
+    this._sendMessage();
+  }
+
+  _cancelVoiceResult() {
+    this._removeVoicePreview();
+    this._voiceResultText = '';
+    this._voiceAudioUrl = null;
+    this._audioRecorder.cancel();
+  }
+
 
   _setSending(active) {
     this._isSending = active;
