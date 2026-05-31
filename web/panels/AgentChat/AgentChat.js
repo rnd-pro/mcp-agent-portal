@@ -315,7 +315,7 @@ export class AgentChat extends Symbiote {
         paramsToMap.push(...meta.pool.parameters);
       }
 
-      let providers = Object.keys(meta).filter(k => k !== 'pool');
+      let providers = Object.keys(meta).filter(k => k !== 'pool' && !k.startsWith('_'));
       let currentProvider = currentParams.provider ?? providers[0];
 
       paramsToMap.push({
