@@ -294,6 +294,13 @@ export class AgentChat extends Symbiote {
     this.ref.composer?.setSending?.(active);
     this._renderMessages();
   }
+
+  _focusInput() {
+    requestAnimationFrame(() => {
+      let input = this.ref.composer?.getInputElement?.();
+      if (input && !input.disabled) input.focus();
+    });
+  }
   async _fetchAdapterMeta() {
     try {
       let res = await fetch('/api/adapter/types');
@@ -744,6 +751,7 @@ export class AgentChat extends Symbiote {
       this._sessionId = null;
       this.$.sessionMetaHtml = '';
       this._updateComposerFooter();
+      this._focusInput();
       return;
     }
 
@@ -798,6 +806,8 @@ export class AgentChat extends Symbiote {
       if (chat.pendingTaskId) {
         this._setSending(true);
         this._wsClient.resume(chatId, chat.pendingTaskId);
+      } else {
+        this._focusInput();
       }
       
     } catch (err) {

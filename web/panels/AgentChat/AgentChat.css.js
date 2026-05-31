@@ -77,30 +77,4 @@ chat-composer .composer-body textarea::placeholder {
   opacity: 0.41;
 }
 
-/* Blinking cursor before placeholder — visible even without focus */
-@keyframes cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-chat-composer .composer-body:has(textarea:placeholder-shown)::before {
-  content: '';
-  position: absolute;
-  left: var(--sn-composer-body-padding-left, 12px);
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1.5px;
-  height: 16px;
-  background: var(--sn-text-dim);
-  opacity: 0.41;
-  pointer-events: none;
-  animation: cursor-blink 1s step-end infinite;
-  z-index: 1;
-}
-
-/* Hide fake cursor when real cursor is active */
-chat-composer .composer-body:has(textarea:focus)::before {
-  display: none;
-}
-
 `;
