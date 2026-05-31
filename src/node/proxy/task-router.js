@@ -368,16 +368,23 @@ export class TaskRouter {
     msgs = msgs.filter(m => !(m.role === 'tool' && m.streaming));
 
     if (parsedResult?.toolCalls?.length > 0) {
+      let toolMessages = [];
       for (let i = 0; i < parsedResult.toolCalls.length; i++) {
         let call = parsedResult.toolCalls[i];
         let tRes = parsedResult.toolResults?.[i];
-        msgs.push({
+        toolMessages.push({
           role: 'tool',
           name: call.name,
           input: call.args,
           result: tRes ? (tRes.output ?? tRes.status) : null,
-          streaming: false
+          streaming: false,
         });
+      }
+      let lastStreamingAgentIndex = msgs.findLastIndex(m => m.role === 'agent' && m.streaming);
+      if (lastStreamingAgentIndex >= 0) {
+        msgs.splice(lastStreamingAgentIndex, 0, ...toolMessages);
+      } else {
+        msgs.push(...toolMessages);
       }
     }
 
