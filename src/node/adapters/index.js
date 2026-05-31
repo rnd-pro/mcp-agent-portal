@@ -277,21 +277,78 @@ export function getAgentList() {
 // Adapter metadata — describes providers and their parameters.
 // The UI uses this to build dynamic cascading selects:
 //   pool → Agent (from .agent-portal/agents/) → Provider → Model → ChatType
+
+/**
+ * Read resource-groups.json and extract preferred models per provider + full group list.
+ * @returns {{ byProvider: Object<string, string[]>, defaultModel: string|null, groups: object[] }}
+ */
+function loadResourceGroupPreferences() {
+  let result = { byProvider: {}, defaultModel: null, groups: [] };
+  try {
+    let rgPath = join(homedir(), '.agent-portal', 'resource-groups.json');
+    if (!existsSync(rgPath)) return result;
+    let groups = JSON.parse(readFileSync(rgPath, 'utf8'));
+    let seen = new Set();
+    for (let [name, config] of Object.entries(groups)) {
+      let provider = config.provider || 'codex';
+      // Full group entry for frontend
+      result.groups.push({
+        name,
+        provider,
+        model: config.model || null,
+        profiles: Array.isArray(config.profiles) ? config.profiles : [],
+        rotation_mode: config.rotation_mode || 'error_fallback',
+        max_agents: config.max_agents || null,
+        fallback_profiles: Array.isArray(config.fallback_profiles) ? config.fallback_profiles : [],
+      });
+      // Preferred models by provider
+      if (config.model && !seen.has(`${provider}:${config.model}`)) {
+        if (!result.byProvider[provider]) result.byProvider[provider] = [];
+        result.byProvider[provider].push(config.model);
+        seen.add(`${provider}:${config.model}`);
+        if (!result.defaultModel) result.defaultModel = config.model;
+      }
+      if (Array.isArray(config.profiles)) {
+        for (let p of config.profiles) {
+          let pProvider = p.provider || provider;
+          if (p.model && !seen.has(`${pProvider}:${p.model}`)) {
+            if (!result.byProvider[pProvider]) result.byProvider[pProvider] = [];
+            result.byProvider[pProvider].push(p.model);
+            seen.add(`${pProvider}:${p.model}`);
+          }
+        }
+      }
+    }
+  } catch { /* resource groups may not exist */ }
+  return result;
+}
+
 function buildAdapterMetadata() {
   let agentOptions = getAgentList().map(a => {
-    // Humanize slug: backend-engineer → Backend Engineer, qa-engineer → QA Engineer
     let acronyms = new Set(['qa', 'ui', 'api', 'db', 'ci', 'cd', 'ml', 'ai', 'devops', 'sre']);
     let name = a.slug.split('-').map(w => acronyms.has(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).join(' ');
-    return { val: a.slug, text: name, approvalMode: a.approvalMode };
+    return { val: a.slug, text: name, approvalMode: a.approvalMode, resourceGroup: a.resourceGroup || null };
   });
-  // Ensure 'none' is always first — direct mode, no agent persona
-  agentOptions.unshift({ val: 'none', text: 'Direct (no agent)' });
+  agentOptions.unshift({ val: 'none', text: 'Direct (no agent)', resourceGroup: null });
+
+  let rgPrefs = loadResourceGroupPreferences();
+
+  // Build resource_group selector options
+  let groupOptions = [{ val: 'none', text: 'Manual (provider + model)' }];
+  for (let g of rgPrefs.groups) {
+    let profileCount = g.profiles.length + g.fallback_profiles.length;
+    let subtitle = `${g.provider}${g.model ? ' / ' + g.model.split('/').pop() : ''}`;
+    if (profileCount > 1) subtitle += ` · ${profileCount} profiles`;
+    if (g.rotation_mode === 'round_robin') subtitle += ' · round-robin';
+    groupOptions.push({ val: g.name, text: g.name, subtitle });
+  }
 
   return {
     pool: {
       name: 'Agent Pool',
       parameters: [
         { id: 'agent', label: 'Agent', type: 'select', options: agentOptions },
+        { id: 'resource_group', label: 'Resource Group', type: 'select', options: groupOptions },
         { id: 'chatType', label: 'Chat Type', type: 'select', options: ['standard', 'planning', 'review'] },
         {
           id: 'approval_mode',
@@ -308,34 +365,40 @@ function buildAdapterMetadata() {
     gemini: {
       name: 'Gemini CLI',
       parameters: [
-        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('gemini') }
+        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('gemini'), preferred: rgPrefs.byProvider['gemini'] || [] }
       ]
     },
     claude: {
       name: 'Claude CLI',
       parameters: [
-        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('claude') }
+        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('claude'), preferred: rgPrefs.byProvider['claude'] || [] }
       ]
     },
     codex: {
       name: 'Codex CLI',
       parameters: [
-        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('codex') }
+        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('codex'), preferred: rgPrefs.byProvider['codex'] || [] }
       ]
     },
     opencode: {
       name: 'OpenCode',
       parameters: [
-        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('opencode') }
+        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('opencode'), preferred: rgPrefs.byProvider['opencode'] || [] }
       ]
-    }
+    },
+    _resourceGroupDefaults: {
+      defaultModel: rgPrefs.defaultModel,
+      byProvider: rgPrefs.byProvider,
+      groups: rgPrefs.groups,
+      configUrl: '/#resource-groups',
+    },
   };
 }
 
 /** @returns {string[]} Available adapter type names. */
 export function listAdapterTypes() {
   let metadata = buildAdapterMetadata();
-  let types = Object.keys(metadata);
+  let types = Object.keys(metadata).filter(k => !k.startsWith('_'));
   return { types, metadata };
 }
 

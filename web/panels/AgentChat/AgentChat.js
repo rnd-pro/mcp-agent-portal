@@ -228,6 +228,18 @@ export class AgentChat extends Symbiote {
     }
     if (id === 'agent') {
       updatedParams.approval_mode = this._getAgentDefaultApprovalMode(val);
+      // Auto-select resource group from agent binding
+      let agentGroup = this._getAgentResourceGroup(val);
+      if (agentGroup) {
+        updatedParams.resource_group = agentGroup;
+      }
+    }
+    if (id === 'resource_group') {
+      // When switching groups, clear manual provider/model overrides
+      if (val !== 'none') {
+        delete updatedParams.provider;
+        delete updatedParams.model;
+      }
     }
 
     this.$.chatParams = updatedParams;
@@ -236,7 +248,14 @@ export class AgentChat extends Symbiote {
     if (chatId) {
       let saveData = { id: chatId, [id]: val };
       if (id === 'provider') saveData.model = null;
-      if (id === 'agent') saveData.approval_mode = updatedParams.approval_mode;
+      if (id === 'agent') {
+        saveData.approval_mode = updatedParams.approval_mode;
+        if (updatedParams.resource_group) saveData.resource_group = updatedParams.resource_group;
+      }
+      if (id === 'resource_group') {
+        saveData.provider = null;
+        saveData.model = null;
+      }
       fetch('/api/chats/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -321,16 +340,45 @@ export class AgentChat extends Symbiote {
             if (p.id === 'agent') {
               let orch = p.options.find(o => (typeof o === 'string' ? o : o.val) === 'orchestrator');
               paramValue = orch ? (typeof orch === 'string' ? orch : orch.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
+            } else if (p.id === 'resource_group') {
+              // Auto-select group from current agent's binding
+              let agentGroup = this._getAgentResourceGroup(currentParams.agent);
+              if (agentGroup) {
+                let found = p.options.find(o => (typeof o === 'string' ? o : o.val) === agentGroup);
+                paramValue = found ? (typeof found === 'string' ? found : found.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
+              } else {
+                paramValue = typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val;
+              }
             } else if (p.id === 'approval_mode') {
               paramValue = this._getAgentDefaultApprovalMode(currentParams.agent);
             } else if (p.id === 'model') {
-              let defMap = { 'gemini': 'gemini-2.5-pro', 'opencode': 'openrouter/deepseek/deepseek-v4-pro' };
+              // Use preferred models from resource groups instead of hardcoded defaults
               let currentCtx = adapter === 'pool' ? currentParams.provider : adapter;
-              let expectedDef = defMap[currentCtx];
-              let found = expectedDef ? p.options.find(o => (typeof o === 'string' ? o : o.val) === expectedDef) : null;
-              if (found) {
-                paramValue = typeof found === 'string' ? found : found.val;
-              } else {
+              let rgDefaults = meta._resourceGroupDefaults || {};
+              let preferred = (rgDefaults.byProvider?.[currentCtx] || p.preferred || []);
+
+              // Sort preferred models to the top of options
+              if (preferred.length > 0) {
+                let prefSet = new Set(preferred);
+                let prefOptions = [];
+                let restOptions = [];
+                for (let opt of p.options) {
+                  let val = typeof opt === 'string' ? opt : opt.val;
+                  if (prefSet.has(val)) {
+                    prefOptions.push(opt);
+                  } else {
+                    restOptions.push(opt);
+                  }
+                }
+                p.options = [...prefOptions, ...restOptions];
+              }
+
+              // Default to first preferred model, or first option
+              if (preferred.length > 0) {
+                let found = p.options.find(o => preferred.includes(typeof o === 'string' ? o : o.val));
+                paramValue = found ? (typeof found === 'string' ? found : found.val) : null;
+              }
+              if (!paramValue) {
                 let firstOpt = p.options[0];
                 paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
               }
@@ -358,15 +406,26 @@ export class AgentChat extends Symbiote {
           }).join('');
           
           let disabledAttr = '';
+          let activeGroup = currentParams.resource_group;
+          let groupIsActive = activeGroup && activeGroup !== 'none';
           if ((p.id === 'provider' || p.id === 'agent') && this.$.messages && this.$.messages.length > 0) {
             disabledAttr = `disabled title="${escapeHtml(tPortal('text.locked'))}"`;
           }
+          // Disable provider+model when a resource group is active
+          if ((p.id === 'provider' || p.id === 'model') && groupIsActive) {
+            disabledAttr = `disabled title="Managed by resource group: ${escapeHtml(activeGroup)}"`;
+          }
 
-          let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
+          let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'resource_group' ? 'view_kanban' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
           let currentOption = p.options.find(opt => (typeof opt === 'string' ? opt : opt.val) === paramValue);
           let currentLabel = typeof currentOption === 'string' ? currentOption : currentOption?.text || p.label;
+          // Show subtitle (group metadata) as tooltip
+          let titleText = `${p.label}: ${currentLabel}`;
+          if (p.id === 'resource_group' && typeof currentOption === 'object' && currentOption?.subtitle) {
+            titleText += ` (${currentOption.subtitle})`;
+          }
           
-          return `<span class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(p.label)}: ${escapeHtml(currentLabel)}"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" aria-label="${escapeHtml(p.label)}" ${disabledAttr}>${optionsHtml}</select></span>`;
+          return `<span class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(titleText)}"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" aria-label="${escapeHtml(p.label)}" ${disabledAttr}>${optionsHtml}</select></span>`;
         } else if (p.type === 'boolean') {
           let paramValue = currentParams[p.id];
           if (paramValue === undefined) {
@@ -384,6 +443,8 @@ export class AgentChat extends Symbiote {
         }
         return '';
       }).join('');
+      // Append settings button at the end of all selectors
+      htmlStr += `<a href="/#resource-groups" class="composer-footer-btn composer-settings-btn" title="Configure Resource Groups" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer"><span class="material-symbols-outlined" style="font-size:16px;opacity:0.5">settings</span></a>`;
       this.$.composerFooterHtml = htmlStr;
       // Batch-persist all defaults in a single reactive update
       if (paramsChanged) {
@@ -399,7 +460,8 @@ export class AgentChat extends Symbiote {
     switch (paramId) {
       case 'model': return 'composer-priority-5';
       case 'agent': return 'composer-priority-4';
-      case 'provider': return 'composer-priority-3';
+      case 'resource_group': return 'composer-priority-3';
+      case 'provider': return 'composer-priority-2';
       case 'approval_mode': return 'composer-priority-2';
       case 'chatType': return 'composer-priority-1';
       default: return 'composer-priority-1';
@@ -411,6 +473,13 @@ export class AgentChat extends Symbiote {
     let agentParam = this.$.adapterMeta?.pool?.parameters?.find(p => p.id === 'agent');
     let option = agentParam?.options?.find(opt => (typeof opt === 'string' ? opt : opt.val) === agentSlug);
     return typeof option === 'object' && option.approvalMode ? option.approvalMode : 'yolo';
+  }
+
+  _getAgentResourceGroup(agentSlug) {
+    if (!agentSlug || agentSlug === 'none') return null;
+    let agentParam = this.$.adapterMeta?.pool?.parameters?.find(p => p.id === 'agent');
+    let option = agentParam?.options?.find(opt => (typeof opt === 'string' ? opt : opt.val) === agentSlug);
+    return typeof option === 'object' && option.resourceGroup ? option.resourceGroup : null;
   }
 
   _syncChatFromRouter() {

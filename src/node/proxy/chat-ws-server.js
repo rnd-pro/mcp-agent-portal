@@ -47,7 +47,7 @@ export class ChatWsServer {
   }
 
   async _handleChatSend(ws, params) {
-    let { chatId, prompt, sessionId, timeout, model, provider, approval_mode } = params;
+    let { chatId, prompt, sessionId, timeout, model, provider, approval_mode, resource_group } = params;
     let agentSlug = params.agent || params.agent_slug;
     if (!prompt) return;
 
@@ -86,6 +86,7 @@ export class ChatWsServer {
         if (!model && chatData.model) model = chatData.model;
         if (!sessionId && chatData.sessionId) sessionId = chatData.sessionId;
         if (!approval_mode && chatData.approval_mode) approval_mode = chatData.approval_mode;
+        if (!resource_group && chatData.resource_group) resource_group = chatData.resource_group;
         if ((!agentSlug || agentSlug === 'none') && chatData.agent) agentSlug = chatData.agent;
       }
     }
@@ -95,6 +96,7 @@ export class ChatWsServer {
     if (model) delegateArgs.model = model;
     if (provider) delegateArgs.provider = provider;
     if (approval_mode) delegateArgs.approval_mode = approval_mode;
+    if (resource_group && resource_group !== 'none') delegateArgs.resource_group = resource_group;
     
     // Agent selection: read from UI/MCP chat params or persisted chat metadata.
     if (agentSlug && agentSlug !== 'none') {
