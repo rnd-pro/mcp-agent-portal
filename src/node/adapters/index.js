@@ -3,9 +3,10 @@ import { createClaudeAdapter } from './claude.js';
 import { createCodexAdapter } from './codex.js';
 import { getStateGraph } from '../state-graph.js';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
 
 let ADAPTERS = {
@@ -41,6 +42,10 @@ const DEFAULT_MODELS = {
 let _cliModels = [];
 let _openRouterMetadata = new Map();
 let _lastMetadataFetch = 0;
+
+// Cached Gemini CLI-discovered models (populated by discoverGeminiModels)
+/** @type {string[]} */
+let _geminiModels = [];
 
 async function fetchOpenRouterMetadata() {
   if (Date.now() - _lastMetadataFetch < 3600000 && _openRouterMetadata.size > 0) return;
@@ -101,6 +106,85 @@ export async function discoverOpenCodeModels() {
   });
 }
 
+// ── Gemini CLI model discovery ──────────────────────────────
+// Parses the installed Gemini CLI bundle to extract supported model names.
+// Checks: npx cache → npm global. Caches by CLI package version.
+
+let _geminiDiscoveryVersion = '';
+
+
+
+/**
+ * Discover Gemini models by parsing the CLI bundle.
+ * Caches by package version — only re-parses on CLI update.
+ * @returns {Promise<string[]>}
+ */
+export async function discoverGeminiModels() {
+  try {
+    // Find CLI package directory
+    const npxDir = join(homedir(), '.npm', '_npx');
+    let cliDir = null;
+    if (existsSync(npxDir)) {
+      for (const entry of readdirSync(npxDir)) {
+        const pkgPath = join(npxDir, entry, 'node_modules', '@google', 'gemini-cli', 'package.json');
+        if (existsSync(pkgPath)) {
+          cliDir = dirname(pkgPath);
+          break;
+        }
+      }
+    }
+    if (!cliDir) {
+      // Try local node_modules
+      const local = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'node_modules', '@google', 'gemini-cli');
+      if (existsSync(join(local, 'package.json'))) cliDir = local;
+    }
+    if (!cliDir) return _geminiModels;
+
+    // Check version — skip if already parsed this version
+    const pkg = JSON.parse(readFileSync(join(cliDir, 'package.json'), 'utf8'));
+    if (pkg.version === _geminiDiscoveryVersion && _geminiModels.length > 0) {
+      return _geminiModels;
+    }
+
+    // Find the main (biggest) chunk in bundle/
+    const bundleDir = join(cliDir, 'bundle');
+    if (!existsSync(bundleDir)) return _geminiModels;
+
+    const chunks = readdirSync(bundleDir).filter(f => f.startsWith('chunk-') && f.endsWith('.js'));
+    if (chunks.length === 0) return _geminiModels;
+
+    const biggest = chunks.reduce((a, b) =>
+      statSync(join(bundleDir, a)).size > statSync(join(bundleDir, b)).size ? a : b
+    );
+
+    // Extract model names via regex
+    const content = readFileSync(join(bundleDir, biggest), 'utf8');
+    const raw = [...new Set(content.match(/gemini-[0-9][a-z0-9.\-]*/g) || [])];
+
+    // Filter: remove test models, file extensions, bare version stubs
+    const models = raw
+      .filter(m =>
+        !m.endsWith('.js') && !m.endsWith('.ts') &&
+        !m.includes('9001') && !m.endsWith('-') &&
+        !/^gemini-[0-9]$/.test(m) && !/^gemini-[0-9]\.[0-9]$/.test(m)
+      )
+      .sort();
+
+    _geminiModels = models;
+    _geminiDiscoveryVersion = pkg.version;
+    console.log(`[adapters] Discovered ${models.length} Gemini models from CLI v${pkg.version}`);
+    return models;
+  } catch (err) {
+    console.warn('[adapters] Gemini model discovery failed:', err.message);
+    return _geminiModels;
+  }
+}
+
+/** Get cached Gemini models. */
+export function getGeminiModels() {
+  return _geminiModels;
+}
+
 // Get the cached CLI models (from last discovery).
 /**
  * @returns {any[]}
@@ -124,6 +208,8 @@ function getEffectiveModels(provider) {
     models = userModels[provider];
   } else if (provider === 'opencode' && _cliModels.length > 0) {
     models = _cliModels.map(m => m.id);
+  } else if (provider === 'gemini' && _geminiModels.length > 0) {
+    models = ['default', ..._geminiModels];
   } else {
     models = DEFAULT_MODELS[provider] || ['default'];
   }
@@ -256,3 +342,4 @@ export function listAdapterTypes() {
 // Pre-warm the cache on module load so that getEffectiveModels has metadata available 
 // immediately for the initial /api/adapter/types request when a chat opens.
 discoverOpenCodeModels().catch(() => {});
+discoverGeminiModels().catch(() => {});
