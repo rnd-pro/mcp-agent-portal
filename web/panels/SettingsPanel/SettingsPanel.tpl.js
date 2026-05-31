@@ -19,6 +19,25 @@ export default`
   <div class="pg-language-status" ref="languageStatus"></div>
 </sn-card>
 
+<sn-card class="pg-voice-settings" ref="voiceCard">
+  <span slot="title">Voice Input</span>
+  <div class="pg-voice-grid">
+    <sn-field variant="compact">
+      <span slot="label">English Command</span>
+      <input type="text" ref="voiceSendCommandEnInput" placeholder="send">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Russian Command</span>
+      <input type="text" ref="voiceSendCommandRuInput" placeholder="отправить">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Spanish Command</span>
+      <input type="text" ref="voiceSendCommandEsInput" placeholder="enviar">
+    </sn-field>
+  </div>
+  <div class="pg-voice-note">In Auto language mode, the recording panel uses the command for the detected interface language.</div>
+</sn-card>
+
 <sn-card>
   <span slot="title">Backend</span>
   <div ref="backendCard"></div>

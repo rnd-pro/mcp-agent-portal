@@ -92,6 +92,8 @@ describe('portal localization bootstrap', () => {
     assert.equal(localization.locale, 'ru');
     assert.equal(storage.get('agentPortal.localeMode'), 'ru');
     assert.equal(tPortal('settings.language.title'), 'Язык интерфейса');
+    assert.equal(tPortal('settings.voice.title'), 'Голосовой ввод');
+    assert.equal(tPortal('settings.voice.commandRuLabel'), 'Команда на русском');
     assert.deepEqual(
       getPortalLocaleOptions().map((option) => option.value),
       ['auto', 'en', 'ru', 'es'],
@@ -104,7 +106,7 @@ describe('portal localization bootstrap', () => {
       document: { documentElement: { dataset: {}, lang: '', dir: '' } },
     });
 
-    let textNode = { nodeType: 3, nodeValue: 'Workspace not selected', parentElement: null };
+    let textNode = { nodeType: 3, nodeValue: 'Voice Input', parentElement: null };
     let input = {
       getAttribute: (name) => name === 'placeholder' ? 'Ask anything, @ to mention, / for workflows' : null,
       setAttribute(name, value) {
@@ -128,7 +130,7 @@ describe('portal localization bootstrap', () => {
 
     localizePortalTree(root);
 
-    assert.equal(textNode.nodeValue, 'Рабочая область не выбрана');
+    assert.equal(textNode.nodeValue, 'Голосовой ввод');
     assert.equal(input.placeholder, 'Спросите что-нибудь, @ для упоминаний, / для workflows');
   });
 

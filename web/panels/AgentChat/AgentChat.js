@@ -25,6 +25,7 @@ import {
 } from '../../services/project-transaction-messages.js';
 import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
+import { getLocalization } from 'symbiote-node/locale';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
@@ -33,6 +34,10 @@ import '../../components/ChatSidebar/ChatSidebar.js';
 export class AgentChat extends Symbiote {
   static isoMode = true;
   _audioRecorder = new AudioRecorder();
+  _voiceCommandMode = false;
+  _voiceCommandTriggered = false;
+  _voiceCommandTextOverride = '';
+  _voiceCommandPhrases = null;
   init$ = {
     messages: [],
     messageItems: [],
@@ -59,6 +64,7 @@ export class AgentChat extends Symbiote {
     this._fetchAdapterMeta();
 
     this._bindComposer();
+    this._loadVoiceInputSettings();
 
     this._ac = new ChatAutocomplete({
       popupEl: this.ref.composer?.getAutocompleteElement?.(),
@@ -193,6 +199,7 @@ export class AgentChat extends Symbiote {
     composer.addEventListener('chat-composer-voice-approve', () => this._stopRecording({ autoSend: true }));
     composer.addEventListener('chat-composer-voice-cancel', () => this._cancelVoiceResult());
     composer.addEventListener('chat-composer-voice-send', () => this._confirmVoiceResult());
+    composer.addEventListener('chat-composer-voice-command-toggle', () => this._toggleVoiceCommandMode());
     composer.addEventListener('chat-composer-param-change', (event) => this._handleComposerParamChange(event.detail));
     composer.addEventListener('chat-composer-context-remove', (event) => {
       this.$.attachedContext = removeAttachedContext(this.$.attachedContext, event.detail?.key);
@@ -325,19 +332,79 @@ export class AgentChat extends Symbiote {
     };
   }
 
+  _toggleVoiceCommandMode() {
+    this._voiceCommandMode = !this._voiceCommandMode;
+    this._updateVoicePreview(null, this._audioRecorder.elapsed);
+  }
+
+  _defaultVoiceCommandPhrases() {
+    return {
+      en: 'send',
+      ru: 'отправить',
+      es: 'enviar',
+    };
+  }
+
+  _getVoiceCommandPhrase() {
+    let locale = getLocalization().locale;
+    let phrases = this._voiceCommandPhrases || this._defaultVoiceCommandPhrases();
+    return phrases[locale] || this._defaultVoiceCommandPhrases()[locale] || this._defaultVoiceCommandPhrases().en;
+  }
+
+  async _loadVoiceInputSettings() {
+    try {
+      let settings = await fetch('/api/settings').then((res) => res.json());
+      let defaults = this._defaultVoiceCommandPhrases();
+      let saved = settings?.voiceInput?.sendCommands || {};
+      let legacy = String(settings?.voiceInput?.sendCommand || '').trim();
+      this._voiceCommandPhrases = {
+        en: String(saved.en || legacy || defaults.en).trim() || defaults.en,
+        ru: String(saved.ru || defaults.ru).trim() || defaults.ru,
+        es: String(saved.es || defaults.es).trim() || defaults.es,
+      };
+    } catch {
+      this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
+    }
+  }
+
+  _escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  _extractVoiceCommandText(text = '') {
+    let value = String(text || '').trim();
+    if (!value) return { matched: false, text: '' };
+    let command = this._escapeRegExp(this._getVoiceCommandPhrase());
+    let commandPattern = new RegExp(`(?:[\\s,.;:!?]+|^)(${command})[\\s,.;:!?]*$`, 'iu');
+    if (!commandPattern.test(value)) return { matched: false, text: value };
+    let cleaned = value.replace(commandPattern, '').trim();
+    return { matched: Boolean(cleaned), text: cleaned };
+  }
+
   /** Show/update the live preview banner above the composer */
   _updateVoicePreview(text, elapsed) {
     if (this._audioRecorder.state === 'recording') {
       this._ensureVoicePreview('recording');
     }
     if (!this._voicePreview) return;
-    if (text) this._voiceInterimText = text;
+    if (text) {
+      let command = this._voiceCommandMode ? this._extractVoiceCommandText(text) : { matched: false, text };
+      this._voiceInterimText = command.text;
+      if (command.matched && !this._voiceCommandTriggered) {
+        this._voiceCommandTriggered = true;
+        this._voiceCommandTextOverride = command.text;
+        this._stopRecording({ autoSend: true, textOverride: command.text });
+        return;
+      }
+    }
     let seconds = typeof elapsed === 'number' ? elapsed : this._audioRecorder.elapsed;
     this.ref.composer?.setVoicePreview?.({
       mode: 'recording',
       status: this._formatVoiceElapsed(seconds),
       text: this._voiceInterimText || '',
       elapsed: true,
+      commandMode: this._voiceCommandMode,
+      commandPhrase: this._getVoiceCommandPhrase(),
     });
     this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || this._voicePreview;
   }
@@ -375,6 +442,8 @@ export class AgentChat extends Symbiote {
       status: recording ? this._formatVoiceElapsed(this._audioRecorder.elapsed) : '',
       text: recording ? this._voiceInterimText || '' : '',
       elapsed: recording,
+      commandMode: this._voiceCommandMode,
+      commandPhrase: this._getVoiceCommandPhrase(),
     });
     this._voicePreview = composer.getVoicePreviewElement?.() || null;
   }
@@ -402,6 +471,8 @@ export class AgentChat extends Symbiote {
     this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
+    this._voiceCommandTriggered = false;
+    this._voiceCommandTextOverride = '';
     this._micBtn?.classList.remove('recording', 'processing');
     let icon = this._micBtn?.querySelector('.material-symbols-outlined');
     if (icon) icon.textContent = 'mic';
@@ -410,6 +481,8 @@ export class AgentChat extends Symbiote {
   _removeVoicePreview() {
     this.ref.composer?.clearVoicePreview?.();
     this._voicePreview = null;
+    this._voiceCommandTriggered = false;
+    this._voiceCommandTextOverride = '';
   }
 
   async _toggleRecording() {
@@ -417,7 +490,10 @@ export class AgentChat extends Symbiote {
       this._stopRecording();
     } else if (this._audioRecorder.state === 'idle') {
       try {
+        await this._loadVoiceInputSettings();
         this._voiceInterimText = '';
+        this._voiceCommandTriggered = false;
+        this._voiceCommandTextOverride = '';
         this._showVoicePreview('recording');
         this._startVoiceUiTimer();
         await this._audioRecorder.start();
@@ -429,6 +505,8 @@ export class AgentChat extends Symbiote {
         if (this._audioRecorder.hasSpeechRecognition && this._audioRecorder.state === 'idle') {
           try {
             this._voiceInterimText = '';
+            this._voiceCommandTriggered = false;
+            this._voiceCommandTextOverride = '';
             await this._audioRecorder.startMediaRecorder();
             this._showVoicePreview('recording');
             this._startVoiceUiTimer();
@@ -444,7 +522,7 @@ export class AgentChat extends Symbiote {
     }
   }
 
-  async _stopRecording({ autoSend = false } = {}) {
+  async _stopRecording({ autoSend = false, textOverride = '' } = {}) {
     this._stopVoiceUiTimer();
     this._micBtn?.classList.remove('recording');
     this._micBtn?.classList.add('processing');
@@ -453,7 +531,7 @@ export class AgentChat extends Symbiote {
 
     try {
       let result = await this._audioRecorder.stop();
-      let text = result.text || '';
+      let text = textOverride || this._voiceCommandTextOverride || result.text || '';
 
       // If no text from Speech API, try server transcription
       if (!text && result.audioBase64) {
@@ -474,9 +552,15 @@ export class AgentChat extends Symbiote {
         }
       }
 
+      if (this._voiceCommandMode && autoSend) {
+        let command = this._extractVoiceCommandText(text);
+        if (command.matched) text = command.text;
+      }
+
       if (text) {
         this._voiceInterimText = '';
         this._voiceResultText = text;
+        this._voiceCommandTextOverride = '';
         if (autoSend) {
           this._removeVoicePreview();
           this.ref.composer?.setValue?.(text);
@@ -506,6 +590,8 @@ export class AgentChat extends Symbiote {
     this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
+    this._voiceCommandTriggered = false;
+    this._voiceCommandTextOverride = '';
     if (!text) return;
     this.ref.composer?.setValue?.(text);
     this.$.inputVal = text;
@@ -518,7 +604,12 @@ export class AgentChat extends Symbiote {
     this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
+    this._voiceCommandTriggered = false;
+    this._voiceCommandTextOverride = '';
     this._audioRecorder.cancel();
+    this._micBtn?.classList.remove('recording', 'processing');
+    let icon = this._micBtn?.querySelector('.material-symbols-outlined');
+    if (icon) icon.textContent = 'mic';
   }
 
 

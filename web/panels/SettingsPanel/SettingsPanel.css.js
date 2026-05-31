@@ -87,6 +87,7 @@ pg-settings-panel {
 /* Claude Gateway */
 .pg-library-settings,
 .pg-language-settings,
+.pg-voice-settings,
 .pg-network-settings,
 .pg-gateway {
   display: flex;
@@ -94,8 +95,21 @@ pg-settings-panel {
   gap: 10px;
 }
 
-.pg-language-settings select {
+.pg-language-settings select,
+.pg-voice-grid input {
   font-family: var(--sn-font);
+}
+
+.pg-voice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 760px) {
+  .pg-voice-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .pg-library-settings input,
@@ -106,6 +120,7 @@ pg-settings-panel {
 
 .pg-language-note,
 .pg-language-status,
+.pg-voice-note,
 .pg-library-note {
   font-size: 11px;
   line-height: 1.4;

@@ -75,6 +75,14 @@ const DEFAULT_GATEWAY = {
   },
 };
 
+function defaultVoiceCommands() {
+  return {
+    en: 'send',
+    ru: 'отправить',
+    es: 'enviar',
+  };
+}
+
 export class SettingsPanel extends Symbiote {
   init$ = {};
   _statusInterval = null;
@@ -107,6 +115,7 @@ export class SettingsPanel extends Symbiote {
       }
       this._settings = r || {};
       this._applyLocalizationSettings(r.localization || {});
+      this._applyVoiceInputSettings(r.voiceInput || {});
       this._applyAgentPortalSettings(r.agentPortal || {});
       if (this._lastNetworkAccess) this._renderNetworkAccess(this._lastNetworkAccess);
       this._applyGatewaySettings(r.anthropicGateway || {});
@@ -121,13 +130,14 @@ export class SettingsPanel extends Symbiote {
       let telegramChatId = this.ref.telegramChatIdInput.value.trim();
       let agentPortal = this._readAgentPortalSettings();
       let localization = this._readLocalizationSettings();
+      let voiceInput = this._readVoiceInputSettings();
       let anthropicGateway = this._readGatewaySettings();
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramToken, telegramChatId, localization, agentPortal, anthropicGateway })
+        body: JSON.stringify({ telegramToken, telegramChatId, localization, voiceInput, agentPortal, anthropicGateway })
       });
-      this._settings = { ...this._settings, telegramToken, telegramChatId, localization, agentPortal, anthropicGateway };
+      this._settings = { ...this._settings, telegramToken, telegramChatId, localization, voiceInput, agentPortal, anthropicGateway };
       let btn = this.ref.saveSettingsBtn;
       btn.textContent = tPortal('text.savedRestart');
       setTimeout(() => {
@@ -178,6 +188,26 @@ export class SettingsPanel extends Symbiote {
   _readLocalizationSettings() {
     return {
       mode: this.ref.localeModeInput.value || 'auto',
+    };
+  }
+
+  _applyVoiceInputSettings(raw) {
+    let defaults = defaultVoiceCommands();
+    let saved = raw.sendCommands || {};
+    let legacy = raw.sendCommand || '';
+    this.ref.voiceSendCommandEnInput.value = saved.en || legacy || defaults.en;
+    this.ref.voiceSendCommandRuInput.value = saved.ru || defaults.ru;
+    this.ref.voiceSendCommandEsInput.value = saved.es || defaults.es;
+  }
+
+  _readVoiceInputSettings() {
+    let defaults = defaultVoiceCommands();
+    return {
+      sendCommands: {
+        en: this.ref.voiceSendCommandEnInput.value.trim() || defaults.en,
+        ru: this.ref.voiceSendCommandRuInput.value.trim() || defaults.ru,
+        es: this.ref.voiceSendCommandEsInput.value.trim() || defaults.es,
+      },
     };
   }
 

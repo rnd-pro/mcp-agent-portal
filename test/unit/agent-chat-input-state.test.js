@@ -77,8 +77,17 @@ describe('agent chat input state', () => {
     assert.match(source, /text: this\._voiceInterimText \|\| ''/);
     assert.equal(source.includes("composer.querySelector('.composer-body:not(.voice-preview)')"), true);
     assert.match(source, /chat-composer-voice-approve', \(\) => this\._stopRecording\(\{ autoSend: true \}\)/);
-    assert.match(source, /async _stopRecording\(\{ autoSend = false \} = \{\}\)/);
+    assert.match(source, /async _stopRecording\(\{ autoSend = false, textOverride = '' \} = \{\}\)/);
     assert.match(source, /if \(autoSend\) \{\s+this\._removeVoicePreview\(\);\s+this\.ref\.composer\?\.setValue\?\.\(text\);/);
+    assert.match(source, /_extractVoiceCommandText\(text = ''\)/);
+    assert.match(source, /_loadVoiceInputSettings\(\)/);
+    assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
+    assert.match(source, /settings\?\.voiceInput\?\.sendCommand/);
+    assert.match(source, /_defaultVoiceCommandPhrases\(\)/);
+    assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
+    assert.match(source, /chat-composer-voice-command-toggle', \(\) => this\._toggleVoiceCommandMode\(\)/);
+    assert.match(source, /this\._stopRecording\(\{ autoSend: true, textOverride: command\.text \}\)/);
+    assert.match(source, /this\._micBtn\?\.classList\.remove\('recording', 'processing'\);/);
     assert.equal(source.includes('composer.parentElement.insertBefore(preview, composer)'), false);
     assert.match(source, /_showVoiceError\(message\)/);
     assert.match(source, /this\._showVoiceError\('Microphone access denied\. Check browser microphone permissions\.'\);/);
