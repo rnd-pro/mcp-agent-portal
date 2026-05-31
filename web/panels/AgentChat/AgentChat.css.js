@@ -72,4 +72,32 @@ pg-agent-chat {
   width: 90%;
 }
 
+/* Placeholder: 59% more faded than default */
+chat-composer .composer-body textarea::placeholder {
+  opacity: 0.41;
+}
+
+/* Blinking cursor before placeholder — visible even without focus */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+chat-composer .composer-body {
+  position: relative;
+}
+
+chat-composer .composer-body:has(textarea:placeholder-shown)::after {
+  content: '|';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  color: var(--sn-text-dim);
+  opacity: 0.41;
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: none;
+  animation: cursor-blink 1s step-end infinite;
+}
+
 `;
