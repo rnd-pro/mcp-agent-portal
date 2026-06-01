@@ -131,7 +131,7 @@ export class AgentChat extends Symbiote {
         this._updateEmptyState();
       },
       onError: (_errText) => {
-        this._setSending(false);
+        this._setSending(false, { speak: false });
         this._renderLiveStatus(null);
         this._updateEmptyState();
       },
@@ -545,6 +545,10 @@ export class AgentChat extends Symbiote {
     return this._getLatestAgentSpeechMessage()?.text || '';
   }
 
+  _snapshotVoiceResponseBaseline() {
+    this._voiceResponseLastAgentKey = this._getLatestAgentSpeechMessage()?.key || '';
+  }
+
   _speechLocale() {
     let locale = getLocalization().locale;
     if (locale === 'ru') return 'ru-RU';
@@ -880,7 +884,7 @@ export class AgentChat extends Symbiote {
           this._removeVoicePreview();
           this.ref.composer?.setValue?.(text);
           this.$.inputVal = text;
-          this._sendMessage();
+          this._sendMessage({ voiceTranscribed: true });
         } else {
           this.ref.composer?.setVoicePreview?.({ mode: 'result', text, editable: true });
           this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
@@ -911,7 +915,7 @@ export class AgentChat extends Symbiote {
     if (!text) return;
     this.ref.composer?.setValue?.(text);
     this.$.inputVal = text;
-    this._sendMessage();
+    this._sendMessage({ voiceTranscribed: true });
   }
 
   _cancelVoiceResult() {
@@ -1235,7 +1239,23 @@ export class AgentChat extends Symbiote {
     return !!(this._isSending || chat?.pendingTaskId || this.$.chatParams?.pendingTaskId);
   }
 
-  async _sendMessage() {
+  _voiceTranscriptionPromptNote() {
+    let locale = getLocalization().locale;
+    if (locale === 'ru') {
+      return '[Примечание: следующее сообщение получено через голосовую транскрибацию. В нем возможны ошибки распознавания; учитывай контекст и уточняй, если смысл неоднозначен.]';
+    }
+    if (locale === 'es') {
+      return '[Nota: el siguiente mensaje proviene de una transcripcion de voz. Puede contener errores de reconocimiento; usa el contexto y pide aclaracion si el sentido no es claro.]';
+    }
+    return '[Note: the following message was produced by voice transcription. It may contain recognition errors; use context and ask for clarification if the intent is ambiguous.]';
+  }
+
+  _buildAgentPrompt(prompt, { voiceTranscribed = false } = {}) {
+    if (!voiceTranscribed) return prompt;
+    return `${this._voiceTranscriptionPromptNote()}\n\n${prompt}`;
+  }
+
+  async _sendMessage({ voiceTranscribed = false } = {}) {
     this._syncComposerParamsFromDom();
     if (this.$.isInputDisabled) return;
     let chatId = this._loadedChatId || dashState.activeChatId;
@@ -1291,7 +1311,9 @@ export class AgentChat extends Symbiote {
     if (contextText) {
       prompt = contextText + prompt;
     }
+    let agentPrompt = this._buildAgentPrompt(prompt, { voiceTranscribed });
 
+    this._snapshotVoiceResponseBaseline();
     this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
     this.$.inputVal = '';
     this.$.attachedContext = []; // Clear context after send
@@ -1314,14 +1336,14 @@ export class AgentChat extends Symbiote {
       if (adapter === 'pool') {
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
-        reply = await this._wsClient.send(chatId, prompt, sendParams, this._sessionId);
+        reply = await this._wsClient.send(chatId, agentPrompt, sendParams, this._sessionId);
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
         this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.processing') }];
         if (this.ref.cellBg) this.ref.cellBg.toggle(true);
 
-        let payload = { ...sendParams, type: adapter, prompt };
+        let payload = { ...sendParams, type: adapter, prompt: agentPrompt };
         if (!payload.timeout) payload.timeout = 300;
         let res = await fetch('/api/adapter/run', {
           method: 'POST',

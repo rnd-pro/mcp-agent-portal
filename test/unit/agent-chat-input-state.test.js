@@ -58,12 +58,16 @@ describe('agent chat input state', () => {
     assert.match(agentChat, /let createPayload = \{ \.\.\.persistedParams, adapter, projectId, name \};/);
     assert.match(agentChat, /if \(changedParams\) \{[\s\S]*sendParams = this\._getChatSendParams\(\);[\s\S]*persistedParams = this\._getPersistedChatParams\(sendParams\);[\s\S]*\}/);
     assert.match(agentChat, /if \(chatId\) \{[\s\S]*\/api\/chats\/update[\s\S]*this\._getPersistedChatParams\(currentParams\)/);
-    assert.match(agentChat, /let payload = \{ \.\.\.sendParams, type: adapter, prompt \};/);
+    assert.match(agentChat, /let agentPrompt = this\._buildAgentPrompt\(prompt, \{ voiceTranscribed \}\);/);
+    assert.match(agentChat, /let payload = \{ \.\.\.sendParams, type: adapter, prompt: agentPrompt \};/);
+    assert.match(agentChat, /this\._wsClient\.send\(chatId, agentPrompt, sendParams, this\._sessionId\)/);
     assert.match(agentChat, /delete params\.prompt;/);
     assert.match(agentChat, /if \(params\.resource_group && params\.resource_group !== 'none'\) \{[\s\S]*delete params\.provider;[\s\S]*delete params\.model;[\s\S]*\}/);
     assert.match(agentChat, /if \(hasResourceGroup && \(key === 'provider' \|\| key === 'model'\)\) continue;/);
     assert.match(agentChat, /result\.provider = null;[\s\S]*result\.model = null;/);
     assert.match(wsClient, /let params = \{ \.\.\.chatParams, chatId, prompt \};/);
+    assert.match(wsClient, /case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*if \(this\.opts\.onDone\) this\.opts\.onDone\(\);[\s\S]*resolve\(''\);/);
+    assert.match(wsClient, /resume\(chatId, taskId\) \{[\s\S]*case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*this\.opts\.onDone\(\);/);
   });
 
   it('keeps a visible voice preview when recording cannot start or produce text', () => {
@@ -79,6 +83,10 @@ describe('agent chat input state', () => {
     assert.match(source, /chat-composer-voice-approve', \(\) => this\._stopRecording\(\{ autoSend: true \}\)/);
     assert.match(source, /async _stopRecording\(\{ autoSend = false, textOverride = '' \} = \{\}\)/);
     assert.match(source, /if \(autoSend\) \{\s+this\._removeVoicePreview\(\);\s+this\.ref\.composer\?\.setValue\?\.\(text\);/);
+    assert.match(source, /this\._sendMessage\(\{ voiceTranscribed: true \}\);/);
+    assert.match(source, /_voiceTranscriptionPromptNote\(\)/);
+    assert.match(source, /_buildAgentPrompt\(prompt, \{ voiceTranscribed = false \} = \{\}\)/);
+    assert.match(source, /return `\$\{this\._voiceTranscriptionPromptNote\(\)\}\\n\\n\$\{prompt\}`;/);
     assert.match(source, /_extractVoiceCommandText\(text = ''\)/);
     assert.match(source, /_loadVoiceInputSettings\(\)/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
@@ -99,7 +107,10 @@ describe('agent chat input state', () => {
     assert.match(source, /_setSending\(active, \{ speak = true \} = \{\}\)/);
     assert.match(source, /if \(!active && speak\) this\._speakPendingAgentResponse\(\);/);
     assert.match(source, /this\._setSending\(false, \{ speak: false \}\);/);
+    assert.match(source, /onError: \(_errText\) => \{[\s\S]*this\._setSending\(false, \{ speak: false \}\);/);
     assert.doesNotMatch(source, /sub\('messages'[\s\S]{0,240}_speakPendingAgentResponse\(\)/);
+    assert.match(source, /_snapshotVoiceResponseBaseline\(\)/);
+    assert.match(source, /this\._snapshotVoiceResponseBaseline\(\);\s+this\.\$\.messages = \[\.\.\.this\.\$\.messages, \{ role: 'user', text: prompt \}\];/);
     assert.match(source, /function sameChatMessages\(next = \[\], current = \[\]\)/);
     assert.match(source, /JSON\.stringify\(message\) === JSON\.stringify\(current\[index\]\)/);
     assert.doesNotMatch(source, /m\.text === cur\[i\]\?\.text && m\.role === cur\[i\]\?\.role/);

@@ -174,11 +174,14 @@ export class ChatWsClient {
               setTimeout(() => {
                 this._pullMessages(chatId).then(() => {
                   dashEmit("chats-updated");
-                }).catch(() => { dashEmit("chats-updated"); });
+                }).catch(() => {
+                  dashEmit("chats-updated");
+                }).finally(() => {
+                  if (this.opts.onDone) this.opts.onDone();
+                  resolve('');
+                });
               }, 500);
 
-              if (this.opts.onDone) this.opts.onDone();
-              resolve('');
               break;
             }
 
@@ -303,9 +306,11 @@ export class ChatWsClient {
             // Fetch final state from server
             this._pullMessages(chatId).then(() => {
               dashEmit("chats-updated");
-            }).catch(() => {});
-
-            this.opts.onDone();
+            }).catch(() => {
+              dashEmit("chats-updated");
+            }).finally(() => {
+              this.opts.onDone();
+            });
             break;
           }
 
