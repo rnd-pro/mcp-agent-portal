@@ -246,7 +246,62 @@ function demoNetworkAccess() {
   };
 }
 
-function demoSettings() {
+function sanitizeDemoVoiceCommands(value) {
+  if (!value || typeof value !== 'object') return {};
+  let result = {};
+  for (let locale of ['en', 'ru', 'es']) {
+    let command = String(value[locale] || '').trim();
+    if (command) result[locale] = command.slice(0, 80);
+  }
+  return result;
+}
+
+function sanitizeDemoVoiceInput(value = {}) {
+  if (!value || typeof value !== 'object') return {};
+  let result = {};
+  if ('sendByCommandEnabled' in value) {
+    result.sendByCommandEnabled = Boolean(value.sendByCommandEnabled);
+  }
+  if ('voiceResponseEnabled' in value) {
+    result.voiceResponseEnabled = Boolean(value.voiceResponseEnabled);
+  }
+  let sendCommands = sanitizeDemoVoiceCommands(value.sendCommands);
+  if (Object.keys(sendCommands).length) result.sendCommands = sendCommands;
+  let wakeCommands = sanitizeDemoVoiceCommands(value.wakeCommands);
+  if (Object.keys(wakeCommands).length) result.wakeCommands = wakeCommands;
+  return result;
+}
+
+function sanitizeDemoSettings(updates = {}) {
+  let safe = {};
+  if (updates.localization && typeof updates.localization === 'object') {
+    let mode = String(updates.localization.mode || '').trim();
+    if (['auto', 'en', 'ru', 'es'].includes(mode)) safe.localization = { mode };
+  }
+  if (updates.voiceInput && typeof updates.voiceInput === 'object') {
+    safe.voiceInput = sanitizeDemoVoiceInput(updates.voiceInput);
+  }
+  return safe;
+}
+
+function mergeDemoSettings(current = {}, updates = {}) {
+  let safe = sanitizeDemoSettings(updates);
+  return {
+    ...current,
+    ...safe,
+    localization: safe.localization || current.localization,
+    voiceInput: safe.voiceInput
+      ? {
+          ...(current.voiceInput || {}),
+          ...safe.voiceInput,
+          sendCommands: safe.voiceInput.sendCommands || current.voiceInput?.sendCommands,
+          wakeCommands: safe.voiceInput.wakeCommands || current.voiceInput?.wakeCommands,
+        }
+      : current.voiceInput,
+  };
+}
+
+function demoSettings(overrides = {}) {
   return {
     telegramToken: '',
     telegramChatId: '',
@@ -273,6 +328,7 @@ function demoSettings() {
         },
       },
     },
+    ...overrides,
   };
 }
 
@@ -932,6 +988,7 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
   let chats = createDemoChats();
   let chatMap = new Map(chats.map((chat) => [chat.id, chat]));
   let events = generateInitialEvents(18);
+  let settingsState = {};
   let wsServer = new WebSocketServer({ noServer: true });
 
   function registerChatWithSubagents(chat) {
@@ -1008,8 +1065,12 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
       'GET /api/network-auth/pending': (_req, res) => json(res, { pending: [], demoMode: true }),
       'POST /api/network-auth/approve': async (_req, res) => json(res, { ok: true, demoMode: true }),
       'POST /api/network-auth/reject': async (_req, res) => json(res, { ok: true, demoMode: true }),
-      'GET /api/settings': (_req, res) => json(res, demoSettings()),
-      'POST /api/settings': async (_req, res) => json(res, { ok: true, demoMode: true }),
+      'GET /api/settings': (_req, res) => json(res, demoSettings(settingsState)),
+      'POST /api/settings': async (req, res) => {
+        let body = await parseBody(req);
+        settingsState = mergeDemoSettings(settingsState, body);
+        json(res, { ok: true, demoMode: true, settings: demoSettings(settingsState) });
+      },
       'GET /api/settings/models': (_req, res) => json(res, demoModels()),
       'POST /api/settings/models': async (_req, res) => json(res, { ok: true, demoMode: true }),
       'POST /api/settings/models/refresh': async (_req, res) => json(res, { ...demoModels(), models: demoModels().cliModels, count: demoModels().cliModels.length }),

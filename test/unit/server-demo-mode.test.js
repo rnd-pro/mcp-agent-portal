@@ -288,6 +288,41 @@ describe('server demo mode', () => {
     assert.ok(marketplace.categories['rnd-pro'].every((item) => item.name && item.command));
   });
 
+  it('persists safe voice settings in public demo mode without storing secrets', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+
+    let saveRes = makeRes();
+    await demo.routes['POST /api/settings'](
+      makeReq('POST', '/api/settings', {
+        telegramToken: 'do-not-store',
+        anthropicGateway: { enabled: true },
+        localization: { mode: 'ru' },
+        voiceInput: {
+          sendByCommandEnabled: true,
+          voiceResponseEnabled: true,
+          sendCommands: { ru: 'отправить сообщение' },
+          wakeCommands: { ru: 'голосовой ввод' },
+        },
+      }),
+      saveRes,
+    );
+    assert.equal(saveRes.json().ok, true);
+
+    let settingsRes = makeRes();
+    demo.routes['GET /api/settings'](makeReq('GET', '/api/settings'), settingsRes);
+    let settings = settingsRes.json();
+    assert.equal(settings.localization.mode, 'ru');
+    assert.equal(settings.voiceInput.sendByCommandEnabled, true);
+    assert.equal(settings.voiceInput.voiceResponseEnabled, true);
+    assert.equal(settings.voiceInput.sendCommands.ru, 'отправить сообщение');
+    assert.equal(settings.voiceInput.wakeCommands.ru, 'голосовой ввод');
+    assert.equal(settings.telegramToken, '');
+    assert.equal(settings.anthropicGateway.enabled, false);
+  });
+
   it('records XR diagnostics in public demo mode', async () => {
     let demo = createServerDemoMode({
       projectRoot: process.cwd(),
