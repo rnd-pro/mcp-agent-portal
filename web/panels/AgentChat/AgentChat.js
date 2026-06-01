@@ -26,6 +26,7 @@ import {
 import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
 import { getLocalization } from 'symbiote-node/locale';
+import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 /**
@@ -528,13 +529,7 @@ export class AgentChat extends Symbiote {
   }
 
   _cleanSpeechText(text) {
-    return String(text)
-        .replace(/```[\s\S]*?```/g, ' ')
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-        .replace(/[#*_>~-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+    return sanitizeVoiceResponseText(text);
   }
 
   _getLatestAgentSpeechText() {
