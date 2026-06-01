@@ -802,6 +802,19 @@ export class AgentChat extends Symbiote {
     if (icon) icon.textContent = 'mic';
   }
 
+  async _isMicrophonePermissionPrompt() {
+    try {
+      let status = await navigator.permissions?.query?.({ name: 'microphone' });
+      return status?.state === 'prompt';
+    } catch {
+      return false;
+    }
+  }
+
+  _voicePermissionRefreshMessage() {
+    return tPortal('settings.voice.refreshAfterPermission');
+  }
+
   _removeVoicePreview() {
     this.ref.composer?.clearVoicePreview?.();
     this._voicePreview = null;
@@ -813,8 +826,11 @@ export class AgentChat extends Symbiote {
     if (this._audioRecorder.state === 'recording') {
       this._stopRecording();
     } else if (this._audioRecorder.state === 'idle') {
+      let wasMicrophonePrompt = false;
       try {
         await this._loadVoiceInputSettings();
+        wasMicrophonePrompt = await this._isMicrophonePermissionPrompt();
+        this._voicePermissionPromptBeforeStart = wasMicrophonePrompt;
         this._pauseWakeListeningForRecording();
         this._voiceInterimText = '';
         this._voiceCommandTriggered = false;
@@ -839,11 +855,17 @@ export class AgentChat extends Symbiote {
             this._micBtn?.classList.add('recording');
           } catch (err2) {
             console.error('[AgentChat] Mic fallback also failed:', err2);
-            this._showVoiceError('Microphone access denied. Check browser microphone permissions.');
+            let message = wasMicrophonePrompt
+              ? this._voicePermissionRefreshMessage()
+              : 'Microphone access denied. Check browser microphone permissions.';
+            this._showVoiceError(message);
             this._resumeWakeListeningAfterRecording();
           }
         } else {
-          this._showVoiceError('Microphone access denied. Check browser microphone permissions.');
+          let message = wasMicrophonePrompt
+            ? this._voicePermissionRefreshMessage()
+            : 'Microphone access denied. Check browser microphone permissions.';
+          this._showVoiceError(message);
           this._resumeWakeListeningAfterRecording();
         }
       }
@@ -899,7 +921,10 @@ export class AgentChat extends Symbiote {
           this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
         }
       } else {
-        this._showVoiceError('No speech detected. Try again.');
+        let message = this._voicePermissionPromptBeforeStart
+          ? this._voicePermissionRefreshMessage()
+          : 'No speech detected. Try again.';
+        this._showVoiceError(message);
       }
     } catch (err) {
       console.error('[AgentChat] Transcription error:', err);
@@ -908,6 +933,7 @@ export class AgentChat extends Symbiote {
       this._micBtn?.classList.remove('processing');
       let icon = this._micBtn?.querySelector('.material-symbols-outlined');
       if (icon) icon.textContent = 'mic';
+      this._voicePermissionPromptBeforeStart = false;
       this._resumeWakeListeningAfterRecording();
     }
   }

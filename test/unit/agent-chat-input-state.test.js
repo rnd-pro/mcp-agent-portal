@@ -162,8 +162,11 @@ describe('agent chat input state', () => {
     assert.match(source, /this\._micBtn\?\.classList\.remove\('recording', 'processing'\);/);
     assert.equal(source.includes('composer.parentElement.insertBefore(preview, composer)'), false);
     assert.match(source, /_showVoiceError\(message\)/);
-    assert.match(source, /this\._showVoiceError\('Microphone access denied\. Check browser microphone permissions\.'\);/);
-    assert.match(source, /this\._showVoiceError\('No speech detected\. Try again\.'\);/);
+    assert.match(source, /_isMicrophonePermissionPrompt\(\)/);
+    assert.match(source, /tPortal\('settings\.voice\.refreshAfterPermission'\)/);
+    assert.match(source, /this\._voicePermissionPromptBeforeStart/);
+    assert.equal(source.includes('Microphone access denied. Check browser microphone permissions.'), true);
+    assert.equal(source.includes('No speech detected. Try again.'), true);
     assert.match(source, /this\._showVoiceError\('Transcription failed\. Try again\.'\);/);
 
     let settingsSource = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.js'), 'utf8');

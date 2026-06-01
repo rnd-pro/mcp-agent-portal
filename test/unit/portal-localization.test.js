@@ -96,6 +96,10 @@ describe('portal localization bootstrap', () => {
     assert.equal(tPortal('settings.voice.commandRuLabel'), 'Команда на русском');
     assert.equal(tPortal('settings.voice.wakeRuLabel'), 'Команда старта на русском');
     assert.equal(tPortal('settings.voice.speakResponse'), 'Озвучивать новые ответы агента');
+    assert.equal(
+      tPortal('settings.voice.refreshAfterPermission'),
+      'Доступ к микрофону разрешен. Если голосовой ввод не запустился, обновите страницу один раз и попробуйте снова.',
+    );
     assert.deepEqual(
       getPortalLocaleOptions().map((option) => option.value),
       ['auto', 'en', 'ru', 'es'],
