@@ -54,6 +54,12 @@ at render (/tmp/app.js:10:2)
     assert.equal(text, 'Готово. Изменения закоммичены и запушены.');
   });
 
+  it('keeps a compact semantic summary for voice sanitizer commits', () => {
+    let text = sanitizeVoiceResponseText('Готово. Закоммичено и запушено:\n\n512c356 — fix: compact voice response sanitizer — summarize ops, strip code tokens\n\nvoice-response-text.js — summarizeOperationalReply, cleanQuotedFragments, isCodeLikeFragment, wordCount, удаление CODE_TOKEN_RE и CLI_FLAG_RE из прозы\n6 новых тестов');
+
+    assert.equal(text, 'Готово. Изменения закоммичены и запушены. Обновлён фильтр озвучки ответов и добавлены тесты.');
+  });
+
   it('summarizes technical root-cause replies that would become fragmented', () => {
     let text = sanitizeVoiceResponseText('Нашёл причину. `_pullMessages` в `chat-ws-client.js` каждые 2 секунды заменяет `this.$.messages` и триггерит перерендер. Фикс — добавить проверку в `setMessages`.');
 

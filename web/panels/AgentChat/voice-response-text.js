@@ -65,6 +65,9 @@ function summarizeOperationalReply(text) {
     return 'Связь есть.';
   }
   if (/^Готово\.\s+Закоммичено и запушено/i.test(value)) {
+    if (/voice response sanitizer|voice-response-text|CODE_TOKEN_RE|CLI_FLAG_RE|фильтр[а-яё\s]+озвуч/i.test(value)) {
+      return 'Готово. Изменения закоммичены и запушены. Обновлён фильтр озвучки ответов и добавлены тесты.';
+    }
     return 'Готово. Изменения закоммичены и запушены.';
   }
   if (/^Готово\.\s+Закоммичено и запущено/i.test(value)) {

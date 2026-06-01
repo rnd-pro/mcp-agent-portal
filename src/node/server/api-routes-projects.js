@@ -36,9 +36,26 @@ function json(res, data, status = 200) {
 
 /**
  * Build project/chat/CLI route map.
+ * @param {{ proxyManager?: { broadcastMonitor?: Function } }} [deps]
  * @returns {Record<string, Function>}
  */
-export function createProjectRoutes() {
+export function createProjectRoutes(deps = {}) {
+  let { proxyManager = null } = deps;
+  let broadcastChatUpdate = (chatId) => {
+    proxyManager?.broadcastMonitor?.({
+      jsonrpc: '2.0',
+      method: 'patch',
+      params: { path: 'chats.updated', value: chatId },
+    });
+  };
+  let broadcastChatCreated = (chat) => {
+    proxyManager?.broadcastMonitor?.({
+      jsonrpc: '2.0',
+      method: 'patch',
+      params: { path: 'chats.created', value: chat },
+    });
+  };
+
   return {
     // ── Project History ───────────────────────────────────
     'GET /api/projects/history': (req, res) => {
@@ -137,6 +154,8 @@ export function createProjectRoutes() {
         let opts = await parseBody(req);
         let sg = getStateGraph();
         let result = sg.createChat(opts, 'http');
+        let chat = sg.getChat(result.id);
+        if (chat) broadcastChatCreated(chat);
         json(res, { ok: true, id: result.id });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -161,6 +180,7 @@ export function createProjectRoutes() {
         if (!chatId || !role || !text) return json(res, { error: 'Missing chatId, role, or text' }, 400);
         let sg = getStateGraph();
         sg.appendChatMessage(chatId, { role, text });
+        broadcastChatUpdate(chatId);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -179,6 +199,7 @@ export function createProjectRoutes() {
         });
         let sg = getStateGraph();
         sg.replaceChatMessages(chatId, cleaned);
+        broadcastChatUpdate(chatId);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);
@@ -191,6 +212,7 @@ export function createProjectRoutes() {
         if (!id) return json(res, { error: 'Missing id' }, 400);
         let sg = getStateGraph();
         sg.updateChat(id, updates, 'http');
+        broadcastChatUpdate(id);
         json(res, { ok: true });
       } catch (err) {
         json(res, { error: err.message }, 400);

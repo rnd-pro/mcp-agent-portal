@@ -34,6 +34,30 @@ describe('dashboard chat route', () => {
     assert.match(source, /'agent-chat':\s*\{\s*title:\s*tPortal\('text\.chats'\)/);
   });
 
+  it('broadcasts monitor chat updates to the open chat panel', () => {
+    let source = readSource('web/app.js');
+    let routesSource = readSource('src/node/server/api-routes-projects.js');
+    let serverSource = readSource('src/node/server/web-server.js');
+
+    assert.match(source, /function chatPatchId\(value\)/);
+    assert.match(source, /function scheduleChatRefresh\(detail = \{\}\)/);
+    assert.match(source, /dashEmit\("chats-updated", \{ \.\.\.emitDetail, hydrated: true \}\);/);
+    assert.match(source, /dashEmit\("chat-updated", \{ id: emitDetail\.id, source: "monitor" \}\);/);
+    assert.match(source, /dashEmit\("chat-created", \{ id: emitDetail\.id, source: "monitor" \}\);/);
+    assert.match(source, /scheduleChatRefresh\(\{ id: chatId, path: o\.params\.path \}\);/);
+    assert.match(
+      readSource('web/components/ChatSidebar/ChatSidebar.js'),
+      /if \(event\.detail\?\.hydrated\) \{[\s\S]*this\._renderNavItems\(\);[\s\S]*return;[\s\S]*\}[\s\S]*this\._fetchChats\(\);/
+    );
+    assert.match(routesSource, /export function createProjectRoutes\(deps = \{\}\)/);
+    assert.match(routesSource, /let broadcastChatCreated = \(chat\) => \{/);
+    assert.match(routesSource, /let broadcastChatUpdate = \(chatId\) => \{/);
+    assert.match(routesSource, /sg\.appendChatMessage\(chatId, \{ role, text \}\);[\s\S]*broadcastChatUpdate\(chatId\);/);
+    assert.match(routesSource, /sg\.replaceChatMessages\(chatId, cleaned\);[\s\S]*broadcastChatUpdate\(chatId\);/);
+    assert.match(routesSource, /sg\.updateChat\(id, updates, 'http'\);[\s\S]*broadcastChatUpdate\(id\);/);
+    assert.match(serverSource, /let projectRoutes = createProjectRoutes\(\{ proxyManager \}\);/);
+  });
+
   it('groups global chat navigation by project metadata', () => {
     let source = readSource('web/components/ChatSidebar/ChatSidebar.js');
     let treeSource = readSource('web/components/ChatSidebar/chat-tree.js');

@@ -181,7 +181,7 @@ export function startWebServer(projectRoot) {
     getServerAddress: () => server.address(),
   });
   routes = { ...routes, ...networkAuth.routes() };
-  let projectRoutes = createProjectRoutes();
+  let projectRoutes = createProjectRoutes({ proxyManager });
   let runtimeRoutes = createRuntimeRoutes({ proxyManager, projectRoot });
   let allRoutes = { ...routes, ...projectRoutes, ...runtimeRoutes };
   if (serverDemoMode.enabled) {

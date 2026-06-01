@@ -27,6 +27,10 @@ import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
 import { getLocalization } from 'symbiote-node/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
+import {
+  buildChatTitleRequestNote,
+  extractChatTitleFromAgentText,
+} from './chat-title.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 function sameChatMessages(next = [], current = []) {
@@ -125,7 +129,9 @@ export class AgentChat extends Symbiote {
       onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
       onMeta: (meta) => this._renderLiveStatus(meta),
       onProjectTransaction: (detail) => this._applyProjectTransactionEvent(detail),
+      onPulledChat: (chat, detail) => this._handlePulledChat(chat, detail),
       onDone: () => {
+        this._pendingAgentTitleChatId = '';
         this._setSending(false);
         this._renderLiveStatus(null);
         this._updateEmptyState();
@@ -139,6 +145,9 @@ export class AgentChat extends Symbiote {
     });
     dashEvents.addEventListener('active-chat-changed', (e) => {
       this._loadChat(e.detail?.id);
+    });
+    dashEvents.addEventListener('chat-updated', (e) => {
+      this._handleExternalChatUpdate(e.detail);
     });
     dashEvents.addEventListener('graph-context-selected', (e) => {
       this._attachContext(e.detail);
@@ -1250,9 +1259,14 @@ export class AgentChat extends Symbiote {
     return '[Note: the following message was produced by voice transcription. It may contain recognition errors; use context and ask for clarification if the intent is ambiguous.]';
   }
 
-  _buildAgentPrompt(prompt, { voiceTranscribed = false } = {}) {
-    if (!voiceTranscribed) return prompt;
-    return `${this._voiceTranscriptionPromptNote()}\n\n${prompt}`;
+  _buildAgentPrompt(prompt, { voiceTranscribed = false, requestChatTitle = false } = {}) {
+    let parts = [];
+    if (voiceTranscribed) parts.push(this._voiceTranscriptionPromptNote());
+    parts.push(prompt);
+    if (requestChatTitle) {
+      parts.push(buildChatTitleRequestNote(getLocalization().locale));
+    }
+    return parts.join('\n\n');
   }
 
   async _sendMessage({ voiceTranscribed = false } = {}) {
@@ -1263,6 +1277,7 @@ export class AgentChat extends Symbiote {
     if (!prompt) return;
     let sendParams = this._getChatSendParams();
     let persistedParams = this._getPersistedChatParams(sendParams);
+    let requestChatTitle = !chatId;
 
     // Auto-create chat on first message (quick-start flow)
     if (!chatId) {
@@ -1282,6 +1297,7 @@ export class AgentChat extends Symbiote {
         let data = await res.json();
         if (data.ok) {
           chatId = data.id;
+          this._pendingAgentTitleChatId = chatId;
           dashState.activeChatId = chatId;
           updateParams({ chat: chatId });
           dashEmit('active-chat-changed', { id: chatId });
@@ -1311,7 +1327,7 @@ export class AgentChat extends Symbiote {
     if (contextText) {
       prompt = contextText + prompt;
     }
-    let agentPrompt = this._buildAgentPrompt(prompt, { voiceTranscribed });
+    let agentPrompt = this._buildAgentPrompt(prompt, { voiceTranscribed, requestChatTitle });
 
     this._snapshotVoiceResponseBaseline();
     this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
@@ -1380,6 +1396,7 @@ export class AgentChat extends Symbiote {
         } else {
           this.$.messages = [...this.$.messages, { role: 'agent', text: reply }];
         }
+        this.$.messages = this._applyAgentGeneratedChatTitle(chatId, this.$.messages);
       } else {
         // Pool adapter: Handler in _sendViaWs already merged the final result
         // into the last streamed agent message. Nothing to do here.
@@ -1399,6 +1416,46 @@ export class AgentChat extends Symbiote {
     }
     this._setSending(false);
     if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+  }
+
+  _handlePulledChat(chat, detail = {}) {
+    let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+    if (!detail.final) return messages;
+    return this._applyAgentGeneratedChatTitle(chat?.id, messages);
+  }
+
+  _applyAgentGeneratedChatTitle(chatId, messages = []) {
+    if (!chatId || this._pendingAgentTitleChatId !== chatId) return messages;
+    let index = messages.findLastIndex(message => message?.role === 'agent' && message.text);
+    if (index < 0) return messages;
+
+    let parsed = extractChatTitleFromAgentText(messages[index].text);
+    if (!parsed.title) return messages;
+
+    this._pendingAgentTitleChatId = '';
+    let nextMessages = [...messages];
+    nextMessages[index] = { ...nextMessages[index], text: parsed.text };
+    this._saveAgentGeneratedChatTitle(chatId, parsed.title, nextMessages);
+    return nextMessages;
+  }
+
+  _saveAgentGeneratedChatTitle(chatId, title, messages) {
+    this.$.chatName = title;
+    let chat = dashState.chats?.find(item => item.id === chatId);
+    if (chat) chat.name = title;
+    dashEmit('chats-updated', { id: chatId, path: 'chats.updated' });
+
+    fetch('/api/chats/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId, name: title }),
+    }).catch(() => {});
+
+    fetch('/api/chats/messages', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId, messages }),
+    }).catch(() => {});
   }
 
   _syncComposerParamsFromDom() {
@@ -1449,6 +1506,80 @@ export class AgentChat extends Symbiote {
     return result;
   }
 
+  _handleExternalChatUpdate(detail = {}) {
+    let chatId = detail?.id || null;
+    let activeChatId = this._loadedChatId || dashState.activeChatId || null;
+    if (!chatId || chatId !== activeChatId || this._isSending) return;
+    clearTimeout(this._externalChatUpdateTimer);
+    this._externalChatUpdateTimer = setTimeout(() => {
+      this._refreshExternalChat(chatId);
+    }, 150);
+  }
+
+  async _refreshExternalChat(chatId) {
+    if (!chatId || chatId !== (this._loadedChatId || dashState.activeChatId)) return;
+    try {
+      let res = await fetch('/api/chats/get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: chatId }),
+      });
+      if (!res.ok) return;
+      let chat = await res.json();
+      if (!chat || chat.error || chat.id !== (this._loadedChatId || dashState.activeChatId)) return;
+
+      this.$.chatName = chat.name || this.$.chatName || 'Chat';
+      this.$.chatAdapter = chat.adapter || this.$.chatAdapter || 'pool';
+      this.$.isSubagentChat = Boolean(chat.parentChatId);
+      let msgs = this._cleanLoadedMessages(chat.messages || []);
+      if (!sameChatMessages(msgs, this.$.messages)) this.$.messages = msgs;
+      this._applyProjectTransactionEvent({
+        projectId: chat.projectId || null,
+        transactions: chat.projectTransactions || [],
+      });
+      this._sessionId = chat.sessionId || this._sessionId || null;
+      this.$.chatParams = this._chatParamsFromLoadedChat(chat);
+      this._updateComposerFooter();
+    } catch (err) {
+      console.error('[AgentChat] external chat refresh error:', err);
+    }
+  }
+
+  _cleanLoadedMessages(messages = []) {
+    return messages.filter(m => {
+      if (m.role !== 'system') return true;
+      let t = m.text || '';
+      return !t.startsWith(ICONS.WAIT)
+        && !t.startsWith(ICONS.OK)
+        && !t.startsWith(ICONS.WARN)
+        && t !== tPortal('text.processing');
+    });
+  }
+
+  _chatParamsFromLoadedChat(chat = {}) {
+    let params = {};
+    let baseProps = [
+      'id',
+      'projectId',
+      'parentChatId',
+      'name',
+      'adapter',
+      'origin',
+      'messages',
+      'projectTransactions',
+      'sessionId',
+      'pendingTaskId',
+      'createdAt',
+      'updatedAt',
+    ];
+    for (let key in chat) {
+      if (!baseProps.includes(key) && chat[key] != null) {
+        params[key] = chat[key];
+      }
+    }
+    return params;
+  }
+
   async _loadChat(chatId) {
     this._loadedChatId = chatId;
     // Clean up any active voice recording
@@ -1496,12 +1627,7 @@ export class AgentChat extends Symbiote {
       this.$.chatName = chat.name || 'Chat';
       this.$.chatAdapter = chat.adapter || 'pool';
       this.$.isSubagentChat = Boolean(chat.parentChatId);
-      // Filter out stale transient status messages (process artifacts, not conversation content)
-      let msgs = (chat.messages || []).filter(m => {
-        if (m.role !== 'system') return true;
-        let t = m.text || '';
-        return !t.startsWith(ICONS.WAIT) && !t.startsWith(ICONS.OK) && !t.startsWith(ICONS.WARN) && t !== tPortal('text.processing');
-      });
+      let msgs = this._cleanLoadedMessages(chat.messages || []);
       this.$.messages = msgs;
       this._applyProjectTransactionEvent({
         projectId: chat.projectId || null,
@@ -1509,15 +1635,7 @@ export class AgentChat extends Symbiote {
       });
       this._sessionId = chat.sessionId || null;
       
-      // Load saved params — collect all non-base keys that have values
-      let params = {};
-      let baseProps = ['id', 'projectId', 'parentChatId', 'name', 'adapter', 'origin', 'messages', 'projectTransactions', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
-      for (let key in chat) {
-        if (!baseProps.includes(key) && chat[key] != null) {
-          params[key] = chat[key];
-        }
-      }
-      this.$.chatParams = params;
+      this.$.chatParams = this._chatParamsFromLoadedChat(chat);
       
       // Force update options once state is fully set
       this._updateComposerFooter();

@@ -48,7 +48,14 @@ export class ChatSidebar extends ChatSidebarShell {
       this._renderNavItems();
     }
     this._fetchChats();
-    dashEvents.addEventListener('chats-updated', () => this._fetchChats());
+    dashEvents.addEventListener('chats-updated', (event) => {
+      if (event.detail?.hydrated) {
+        this._ensureRouteActiveChat();
+        this._renderNavItems();
+        return;
+      }
+      this._fetchChats();
+    });
     dashEvents.addEventListener('active-project-changed', () => {
       this._ensureRouteActiveChat();
       this._renderNavItems();

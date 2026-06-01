@@ -32,6 +32,7 @@ export class ChatWsClient {
       onError: (errText) => void
       onMeta: ({ phase, messageCount, lastToolName, thinkingStatus }) => void
       onProjectTransaction: ({ chatId, projectId, transaction }) => void
+      onPulledChat: (chat, { final }) => Array|Promise<Array>
       buildSessionMetaHtml: (text) => string
     */
     this._chatWs = null;
@@ -58,7 +59,7 @@ export class ChatWsClient {
    * Fetch current messages from server and update UI.
    * @param {string} chatId
    */
-  async _pullMessages(chatId) {
+  async _pullMessages(chatId, detail = {}) {
     try {
       let res = await fetch('/api/chats/get', {
         method: 'POST',
@@ -68,7 +69,10 @@ export class ChatWsClient {
       if (!res.ok) return;
       let chat = await res.json();
       if (chat && chat.messages) {
-        this.opts.setMessages(chat.messages);
+        let messages = this.opts.onPulledChat
+          ? await this.opts.onPulledChat(chat, detail)
+          : chat.messages;
+        this.opts.setMessages(messages || chat.messages);
         if (chat.sessionId && this.opts.onSessionId) {
           this.opts.onSessionId(chat.sessionId);
         }
@@ -123,7 +127,7 @@ export class ChatWsClient {
         if (this.opts.onMeta) this.opts.onMeta(null);
 
         // Fetch final state from server
-        this._pullMessages(chatId).then(() => {
+        this._pullMessages(chatId, { final: true }).then(() => {
           let msgs = [...this.opts.getMessages()];
           msgs.push({ role: 'system', text: `${ICONS.WAIT} Process crashed or connection closed unexpectedly.` });
           this.opts.setMessages(msgs);
@@ -172,7 +176,7 @@ export class ChatWsClient {
 
               // Fetch final messages from server — single source of truth
               setTimeout(() => {
-                this._pullMessages(chatId).then(() => {
+                this._pullMessages(chatId, { final: true }).then(() => {
                   dashEmit("chats-updated");
                 }).catch(() => {
                   dashEmit("chats-updated");
@@ -304,7 +308,7 @@ export class ChatWsClient {
             if (this.opts.onMeta) this.opts.onMeta(null);
 
             // Fetch final state from server
-            this._pullMessages(chatId).then(() => {
+            this._pullMessages(chatId, { final: true }).then(() => {
               dashEmit("chats-updated");
             }).catch(() => {
               dashEmit("chats-updated");

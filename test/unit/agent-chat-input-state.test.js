@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { getAgentChatInputState } from '../../web/panels/AgentChat/input-state.js';
+import {
+  buildChatTitleRequestNote,
+  extractChatTitleFromAgentText,
+} from '../../web/panels/AgentChat/chat-title.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -46,6 +50,15 @@ describe('agent chat input state', () => {
     assert.match(source, /this\.\$\.isSubagentChat = Boolean\(chat\.parentChatId\);/);
     assert.match(source, /baseProps = \[[^\]]*'parentChatId'/);
     assert.match(source, /if \(this\.\$\.isInputDisabled\) return;/);
+    assert.match(source, /onPulledChat: \(chat, detail\) => this\._handlePulledChat\(chat, detail\),/);
+    assert.match(source, /dashEvents\.addEventListener\('chat-updated', \(e\) => \{[\s\S]*this\._handleExternalChatUpdate\(e\.detail\);/);
+    assert.match(source, /_handleExternalChatUpdate\(detail = \{\}\)/);
+    assert.match(source, /if \(!chatId \|\| chatId !== activeChatId \|\| this\._isSending\) return;/);
+    assert.match(source, /clearTimeout\(this\._externalChatUpdateTimer\);/);
+    assert.match(source, /this\._refreshExternalChat\(chatId\);/);
+    assert.match(source, /async _refreshExternalChat\(chatId\)/);
+    assert.match(source, /this\._cleanLoadedMessages\(chat\.messages \|\| \[\]\)/);
+    assert.match(source, /this\.\$\.chatParams = this\._chatParamsFromLoadedChat\(chat\);/);
   });
 
   it('keeps quick-start chat routing and protected send payload fields intact', () => {
@@ -55,10 +68,15 @@ describe('agent chat input state', () => {
     assert.match(agentChat, /let projectId = dashState\.activeProjectId \|\| routeParams\.project \|\| null;/);
     assert.match(agentChat, /let sendParams = this\._getChatSendParams\(\);/);
     assert.match(agentChat, /let persistedParams = this\._getPersistedChatParams\(sendParams\);/);
+    assert.match(agentChat, /let requestChatTitle = !chatId;/);
     assert.match(agentChat, /let createPayload = \{ \.\.\.persistedParams, adapter, projectId, name \};/);
+    assert.match(agentChat, /this\._pendingAgentTitleChatId = chatId;/);
     assert.match(agentChat, /if \(changedParams\) \{[\s\S]*sendParams = this\._getChatSendParams\(\);[\s\S]*persistedParams = this\._getPersistedChatParams\(sendParams\);[\s\S]*\}/);
     assert.match(agentChat, /if \(chatId\) \{[\s\S]*\/api\/chats\/update[\s\S]*this\._getPersistedChatParams\(currentParams\)/);
-    assert.match(agentChat, /let agentPrompt = this\._buildAgentPrompt\(prompt, \{ voiceTranscribed \}\);/);
+    assert.match(agentChat, /let agentPrompt = this\._buildAgentPrompt\(prompt, \{ voiceTranscribed, requestChatTitle \}\);/);
+    assert.match(agentChat, /buildChatTitleRequestNote\(getLocalization\(\)\.locale\)/);
+    assert.match(agentChat, /extractChatTitleFromAgentText\(messages\[index\]\.text\)/);
+    assert.match(agentChat, /this\._saveAgentGeneratedChatTitle\(chatId, parsed\.title, nextMessages\);/);
     assert.match(agentChat, /let payload = \{ \.\.\.sendParams, type: adapter, prompt: agentPrompt \};/);
     assert.match(agentChat, /this\._wsClient\.send\(chatId, agentPrompt, sendParams, this\._sessionId\)/);
     assert.match(agentChat, /delete params\.prompt;/);
@@ -66,8 +84,27 @@ describe('agent chat input state', () => {
     assert.match(agentChat, /if \(hasResourceGroup && \(key === 'provider' \|\| key === 'model'\)\) continue;/);
     assert.match(agentChat, /result\.provider = null;[\s\S]*result\.model = null;/);
     assert.match(wsClient, /let params = \{ \.\.\.chatParams, chatId, prompt \};/);
-    assert.match(wsClient, /case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*if \(this\.opts\.onDone\) this\.opts\.onDone\(\);[\s\S]*resolve\(''\);/);
-    assert.match(wsClient, /resume\(chatId, taskId\) \{[\s\S]*case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*this\.opts\.onDone\(\);/);
+    assert.match(wsClient, /case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId, \{ final: true \}\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*if \(this\.opts\.onDone\) this\.opts\.onDone\(\);[\s\S]*resolve\(''\);/);
+    assert.match(wsClient, /resume\(chatId, taskId\) \{[\s\S]*case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId, \{ final: true \}\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*this\.opts\.onDone\(\);/);
+  });
+
+  it('extracts an agent generated title from the first final reply', () => {
+    let note = buildChatTitleRequestNote('ru');
+    let parsed = extractChatTitleFromAgentText([
+      'Готово. Я настроил синхронизацию.',
+      '',
+      '<chat-title>Синхронизация чатов</chat-title>',
+    ].join('\n'));
+    let compact = extractChatTitleFromAgentText(
+      'Done.\n<chat-title>**Very long generated chat title with many extra words after limit**</chat-title>'
+    );
+
+    assert.match(note, /<chat-title>Короткое название<\/chat-title>/);
+    assert.match(note, /первое сообщение нового чата/);
+    assert.equal(parsed.title, 'Синхронизация чатов');
+    assert.equal(parsed.text, 'Готово. Я настроил синхронизацию.');
+    assert.equal(parsed.changed, true);
+    assert.equal(compact.title, 'Very long generated chat title with many extra');
   });
 
   it('keeps a visible voice preview when recording cannot start or produce text', () => {
@@ -85,8 +122,9 @@ describe('agent chat input state', () => {
     assert.match(source, /if \(autoSend\) \{\s+this\._removeVoicePreview\(\);\s+this\.ref\.composer\?\.setValue\?\.\(text\);/);
     assert.match(source, /this\._sendMessage\(\{ voiceTranscribed: true \}\);/);
     assert.match(source, /_voiceTranscriptionPromptNote\(\)/);
-    assert.match(source, /_buildAgentPrompt\(prompt, \{ voiceTranscribed = false \} = \{\}\)/);
-    assert.match(source, /return `\$\{this\._voiceTranscriptionPromptNote\(\)\}\\n\\n\$\{prompt\}`;/);
+    assert.match(source, /_buildAgentPrompt\(prompt, \{ voiceTranscribed = false, requestChatTitle = false \} = \{\}\)/);
+    assert.match(source, /if \(voiceTranscribed\) parts\.push\(this\._voiceTranscriptionPromptNote\(\)\);/);
+    assert.match(source, /if \(requestChatTitle\) \{/);
     assert.match(source, /_extractVoiceCommandText\(text = ''\)/);
     assert.match(source, /_loadVoiceInputSettings\(\)/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
