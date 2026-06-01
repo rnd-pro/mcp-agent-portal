@@ -100,6 +100,10 @@ describe('portal localization bootstrap', () => {
       tPortal('settings.voice.refreshAfterPermission'),
       'Доступ к микрофону разрешен. Если голосовой ввод не запустился, обновите страницу один раз и попробуйте снова.',
     );
+    assert.equal(
+      tPortal('settings.voice.transcriptionNote'),
+      '[Примечание: следующее сообщение получено через голосовую транскрибацию. В нем возможны ошибки распознавания; учитывай контекст и уточняй, если смысл неоднозначен.]',
+    );
     assert.deepEqual(
       getPortalLocaleOptions().map((option) => option.value),
       ['auto', 'en', 'ru', 'es'],

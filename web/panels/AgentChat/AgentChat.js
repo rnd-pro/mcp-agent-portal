@@ -1275,14 +1275,7 @@ export class AgentChat extends Symbiote {
   }
 
   _voiceTranscriptionPromptNote() {
-    let locale = getLocalization().locale;
-    if (locale === 'ru') {
-      return '[Примечание: следующее сообщение получено через голосовую транскрибацию. В нем возможны ошибки распознавания; учитывай контекст и уточняй, если смысл неоднозначен.]';
-    }
-    if (locale === 'es') {
-      return '[Nota: el siguiente mensaje proviene de una transcripcion de voz. Puede contener errores de reconocimiento; usa el contexto y pide aclaracion si el sentido no es claro.]';
-    }
-    return '[Note: the following message was produced by voice transcription. It may contain recognition errors; use context and ask for clarification if the intent is ambiguous.]';
+    return tPortal('settings.voice.transcriptionNote');
   }
 
   _buildAgentPrompt(prompt, { voiceTranscribed = false, requestChatTitle = false } = {}) {

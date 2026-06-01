@@ -124,6 +124,7 @@ describe('agent chat input state', () => {
     assert.match(source, /if \(autoSend\) \{\s+this\._removeVoicePreview\(\);\s+this\.ref\.composer\?\.setValue\?\.\(text\);/);
     assert.match(source, /this\._sendMessage\(\{ voiceTranscribed: true \}\);/);
     assert.match(source, /_voiceTranscriptionPromptNote\(\)/);
+    assert.match(source, /return tPortal\('settings\.voice\.transcriptionNote'\);/);
     assert.match(source, /_buildAgentPrompt\(prompt, \{ voiceTranscribed = false, requestChatTitle = false \} = \{\}\)/);
     assert.match(source, /if \(voiceTranscribed\) parts\.push\(this\._voiceTranscriptionPromptNote\(\)\);/);
     assert.match(source, /if \(requestChatTitle\) \{/);
