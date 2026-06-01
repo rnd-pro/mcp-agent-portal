@@ -58,7 +58,9 @@ describe('agent chat input state', () => {
     assert.match(source, /this\._refreshExternalChat\(chatId\);/);
     assert.match(source, /async _refreshExternalChat\(chatId\)/);
     assert.match(source, /this\._cleanLoadedMessages\(chat\.messages \|\| \[\]\)/);
-    assert.match(source, /this\.\$\.chatParams = this\._chatParamsFromLoadedChat\(chat\);/);
+    assert.match(source, /_setLoadedChatParams\(chat\)/);
+    assert.match(source, /this\._loadingChatState = true;/);
+    assert.match(source, /if \(chatId && !this\._loadingChatState\) \{/);
   });
 
   it('keeps quick-start chat routing and protected send payload fields intact', () => {

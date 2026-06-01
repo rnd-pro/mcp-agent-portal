@@ -1113,11 +1113,11 @@ export class AgentChat extends Symbiote {
       // Append settings button at the end of all selectors
       htmlStr += `<a href="/#resource-groups" class="composer-footer-btn composer-settings-btn" title="Configure Resource Groups" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer"><span class="material-symbols-outlined" style="font-size:16px;opacity:0.5">settings</span></a>`;
       this.$.composerFooterHtml = htmlStr;
-      // Batch-persist all defaults in a single reactive update
+      // Batch-persist defaults only for local user/composer changes.
       if (paramsChanged) {
         this.$.chatParams = { ...currentParams };
         let chatId = this._loadedChatId || dashState.activeChatId;
-        if (chatId) {
+        if (chatId && !this._loadingChatState) {
           fetch('/api/chats/update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1538,8 +1538,7 @@ export class AgentChat extends Symbiote {
         transactions: chat.projectTransactions || [],
       });
       this._sessionId = chat.sessionId || this._sessionId || null;
-      this.$.chatParams = this._chatParamsFromLoadedChat(chat);
-      this._updateComposerFooter();
+      this._setLoadedChatParams(chat);
     } catch (err) {
       console.error('[AgentChat] external chat refresh error:', err);
     }
@@ -1578,6 +1577,16 @@ export class AgentChat extends Symbiote {
       }
     }
     return params;
+  }
+
+  _setLoadedChatParams(chat) {
+    this._loadingChatState = true;
+    try {
+      this.$.chatParams = this._chatParamsFromLoadedChat(chat);
+      this._updateComposerFooter();
+    } finally {
+      this._loadingChatState = false;
+    }
   }
 
   async _loadChat(chatId) {
@@ -1635,10 +1644,7 @@ export class AgentChat extends Symbiote {
       });
       this._sessionId = chat.sessionId || null;
       
-      this.$.chatParams = this._chatParamsFromLoadedChat(chat);
-      
-      // Force update options once state is fully set
-      this._updateComposerFooter();
+      this._setLoadedChatParams(chat);
       
       // Resume pending task if exists (e.g. browser was reloaded mid-chat)
       if (chat.pendingTaskId) {
