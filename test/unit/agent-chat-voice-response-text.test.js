@@ -84,6 +84,12 @@ at render (/tmp/app.js:10:2)
     assert.equal(text, 'Он сказал проверь статус и пропустил.');
   });
 
+  it('removes stray brackets and quote marks before speech', () => {
+    let text = sanitizeVoiceResponseText('«[ Готово. Голосовой ввод работает ]»');
+
+    assert.equal(text, 'Готово. Голосовой ввод работает');
+  });
+
   it('limits long responses at a sentence boundary when possible', () => {
     let text = sanitizeVoiceResponseText('Первое предложение. Второе предложение. Третье предложение.', { maxChars: 42 });
 

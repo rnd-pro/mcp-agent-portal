@@ -46,17 +46,27 @@ function isCodeLikeFragment(value) {
   return false;
 }
 
+function cleanQuotedValue(value) {
+  return String(value || '')
+      .trim()
+      .replace(/^[\s[\]{}]+|[\s[\]{}]+$/g, '')
+      .trim();
+}
+
 function cleanQuotedFragments(line) {
   return line
-      .replace(/"([^"]{1,240})"/g, (_match, value) => (
-        wordCount(value) > MAX_QUOTED_WORDS || isCodeLikeFragment(value) ? ' ' : value
-      ))
-      .replace(/\u00ab([^\u00bb]{1,240})\u00bb/g, (_match, value) => (
-        wordCount(value) > MAX_QUOTED_WORDS || isCodeLikeFragment(value) ? ' ' : value
-      ))
-      .replace(/\u201c([^\u201d]{1,240})\u201d/g, (_match, value) => (
-        wordCount(value) > MAX_QUOTED_WORDS || isCodeLikeFragment(value) ? ' ' : value
-      ));
+      .replace(/"([^"]{1,240})"/g, (_match, value) => {
+        let cleaned = cleanQuotedValue(value);
+        return wordCount(cleaned) > MAX_QUOTED_WORDS || isCodeLikeFragment(cleaned) ? ' ' : cleaned;
+      })
+      .replace(/\u00ab([^\u00bb]{1,240})\u00bb/g, (_match, value) => {
+        let cleaned = cleanQuotedValue(value);
+        return wordCount(cleaned) > MAX_QUOTED_WORDS || isCodeLikeFragment(cleaned) ? ' ' : cleaned;
+      })
+      .replace(/\u201c([^\u201d]{1,240})\u201d/g, (_match, value) => {
+        let cleaned = cleanQuotedValue(value);
+        return wordCount(cleaned) > MAX_QUOTED_WORDS || isCodeLikeFragment(cleaned) ? ' ' : cleaned;
+      });
 }
 
 function summarizeOperationalReply(text) {
@@ -108,6 +118,7 @@ function cleanReadableLine(line) {
       .replace(/`[^`]*`/g, ' ')
       .replace(CODE_TOKEN_RE, ' ')
       .replace(CLI_FLAG_RE, ' ')
+      .replace(/[«»“”"\[\]{}]/g, ' ')
       .replace(/(?<=\p{L})-(?=\p{L})/gu, ' ')
       .replace(/[*_~>#]/g, ' ')
       .replace(/\s+/g, ' ')

@@ -144,6 +144,7 @@ describe('agent chat input state', () => {
     assert.match(source, /_speakPendingAgentResponse\(\)/);
     assert.match(source, /_saveVoiceInputModeSettings\(\)/);
     assert.match(source, /this\._voiceResponseLastAgentKey = current\?\.key \|\| ''/);
+    assert.match(source, /if \(!this\._wakeModeEnabled \|\| !this\._voiceResponseEnabled \|\| this\._isSending\) return;/);
     assert.match(source, /_setSending\(active, \{ speak = true \} = \{\}\)/);
     assert.match(source, /if \(!active && speak\) this\._speakPendingAgentResponse\(\);/);
     assert.match(source, /this\._setSending\(false, \{ speak: false \}\);/);

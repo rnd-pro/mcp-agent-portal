@@ -566,7 +566,7 @@ export class AgentChat extends Symbiote {
   }
 
   _speakPendingAgentResponse() {
-    if (!this._voiceResponseEnabled || this._isSending) return;
+    if (!this._wakeModeEnabled || !this._voiceResponseEnabled || this._isSending) return;
     let message = this._getLatestAgentSpeechMessage();
     if (!message || message.key === this._voiceResponseLastAgentKey) return;
     this._voiceResponseLastAgentKey = message.key;
