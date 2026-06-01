@@ -96,6 +96,10 @@ describe('agent chat input state', () => {
     assert.match(source, /_speakPendingAgentResponse\(\)/);
     assert.match(source, /_saveVoiceInputModeSettings\(\)/);
     assert.match(source, /this\._voiceResponseLastAgentKey = current\?\.key \|\| ''/);
+    assert.match(source, /_setSending\(active, \{ speak = true \} = \{\}\)/);
+    assert.match(source, /if \(!active && speak\) this\._speakPendingAgentResponse\(\);/);
+    assert.match(source, /this\._setSending\(false, \{ speak: false \}\);/);
+    assert.doesNotMatch(source, /sub\('messages'[\s\S]{0,240}_speakPendingAgentResponse\(\)/);
     assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);

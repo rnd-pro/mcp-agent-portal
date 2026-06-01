@@ -145,7 +145,6 @@ export class AgentChat extends Symbiote {
       this._applyProjectTransactions(_msgs);
       this._updateEmptyState();
       this._syncVoiceResponseButton();
-      this._speakPendingAgentResponse();
       // Re-evaluate adapter options to lock provider when messages appear.
       queueMicrotask(() => this._updateComposerFooter());
     });
@@ -921,11 +920,11 @@ export class AgentChat extends Symbiote {
   }
 
 
-  _setSending(active) {
+  _setSending(active, { speak = true } = {}) {
     this._isSending = active;
     this.ref.composer?.setSending?.(active);
     this._renderMessages();
-    if (!active) this._speakPendingAgentResponse();
+    if (!active && speak) this._speakPendingAgentResponse();
   }
 
   _focusInput() {
@@ -1430,7 +1429,7 @@ export class AgentChat extends Symbiote {
     }
     // Reset sending state — each chat manages its own task lifecycle independently.
     // The correct state will be restored below if the chat has a pendingTaskId.
-    this._setSending(false);
+    this._setSending(false, { speak: false });
     if (!chatId) {
       this.$.messages = [];
       this.$.chatName = tPortal('text.newChat');
