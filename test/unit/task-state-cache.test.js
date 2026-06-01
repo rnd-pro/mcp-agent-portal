@@ -217,11 +217,13 @@ describe('Task State Cache — StateGraph integration', () => {
       agent: 'orchestrator',
       resource_group: 'implementation',
       approval_mode: 'auto_edit',
-    }, 'test');
+    }, 'mcp');
 
     assert.equal(sg.get(`chats/${id}`).resource_group, 'implementation');
+    assert.equal(sg.get(`chats/${id}`).origin, 'mcp');
     assert.equal(sg.getChat(id).resource_group, 'implementation');
     assert.equal(sg.getChat(id).agent, 'orchestrator');
+    assert.equal(sg.getChat(id).origin, 'mcp');
   });
 
   it('keeps chat reads current while chat files persist asynchronously', async () => {

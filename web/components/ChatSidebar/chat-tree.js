@@ -32,6 +32,12 @@ function hasActiveOrPending(chat, activeChatId) {
     || (chat.subChats || []).some((child) => hasActiveOrPending(child, activeChatId));
 }
 
+function getChatMetaLabel(chat) {
+  if (chat.origin === 'mcp') return 'MCP';
+  if (chat.parentChatId) return 'Agent';
+  return '';
+}
+
 function toChatTreeItem(chat, children, activeChatId, defaultIcon) {
   return {
     ...chat,
@@ -39,7 +45,8 @@ function toChatTreeItem(chat, children, activeChatId, defaultIcon) {
     icon: chat.agentIcon || defaultIcon,
     agentColor: chat.agentColor || '',
     ...getStatusMeta(chat),
-    agentType: chat.adapter,
+    adapter: '',
+    metaLabel: getChatMetaLabel(chat),
     isActive: chat.id === activeChatId,
     isExpanded: chat.id === activeChatId
       || children.some((child) => hasActiveOrPending(child, activeChatId)),
@@ -52,6 +59,8 @@ export function buildChatNavTree({
   projectId = null,
   projectHistory = [],
   activeChatId = null,
+  activeGroupId = null,
+  expandedGroupIds = new Set(),
 } = {}) {
   let scopedChats = projectId
     ? chats.filter((chat) => chat.projectId === projectId)
@@ -90,7 +99,7 @@ export function buildChatNavTree({
           icon: 'folder',
           agentColor: meta.color,
           adapter: '',
-          agentType: '',
+          metaLabel: '',
           isGroup: true,
           isExpanded: false,
           isActive: false,
@@ -99,10 +108,14 @@ export function buildChatNavTree({
       }
       projectGroups.get(meta.id).subChats.push(chat);
     }
-    processedChats = [...projectGroups.values()].map((group) => ({
-      ...group,
-      isExpanded: group.subChats.some((chat) => hasActiveOrPending(chat, activeChatId)),
-    }));
+    processedChats = [...projectGroups.values()].map((group) => {
+      let isExpanded = expandedGroupIds.has(group.id) || group.subChats.some((chat) => hasActiveOrPending(chat, activeChatId));
+      return {
+        ...group,
+        isActive: group.id === activeGroupId,
+        isExpanded,
+      };
+    });
   }
 
   return processedChats;

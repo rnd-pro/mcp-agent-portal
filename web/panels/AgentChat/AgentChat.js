@@ -1485,7 +1485,7 @@ export class AgentChat extends Symbiote {
       
       // Load saved params — collect all non-base keys that have values
       let params = {};
-      let baseProps = ['id', 'projectId', 'parentChatId', 'name', 'adapter', 'messages', 'projectTransactions', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
+      let baseProps = ['id', 'projectId', 'parentChatId', 'name', 'adapter', 'origin', 'messages', 'projectTransactions', 'sessionId', 'pendingTaskId', 'createdAt', 'updatedAt'];
       for (let key in chat) {
         if (!baseProps.includes(key) && chat[key] != null) {
           params[key] = chat[key];

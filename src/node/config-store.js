@@ -23,6 +23,12 @@ let chatCache = new Map();
 let deletedChats = new Set();
 let chatFileQueue = Promise.resolve();
 
+function normalizeChatOrigin(origin) {
+  if (origin === 'mcp') return 'mcp';
+  if (origin === 'agent') return 'agent';
+  return 'portal';
+}
+
 function cloneChat(chat) {
   return JSON.parse(JSON.stringify(chat));
 }
@@ -251,6 +257,7 @@ export function listChats() {
         parentChatId: data.parentChatId || null,
         name: data.name || 'Untitled',
         adapter: data.adapter || 'pool',
+        origin: normalizeChatOrigin(data.origin),
         model: data.model || null,
         lastMessage: data.messages?.length ? data.messages[data.messages.length - 1].text?.slice(0, 80) : '',
         messageCount: data.messages?.length || 0,
@@ -266,6 +273,7 @@ export function listChats() {
       parentChatId: data.parentChatId || null,
       name: data.name || 'Untitled',
       adapter: data.adapter || 'pool',
+      origin: normalizeChatOrigin(data.origin),
       model: data.model || null,
       lastMessage: data.messages?.length ? data.messages[data.messages.length - 1].text?.slice(0, 80) : '',
       messageCount: data.messages?.length || 0,
@@ -314,6 +322,7 @@ export function createChat(opts = {}) {
     approval_mode: opts.approval_mode || null,
     resource_group: opts.resource_group || null,
     chatType: opts.chatType || null,
+    origin: normalizeChatOrigin(opts.origin),
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -366,13 +375,14 @@ export function updateChat(chatId, updates) {
   if (!chat) return;
 
   // Whitelist of keys that can be updated via API
-  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId']);
+  let allowedKeys = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin']);
 
   for (let key of Object.keys(updates)) {
     if (!allowedKeys.has(key)) continue;
     let val = updates[key];
     // Reject template garbage (unresolved Symbiote bindings)
     if (typeof val === 'string' && val.includes('{{')) continue;
+    if (key === 'origin') val = normalizeChatOrigin(val);
     chat[key] = val;
   }
 

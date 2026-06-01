@@ -62,6 +62,12 @@ function defaultState() {
   };
 }
 
+function normalizeChatOrigin(origin) {
+  if (origin === 'mcp') return 'mcp';
+  if (origin === 'agent') return 'agent';
+  return 'portal';
+}
+
 // ── Op Helpers ───────────────────────────────────────────
 
 /**
@@ -555,8 +561,17 @@ export class StateGraph extends EventEmitter {
             ops.push({ op: 'set', path: `chats/${data.id}`, value: {
               name: data.name || 'Untitled',
               projectId: data.projectId || null,
+              parentChatId: data.parentChatId || null,
               adapter: data.adapter || 'pool',
+              agent: data.agent || data.agent_slug || null,
+              provider: data.provider || null,
               model: data.model || null,
+              approval_mode: data.approval_mode || null,
+              resource_group: data.resource_group || null,
+              chatType: data.chatType || null,
+              agentIcon: data.agentIcon || null,
+              agentColor: data.agentColor || null,
+              origin: normalizeChatOrigin(data.origin),
               messageCount: data.messages?.length || 0,
               lastMessage: data.messages?.length ? (data.messages[data.messages.length - 1].text || '').slice(0, 80) : '',
               updatedAt: data.updatedAt || 0,
@@ -707,6 +722,7 @@ export class StateGraph extends EventEmitter {
   createChat(opts = {}, source = 'system') {
     let id = crypto.randomUUID().slice(0, 12);
     let now = Date.now();
+    let origin = normalizeChatOrigin(opts.origin || source);
 
     // Metadata in graph
     this.commit([{ op: 'set', path: `chats/${id}`, value: {
@@ -722,6 +738,7 @@ export class StateGraph extends EventEmitter {
       chatType: opts.chatType || null,
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
+      origin,
       messageCount: 0,
       lastMessage: '',
       updatedAt: now,
@@ -744,6 +761,7 @@ export class StateGraph extends EventEmitter {
       chatType: opts.chatType || null,
       agentIcon: opts.agentIcon || null,
       agentColor: opts.agentColor || null,
+      origin,
       messages: [],
       createdAt: now,
       updatedAt: now,
@@ -834,12 +852,12 @@ export class StateGraph extends EventEmitter {
 
   // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
-    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'lastTaskStatus']);
+    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin', 'lastTaskStatus']);
     let filtered = {};
     for (let [k, v] of Object.entries(updates)) {
       if (!allowed.has(k)) continue;
       if (typeof v === 'string' && v.includes('{{')) continue;
-      filtered[k] = v;
+      filtered[k] = k === 'origin' ? normalizeChatOrigin(v) : v;
     }
     if (Object.keys(filtered).length === 0) return;
     filtered.updatedAt = Date.now();

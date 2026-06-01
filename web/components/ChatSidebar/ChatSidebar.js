@@ -2,6 +2,8 @@ import {
   ChatSidebarShell,
   DEFAULT_NAV_WIDTH,
   clampChatSidebarWidth,
+  getRoute,
+  parseQuery,
   updateParams,
 } from 'symbiote-node/ui';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
@@ -28,6 +30,9 @@ export class ChatSidebar extends ChatSidebarShell {
     this.addEventListener('chat-sidebar-delete', (event) => {
       this._deleteChat(event.detail?.id);
     });
+    this.addEventListener('chat-sidebar-toggle', (event) => {
+      this._handleGroupToggle(event.detail?.id, Boolean(event.detail?.expanded));
+    });
     this.addEventListener('chat-sidebar-collapse-change', (event) => {
       if (!event.detail?.auto) {
         persistUiValue(STORAGE_COLLAPSED_PATH, Boolean(event.detail?.collapsed), STORAGE_COLLAPSED_KEY);
@@ -44,7 +49,10 @@ export class ChatSidebar extends ChatSidebarShell {
     }
     this._fetchChats();
     dashEvents.addEventListener('chats-updated', () => this._fetchChats());
-    dashEvents.addEventListener('active-project-changed', () => this._renderNavItems());
+    dashEvents.addEventListener('active-project-changed', () => {
+      this._ensureRouteActiveChat();
+      this._renderNavItems();
+    });
     dashEvents.addEventListener('active-chat-changed', () => this._renderNavItems());
 
     this._unsubUi = stateSync.on('ui', (ui) => {
@@ -61,9 +69,8 @@ export class ChatSidebar extends ChatSidebarShell {
 
     this._unsubChats = stateSync.on('chats', (chatsObj) => {
       if (!chatsObj) return;
-      dashState.chats = Object.entries(chatsObj)
-        .map(([id, chat]) => ({ id, ...chat }))
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      dashState.chats = this._mergeSyncedChats(chatsObj);
+      this._ensureRouteActiveChat();
       this._renderNavItems();
     });
   }
@@ -109,6 +116,7 @@ export class ChatSidebar extends ChatSidebarShell {
       let res = await fetch('/api/chats');
       let data = await res.json();
       dashState.chats = data.chats || [];
+      this._ensureRouteActiveChat();
       this._renderNavItems();
     } catch (err) {
       console.error('[ChatSidebar] fetch chats error:', err);
@@ -130,21 +138,77 @@ export class ChatSidebar extends ChatSidebarShell {
     this._fetchChats();
   }
 
+  _mergeSyncedChats(chatsObj) {
+    let incoming = new Map(Object.entries(chatsObj).map(([id, chat]) => [id, { id, ...chat }]));
+    let existing = [];
+    for (let chat of dashState.chats || []) {
+      if (!incoming.has(chat.id)) continue;
+      existing.push(incoming.get(chat.id));
+      incoming.delete(chat.id);
+    }
+    let added = [...incoming.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return [...existing, ...added];
+  }
+
+  _ensureRouteActiveChat() {
+    let route = getRoute();
+    let params = parseQuery(route.query || '');
+    if (route.panel !== 'agent-chat') return;
+    let projectId = dashState.activeProjectId || params.project || null;
+    if (params.chat) {
+      this._activeGroupId = null;
+      if (dashState.activeChatId !== params.chat) {
+        dashState.activeChatId = params.chat;
+        dashEmit('active-chat-changed', { id: params.chat, fromRoute: true });
+      }
+      return;
+    }
+    if (dashState.activeChatId) {
+      let activeChat = (dashState.chats || []).find((item) => item.id === dashState.activeChatId);
+      if (!projectId || activeChat?.projectId === projectId) return;
+      dashState.activeChatId = null;
+    }
+    let chats = (dashState.chats || []).filter((chat) => (
+      !projectId || chat.projectId === projectId
+    ));
+    let chat = chats.find((item) => !item.parentChatId) || chats[0];
+    if (!chat?.id) return;
+    dashState.activeChatId = chat.id;
+    updateParams({ chat: chat.id });
+    dashEmit('active-chat-changed', { id: chat.id, fromRouteDefault: true });
+  }
+
+  _handleGroupToggle(id, expanded) {
+    if (!id?.startsWith('project-group:')) return;
+    this._expandedGroupIds ??= new Set();
+    if (expanded) {
+      this._expandedGroupIds.add(id);
+      this._activeGroupId = id;
+    } else {
+      this._expandedGroupIds.delete(id);
+      if (this._activeGroupId === id) this._activeGroupId = null;
+    }
+    this._renderNavItems();
+  }
+
   _selectChat(chatId) {
     if (!chatId) return;
+    this._activeGroupId = null;
     if (dashState.activeChatId !== chatId) dashState.activeChatId = chatId;
     updateParams({ chat: chatId });
     dashEmit('active-chat-changed', { id: chatId });
-    this._fetchChats();
   }
 
   _renderNavItems() {
+    this._ensureRouteActiveChat();
     this.setGroupDividers(!dashState.activeProjectId);
     this.setChats(buildChatNavTree({
       chats: dashState.chats || [],
       projectId: dashState.activeProjectId,
       projectHistory: dashState.projectHistory || [],
       activeChatId: dashState.activeChatId,
+      activeGroupId: this._activeGroupId || null,
+      expandedGroupIds: this._expandedGroupIds || new Set(),
     }));
   }
 }
