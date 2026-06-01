@@ -1,14 +1,23 @@
 node_modules/
 tmp/
-dist/
 .git/
+.github/
+.agent-portal/
+.portal/
+.project-graph-cache.json
+**/.project-graph-cache.json
+.cursorrules
+.windsurfrules
 .DS_Store
 *.log
 *.tgz
+*.ctx
+*.ctx.md
 
 test/
 scripts/
 !scripts/
+!scripts/build-web.js
 !scripts/test-hygiene-audit.js
 packages/*/tests/
 packages/*/tmp/

@@ -219,8 +219,11 @@ Agent Portal aggregates the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-p
 git clone --recurse-submodules https://github.com/rnd-pro/mcp-agent-portal
 cd mcp-agent-portal
 npm install
-node index.js
+npm run build
+npm start
 ```
+
+`npm run build` creates the production browser bundle in `dist/web`. Normal MCP/server starts use that bundle when it is present and fall back to `web/` when it is not. Use `npm run dev` for source-module development against `web/`, or set `AGENT_PORTAL_WEB_ROOT` to serve an explicit UI directory in container builds.
 
 If `.agent-portal` is configured as a private skills submodule, set its local remote before initializing submodules:
 

@@ -19,6 +19,7 @@ import { createServerDemoMode } from './demo-mode.js';
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT_DIR = path.join(__dirname, '..', '..', '..');
 let WEB_DIR = path.join(ROOT_DIR, 'web');
+let DIST_WEB_DIR = path.join(ROOT_DIR, 'dist', 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
 
 /** @type {Record<string, string>} */
@@ -57,13 +58,28 @@ export function createStaticFileHeaders(targetPath, options = {}) {
   return headers;
 }
 
+export function resolveWebRoot(options = {}) {
+  let env = options.env || process.env;
+  let webDir = options.webDir || WEB_DIR;
+  let distWebDir = options.distWebDir || DIST_WEB_DIR;
+  if (env.AGENT_PORTAL_WEB_ROOT) {
+    return path.resolve(String(env.AGENT_PORTAL_WEB_ROOT));
+  }
+  if (options.dev || env.AGENT_PORTAL_DEV_WEB === '1' || process.argv.includes('--dev')) {
+    return webDir;
+  }
+  let distIndexPath = path.join(distWebDir, 'index.html');
+  return fs.existsSync(distIndexPath) ? distWebDir : webDir;
+}
+
 /**
  * Serve a static file from WEB_DIR or packages/.
  * @param {string} reqPath
  * @param {string} method
  * @param {http.ServerResponse} res
  */
-function serveStaticFile(reqPath, method, res) {
+function serveStaticFile(reqPath, method, res, options = {}) {
+  let webRoot = options.webRoot || WEB_DIR;
   let normalizedPath = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, '');
   // Route /packages/<name>/... to packages/<name>/...
   let pkgMatch = normalizedPath.match(/^[/\\]?packages[/\\]([^/\\]+)[/\\]?(.*)/);
@@ -92,7 +108,7 @@ function serveStaticFile(reqPath, method, res) {
       return;
     }
   } else {
-    targetPath = path.join(WEB_DIR, normalizedPath === '/' ? 'index.html' : normalizedPath);
+    targetPath = path.join(webRoot, normalizedPath === '/' ? 'index.html' : normalizedPath);
   }
 
   if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
@@ -167,6 +183,7 @@ function proxyToBackend(req, res, url, proxyManager) {
  * @returns {{ server: http.Server, proxyManager: MCPProxyManager }}
  */
 export function startWebServer(projectRoot) {
+  let webRoot = resolveWebRoot();
   let networkAccess = getNetworkAccessConfig();
   let requestedPort = resolveRequestedPort();
   let networkAccessStatus = { ...networkAccess, localUrl: null, lanUrls: [] };
@@ -265,7 +282,7 @@ export function startWebServer(projectRoot) {
     }
 
     // Static files
-    serveStaticFile(url.pathname, req.method, res);
+    serveStaticFile(url.pathname, req.method, res, { webRoot });
   });
 
   server.on('upgrade', (req, socket, head) => {

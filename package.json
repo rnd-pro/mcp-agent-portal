@@ -8,8 +8,10 @@
     "mcp-agent-portal": "bin/mcp-agent-portal.js"
   },
   "scripts": {
+    "build": "node scripts/build-web.js",
     "start": "node bin/mcp-agent-portal.js",
     "dev": "node index.js --dev",
+    "prepack": "npm run build",
     "xr:visual-smoke": "node scripts/diagnostics/xr-visual-agent-smoke.js",
     "xr:three-smoke": "node scripts/diagnostics/xr-three-baseline-smoke.js",
     "xr:production-smoke": "node scripts/diagnostics/xr-production-spatial-smoke.js",
@@ -45,6 +47,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "esbuild": "^0.28.0",
     "eslint": "^9.39.4",
     "globals": "^17.5.0"
   }

@@ -1060,14 +1060,6 @@ export class SpatialLayout extends Symbiote {
     return `${status.event}:${status.status || 'pending'}`;
   }
 
-  _formatMeters(values) {
-    if (!Array.isArray(values) || !values.length) return '-';
-    return values
-      .filter((value) => Number.isFinite(Number(value)))
-      .map((value) => `${Number(value).toFixed(2)}m`)
-      .join(' x ') || '-';
-  }
-
   _createLaunchRecommendation() {
     return createWebXRLaunchRecommendation(this._support, {
       preferredMode: PRODUCTION_XR_MODE,
@@ -1326,6 +1318,12 @@ export class SpatialLayout extends Symbiote {
 
   _formatMeters(meters) {
     if (!meters) return '-';
+    if (Array.isArray(meters)) {
+      return meters
+        .filter((value) => Number.isFinite(Number(value)))
+        .map((value) => `${Number(value).toFixed(2)}m`)
+        .join(' x ') || '-';
+    }
     return `${this._formatNumber(meters.width)}m x ${this._formatNumber(meters.height)}m`;
   }
 
