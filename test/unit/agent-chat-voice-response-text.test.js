@@ -38,6 +38,46 @@ at render (/tmp/app.js:10:2)
     assert.equal(text, 'Смотри отчет');
   });
 
+  it('removes quoted and inline technical tokens that agents mention as prose', () => {
+    let text = sanitizeVoiceResponseText('onDone/resolve перенесены в ".finally()" после _pullMessages(). Финальный ответ готов.');
+
+    assert.match(text, /Финальный ответ готов/);
+    assert.doesNotMatch(text, /\.finally/);
+    assert.doesNotMatch(text, /_pullMessages/);
+    assert.doesNotMatch(text, /onDone/);
+    assert.doesNotMatch(text, /resolve/);
+  });
+
+  it('summarizes operational commit and push replies instead of reading hashes', () => {
+    let text = sanitizeVoiceResponseText('Готово. Закоммичено и запушено: - **`49c370c`** — `fix: deduplicate pull-timer message updates to prevent full re-renders` - **`d14c3e2..49c370c`** → `origin/main`');
+
+    assert.equal(text, 'Готово. Изменения закоммичены и запушены.');
+  });
+
+  it('summarizes technical root-cause replies that would become fragmented', () => {
+    let text = sanitizeVoiceResponseText('Нашёл причину. `_pullMessages` в `chat-ws-client.js` каждые 2 секунды заменяет `this.$.messages` и триггерит перерендер. Фикс — добавить проверку в `setMessages`.');
+
+    assert.equal(text, 'Нашёл причину. Проблема была в периодическом обновлении сообщений: чат заново заменял список и перерисовывал транскрипт. Фикс добавляет проверку, чтобы не обновлять список без изменений.');
+  });
+
+  it('summarizes low-value operational English status lines', () => {
+    let text = sanitizeVoiceResponseText('Changes already staged. Let me check the submodule and commit everything.');
+
+    assert.equal(text, 'Агент проверяет изменения перед коммитом.');
+  });
+
+  it('keeps natural hyphenated words readable while removing cli flags', () => {
+    let text = sanitizeVoiceResponseText('agent-portal использует route-based selection, но команду --force читать не нужно.');
+
+    assert.equal(text, 'agent portal использует route based selection, но команду читать не нужно.');
+  });
+
+  it('keeps short natural quoted phrases but drops long quoted blocks', () => {
+    let text = sanitizeVoiceResponseText('Он сказал «проверь статус» и пропустил "это очень длинная цитата которую не нужно целиком читать голосом пользователю".');
+
+    assert.equal(text, 'Он сказал проверь статус и пропустил.');
+  });
+
   it('limits long responses at a sentence boundary when possible', () => {
     let text = sanitizeVoiceResponseText('Первое предложение. Второе предложение. Третье предложение.', { maxChars: 42 });
 
