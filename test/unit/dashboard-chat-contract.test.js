@@ -40,11 +40,12 @@ describe('dashboard chat route', () => {
     let serverSource = readSource('src/node/server/web-server.js');
 
     assert.match(source, /function chatPatchId\(value\)/);
-    assert.match(source, /function scheduleChatRefresh\(detail = \{\}\)/);
+    assert.match(source, /function scheduleCreatedChatRefresh\(detail = \{\}\)/);
     assert.match(source, /dashEmit\("chats-updated", \{ \.\.\.emitDetail, hydrated: true \}\);/);
-    assert.match(source, /dashEmit\("chat-updated", \{ id: emitDetail\.id, source: "monitor" \}\);/);
     assert.match(source, /dashEmit\("chat-created", \{ id: emitDetail\.id, source: "monitor" \}\);/);
-    assert.match(source, /scheduleChatRefresh\(\{ id: chatId, path: o\.params\.path \}\);/);
+    assert.match(source, /scheduleCreatedChatRefresh\(\{ id: chatId, path: o\.params\.path \}\);/);
+    assert.match(source, /dashEmit\("chat-updated", \{ id: chatId, source: "monitor" \}\);/);
+    assert.doesNotMatch(source, /scheduleChatRefresh/);
     assert.match(
       readSource('web/components/ChatSidebar/ChatSidebar.js'),
       /if \(event\.detail\?\.hydrated\) \{[\s\S]*this\._renderNavItems\(\);[\s\S]*return;[\s\S]*\}[\s\S]*this\._fetchChats\(\);/

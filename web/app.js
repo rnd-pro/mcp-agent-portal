@@ -184,35 +184,22 @@ function chatPatchId(value) {
   return typeof value === 'string' ? value : value?.id || null;
 }
 
-let pendingChatPatch = null;
-let chatRefreshTimer = null;
-let chatRefreshInFlight = false;
+let pendingCreatedChatPatch = null;
+let createdChatRefreshTimer = null;
 
-function scheduleChatRefresh(detail = {}) {
-  pendingChatPatch = { ...(pendingChatPatch || {}), ...detail };
-  if (chatRefreshTimer) return;
-  chatRefreshTimer = setTimeout(() => {
-    chatRefreshTimer = null;
-    if (chatRefreshInFlight) {
-      scheduleChatRefresh(pendingChatPatch || {});
-      return;
-    }
-
-    let emitDetail = pendingChatPatch || {};
-    pendingChatPatch = null;
-    chatRefreshInFlight = true;
+function scheduleCreatedChatRefresh(detail = {}) {
+  pendingCreatedChatPatch = { ...(pendingCreatedChatPatch || {}), ...detail };
+  if (createdChatRefreshTimer) return;
+  createdChatRefreshTimer = setTimeout(() => {
+    createdChatRefreshTimer = null;
+    let emitDetail = pendingCreatedChatPatch || {};
+    pendingCreatedChatPatch = null;
     fetch('/api/chats').then(r => r.json()).then(d => {
       dashState.chats = d.chats || [];
       dashEmit("chats-updated", { ...emitDetail, hydrated: true });
-      if (emitDetail.id && emitDetail.path === "chats.updated") {
-        dashEmit("chat-updated", { id: emitDetail.id, source: "monitor" });
-      }
-      if (emitDetail.id && emitDetail.path === "chats.created") {
+      if (emitDetail.id) {
         dashEmit("chat-created", { id: emitDetail.id, source: "monitor" });
       }
-    }).finally(() => {
-      chatRefreshInFlight = false;
-      if (pendingChatPatch) scheduleChatRefresh(pendingChatPatch);
     });
   }, 150);
 }
@@ -235,7 +222,11 @@ function connectDashboardWS(e, t, o, _att = 0) {
     if ("patch" === o.method && o.params) {
       if (o.params.path === "chats.created" || o.params.path === "chats.updated") {
         const chatId = chatPatchId(o.params.value);
-        scheduleChatRefresh({ id: chatId, path: o.params.path });
+        if (o.params.path === "chats.created") {
+          scheduleCreatedChatRefresh({ id: chatId, path: o.params.path });
+        } else if (chatId) {
+          dashEmit("chat-updated", { id: chatId, source: "monitor" });
+        }
       }
       if (o.params.path === "projects.opened") {
         fetch('/api/projects/history').then(r => r.json()).then(d => { dashState.projectHistory = d.projects || []; dashState.openProjectIds = d.activeIds || []; dashEmit("projects-history-updated"); });
