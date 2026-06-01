@@ -172,7 +172,10 @@ describe('server demo mode', () => {
       await demo.routes['POST /api/chats/get'](makeReq('POST', '/api/chats/get', { id }), chatRes);
       let chat = chatRes.json();
       assert.equal(chat.messages.filter((message) => message.role === 'user' && message.text === prompt).length, 1);
-      assert.equal(chat.messages.filter((message) => message.role === 'agent' && message.text?.includes(prompt)).length, 1);
+      let demoReply = chat.messages.find((message) => message.role === 'agent' && message.text?.includes(`Вы написали: «${prompt}».`));
+      assert.ok(demoReply);
+      assert.match(demoReply.text, /агент отключен от этого чата/);
+      assert.match(demoReply.text, /не запускаю инструменты/);
     } finally {
       server.close();
     }

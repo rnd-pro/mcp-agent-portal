@@ -1111,7 +1111,7 @@ export class AgentChat extends Symbiote {
         return '';
       }).join('');
       // Append settings button at the end of all selectors
-      htmlStr += `<a href="/#resource-groups" class="composer-footer-btn composer-settings-btn" title="Configure Resource Groups" style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer"><span class="material-symbols-outlined" style="font-size:16px;opacity:0.5">settings</span></a>`;
+      htmlStr += '<a href="/#resource-groups" class="composer-footer-btn composer-settings-btn" title="Configure Resource Groups"><span class="material-symbols-outlined">settings</span></a>';
       this.$.composerFooterHtml = htmlStr;
       // Batch-persist defaults only for local user/composer changes.
       if (paramsChanged) {

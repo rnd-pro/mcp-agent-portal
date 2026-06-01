@@ -104,6 +104,18 @@ function rndProReply(prompt = '') {
   ].join('\n');
 }
 
+function demoChatReply(prompt = '') {
+  let text = String(prompt).trim();
+  let preview = text.length > 260 ? `${text.slice(0, 257)}...` : text;
+  return [
+    preview ? `Вы написали: «${preview}».` : 'Сообщение получено.',
+    '',
+    'К сожалению, в публичном демо агент отключен от этого чата: я не запускаю инструменты, не создаю задачи и не изменяю проект.',
+    '',
+    'Демо показывает интерфейс Agent Portal и безопасные примерные данные. Для рабочего агентного диалога нужен подключенный runtime в полной версии.',
+  ].join('\n');
+}
+
 function summarizeChat(chat) {
   let messages = chat.messages || [];
   let lastText = [...messages].reverse().find((message) => typeof message.text === 'string')?.text || '';
@@ -1075,7 +1087,7 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
       },
       'POST /api/adapter/run': async (req, res) => {
         let body = await parseBody(req);
-        json(res, { response: rndProReply(body.prompt), events: [], demo: true });
+        json(res, { response: demoChatReply(body.prompt), events: [], demo: true });
       },
     };
   }
@@ -1093,11 +1105,11 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
           let { chatId, prompt } = message.params || {};
           let chat = chatMap.get(chatId);
           if (chat) {
-            chat.messages.push({ role: 'thinking', elapsed: 1, done: true, status: 'Preparing RND PRO demo response...' });
-            chat.messages.push({ role: 'agent', text: rndProReply(prompt) });
+            chat.messages.push({ role: 'thinking', elapsed: 1, done: true, status: 'Готовлю демо-ответ...' });
+            chat.messages.push({ role: 'agent', text: demoChatReply(prompt) });
             chat.updatedAt = Date.now();
           }
-          ws.send(JSON.stringify({ method: 'chat.meta', params: { chatId, phase: 'thinking', messageCount: chat?.messages?.length || 0, thinkingStatus: 'Demo response' } }));
+          ws.send(JSON.stringify({ method: 'chat.meta', params: { chatId, phase: 'thinking', messageCount: chat?.messages?.length || 0, thinkingStatus: 'Демо-ответ' } }));
           ws.send(JSON.stringify({ method: 'chat.done', params: { chatId, taskId: 'demo-task' } }));
         } else if (message.method === 'state.subscribe') {
           ws.send(JSON.stringify({ method: 'snapshot', params: { state: { tasks: {}, events } } }));
