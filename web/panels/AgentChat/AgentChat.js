@@ -29,6 +29,13 @@ import { getLocalization } from 'symbiote-node/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
+function sameChatMessages(next = [], current = []) {
+  if (next === current) return true;
+  if (!Array.isArray(next) || !Array.isArray(current)) return false;
+  if (next.length !== current.length) return false;
+  return next.every((message, index) => JSON.stringify(message) === JSON.stringify(current[index]));
+}
+
 /**
  * AgentChat — portal adapter for chat state, transport, and routing.
  */
@@ -99,7 +106,10 @@ export class AgentChat extends Symbiote {
 
     this._wsClient = new ChatWsClient({
       getMessages: () => this.$.messages,
-      setMessages: (msgs) => { this.$.messages = msgs; },
+      setMessages: (msgs) => {
+        if (sameChatMessages(msgs, this.$.messages)) return;
+        this.$.messages = msgs;
+      },
       onSessionId: (id) => {
         this._sessionId = id;
         let targetChatId = this._loadedChatId || dashState.activeChatId;

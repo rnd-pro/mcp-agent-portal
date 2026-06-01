@@ -100,6 +100,9 @@ describe('agent chat input state', () => {
     assert.match(source, /if \(!active && speak\) this\._speakPendingAgentResponse\(\);/);
     assert.match(source, /this\._setSending\(false, \{ speak: false \}\);/);
     assert.doesNotMatch(source, /sub\('messages'[\s\S]{0,240}_speakPendingAgentResponse\(\)/);
+    assert.match(source, /function sameChatMessages\(next = \[\], current = \[\]\)/);
+    assert.match(source, /JSON\.stringify\(message\) === JSON\.stringify\(current\[index\]\)/);
+    assert.doesNotMatch(source, /m\.text === cur\[i\]\?\.text && m\.role === cur\[i\]\?\.role/);
     assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
