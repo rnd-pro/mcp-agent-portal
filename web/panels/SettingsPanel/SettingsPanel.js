@@ -213,7 +213,10 @@ export class SettingsPanel extends Symbiote {
 
   _readVoiceInputSettings() {
     let defaults = defaultVoiceCommands();
+    let current = this._settings?.voiceInput || {};
     return {
+      sendByCommandEnabled: Boolean(current.sendByCommandEnabled),
+      voiceResponseEnabled: Boolean(current.voiceResponseEnabled),
       sendCommands: {
         en: this.ref.voiceSendCommandEnInput.value.trim() || defaults.send.en,
         ru: this.ref.voiceSendCommandRuInput.value.trim() || defaults.send.ru,

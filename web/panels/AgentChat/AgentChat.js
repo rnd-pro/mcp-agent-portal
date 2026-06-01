@@ -369,7 +369,26 @@ export class AgentChat extends Symbiote {
 
   _toggleVoiceCommandMode() {
     this._voiceCommandMode = !this._voiceCommandMode;
+    this._saveVoiceInputModeSettings();
     this._updateVoicePreview(null, this._audioRecorder.elapsed);
+  }
+
+  async _saveVoiceInputModeSettings() {
+    try {
+      let settings = await fetch('/api/settings').then((res) => res.json());
+      let voiceInput = {
+        ...(settings?.voiceInput || {}),
+        sendByCommandEnabled: this._voiceCommandMode,
+        voiceResponseEnabled: this._voiceResponseEnabled,
+      };
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voiceInput }),
+      });
+    } catch {
+      // Mode persistence is best-effort; the local toggle still applies immediately.
+    }
   }
 
   _defaultVoiceCommandPhrases() {
@@ -408,6 +427,8 @@ export class AgentChat extends Symbiote {
       let savedSend = settings?.voiceInput?.sendCommands || {};
       let savedWake = settings?.voiceInput?.wakeCommands || {};
       let legacy = String(settings?.voiceInput?.sendCommand || '').trim();
+      this._voiceCommandMode = Boolean(settings?.voiceInput?.sendByCommandEnabled);
+      this._voiceResponseEnabled = Boolean(settings?.voiceInput?.voiceResponseEnabled);
       this._voiceCommandPhrases = {
         en: String(savedSend.en || legacy || sendDefaults.en).trim() || sendDefaults.en,
         ru: String(savedSend.ru || sendDefaults.ru).trim() || sendDefaults.ru,
@@ -490,6 +511,7 @@ export class AgentChat extends Symbiote {
     } else {
       this._cancelVoiceResponseSpeech();
     }
+    this._saveVoiceInputModeSettings();
     this._syncVoiceResponseButton();
   }
 
@@ -616,7 +638,6 @@ export class AgentChat extends Symbiote {
   _stopWakeListening({ disableMode = false } = {}) {
     if (disableMode) {
       this._wakeModeEnabled = false;
-      this._voiceResponseEnabled = false;
       this._voiceResponseLastAgentKey = '';
     }
     this._wakePausedForRecording = false;

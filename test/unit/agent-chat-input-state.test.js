@@ -83,6 +83,8 @@ describe('agent chat input state', () => {
     assert.match(source, /_loadVoiceInputSettings\(\)/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
     assert.match(source, /settings\?\.voiceInput\?\.wakeCommands/);
+    assert.match(source, /settings\?\.voiceInput\?\.sendByCommandEnabled/);
+    assert.match(source, /settings\?\.voiceInput\?\.voiceResponseEnabled/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommand/);
     assert.match(source, /_defaultVoiceCommandPhrases\(\)/);
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
@@ -92,6 +94,7 @@ describe('agent chat input state', () => {
     assert.match(source, /speechSynthesis/);
     assert.match(source, /_toggleVoiceResponseMode\(\)/);
     assert.match(source, /_speakPendingAgentResponse\(\)/);
+    assert.match(source, /_saveVoiceInputModeSettings\(\)/);
     assert.match(source, /this\._voiceResponseLastAgentKey = current\?\.key \|\| ''/);
     assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
@@ -104,5 +107,9 @@ describe('agent chat input state', () => {
     assert.match(source, /this\._showVoiceError\('Microphone access denied\. Check browser microphone permissions\.'\);/);
     assert.match(source, /this\._showVoiceError\('No speech detected\. Try again\.'\);/);
     assert.match(source, /this\._showVoiceError\('Transcription failed\. Try again\.'\);/);
+
+    let settingsSource = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.js'), 'utf8');
+    assert.match(settingsSource, /sendByCommandEnabled: Boolean\(current\.sendByCommandEnabled\)/);
+    assert.match(settingsSource, /voiceResponseEnabled: Boolean\(current\.voiceResponseEnabled\)/);
   });
 });
