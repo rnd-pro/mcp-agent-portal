@@ -16,8 +16,35 @@ const LOCAL_AGENT_PORTAL_NAMES = new Set([
   'scheduler.pid',
   'runtime',
 ]);
-const WRITABLE_AGENT_PORTAL_DIRS = new Set(['agents', 'skills', 'workflows']);
+const WRITABLE_AGENT_PORTAL_DIRS = new Set([
+  'agents',
+  'contexts',
+  'pipelines',
+  'resources',
+  'rules',
+  'skills',
+  'workflows',
+  'workspace',
+]);
 const WRITABLE_AGENT_PORTAL_EXTS = new Set(['.md', '.json']);
+const PUBLIC_CONTENT_PATTERNS = [
+  {
+    label: 'private key material',
+    pattern: /-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/i,
+  },
+  {
+    label: 'bearer token',
+    pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/i,
+  },
+  {
+    label: 'secret assignment',
+    pattern: /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|private[_-]?key|secret)\b\s*[:=]\s*['"]?[A-Za-z0-9._~+/=-]{16,}/i,
+  },
+  {
+    label: 'local home path',
+    pattern: /(^|[\s"'`(])(?:\/Users\/[^/\s]+|\/home\/[^/\s]+|[A-Za-z]:\\Users\\[^\\/\s]+)/,
+  },
+];
 const TREE_MAX_DEPTH = 8;
 const TREE_MAX_NODES = 1000;
 
@@ -89,6 +116,17 @@ function assertWritableAgentPortalPath(relativePath = '') {
   }
   if (!WRITABLE_AGENT_PORTAL_EXTS.has(path.extname(parts.at(-1) || '').toLowerCase())) {
     throw new Error('Only markdown and JSON files are editable');
+  }
+}
+
+function assertPublicAgentPortalContent(content = '') {
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(content)) {
+    throw new Error('Content contains control characters');
+  }
+  for (let { label, pattern } of PUBLIC_CONTENT_PATTERNS) {
+    if (pattern.test(content)) {
+      throw new Error(`Content contains ${label}; public .agent-portal files must not store secrets or local paths`);
+    }
   }
 }
 
@@ -268,6 +306,7 @@ export function createAgentPortalRoutes(ctx) {
         let stat = await fs.stat(source.targetPath);
         if (!stat.isFile()) throw new Error('Only file installation is supported');
         let content = await fs.readFile(source.targetPath, 'utf8');
+        assertPublicAgentPortalContent(content);
         await writeTextAtomic(target.targetPath, content);
         json(res, { ok: true, sourcePath: source.cleanPath, targetPath: target.cleanPath });
       } catch (err) {
@@ -301,6 +340,7 @@ export function createAgentPortalRoutes(ctx) {
         assertWritableAgentPortalPath(body.path);
         let { root, targetPath, cleanPath } = resolveAgentPortalPath(activeProjectRoot, body.path);
         await assertSafeWriteTarget(root, targetPath);
+        assertPublicAgentPortalContent(body.content);
         await writeTextAtomic(targetPath, body.content);
         json(res, { ok: true, root, path: cleanPath });
       } catch (err) {

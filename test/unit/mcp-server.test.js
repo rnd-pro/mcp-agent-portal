@@ -89,7 +89,7 @@ describe('mcp-server integration', () => {
     const debugWf = workflows.find(w => w.name === 'debug_protocol');
     assert.ok(debugWf);
     assert.ok(debugWf.steps.length > 0);
-    assert.strictEqual(debugWf.entryPoint, '01-reproduce');
+    assert.strictEqual(debugWf.entryPoint, 'debug_protocol/01-reproduce');
   });
 
   it('search_by_tags multiple matches returns lightweight list', async () => {
@@ -114,7 +114,7 @@ describe('mcp-server integration', () => {
     }, 5);
     
     const data = JSON.parse(res.content[0].text);
-    assert.strictEqual(data.id, '01-reproduce');
+    assert.strictEqual(data.id, 'debug_protocol/01-reproduce');
     assert.ok(data.content.includes('# Step 1: Reproduce the Error'));
     assert.deepStrictEqual(data.availableDecisions, ['reproduced', 'cannot_reproduce', 'abort']);
   });
@@ -122,11 +122,11 @@ describe('mcp-server integration', () => {
   it('get_workflow_content returns transitions and body', async () => {
     const res = await sendRequest(serverProc, 'tools/call', {
       name: 'get_workflow_content',
-      arguments: { nodeId: '03-hypothesize' }
+      arguments: { nodeId: 'debug_protocol/03-hypothesize' }
     }, 6);
     
     const data = JSON.parse(res.content[0].text);
-    assert.strictEqual(data.id, '03-hypothesize');
+    assert.strictEqual(data.id, 'debug_protocol/03-hypothesize');
     assert.strictEqual(data.group, 'heavy-thinkers');
     assert.ok(data.content.includes('# Step 3: Formulate Hypothesis'));
   });

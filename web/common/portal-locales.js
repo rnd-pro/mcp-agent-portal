@@ -263,7 +263,7 @@ export const PORTAL_LOCALE_MESSAGES = Object.freeze({
     'portal.text.removeServerConfirm': 'Remove "{name}"? The server will be stopped immediately.',
     'portal.text.nameCommandRequired': 'Name and command are required.',
     'portal.text.installedAndStarted': '✓ "{name}" installed and started.',
-    'portal.text.openMemoryNotConnected': 'Open Memory marketplace is not connected. Use project skills and workflows from .agent-portal.',
+    'portal.text.openMemoryNotConnected': 'Open Memory marketplace is not connected. Use team memory from .agent-portal.',
     'portal.text.noContextItemsFound': 'No context items found in open memory',
     'portal.text.providerLabel': 'Provider',
     'portal.text.geometry': 'Geometry',

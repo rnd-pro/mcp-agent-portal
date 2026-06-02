@@ -3,6 +3,8 @@ import path from 'node:path';
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
 
+const DEFAULT_CHAT_AGENT = 'orchestrator';
+
 /** WebSocket server for chat-based agent interactions. */
 export class ChatWsServer {
   /**
@@ -47,8 +49,8 @@ export class ChatWsServer {
   }
 
   async _handleChatSend(ws, params) {
-    let { chatId, prompt, sessionId, timeout, model, provider, approval_mode, resource_group } = params;
-    let agentSlug = params.agent || params.agent_slug;
+    let { chatId, prompt, sessionId, timeout, model, provider, approval_mode, resource_group, context_mode } = params;
+    let agentSlug = params.agent || params.agent_slug || DEFAULT_CHAT_AGENT;
     if (!prompt) return;
 
     let sg = getStateGraph();
@@ -102,6 +104,11 @@ export class ChatWsServer {
     if (provider) delegateArgs.provider = provider;
     if (approval_mode) delegateArgs.approval_mode = approval_mode;
     if (resource_group && resource_group !== 'none') delegateArgs.resource_group = resource_group;
+    if (context_mode === 'auto' || context_mode === 'off') delegateArgs.context_mode = context_mode;
+    if (Array.isArray(params.files)) {
+      let files = [...new Set(params.files.map(file => String(file || '').trim()).filter(Boolean))];
+      if (files.length) delegateArgs.files = files;
+    }
     
     // Agent selection: read from UI/MCP chat params or persisted chat metadata.
     if (agentSlug && agentSlug !== 'none') {

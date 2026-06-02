@@ -2,6 +2,8 @@
 import { createInterface } from 'node:readline';
 import { ToolIndex } from './tool-index.js';
 
+const DEFAULT_CHAT_AGENT = 'orchestrator';
+
 /**
  * Smart Tool Gateway — exposes 3 meta-tools instead of proxying all child tools.
  * 
@@ -94,6 +96,8 @@ export let META_TOOLS = [
         agent: { type: 'string', description: 'Override agent role slug. Alias for agent_slug.' },
         agent_slug: { type: 'string', description: 'Override agent role slug.' },
         cwd: { type: 'string', description: 'Override working directory. Defaults to the chat project path or portal project root.' },
+        context_mode: { type: 'string', enum: ['auto', 'off'], description: 'Context package mode passed to delegate_task. Default: auto.' },
+        files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths passed to delegate_task as structured context hints.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600.' },
       },
       required: ['chatId', 'prompt'],
@@ -162,7 +166,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
   let model = args.model || chat.model || undefined;
   let sessionId = args.session_id || args.sessionId || chat.sessionId || undefined;
   let approvalMode = args.approval_mode || chat.approval_mode || undefined;
-  let agentSlug = args.agent || args.agent_slug || chat.agent || undefined;
+  let agentSlug = args.agent || args.agent_slug || chat.agent || DEFAULT_CHAT_AGENT;
 
   sg.appendChatMessage(chatId, { role: 'user', text: prompt });
   proxyManager.broadcastMonitor?.({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
@@ -178,6 +182,11 @@ export async function resumeChatTool(proxyManager, args = {}) {
   if (sessionId) delegateArgs.session_id = sessionId;
   if (approvalMode) delegateArgs.approval_mode = approvalMode;
   if (agentSlug && agentSlug !== 'none') delegateArgs.agent_slug = agentSlug;
+  if (args.context_mode === 'auto' || args.context_mode === 'off') delegateArgs.context_mode = args.context_mode;
+  if (Array.isArray(args.files)) {
+    let files = [...new Set(args.files.map(file => String(file || '').trim()).filter(Boolean))];
+    if (files.length) delegateArgs.files = files;
+  }
 
   let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
     name: 'delegate_task',
@@ -486,7 +495,7 @@ export class MCPMultiplexer {
         let chat = sg.createChat({
           name: args.name,
           adapter: args.adapter || 'pool',
-          agent: args.agent || args.agent_slug || null,
+          agent: args.agent || args.agent_slug || ((args.adapter || 'pool') === 'pool' ? DEFAULT_CHAT_AGENT : null),
           provider: args.provider || null,
           model: args.model || null,
           approval_mode: args.approval_mode || null,

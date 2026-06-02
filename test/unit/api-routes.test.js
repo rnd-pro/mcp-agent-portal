@@ -747,6 +747,16 @@ describe('api-routes', () => {
     assert.equal(okRes.status, 200);
     assert.equal(await fs.readFile(path.join(tmpDir, '.agent-portal/skills/code/example.md'), 'utf8'), '# Example\n');
 
+    let workspaceReq = makeReq('POST', '/api/agent-portal/file', {
+      path: 'workspace/demo/context.md',
+      content: '# Demo\n',
+    });
+    let workspaceRes = makeRes();
+    await routes['POST /api/agent-portal/file'](workspaceReq, workspaceRes);
+
+    assert.equal(workspaceRes.status, 200);
+    assert.equal(await fs.readFile(path.join(tmpDir, '.agent-portal/workspace/demo/context.md'), 'utf8'), '# Demo\n');
+
     let deniedReq = makeReq('POST', '/api/agent-portal/file', {
       path: 'runtime/state.json',
       content: '{}',
@@ -756,6 +766,16 @@ describe('api-routes', () => {
 
     assert.equal(deniedRes.status, 400);
     assert.match(deniedRes.json().error, /not editable public|local portal state/);
+
+    let unsafeReq = makeReq('POST', '/api/agent-portal/file', {
+      path: 'skills/code/unsafe.md',
+      content: `# Unsafe\n\n${['Bearer', 'abcdefghijklmnopqrstuvwxyz123456'].join(' ')}\n`,
+    });
+    let unsafeRes = makeRes();
+    await routes['POST /api/agent-portal/file'](unsafeReq, unsafeRes);
+
+    assert.equal(unsafeRes.status, 400);
+    assert.match(unsafeRes.json().error, /bearer token|secrets or local paths/);
   });
 
   it('rejects .agent-portal file symlinks that escape the project portal root', async () => {
@@ -795,6 +815,8 @@ describe('api-routes', () => {
     process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = libDir;
     await fs.mkdir(path.join(libDir, 'skills/code'), { recursive: true });
     await fs.writeFile(path.join(libDir, 'skills/code/example.md'), '# Example\n');
+    let unsafeLocalPath = ['# Unsafe', '', ['', 'Users', 'alice', 'private'].join('/')].join('\n');
+    await fs.writeFile(path.join(libDir, 'skills/code/unsafe.md'), `${unsafeLocalPath}\n`);
 
     try {
       let routes = createRoutes(makeRoutes(tmpDir));
@@ -807,6 +829,15 @@ describe('api-routes', () => {
 
       assert.equal(res.status, 400);
       assert.match(res.json().error, /not editable public|local portal state/);
+
+      let unsafeReq = makeReq('POST', '/api/agent-portal/open-library/install', {
+        sourcePath: 'skills/code/unsafe.md',
+      });
+      let unsafeRes = makeRes();
+      await routes['POST /api/agent-portal/open-library/install'](unsafeReq, unsafeRes);
+
+      assert.equal(unsafeRes.status, 400);
+      assert.match(unsafeRes.json().error, /local home path|secrets or local paths/);
     } finally {
       if (oldOpenLibrary === undefined) delete process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
       else process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = oldOpenLibrary;

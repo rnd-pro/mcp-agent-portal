@@ -15,6 +15,7 @@ import { ChatWsClient } from '../../services/chat-ws-client.js';
 import { AudioRecorder } from '../../services/audio-recorder.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import {
+  extractAttachedFilePaths,
   formatAttachedContextBlock,
   mergeAttachedContext,
   removeAttachedContext,
@@ -32,6 +33,8 @@ import {
   extractChatTitleFromAgentText,
 } from './chat-title.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
+
+const DEFAULT_POOL_AGENT = 'orchestrator';
 
 function sameChatMessages(next = [], current = []) {
   if (next === current) return true;
@@ -997,11 +1000,15 @@ export class AgentChat extends Symbiote {
     let meta = this.$.adapterMeta || {};
     let currentParams = this.$.chatParams || {};
     let paramsToMap = [];
+    let defaultParamsChanged = false;
 
     if (adapter === 'pool') {
-      // Pool params first (agent, chatType)
+      let normalizedParams = this._normalizePoolChatParams(currentParams);
+      defaultParamsChanged = JSON.stringify(normalizedParams) !== JSON.stringify(currentParams);
+      currentParams = normalizedParams;
+      // Agent is selected by the orchestrator layer by default; users configure execution resources.
       if (meta.pool?.parameters) {
-        paramsToMap.push(...meta.pool.parameters);
+        paramsToMap.push(...meta.pool.parameters.filter(p => p.id !== 'agent'));
       }
 
       let providers = Object.keys(meta).filter(k => k !== 'pool' && !k.startsWith('_'));
@@ -1020,16 +1027,13 @@ export class AgentChat extends Symbiote {
 
     this._updatingOptions = true;
     if (paramsToMap.length > 0) {
-      let paramsChanged = false;
+      let paramsChanged = defaultParamsChanged;
       let htmlStr = paramsToMap.map(p => {
         let priorityClass = this._composerParamPriorityClass(p.id);
         if (p.type === 'select' && Array.isArray(p.options)) {
           let paramValue = currentParams[p.id];
           if (!paramValue && p.options.length > 0) {
-            if (p.id === 'agent') {
-              let orch = p.options.find(o => (typeof o === 'string' ? o : o.val) === 'orchestrator');
-              paramValue = orch ? (typeof orch === 'string' ? orch : orch.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
-            } else if (p.id === 'resource_group') {
+            if (p.id === 'resource_group') {
               // Auto-select group from current agent's binding
               let agentGroup = this._getAgentResourceGroup(currentParams.agent);
               if (agentGroup) {
@@ -1181,6 +1185,32 @@ export class AgentChat extends Symbiote {
     let agentParam = this.$.adapterMeta?.pool?.parameters?.find(p => p.id === 'agent');
     let option = agentParam?.options?.find(opt => (typeof opt === 'string' ? opt : opt.val) === agentSlug);
     return typeof option === 'object' && option.resourceGroup ? option.resourceGroup : null;
+  }
+
+  _getDefaultPoolAgentSlug() {
+    let agentParam = this.$.adapterMeta?.pool?.parameters?.find(p => p.id === 'agent');
+    let options = agentParam?.options || [];
+    let orchestrator = options.find(opt => (typeof opt === 'string' ? opt : opt.val) === DEFAULT_POOL_AGENT);
+    if (orchestrator) return DEFAULT_POOL_AGENT;
+    let first = options[0];
+    return first ? (typeof first === 'string' ? first : first.val) : DEFAULT_POOL_AGENT;
+  }
+
+  _normalizePoolChatParams(params = {}) {
+    let next = { ...params };
+    if (!next.agent || next.agent === 'none') {
+      next.agent = this._getDefaultPoolAgentSlug();
+    }
+    if (next.agent && next.agent !== 'none') {
+      if (!next.approval_mode) {
+        next.approval_mode = this._getAgentDefaultApprovalMode(next.agent);
+      }
+      let agentGroup = this._getAgentResourceGroup(next.agent);
+      if (agentGroup && (!next.resource_group || next.resource_group === 'none')) {
+        next.resource_group = agentGroup;
+      }
+    }
+    return next;
   }
 
   _syncChatFromRouter() {
@@ -1342,7 +1372,14 @@ export class AgentChat extends Symbiote {
       });
     }
 
-    let contextText = formatAttachedContextBlock(this.$.attachedContext || []);
+    let attachedContext = this.$.attachedContext || [];
+    let attachedFiles = extractAttachedFilePaths(attachedContext);
+    if (attachedFiles.length) {
+      let existingFiles = Array.isArray(sendParams.files) ? sendParams.files : [];
+      sendParams = { ...sendParams, files: [...new Set([...existingFiles, ...attachedFiles])] };
+    }
+
+    let contextText = formatAttachedContextBlock(attachedContext);
     if (contextText) {
       prompt = contextText + prompt;
     }
@@ -1497,6 +1534,9 @@ export class AgentChat extends Symbiote {
 
   _getChatSendParams() {
     let params = { ...(this.$.chatParams || {}) };
+    if ((this.$.chatAdapter || 'pool') === 'pool') {
+      params = this._normalizePoolChatParams(params);
+    }
     delete params.chatId;
     delete params.sessionId;
     delete params.prompt;

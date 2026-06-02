@@ -156,6 +156,51 @@ async function run() {
     ws.close();
   });
 
+  await test('chat.send forwards structured files and context mode to delegate_task', async () => {
+    let ws = await connectChatClient();
+    let originalRequest = proxyManager.requestFromChild;
+    let capturedArgs = null;
+    proxyManager.requestFromChild = async (_server, _method, payload) => {
+      capturedArgs = payload.arguments;
+      return {
+        isError: false,
+        content: [{ type: 'text', text: 'Delegated task 11111111-2222-4333-8444-555555555555' }]
+      };
+    };
+
+    try {
+      let receivedDelegated = new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.delegated')), 10000);
+        ws.on('message', (data) => {
+          let msg = JSON.parse(data.toString());
+          if (msg.method === 'chat.delegated') {
+            clearTimeout(timer);
+            resolve(msg);
+          }
+        });
+      });
+
+      ws.send(JSON.stringify({
+        method: 'chat.send',
+        params: {
+          chatId: 'context-files-chat',
+          prompt: 'test context files',
+          files: ['web/app.js', 'web/app.js', 'src/node/server.js'],
+          context_mode: 'off',
+        }
+      }));
+
+      await receivedDelegated;
+
+      assert.deepEqual(capturedArgs.files, ['web/app.js', 'src/node/server.js']);
+      assert.equal(capturedArgs.context_mode, 'off');
+      assert.equal(capturedArgs.agent_slug, 'orchestrator');
+    } finally {
+      proxyManager.requestFromChild = originalRequest;
+      ws.close();
+    }
+  });
+
   // Test 2: Success workflow propagation (streaming)
   await test('valid workflow triggers chat.delegated, streams metadata, and completes with chat.done', async () => {
     let ws = await connectChatClient();

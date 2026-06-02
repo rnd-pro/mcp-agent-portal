@@ -108,3 +108,14 @@ export function removeAttachedContext(current, key) {
 export function formatAttachedContextBlock(context) {
   return _format(context, TYPE_HANDLERS);
 }
+
+export function extractAttachedFilePaths(context = []) {
+  let paths = [];
+  for (let item of context || []) {
+    let normalized = normalizeAttachedContextItem(item);
+    if (normalized.type !== 'file') continue;
+    if (!normalized.path) continue;
+    paths.push(normalized.path);
+  }
+  return [...new Set(paths)];
+}

@@ -81,6 +81,9 @@ describe('agent chat input state', () => {
     assert.match(agentChat, /this\._saveAgentGeneratedChatTitle\(chatId, parsed\.title, nextMessages\);/);
     assert.match(agentChat, /let payload = \{ \.\.\.sendParams, type: adapter, prompt: agentPrompt \};/);
     assert.match(agentChat, /this\._wsClient\.send\(chatId, agentPrompt, sendParams, this\._sessionId\)/);
+    assert.match(agentChat, /const DEFAULT_POOL_AGENT = 'orchestrator';/);
+    assert.match(agentChat, /meta\.pool\.parameters\.filter\(p => p\.id !== 'agent'\)/);
+    assert.match(agentChat, /params = this\._normalizePoolChatParams\(params\);/);
     assert.match(agentChat, /delete params\.prompt;/);
     assert.match(agentChat, /if \(params\.resource_group && params\.resource_group !== 'none'\) \{[\s\S]*delete params\.provider;[\s\S]*delete params\.model;[\s\S]*\}/);
     assert.match(agentChat, /if \(hasResourceGroup && \(key === 'provider' \|\| key === 'model'\)\) continue;/);

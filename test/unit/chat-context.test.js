@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  extractAttachedFilePaths,
   formatAttachedContextBlock,
   mergeAttachedContext,
   removeAttachedContext,
@@ -77,4 +78,17 @@ test('formatAttachedContextBlock supports graph story beats', () => {
   assert.match(block, /"type": "graph-story-beat"/);
   assert.match(block, /"beatId": "api-route"/);
   assert.match(block, /"focusPath": "web\/app.js"/);
+});
+
+test('extractAttachedFilePaths returns only structured file context hints', () => {
+  let context = mergeAttachedContext([], { path: 'web/app.js', source: 'autocomplete' });
+  context = mergeAttachedContext(context, { path: 'web/app.js', source: 'manual' });
+  context = mergeAttachedContext(context, {
+    type: 'graph-cluster',
+    clusterId: 'backend',
+    label: 'Backend',
+    paths: ['src/node/'],
+  });
+
+  assert.deepEqual(extractAttachedFilePaths(context), ['web/app.js']);
 });

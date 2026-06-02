@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, resolve } from 'path';
 import { spawn, execSync } from 'child_process';
 import { readFileSync, existsSync, readdirSync, unlinkSync, writeFileSync } from 'fs';
@@ -180,16 +180,68 @@ function parseFlags(argsArr) {
   for (let i = 0; i < argsArr.length; i++) {
     if (argsArr[i].startsWith('--')) {
       let key = argsArr[i].slice(2);
+      let value = true;
       if (i + 1 < argsArr.length && !argsArr[i + 1].startsWith('--')) {
-        flags[key] = argsArr[++i];
+        value = argsArr[++i];
+      }
+      if (Object.hasOwn(flags, key)) {
+        flags[key] = Array.isArray(flags[key]) ? [...flags[key], value] : [flags[key], value];
       } else {
-        flags[key] = true;
+        flags[key] = value;
       }
     } else {
       positional.push(argsArr[i]);
     }
   }
   return { flags, positional };
+}
+
+function flagValues(flags, key) {
+  let value = flags[key];
+  if (value == null || value === true) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function numberFlag(flags, key, fallback) {
+  let value = flags[key];
+  if (Array.isArray(value)) value = value.at(-1);
+  let parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function printResolvedContextSummary(result) {
+  console.log('Resolved context');
+  console.log(`  Zones: ${result.zones?.join(', ') || 'none'}`);
+  console.log(`  Tool profile: ${result.toolProfile || 'implementation'}`);
+
+  console.log('  Active contexts:');
+  for (let context of result.contexts || []) {
+    let workspace = context.workspace ? ` workspace=${context.workspace}` : '';
+    console.log(`    - ${context.id} scope=${context.scope}${workspace} path=${context.path}`);
+  }
+  if (!result.contexts?.length) console.log('    - none');
+
+  console.log('  Skills:');
+  for (let skill of result.skills || []) {
+    let description = skill.description ? ` - ${skill.description}` : '';
+    console.log(`    - ${skill.name} [${skill.category || 'uncategorized'}]${description}`);
+  }
+  if (!result.skills?.length) console.log('    - none');
+
+  console.log('  Workflows:');
+  for (let workflow of result.workflows || []) {
+    let description = workflow.description ? ` - ${workflow.description}` : '';
+    console.log(`    - ${workflow.id}${description}`);
+  }
+  if (!result.workflows?.length) console.log('    - none');
+}
+
+async function loadAgentPoolContextApi() {
+  try {
+    return await import('agent-pool-mcp/context.js');
+  } catch {
+    return import(pathToFileURL(resolve(__dirname, '../packages/agent-pool-mcp/context.js')).href);
+  }
 }
 
 const DEFAULT_DEEPSEEK_GATEWAY = {
@@ -718,6 +770,48 @@ let CLI = {
     },
   },
 
+  context: {
+    desc: 'Resolve metadata-first project context (usage: context resolve --task <text> [--agent <slug>] [--file <path>] [--json])',
+    async handler() {
+      let { flags, positional } = parseFlags(args);
+      let subcmd = positional[0] || 'resolve';
+      if (subcmd !== 'resolve') {
+        console.error(`Unknown context command: ${subcmd}`);
+        console.error('Usage: mcp-agent-portal context resolve --cwd . --task "..." --agent backend-engineer --file src/app.js --json');
+        process.exit(1);
+      }
+
+      let task = flags.task || flags.prompt || positional.slice(1).join(' ');
+      if (Array.isArray(task)) task = task.at(-1);
+      let cwdFlag = Array.isArray(flags.cwd) ? flags.cwd.at(-1) : flags.cwd;
+      let cwd = resolve(cwdFlag || process.cwd());
+      let agentSlug = flags.agent || flags.agent_slug || flags['agent-slug'];
+      if (Array.isArray(agentSlug)) agentSlug = agentSlug.at(-1);
+      let mode = Array.isArray(flags.mode) ? flags.mode.at(-1) : flags.mode;
+      let files = [
+        ...flagValues(flags, 'file'),
+        ...flagValues(flags, 'files'),
+      ].map(file => String(file || '').trim()).filter(Boolean);
+
+      let { resolveContext } = await loadAgentPoolContextApi();
+      let result = resolveContext({
+        cwd,
+        task,
+        agent_slug: agentSlug || undefined,
+        files,
+        mode: mode || 'plan',
+        max_skills: numberFlag(flags, 'max-skills', 8),
+        max_workflows: numberFlag(flags, 'max-workflows', 8),
+      }, cwd);
+
+      if (flags.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        printResolvedContextSummary(result);
+      }
+    },
+  },
+
   gateway: {
     desc: 'Configure Anthropic/Claude gateway (usage: gateway status|enable|disable|test)',
     async handler() {
@@ -1153,6 +1247,13 @@ Options for 'gateway':
   disable                Disable the gateway
   test                   Probe running /anthropic endpoints or validate config
 
+Options for 'context resolve':
+  --cwd <path>           Project directory (default: current)
+  --task <text>          Task or prompt to classify
+  --agent <slug>         Agent role slug for context selection
+  --file <path>          Focus file path; may be repeated
+  --json                 Print the same JSON shape as MCP resolve_context
+
 Options for 'hub':
   status                 Show local gateway, route, and backend state
   routes                 List portal.local routes
@@ -1175,6 +1276,7 @@ Examples:
   npx mcp-agent-portal hub doctor
   npx mcp-agent-portal gateway enable --provider deepseek
   npx mcp-agent-portal gateway test
+  npx mcp-agent-portal context resolve --cwd . --task "debug Bybit realtime MCP tools" --agent backend-engineer --file src/exchanges/bybit-ws.js --json
   npx mcp-agent-portal tasks
   npx mcp-agent-portal finish <taskId>
   npx mcp-agent-portal call list_skills
