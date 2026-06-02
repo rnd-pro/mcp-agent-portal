@@ -169,14 +169,15 @@ describe('agent chat input state', () => {
     assert.match(source, /_voiceRecognitionLanguage\(\)/);
     assert.match(source, /_voiceCommandLocale\(\)/);
     assert.match(source, /_autoVoiceLocale\(\)/);
-    assert.match(source, /_voiceLanguageDisplayOption\(\)/);
-    assert.match(source, /this\._voiceLanguageBtn\.textContent = displayOption\.short;/);
-    assert.match(source, /settings\.voice\.languageAutoResolved/);
+    assert.match(source, /_handleVoiceLanguageClick\(event = \{\}\)/);
+    assert.match(source, /_setVoiceLanguageMode\(mode\)/);
+    assert.match(source, /data-voice-language/);
+    assert.match(source, /this\._audioRecorder\.restartSpeechRecognition\(language\);/);
     assert.match(source, /let locale = this\._voiceCommandLocale\(\);/);
     assert.match(source, /recognition\.lang = this\._voiceRecognitionLanguage\(\);/);
     assert.match(source, /this\._audioRecorder\.setLanguage\(this\._voiceRecognitionLanguage\(\)\);/);
-    assert.match(source, /_cycleVoiceLanguageMode\(\)/);
-    assert.match(source, /this\._syncWakeButton\(\);\s+if \(this\._wakeModeEnabled && !this\._wakePausedForRecording\) \{\s+this\._restartWakeListening\(\);/);
+    assert.match(source, /_nextVoiceLanguageMode\(\)/);
+    assert.match(source, /this\._syncWakeButton\(\);[\s\S]*this\._audioRecorder\.setLanguage\(language\);[\s\S]*restartSpeechRecognition\(language\);[\s\S]*if \(this\._wakeModeEnabled && !this\._wakePausedForRecording\) \{\s+this\._restartWakeListening\(\);/);
     assert.match(source, /_restartWakeListening\(\)/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
@@ -199,6 +200,8 @@ describe('agent chat input state', () => {
 
     let recorderSource = fs.readFileSync(path.join(ROOT, 'web/services/audio-recorder.js'), 'utf8');
     assert.match(recorderSource, /setLanguage\(language = ''\)/);
+    assert.match(recorderSource, /restartSpeechRecognition\(language = ''\)/);
+    assert.match(recorderSource, /_startSpeechRecognition\(\{ initialText = '', startTime = 0 \} = \{\}\)/);
     assert.match(recorderSource, /_recognitionLanguage\(\)/);
     assert.match(recorderSource, /recognition\.lang = this\._recognitionLanguage\(\);/);
   });

@@ -126,6 +126,31 @@ export class AudioRecorder {
     this._setState('idle');
   }
 
+  async restartSpeechRecognition(language = '') {
+    this.setLanguage(language);
+    if (this.state !== 'recording' || !this._recognition) return false;
+
+    let initialText = this._resultText.trim();
+    let startTime = this._startTime || Date.now();
+    let recognition = this._recognition;
+    recognition.onresult = null;
+    recognition.onend = null;
+    recognition.onerror = null;
+    try { recognition.abort(); } catch (_) { /* already stopped */ }
+    this._recognition = null;
+    this._resolved = false;
+    this._resolveStop = null;
+    this._setState('starting');
+
+    try {
+      await this._startSpeechRecognition({ initialText, startTime });
+      return true;
+    } catch (err) {
+      this._setState('idle');
+      throw err;
+    }
+  }
+
   // ── Resolve helper (prevents double-resolve from onerror + onend) ──
 
   _finish(result) {
@@ -144,7 +169,7 @@ export class AudioRecorder {
     return this._language || navigator.language || 'en-US';
   }
 
-  _startSpeechRecognition() {
+  _startSpeechRecognition({ initialText = '', startTime = 0 } = {}) {
     return new Promise((resolveStart, rejectStart) => {
       let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       let recognition = new SpeechRecognition();
@@ -152,14 +177,14 @@ export class AudioRecorder {
       recognition.interimResults = true;
       recognition.continuous = true;
 
-      this._resultText = '';
+      this._resultText = initialText;
       this._recognition = recognition;
       let started = false;
 
       recognition.onstart = () => {
         if (started) return;
         started = true;
-        this._startTime = Date.now();
+        this._startTime = startTime || Date.now();
         this._setState('recording');
         resolveStart();
       };
@@ -169,8 +194,8 @@ export class AudioRecorder {
         for (let i = 0; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript;
         }
-        this._resultText = transcript;
-        this._onInterim?.(transcript);
+        this._resultText = [initialText, transcript].filter(Boolean).join(' ').trim();
+        this._onInterim?.(this._resultText);
       };
 
       recognition.onend = () => {

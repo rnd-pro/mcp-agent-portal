@@ -394,7 +394,7 @@ export class AgentChat extends Symbiote {
     micBtn.onclick = () => this._toggleRecording();
     wakeBtn.onclick = () => this._toggleWakeMode();
     responseBtn.onclick = () => this._toggleVoiceResponseMode();
-    languageBtn.onclick = () => this._cycleVoiceLanguageMode();
+    languageBtn.onclick = (event) => this._handleVoiceLanguageClick(event);
 
     // Live interim results callback
     this._audioRecorder.onInterim = (text, elapsed) => {
@@ -477,7 +477,7 @@ export class AgentChat extends Symbiote {
         es: String(savedWake.es || wakeDefaults.es).trim() || wakeDefaults.es,
       };
     } catch {
-      this._voiceLanguageMode = 'auto';
+      this._voiceLanguageMode = this._autoVoiceLocale();
       this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
       this._wakeCommandPhrases = this._defaultWakeCommandPhrases();
     }
@@ -485,12 +485,12 @@ export class AgentChat extends Symbiote {
 
   _normalizeVoiceLanguageMode(mode = 'auto') {
     let value = String(mode || 'auto').trim().toLowerCase();
-    return ['auto', 'ru', 'es', 'en'].includes(value) ? value : 'auto';
+    if (['ru', 'es', 'en'].includes(value)) return value;
+    return this._autoVoiceLocale();
   }
 
   _voiceLanguageOptions() {
     return [
-      { mode: 'auto', short: 'Auto', label: tPortal('settings.voice.languageAuto'), lang: null },
       { mode: 'ru', short: 'RU', label: tPortal('settings.voice.languageRu'), lang: 'ru-RU' },
       { mode: 'es', short: 'ES', label: tPortal('settings.voice.languageEs'), lang: 'es-ES' },
       { mode: 'en', short: 'EN', label: tPortal('settings.voice.languageEn'), lang: 'en-US' },
@@ -506,8 +506,7 @@ export class AgentChat extends Symbiote {
   }
 
   _voiceCommandLocale() {
-    if (this._voiceLanguageMode !== 'auto') return this._voiceLanguageMode;
-    return this._autoVoiceLocale();
+    return this._normalizeVoiceLanguageMode(this._voiceLanguageMode);
   }
 
   _voiceLanguageTags() {
@@ -523,11 +522,6 @@ export class AgentChat extends Symbiote {
     if (['ru', 'es', 'en'].includes(browserLocale)) return browserLocale;
     let interfaceLocale = getLocalization().locale;
     return ['ru', 'es', 'en'].includes(interfaceLocale) ? interfaceLocale : 'en';
-  }
-
-  _voiceLanguageDisplayOption() {
-    let locale = this._voiceCommandLocale();
-    return this._voiceLanguageOptions().find((item) => item.mode === locale) || this._voiceLanguageOptions().find((item) => item.mode === 'en');
   }
 
   _escapeRegExp(value) {
@@ -607,28 +601,46 @@ export class AgentChat extends Symbiote {
 
   _syncVoiceLanguageButton() {
     if (!this._voiceLanguageBtn) return;
-    let modeOption = this._voiceLanguageOption();
-    let displayOption = this._voiceLanguageDisplayOption();
-    let label = this._voiceLanguageMode === 'auto'
-      ? tPortal('settings.voice.languageAutoResolved', { language: displayOption.label })
-      : displayOption.label;
+    let option = this._voiceLanguageOption();
     this._voiceLanguageBtn.hidden = !this._wakeModeEnabled;
     this._voiceLanguageBtn.disabled = !this._wakeModeEnabled;
-    this._voiceLanguageBtn.dataset.mode = modeOption.mode;
-    this._voiceLanguageBtn.dataset.locale = displayOption.mode;
-    this._voiceLanguageBtn.textContent = displayOption.short;
-    this._voiceLanguageBtn.title = tPortal('settings.voice.languageButton', { language: label });
+    this._voiceLanguageBtn.dataset.mode = option.mode;
+    this._voiceLanguageBtn.innerHTML = this._voiceLanguageOptions().map((item) => [
+      `<span class="voice-language-option${item.mode === option.mode ? ' active' : ''}" data-voice-language="${item.mode}">`,
+      escapeHtml(item.short),
+      '</span>',
+    ].join('')).join('');
+    this._voiceLanguageBtn.title = tPortal('settings.voice.languageButton', { language: option.label });
     this._voiceLanguageBtn.setAttribute('aria-label', this._voiceLanguageBtn.title);
-    this._voiceLanguageBtn.setAttribute('aria-pressed', modeOption.mode === 'auto' ? 'false' : 'true');
+    this._voiceLanguageBtn.setAttribute('aria-pressed', 'true');
   }
 
-  _cycleVoiceLanguageMode() {
+  _nextVoiceLanguageMode() {
     let options = this._voiceLanguageOptions();
     let index = options.findIndex((item) => item.mode === this._voiceLanguageMode);
-    let next = options[(index + 1) % options.length] || options[0];
-    this._voiceLanguageMode = next.mode;
+    return (options[(index + 1) % options.length] || options[0]).mode;
+  }
+
+  _handleVoiceLanguageClick(event = {}) {
+    let targetMode = event.target?.closest?.('[data-voice-language]')?.dataset?.voiceLanguage;
+    let nextMode = targetMode || this._nextVoiceLanguageMode();
+    if (nextMode === this._voiceLanguageMode) return;
+    this._setVoiceLanguageMode(nextMode);
+  }
+
+  async _setVoiceLanguageMode(mode) {
+    this._voiceLanguageMode = this._normalizeVoiceLanguageMode(mode);
     this._saveVoiceInputModeSettings();
     this._syncWakeButton();
+    let language = this._voiceRecognitionLanguage();
+    this._audioRecorder.setLanguage(language);
+    if (this._audioRecorder.state === 'recording') {
+      try {
+        await this._audioRecorder.restartSpeechRecognition(language);
+      } catch (err) {
+        console.warn('[AgentChat] Voice language restart failed:', err.message);
+      }
+    }
     if (this._wakeModeEnabled && !this._wakePausedForRecording) {
       this._restartWakeListening();
     }
