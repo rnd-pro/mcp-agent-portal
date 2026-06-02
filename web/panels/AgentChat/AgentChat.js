@@ -829,7 +829,7 @@ export class AgentChat extends Symbiote {
     this._pauseWakeListeningForRecording();
     setTimeout(async () => {
       try {
-        await this._toggleRecording();
+        await this._toggleRecording({ reloadSettings: false });
       } finally {
         this._wakeTriggering = false;
       }
@@ -953,13 +953,17 @@ export class AgentChat extends Symbiote {
     this._voiceCommandTextOverride = '';
   }
 
-  async _toggleRecording() {
+  async _toggleRecording({ reloadSettings = true } = {}) {
     if (this._audioRecorder.state === 'recording') {
       this._stopRecording();
     } else if (this._audioRecorder.state === 'idle') {
       let wasMicrophonePrompt = false;
       try {
-        await this._loadVoiceInputSettings();
+        if (reloadSettings) {
+          await this._loadVoiceInputSettings();
+        } else {
+          this._syncVoiceLanguageButton();
+        }
         wasMicrophonePrompt = await this._isMicrophonePermissionPrompt();
         this._voicePermissionPromptBeforeStart = wasMicrophonePrompt;
         this._pauseWakeListeningForRecording();

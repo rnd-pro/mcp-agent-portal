@@ -184,6 +184,9 @@ describe('agent chat input state', () => {
     assert.match(source, /this\._syncWakeButton\(\);[\s\S]*this\._audioRecorder\.setLanguage\(language\);[\s\S]*restartSpeechRecognition\(language\);[\s\S]*if \(this\._wakeModeEnabled && !this\._wakePausedForRecording\) \{\s+this\._restartWakeListening\(\);/);
     assert.match(source, /_restartWakeListening\(\)/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
+    assert.match(source, /this\._toggleRecording\(\{ reloadSettings: false \}\);/);
+    assert.match(source, /async _toggleRecording\(\{ reloadSettings = true \} = \{\}\)/);
+    assert.match(source, /if \(reloadSettings\) \{\s+await this\._loadVoiceInputSettings\(\);\s+\} else \{\s+this\._syncVoiceLanguageButton\(\);/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
     assert.match(source, /chat-composer-voice-command-toggle', \(\) => this\._toggleVoiceCommandMode\(\)/);
     assert.match(source, /this\._stopRecording\(\{ autoSend: true, textOverride: command\.text \}\)/);
