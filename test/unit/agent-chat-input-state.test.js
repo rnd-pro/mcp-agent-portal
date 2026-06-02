@@ -164,7 +164,7 @@ describe('agent chat input state', () => {
     assert.doesNotMatch(source, /m\.text === cur\[i\]\?\.text && m\.role === cur\[i\]\?\.role/);
     assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
     assert.match(source, /let command = this\._getWakeCommandPhrase\(\);/);
-    assert.match(source, /commandText\.textContent = this\._wakeModeEnabled \? command : ''/);
+    assert.match(source, /tPortal\('settings\.voice\.sayCommand', \{ command \}\)/);
     assert.match(source, /_normalizeVoiceLanguageMode\(mode = 'auto'\)/);
     assert.match(source, /_voiceRecognitionLanguage\(\)/);
     assert.match(source, /_voiceCommandLocale\(\)/);

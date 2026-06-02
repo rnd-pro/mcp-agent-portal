@@ -571,7 +571,11 @@ export class AgentChat extends Symbiote {
       ? tPortal('settings.voice.listeningFor', { command })
       : tPortal('settings.voice.listenButton');
     let commandText = this._wakeBtn.querySelector('.wake-command-text');
-    if (commandText) commandText.textContent = this._wakeModeEnabled ? command : '';
+    if (commandText) {
+      commandText.textContent = this._wakeModeEnabled
+        ? tPortal('settings.voice.sayCommand', { command })
+        : '';
+    }
     if (this._micBtn) this._micBtn.hidden = this._wakeModeEnabled;
     this._syncVoiceResponseButton();
     this._syncVoiceLanguageButton();
