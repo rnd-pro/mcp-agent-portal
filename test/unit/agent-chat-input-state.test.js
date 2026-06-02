@@ -161,10 +161,15 @@ describe('agent chat input state', () => {
     assert.match(source, /btn-wake-listen/);
     assert.match(source, /wake-command-text/);
     assert.match(source, /btn-voice-response/);
+    assert.match(source, /btn-voice-command/);
     assert.match(source, /btn-voice-language/);
     assert.match(source, /this\._audioRecorder\.onStateChange = \(\) => \{[\s\S]*this\._syncVoiceLanguageButton\(\);/);
     assert.match(source, /speechSynthesis/);
     assert.match(source, /_toggleVoiceResponseMode\(\)/);
+    assert.match(source, /_syncVoiceCommandButton\(\)/);
+    assert.match(source, /_voiceCommandHints\(\)/);
+    assert.match(source, /_extractVoiceCommandAction\(text = ''\)/);
+    assert.match(source, /_handleVoiceCommandAction\(command\)/);
     assert.match(source, /_speakPendingAgentResponse\(\)/);
     assert.match(source, /_saveVoiceInputModeSettings\(\)/);
     assert.match(source, /this\._voiceResponseLastAgentKey = current\?\.key \|\| ''/);
@@ -191,7 +196,9 @@ describe('agent chat input state', () => {
     assert.match(source, /data-voice-language/);
     assert.match(source, /this\._syncVoiceLanguageButton\(\);/);
     assert.match(source, /let available = Boolean\(this\._audioRecorder\.hasSpeechRecognition\);/);
-    assert.match(source, /let active = this\._wakeModeEnabled \|\| \['starting', 'recording'\]\.includes\(this\._audioRecorder\.state\);/);
+    assert.match(source, /_voiceControlActive\(\) \{/);
+    assert.match(source, /return this\._wakeModeEnabled \|\| \['starting', 'recording'\]\.includes\(this\._audioRecorder\.state\);/);
+    assert.match(source, /let active = this\._voiceControlActive\(\);/);
     assert.match(source, /this\._voiceLanguageBtn\.hidden = !available \|\| !active;/);
     assert.doesNotMatch(source, /this\._voiceLanguageBtn\.hidden = !this\._wakeModeEnabled/);
     assert.match(source, /this\._audioRecorder\.restartSpeechRecognition\(language\);/);
@@ -206,7 +213,12 @@ describe('agent chat input state', () => {
     assert.match(source, /async _toggleRecording\(\{ reloadSettings = true \} = \{\}\)/);
     assert.match(source, /if \(reloadSettings\) \{\s+await this\._loadVoiceInputSettings\(\);\s+\} else \{\s+this\._syncVoiceLanguageButton\(\);/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
-    assert.match(source, /chat-composer-voice-command-toggle', \(\) => this\._toggleVoiceCommandMode\(\)/);
+    assert.match(source, /command\.action === 'cancel'/);
+    assert.match(source, /command\.action === 'delete'/);
+    assert.match(source, /restartSpeechRecognition\(this\._voiceRecognitionLanguage\(\), \{ initialText: '' \}\)/);
+    assert.match(source, /command\.action === 'off'/);
+    assert.match(source, /this\._stopWakeListening\(\{ disableMode: true \}\);/);
+    assert.match(source, /commandBtn\.onclick = \(\) => this\._toggleVoiceCommandMode\(\);/);
     assert.match(source, /this\._stopRecording\(\{ autoSend: true, textOverride: command\.text \}\)/);
     assert.match(source, /this\._micBtn\?\.classList\.remove\('recording', 'processing'\);/);
     assert.equal(source.includes('composer.parentElement.insertBefore(preview, composer)'), false);
@@ -228,7 +240,7 @@ describe('agent chat input state', () => {
 
     let recorderSource = fs.readFileSync(path.join(ROOT, 'web/services/audio-recorder.js'), 'utf8');
     assert.match(recorderSource, /setLanguage\(language = ''\)/);
-    assert.match(recorderSource, /restartSpeechRecognition\(language = ''\)/);
+    assert.match(recorderSource, /restartSpeechRecognition\(language = '', \{ initialText = this\._resultText\.trim\(\) \} = \{\}\)/);
     assert.match(recorderSource, /_startSpeechRecognition\(\{ initialText = '', startTime = 0 \} = \{\}\)/);
     assert.match(recorderSource, /_recognitionLanguage\(\)/);
     assert.match(recorderSource, /recognition\.lang = this\._recognitionLanguage\(\);/);

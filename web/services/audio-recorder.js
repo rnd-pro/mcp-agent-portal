@@ -126,11 +126,10 @@ export class AudioRecorder {
     this._setState('idle');
   }
 
-  async restartSpeechRecognition(language = '') {
+  async restartSpeechRecognition(language = '', { initialText = this._resultText.trim() } = {}) {
     this.setLanguage(language);
     if (this.state !== 'recording' || !this._recognition) return false;
 
-    let initialText = this._resultText.trim();
     let startTime = this._startTime || Date.now();
     let recognition = this._recognition;
     recognition.onresult = null;
