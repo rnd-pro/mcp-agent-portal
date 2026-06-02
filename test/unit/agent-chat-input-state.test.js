@@ -191,6 +191,7 @@ describe('agent chat input state', () => {
     assert.match(source, /matchVoiceCommandAtEnd\(value, candidates\)/);
     assert.match(source, /matchVoiceCommandInText\(text, \[this\._getWakeCommandPhrase\(\)\]\)\.matched/);
     assert.doesNotMatch(source, /_escapeRegExp/);
+    assert.match(source, /command\.matched && !this\._voiceCommandHandling && !this\._voiceCommandTriggered/);
     assert.match(source, /_handleVoiceCommandAction\(command\)/);
     assert.match(source, /_speakPendingAgentResponse\(\)/);
     assert.match(source, /_saveVoiceInputModeSettings\(\)/);
@@ -241,7 +242,8 @@ describe('agent chat input state', () => {
     assert.match(source, /command\.action === 'off'/);
     assert.match(source, /this\._stopWakeListening\(\{ disableMode: true \}\);/);
     assert.match(source, /commandBtn\.onclick = \(\) => this\._toggleVoiceCommandMode\(\);/);
-    assert.match(source, /this\._stopRecording\(\{ autoSend: true, textOverride: command\.text \}\)/);
+    assert.match(source, /await this\._stopRecording\(\{ autoSend: true, textOverride: command\.text \}\)/);
+    assert.match(source, /async _sendMessage\(\{ voiceTranscribed = false \} = \{\}\) \{[\s\S]*if \(this\._isSending\) return;/);
     assert.match(source, /this\._micBtn\?\.classList\.remove\('recording', 'processing'\);/);
     assert.equal(source.includes('composer.parentElement.insertBefore(preview, composer)'), false);
     assert.match(source, /_showVoiceError\(message\)/);

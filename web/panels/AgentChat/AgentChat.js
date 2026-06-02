@@ -940,7 +940,7 @@ export class AgentChat extends Symbiote {
     if (text) {
       let command = this._voiceCommandMode ? this._extractVoiceCommandAction(text) : { matched: false, text };
       this._voiceInterimText = command.text;
-      if (command.matched && !this._voiceCommandHandling) {
+      if (command.matched && !this._voiceCommandHandling && !this._voiceCommandTriggered) {
         this._voiceCommandHandling = true;
         this._handleVoiceCommandAction(command).finally(() => {
           this._voiceCommandHandling = false;
@@ -964,7 +964,7 @@ export class AgentChat extends Symbiote {
     if (command.action === 'send') {
       this._voiceCommandTriggered = true;
       this._voiceCommandTextOverride = command.text;
-      this._stopRecording({ autoSend: true, textOverride: command.text });
+      await this._stopRecording({ autoSend: true, textOverride: command.text });
       return;
     }
     if (command.action === 'cancel') {
@@ -1591,6 +1591,7 @@ export class AgentChat extends Symbiote {
   async _sendMessage({ voiceTranscribed = false } = {}) {
     this._syncComposerParamsFromDom();
     if (this.$.isInputDisabled) return;
+    if (this._isSending) return;
     let chatId = this._loadedChatId || dashState.activeChatId;
     let prompt = this.$.inputVal.trim();
     if (!prompt) return;
