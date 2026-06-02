@@ -172,6 +172,10 @@ describe('agent chat input state', () => {
     assert.match(source, /_handleVoiceLanguageClick\(event = \{\}\)/);
     assert.match(source, /_setVoiceLanguageMode\(mode\)/);
     assert.match(source, /data-voice-language/);
+    assert.match(source, /this\._syncVoiceLanguageButton\(\);/);
+    assert.match(source, /let available = Boolean\(this\._audioRecorder\.hasSpeechRecognition\);/);
+    assert.match(source, /this\._voiceLanguageBtn\.hidden = !available;/);
+    assert.doesNotMatch(source, /this\._voiceLanguageBtn\.hidden = !this\._wakeModeEnabled/);
     assert.match(source, /this\._audioRecorder\.restartSpeechRecognition\(language\);/);
     assert.match(source, /let locale = this\._voiceCommandLocale\(\);/);
     assert.match(source, /recognition\.lang = this\._voiceRecognitionLanguage\(\);/);
