@@ -168,6 +168,10 @@ describe('agent chat input state', () => {
     assert.match(source, /_normalizeVoiceLanguageMode\(mode = 'auto'\)/);
     assert.match(source, /_voiceRecognitionLanguage\(\)/);
     assert.match(source, /_voiceCommandLocale\(\)/);
+    assert.match(source, /_autoVoiceLocale\(\)/);
+    assert.match(source, /_voiceLanguageDisplayOption\(\)/);
+    assert.match(source, /this\._voiceLanguageBtn\.textContent = displayOption\.short;/);
+    assert.match(source, /settings\.voice\.languageAutoResolved/);
     assert.match(source, /let locale = this\._voiceCommandLocale\(\);/);
     assert.match(source, /recognition\.lang = this\._voiceRecognitionLanguage\(\);/);
     assert.match(source, /this\._audioRecorder\.setLanguage\(this\._voiceRecognitionLanguage\(\)\);/);

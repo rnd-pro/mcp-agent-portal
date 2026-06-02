@@ -502,16 +502,32 @@ export class AgentChat extends Symbiote {
   }
 
   _voiceRecognitionLanguage() {
-    let option = this._voiceLanguageOption();
-    return option.lang || navigator.language || this._speechLocaleFromInterface();
+    return this._voiceLanguageTags()[this._voiceCommandLocale()] || 'en-US';
   }
 
   _voiceCommandLocale() {
     if (this._voiceLanguageMode !== 'auto') return this._voiceLanguageMode;
+    return this._autoVoiceLocale();
+  }
+
+  _voiceLanguageTags() {
+    return {
+      ru: 'ru-RU',
+      es: 'es-ES',
+      en: 'en-US',
+    };
+  }
+
+  _autoVoiceLocale() {
     let browserLocale = String(navigator.language || '').slice(0, 2).toLowerCase();
     if (['ru', 'es', 'en'].includes(browserLocale)) return browserLocale;
     let interfaceLocale = getLocalization().locale;
     return ['ru', 'es', 'en'].includes(interfaceLocale) ? interfaceLocale : 'en';
+  }
+
+  _voiceLanguageDisplayOption() {
+    let locale = this._voiceCommandLocale();
+    return this._voiceLanguageOptions().find((item) => item.mode === locale) || this._voiceLanguageOptions().find((item) => item.mode === 'en');
   }
 
   _escapeRegExp(value) {
@@ -591,14 +607,19 @@ export class AgentChat extends Symbiote {
 
   _syncVoiceLanguageButton() {
     if (!this._voiceLanguageBtn) return;
-    let option = this._voiceLanguageOption();
+    let modeOption = this._voiceLanguageOption();
+    let displayOption = this._voiceLanguageDisplayOption();
+    let label = this._voiceLanguageMode === 'auto'
+      ? tPortal('settings.voice.languageAutoResolved', { language: displayOption.label })
+      : displayOption.label;
     this._voiceLanguageBtn.hidden = !this._wakeModeEnabled;
     this._voiceLanguageBtn.disabled = !this._wakeModeEnabled;
-    this._voiceLanguageBtn.dataset.mode = option.mode;
-    this._voiceLanguageBtn.textContent = option.short;
-    this._voiceLanguageBtn.title = tPortal('settings.voice.languageButton', { language: option.label });
+    this._voiceLanguageBtn.dataset.mode = modeOption.mode;
+    this._voiceLanguageBtn.dataset.locale = displayOption.mode;
+    this._voiceLanguageBtn.textContent = displayOption.short;
+    this._voiceLanguageBtn.title = tPortal('settings.voice.languageButton', { language: label });
     this._voiceLanguageBtn.setAttribute('aria-label', this._voiceLanguageBtn.title);
-    this._voiceLanguageBtn.setAttribute('aria-pressed', option.mode === 'auto' ? 'false' : 'true');
+    this._voiceLanguageBtn.setAttribute('aria-pressed', modeOption.mode === 'auto' ? 'false' : 'true');
   }
 
   _cycleVoiceLanguageMode() {
