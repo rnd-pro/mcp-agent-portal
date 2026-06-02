@@ -17,13 +17,15 @@ const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 describe('agent chat input state', () => {
   it('uses ok agent as the shared wake command default', () => {
     assert.deepEqual(defaultWakeCommandPhrases(), {
-      en: "О'кей Агент",
+      en: 'Okay Agent',
       ru: "О'кей Агент",
-      es: "О'кей Агент",
+      es: 'Okey Agente',
     });
-    assert.equal(normalizeWakeCommandPhrase('voice input', 'en'), "О'кей Агент");
+    assert.equal(normalizeWakeCommandPhrase('voice input', 'en'), 'Okay Agent');
     assert.equal(normalizeWakeCommandPhrase('голосовой ввод', 'ru'), "О'кей Агент");
-    assert.equal(normalizeWakeCommandPhrase('entrada de voz', 'es'), "О'кей Агент");
+    assert.equal(normalizeWakeCommandPhrase('entrada de voz', 'es'), 'Okey Agente');
+    assert.equal(normalizeWakeCommandPhrase("О'кей Агент", 'en'), 'Okay Agent');
+    assert.equal(normalizeWakeCommandPhrase("О'кей Агент", 'es'), 'Okey Agente');
     assert.equal(normalizeWakeCommandPhrase('assistant start', 'en'), 'assistant start');
   });
 
