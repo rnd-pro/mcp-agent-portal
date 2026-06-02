@@ -401,6 +401,9 @@ export class AgentChat extends Symbiote {
     this._audioRecorder.onInterim = (text, elapsed) => {
       this._updateVoicePreview(text, elapsed);
     };
+    this._audioRecorder.onStateChange = () => {
+      this._syncVoiceLanguageButton();
+    };
   }
 
   _toggleVoiceCommandMode() {
@@ -610,8 +613,9 @@ export class AgentChat extends Symbiote {
     if (!this._voiceLanguageBtn) return;
     let option = this._voiceLanguageOption();
     let available = Boolean(this._audioRecorder.hasSpeechRecognition);
-    this._voiceLanguageBtn.hidden = !available;
-    this._voiceLanguageBtn.disabled = !available;
+    let active = this._wakeModeEnabled || ['starting', 'recording'].includes(this._audioRecorder.state);
+    this._voiceLanguageBtn.hidden = !available || !active;
+    this._voiceLanguageBtn.disabled = !available || !active;
     this._voiceLanguageBtn.dataset.mode = option.mode;
     this._voiceLanguageBtn.innerHTML = this._voiceLanguageOptions().map((item) => [
       `<span class="voice-language-option${item.mode === option.mode ? ' active' : ''}" data-voice-language="${item.mode}">`,

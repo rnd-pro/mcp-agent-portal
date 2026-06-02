@@ -146,6 +146,7 @@ describe('agent chat input state', () => {
     assert.match(source, /wake-command-text/);
     assert.match(source, /btn-voice-response/);
     assert.match(source, /btn-voice-language/);
+    assert.match(source, /this\._audioRecorder\.onStateChange = \(\) => \{[\s\S]*this\._syncVoiceLanguageButton\(\);/);
     assert.match(source, /speechSynthesis/);
     assert.match(source, /_toggleVoiceResponseMode\(\)/);
     assert.match(source, /_speakPendingAgentResponse\(\)/);
@@ -174,7 +175,8 @@ describe('agent chat input state', () => {
     assert.match(source, /data-voice-language/);
     assert.match(source, /this\._syncVoiceLanguageButton\(\);/);
     assert.match(source, /let available = Boolean\(this\._audioRecorder\.hasSpeechRecognition\);/);
-    assert.match(source, /this\._voiceLanguageBtn\.hidden = !available;/);
+    assert.match(source, /let active = this\._wakeModeEnabled \|\| \['starting', 'recording'\]\.includes\(this\._audioRecorder\.state\);/);
+    assert.match(source, /this\._voiceLanguageBtn\.hidden = !available \|\| !active;/);
     assert.doesNotMatch(source, /this\._voiceLanguageBtn\.hidden = !this\._wakeModeEnabled/);
     assert.match(source, /this\._audioRecorder\.restartSpeechRecognition\(language\);/);
     assert.match(source, /let locale = this\._voiceCommandLocale\(\);/);
