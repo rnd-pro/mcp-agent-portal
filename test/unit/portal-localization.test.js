@@ -95,6 +95,8 @@ describe('portal localization bootstrap', () => {
     assert.equal(tPortal('settings.voice.title'), 'Голосовой ввод');
     assert.equal(tPortal('settings.voice.commandRuLabel'), 'Команда на русском');
     assert.equal(tPortal('settings.voice.wakeRuLabel'), 'Команда старта на русском');
+    assert.equal(tPortal('settings.voice.cancelGroup'), 'Остановка голосового ввода');
+    assert.equal(tPortal('settings.voice.commandListDescription'), 'Разделяйте альтернативные команды запятыми.');
     assert.equal(tPortal('settings.voice.speakResponse'), 'Озвучивать новые ответы агента');
     assert.equal(tPortal('settings.voice.sayCommand', { command: "О'кей Агент" }), "Скажи: О'кей Агент");
     assert.equal(

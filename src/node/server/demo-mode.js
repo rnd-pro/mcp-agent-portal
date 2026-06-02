@@ -256,6 +256,32 @@ function sanitizeDemoVoiceCommands(value) {
   return result;
 }
 
+function sanitizeDemoVoiceCommandList(value) {
+  let commands = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[,/;=\n]+/u);
+  return commands
+    .map((command) => String(command || '').trim().slice(0, 80))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function sanitizeDemoVoiceActionCommands(value) {
+  if (!value || typeof value !== 'object') return {};
+  let result = {};
+  for (let action of ['cancel', 'delete', 'off']) {
+    let raw = value[action];
+    if (!raw || typeof raw !== 'object') continue;
+    let actionResult = {};
+    for (let locale of ['en', 'ru', 'es']) {
+      let commands = sanitizeDemoVoiceCommandList(raw[locale]);
+      if (commands.length) actionResult[locale] = commands;
+    }
+    if (Object.keys(actionResult).length) result[action] = actionResult;
+  }
+  return result;
+}
+
 function sanitizeDemoVoiceInput(value = {}) {
   if (!value || typeof value !== 'object') return {};
   let result = {};
@@ -273,6 +299,8 @@ function sanitizeDemoVoiceInput(value = {}) {
   if (Object.keys(sendCommands).length) result.sendCommands = sendCommands;
   let wakeCommands = sanitizeDemoVoiceCommands(value.wakeCommands);
   if (Object.keys(wakeCommands).length) result.wakeCommands = wakeCommands;
+  let actionCommands = sanitizeDemoVoiceActionCommands(value.actionCommands);
+  if (Object.keys(actionCommands).length) result.actionCommands = actionCommands;
   return result;
 }
 
@@ -300,6 +328,7 @@ function mergeDemoSettings(current = {}, updates = {}) {
           ...safe.voiceInput,
           sendCommands: safe.voiceInput.sendCommands || current.voiceInput?.sendCommands,
           wakeCommands: safe.voiceInput.wakeCommands || current.voiceInput?.wakeCommands,
+          actionCommands: safe.voiceInput.actionCommands || current.voiceInput?.actionCommands,
         }
       : current.voiceInput,
   };

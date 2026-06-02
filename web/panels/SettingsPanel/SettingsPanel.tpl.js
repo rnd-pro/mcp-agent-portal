@@ -51,6 +51,52 @@ export default`
       <input type="text" ref="voiceWakeCommandEsInput" placeholder="Okey Agente">
     </sn-field>
   </div>
+  <div class="pg-voice-group-title">Stop voice input</div>
+  <div class="pg-voice-grid">
+    <sn-field variant="compact">
+      <span slot="label">English Command</span>
+      <input type="text" ref="voiceCancelCommandEnInput" placeholder="cancel, stop">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Russian Command</span>
+      <input type="text" ref="voiceCancelCommandRuInput" placeholder="отмена, стоп">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Spanish Command</span>
+      <input type="text" ref="voiceCancelCommandEsInput" placeholder="cancelar, detener">
+    </sn-field>
+  </div>
+  <div class="pg-voice-group-title">Clear recognized text</div>
+  <div class="pg-voice-grid">
+    <sn-field variant="compact">
+      <span slot="label">English Command</span>
+      <input type="text" ref="voiceDeleteCommandEnInput" placeholder="delete, clear">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Russian Command</span>
+      <input type="text" ref="voiceDeleteCommandRuInput" placeholder="удали">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Spanish Command</span>
+      <input type="text" ref="voiceDeleteCommandEsInput" placeholder="borra, eliminar">
+    </sn-field>
+  </div>
+  <div class="pg-voice-group-title">Turn off listening</div>
+  <div class="pg-voice-grid">
+    <sn-field variant="compact">
+      <span slot="label">English Command</span>
+      <input type="text" ref="voiceOffCommandEnInput" placeholder="turn off">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Russian Command</span>
+      <input type="text" ref="voiceOffCommandRuInput" placeholder="выключи">
+    </sn-field>
+    <sn-field variant="compact">
+      <span slot="label">Spanish Command</span>
+      <input type="text" ref="voiceOffCommandEsInput" placeholder="apagar">
+    </sn-field>
+  </div>
+  <div class="pg-voice-note">Separate alternative commands with commas.</div>
   <div class="pg-voice-note">In Auto language mode, the recording panel uses commands for the detected interface language.</div>
 </sn-card>
 

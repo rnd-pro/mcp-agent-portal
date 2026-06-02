@@ -8,8 +8,10 @@ import {
   extractChatTitleFromAgentText,
 } from '../../web/panels/AgentChat/chat-title.js';
 import {
+  defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
   normalizeWakeCommandPhrase,
+  parseVoiceCommandList,
 } from '../../web/common/voice-input-defaults.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
@@ -27,6 +29,9 @@ describe('agent chat input state', () => {
     assert.equal(normalizeWakeCommandPhrase("О'кей Агент", 'en'), 'Okay Agent');
     assert.equal(normalizeWakeCommandPhrase("О'кей Агент", 'es'), 'Okey Agente');
     assert.equal(normalizeWakeCommandPhrase('assistant start', 'en'), 'assistant start');
+    assert.deepEqual(defaultVoiceActionCommandPhrases().cancel.ru, ['отмена', 'стоп']);
+    assert.deepEqual(parseVoiceCommandList('отмена=стоп'), ['отмена', 'стоп']);
+    assert.deepEqual(parseVoiceCommandList('cancel, stop'), ['cancel', 'stop']);
   });
 
   it('disables direct user input for sub-agent chats', () => {
@@ -153,11 +158,16 @@ describe('agent chat input state', () => {
     assert.match(source, /_loadVoiceInputSettings\(\)/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
     assert.match(source, /settings\?\.voiceInput\?\.wakeCommands/);
+    assert.match(source, /settings\?\.voiceInput\?\.actionCommands/);
     assert.match(source, /settings\?\.voiceInput\?\.sendByCommandEnabled/);
     assert.match(source, /settings\?\.voiceInput\?\.voiceResponseEnabled/);
     assert.match(source, /settings\?\.voiceInput\?\.languageMode/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommand/);
     assert.match(source, /_defaultVoiceCommandPhrases\(\)/);
+    assert.match(source, /_defaultVoiceActionPhrases\(\)/);
+    assert.match(source, /defaultVoiceActionCommandPhrases\(\)/);
+    assert.match(source, /this\._voiceActionCommandPhrases = \{/);
+    assert.match(source, /parseVoiceCommandList\(savedActions\.cancel\?\.ru, actionDefaults\.cancel\.ru\)/);
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
     assert.match(source, /_matchesWakeCommand\(text = ''\)/);
     assert.match(source, /btn-wake-listen/);
@@ -237,6 +247,13 @@ describe('agent chat input state', () => {
     assert.match(settingsSource, /voiceResponseEnabled: Boolean\(current\.voiceResponseEnabled\)/);
     assert.match(settingsSource, /languageMode: \['auto', 'ru', 'es', 'en'\]\.includes\(current\.languageMode\)/);
     assert.match(settingsSource, /defaultWakeCommandPhrases/);
+    assert.match(settingsSource, /defaultVoiceActionCommandPhrases/);
+    assert.match(settingsSource, /let actions = raw\.actionCommands \|\| \{\};/);
+    assert.match(settingsSource, /this\.ref\.voiceCancelCommandRuInput\.value/);
+    assert.match(settingsSource, /this\.ref\.voiceDeleteCommandRuInput\.value/);
+    assert.match(settingsSource, /this\.ref\.voiceOffCommandRuInput\.value/);
+    assert.match(settingsSource, /actionCommands: \{/);
+    assert.match(settingsSource, /parseVoiceCommandList\(this\.ref\.voiceCancelCommandRuInput\.value, defaults\.actions\.cancel\.ru\)/);
     assert.match(settingsSource, /normalizeWakeCommandPhrase\(wake\.en \|\| defaults\.wake\.en, 'en'\)/);
     assert.match(settingsSource, /normalizeWakeCommandPhrase\(this\.ref\.voiceWakeCommandRuInput\.value, 'ru'\)/);
 

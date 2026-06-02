@@ -9,8 +9,12 @@ import {
   tPortal,
 } from '../../common/localization.js';
 import {
+  defaultSendCommandPhrases,
+  defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
+  formatVoiceCommandList,
   normalizeWakeCommandPhrase,
+  parseVoiceCommandList,
 } from '../../common/voice-input-defaults.js';
 import { getLocalization } from 'symbiote-node/locale';
 
@@ -82,12 +86,9 @@ const DEFAULT_GATEWAY = {
 function defaultVoiceCommands() {
   let wakeDefaults = defaultWakeCommandPhrases();
   return {
-    send: {
-      en: 'send',
-      ru: 'отправить',
-      es: 'enviar',
-    },
+    send: defaultSendCommandPhrases(),
     wake: wakeDefaults,
+    actions: defaultVoiceActionCommandPhrases(),
   };
 }
 
@@ -203,6 +204,7 @@ export class SettingsPanel extends Symbiote {
     let defaults = defaultVoiceCommands();
     let saved = raw.sendCommands || {};
     let wake = raw.wakeCommands || {};
+    let actions = raw.actionCommands || {};
     let legacy = raw.sendCommand || '';
     this.ref.voiceSendCommandEnInput.value = saved.en || legacy || defaults.send.en;
     this.ref.voiceSendCommandRuInput.value = saved.ru || defaults.send.ru;
@@ -210,6 +212,15 @@ export class SettingsPanel extends Symbiote {
     this.ref.voiceWakeCommandEnInput.value = normalizeWakeCommandPhrase(wake.en || defaults.wake.en, 'en');
     this.ref.voiceWakeCommandRuInput.value = normalizeWakeCommandPhrase(wake.ru || defaults.wake.ru, 'ru');
     this.ref.voiceWakeCommandEsInput.value = normalizeWakeCommandPhrase(wake.es || defaults.wake.es, 'es');
+    this.ref.voiceCancelCommandEnInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.cancel?.en, defaults.actions.cancel.en));
+    this.ref.voiceCancelCommandRuInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.cancel?.ru, defaults.actions.cancel.ru));
+    this.ref.voiceCancelCommandEsInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.cancel?.es, defaults.actions.cancel.es));
+    this.ref.voiceDeleteCommandEnInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.delete?.en, defaults.actions.delete.en));
+    this.ref.voiceDeleteCommandRuInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.delete?.ru, defaults.actions.delete.ru));
+    this.ref.voiceDeleteCommandEsInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.delete?.es, defaults.actions.delete.es));
+    this.ref.voiceOffCommandEnInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.off?.en, defaults.actions.off.en));
+    this.ref.voiceOffCommandRuInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.off?.ru, defaults.actions.off.ru));
+    this.ref.voiceOffCommandEsInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.off?.es, defaults.actions.off.es));
   }
 
   _readVoiceInputSettings() {
@@ -228,6 +239,23 @@ export class SettingsPanel extends Symbiote {
         en: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandEnInput.value, 'en'),
         ru: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandRuInput.value, 'ru'),
         es: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandEsInput.value, 'es'),
+      },
+      actionCommands: {
+        cancel: {
+          en: parseVoiceCommandList(this.ref.voiceCancelCommandEnInput.value, defaults.actions.cancel.en),
+          ru: parseVoiceCommandList(this.ref.voiceCancelCommandRuInput.value, defaults.actions.cancel.ru),
+          es: parseVoiceCommandList(this.ref.voiceCancelCommandEsInput.value, defaults.actions.cancel.es),
+        },
+        delete: {
+          en: parseVoiceCommandList(this.ref.voiceDeleteCommandEnInput.value, defaults.actions.delete.en),
+          ru: parseVoiceCommandList(this.ref.voiceDeleteCommandRuInput.value, defaults.actions.delete.ru),
+          es: parseVoiceCommandList(this.ref.voiceDeleteCommandEsInput.value, defaults.actions.delete.es),
+        },
+        off: {
+          en: parseVoiceCommandList(this.ref.voiceOffCommandEnInput.value, defaults.actions.off.en),
+          ru: parseVoiceCommandList(this.ref.voiceOffCommandRuInput.value, defaults.actions.off.ru),
+          es: parseVoiceCommandList(this.ref.voiceOffCommandEsInput.value, defaults.actions.off.es),
+        },
       },
     };
   }

@@ -306,6 +306,11 @@ describe('server demo mode', () => {
           languageMode: 'ru',
           sendCommands: { ru: 'отправить сообщение' },
           wakeCommands: { ru: 'голосовой ввод' },
+          actionCommands: {
+            cancel: { ru: ['отмена', 'стоп'] },
+            delete: { ru: ['удали'] },
+            off: { ru: ['выключи'] },
+          },
         },
       }),
       saveRes,
@@ -321,6 +326,9 @@ describe('server demo mode', () => {
     assert.equal(settings.voiceInput.languageMode, 'ru');
     assert.equal(settings.voiceInput.sendCommands.ru, 'отправить сообщение');
     assert.equal(settings.voiceInput.wakeCommands.ru, 'голосовой ввод');
+    assert.deepEqual(settings.voiceInput.actionCommands.cancel.ru, ['отмена', 'стоп']);
+    assert.deepEqual(settings.voiceInput.actionCommands.delete.ru, ['удали']);
+    assert.deepEqual(settings.voiceInput.actionCommands.off.ru, ['выключи']);
     assert.equal(settings.telegramToken, '');
     assert.equal(settings.anthropicGateway.enabled, false);
   });

@@ -4,6 +4,30 @@ export const DEFAULT_VOICE_WAKE_COMMANDS = Object.freeze({
   es: 'Okey Agente',
 });
 
+export const DEFAULT_VOICE_SEND_COMMANDS = Object.freeze({
+  en: 'send',
+  ru: 'отправить',
+  es: 'enviar',
+});
+
+export const DEFAULT_VOICE_ACTION_COMMANDS = Object.freeze({
+  cancel: Object.freeze({
+    en: Object.freeze(['cancel', 'stop']),
+    ru: Object.freeze(['отмена', 'стоп']),
+    es: Object.freeze(['cancelar', 'detener']),
+  }),
+  delete: Object.freeze({
+    en: Object.freeze(['delete', 'clear']),
+    ru: Object.freeze(['удали']),
+    es: Object.freeze(['borra', 'eliminar']),
+  }),
+  off: Object.freeze({
+    en: Object.freeze(['turn off']),
+    ru: Object.freeze(['выключи']),
+    es: Object.freeze(['apagar']),
+  }),
+});
+
 export const DEFAULT_VOICE_WAKE_COMMAND = DEFAULT_VOICE_WAKE_COMMANDS.ru;
 
 export const LEGACY_VOICE_WAKE_COMMANDS = Object.freeze({
@@ -14,6 +38,35 @@ export const LEGACY_VOICE_WAKE_COMMANDS = Object.freeze({
 
 export function defaultWakeCommandPhrases() {
   return { ...DEFAULT_VOICE_WAKE_COMMANDS };
+}
+
+export function defaultSendCommandPhrases() {
+  return { ...DEFAULT_VOICE_SEND_COMMANDS };
+}
+
+export function defaultVoiceActionCommandPhrases() {
+  return Object.fromEntries(
+    Object.entries(DEFAULT_VOICE_ACTION_COMMANDS).map(([action, locales]) => [
+      action,
+      Object.fromEntries(
+        Object.entries(locales).map(([locale, commands]) => [locale, [...commands]])
+      ),
+    ])
+  );
+}
+
+export function parseVoiceCommandList(value, fallback = []) {
+  let commands = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[,/;=\n]+/u);
+  let result = commands
+    .map((command) => String(command || '').trim())
+    .filter(Boolean);
+  return result.length > 0 ? result : [...fallback];
+}
+
+export function formatVoiceCommandList(commands = []) {
+  return parseVoiceCommandList(commands).join(', ');
 }
 
 export function normalizeWakeCommandPhrase(value, locale) {

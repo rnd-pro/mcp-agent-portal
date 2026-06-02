@@ -27,8 +27,11 @@ import {
 import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
 import {
+  defaultSendCommandPhrases,
+  defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
   normalizeWakeCommandPhrase,
+  parseVoiceCommandList,
 } from '../../common/voice-input-defaults.js';
 import { getLocalization } from 'symbiote-node/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
@@ -58,6 +61,7 @@ export class AgentChat extends Symbiote {
   _voiceCommandHandling = false;
   _voiceCommandTextOverride = '';
   _voiceCommandPhrases = null;
+  _voiceActionCommandPhrases = null;
   _wakeCommandPhrases = null;
   _wakeModeEnabled = false;
   _wakePausedForRecording = false;
@@ -448,11 +452,7 @@ export class AgentChat extends Symbiote {
   }
 
   _defaultVoiceCommandPhrases() {
-    return {
-      en: 'send',
-      ru: 'отправить',
-      es: 'enviar',
-    };
+    return defaultSendCommandPhrases();
   }
 
   _defaultVoiceActionPhrases() {
@@ -462,21 +462,7 @@ export class AgentChat extends Symbiote {
         ru: [this._defaultVoiceCommandPhrases().ru],
         es: [this._defaultVoiceCommandPhrases().es],
       },
-      cancel: {
-        en: ['cancel', 'stop'],
-        ru: ['отмена', 'стоп'],
-        es: ['cancelar', 'detener'],
-      },
-      delete: {
-        en: ['delete', 'clear'],
-        ru: ['удали'],
-        es: ['borra', 'eliminar'],
-      },
-      off: {
-        en: ['turn off'],
-        ru: ['выключи'],
-        es: ['apagar'],
-      },
+      ...defaultVoiceActionCommandPhrases(),
     };
   }
 
@@ -492,9 +478,10 @@ export class AgentChat extends Symbiote {
 
   _getVoiceActionPhrases(action) {
     let locale = this._voiceCommandLocale();
-    let defaults = this._defaultVoiceActionPhrases();
     if (action === 'send') return [this._getVoiceCommandPhrase()];
-    return defaults[action]?.[locale] || defaults[action]?.en || [];
+    let defaults = this._defaultVoiceActionPhrases();
+    let phrases = this._voiceActionCommandPhrases || defaults;
+    return phrases[action]?.[locale] || phrases[action]?.en || defaults[action]?.[locale] || defaults[action]?.en || [];
   }
 
   _voiceCommandHints() {
@@ -518,8 +505,10 @@ export class AgentChat extends Symbiote {
       let settings = await fetch('/api/settings').then((res) => res.json());
       let sendDefaults = this._defaultVoiceCommandPhrases();
       let wakeDefaults = this._defaultWakeCommandPhrases();
+      let actionDefaults = this._defaultVoiceActionPhrases();
       let savedSend = settings?.voiceInput?.sendCommands || {};
       let savedWake = settings?.voiceInput?.wakeCommands || {};
+      let savedActions = settings?.voiceInput?.actionCommands || {};
       let legacy = String(settings?.voiceInput?.sendCommand || '').trim();
       this._voiceCommandMode = Boolean(settings?.voiceInput?.sendByCommandEnabled);
       this._voiceResponseEnabled = Boolean(settings?.voiceInput?.voiceResponseEnabled);
@@ -534,9 +523,27 @@ export class AgentChat extends Symbiote {
         ru: normalizeWakeCommandPhrase(savedWake.ru || wakeDefaults.ru, 'ru'),
         es: normalizeWakeCommandPhrase(savedWake.es || wakeDefaults.es, 'es'),
       };
+      this._voiceActionCommandPhrases = {
+        cancel: {
+          en: parseVoiceCommandList(savedActions.cancel?.en, actionDefaults.cancel.en),
+          ru: parseVoiceCommandList(savedActions.cancel?.ru, actionDefaults.cancel.ru),
+          es: parseVoiceCommandList(savedActions.cancel?.es, actionDefaults.cancel.es),
+        },
+        delete: {
+          en: parseVoiceCommandList(savedActions.delete?.en, actionDefaults.delete.en),
+          ru: parseVoiceCommandList(savedActions.delete?.ru, actionDefaults.delete.ru),
+          es: parseVoiceCommandList(savedActions.delete?.es, actionDefaults.delete.es),
+        },
+        off: {
+          en: parseVoiceCommandList(savedActions.off?.en, actionDefaults.off.en),
+          ru: parseVoiceCommandList(savedActions.off?.ru, actionDefaults.off.ru),
+          es: parseVoiceCommandList(savedActions.off?.es, actionDefaults.off.es),
+        },
+      };
     } catch {
       this._voiceLanguageMode = this._autoVoiceLocale();
       this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
+      this._voiceActionCommandPhrases = this._defaultVoiceActionPhrases();
       this._wakeCommandPhrases = this._defaultWakeCommandPhrases();
     } finally {
       this._syncVoiceCommandButton();
