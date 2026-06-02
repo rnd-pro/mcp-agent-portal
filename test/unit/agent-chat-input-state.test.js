@@ -143,6 +143,7 @@ describe('agent chat input state', () => {
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
     assert.match(source, /_matchesWakeCommand\(text = ''\)/);
     assert.match(source, /btn-wake-listen/);
+    assert.match(source, /wake-command-text/);
     assert.match(source, /btn-voice-response/);
     assert.match(source, /btn-voice-language/);
     assert.match(source, /speechSynthesis/);
@@ -162,6 +163,8 @@ describe('agent chat input state', () => {
     assert.match(source, /JSON\.stringify\(message\) === JSON\.stringify\(current\[index\]\)/);
     assert.doesNotMatch(source, /m\.text === cur\[i\]\?\.text && m\.role === cur\[i\]\?\.role/);
     assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
+    assert.match(source, /let command = this\._getWakeCommandPhrase\(\);/);
+    assert.match(source, /commandText\.textContent = this\._wakeModeEnabled \? command : ''/);
     assert.match(source, /_normalizeVoiceLanguageMode\(mode = 'auto'\)/);
     assert.match(source, /_voiceRecognitionLanguage\(\)/);
     assert.match(source, /_voiceCommandLocale\(\)/);
@@ -169,6 +172,7 @@ describe('agent chat input state', () => {
     assert.match(source, /recognition\.lang = this\._voiceRecognitionLanguage\(\);/);
     assert.match(source, /this\._audioRecorder\.setLanguage\(this\._voiceRecognitionLanguage\(\)\);/);
     assert.match(source, /_cycleVoiceLanguageMode\(\)/);
+    assert.match(source, /this\._syncWakeButton\(\);\s+if \(this\._wakeModeEnabled && !this\._wakePausedForRecording\) \{\s+this\._restartWakeListening\(\);/);
     assert.match(source, /_restartWakeListening\(\)/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);

@@ -363,7 +363,10 @@ export class AgentChat extends Symbiote {
     wakeBtn.type = 'button';
     wakeBtn.title = tPortal('settings.voice.listenButton');
     wakeBtn.setAttribute('aria-pressed', 'false');
-    wakeBtn.innerHTML = '<span class="material-symbols-outlined">hearing</span>';
+    wakeBtn.innerHTML = [
+      '<span class="material-symbols-outlined">hearing</span>',
+      '<span class="wake-command-text"></span>',
+    ].join('');
     if (!this._audioRecorder.hasSpeechRecognition) {
       wakeBtn.disabled = true;
       wakeBtn.title = tPortal('settings.voice.listenUnavailable');
@@ -547,11 +550,15 @@ export class AgentChat extends Symbiote {
 
   _syncWakeButton() {
     if (!this._wakeBtn) return;
+    let command = this._getWakeCommandPhrase();
     this._wakeBtn.classList.toggle('listening', this._wakeModeEnabled);
+    this._wakeBtn.classList.toggle('has-command', this._wakeModeEnabled);
     this._wakeBtn.setAttribute('aria-pressed', this._wakeModeEnabled ? 'true' : 'false');
     this._wakeBtn.title = this._wakeModeEnabled
-      ? tPortal('settings.voice.listeningFor', { command: this._getWakeCommandPhrase() })
+      ? tPortal('settings.voice.listeningFor', { command })
       : tPortal('settings.voice.listenButton');
+    let commandText = this._wakeBtn.querySelector('.wake-command-text');
+    if (commandText) commandText.textContent = this._wakeModeEnabled ? command : '';
     if (this._micBtn) this._micBtn.hidden = this._wakeModeEnabled;
     this._syncVoiceResponseButton();
     this._syncVoiceLanguageButton();
@@ -600,7 +607,7 @@ export class AgentChat extends Symbiote {
     let next = options[(index + 1) % options.length] || options[0];
     this._voiceLanguageMode = next.mode;
     this._saveVoiceInputModeSettings();
-    this._syncVoiceLanguageButton();
+    this._syncWakeButton();
     if (this._wakeModeEnabled && !this._wakePausedForRecording) {
       this._restartWakeListening();
     }
