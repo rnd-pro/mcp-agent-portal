@@ -69,6 +69,52 @@ export function formatVoiceCommandList(commands = []) {
   return parseVoiceCommandList(commands).join(', ');
 }
 
+function escapeVoiceCommandRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeVoiceCommandCandidates(candidates = []) {
+  let list = Array.isArray(candidates) ? candidates : [candidates];
+  return list
+    .map((candidate) => {
+      if (candidate && typeof candidate === 'object') {
+        let phrase = String(candidate.phrase || '').trim();
+        return phrase ? { ...candidate, phrase } : null;
+      }
+      let phrase = String(candidate || '').trim();
+      return phrase ? { phrase } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.phrase.length - a.phrase.length);
+}
+
+export function matchVoiceCommandAtEnd(text = '', candidates = []) {
+  let value = String(text || '').trim();
+  if (!value) return { matched: false, phrase: '', text: '' };
+  for (let candidate of normalizeVoiceCommandCandidates(candidates)) {
+    let command = escapeVoiceCommandRegExp(candidate.phrase);
+    let commandPattern = new RegExp(`(?:[\\s,.;:!?]+|^)(${command})[\\s,.;:!?]*$`, 'iu');
+    if (!commandPattern.test(value)) continue;
+    return {
+      ...candidate,
+      matched: true,
+      text: value.replace(commandPattern, '').trim(),
+    };
+  }
+  return { matched: false, phrase: '', text: value };
+}
+
+export function matchVoiceCommandInText(text = '', candidates = []) {
+  let value = String(text || '').trim();
+  if (!value) return { matched: false, phrase: '', text: '' };
+  for (let candidate of normalizeVoiceCommandCandidates(candidates)) {
+    let command = escapeVoiceCommandRegExp(candidate.phrase);
+    let commandPattern = new RegExp(`(?:[\\s,.;:!?]+|^)(${command})(?:[\\s,.;:!?]+|$)`, 'iu');
+    if (commandPattern.test(value)) return { ...candidate, matched: true, text: value };
+  }
+  return { matched: false, phrase: '', text: value };
+}
+
 export function normalizeWakeCommandPhrase(value, locale) {
   let command = String(value || '').trim();
   let fallback = DEFAULT_VOICE_WAKE_COMMANDS[locale] || DEFAULT_VOICE_WAKE_COMMAND;

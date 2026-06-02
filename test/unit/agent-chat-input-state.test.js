@@ -10,6 +10,8 @@ import {
 import {
   defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
+  matchVoiceCommandAtEnd,
+  matchVoiceCommandInText,
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
 } from '../../web/common/voice-input-defaults.js';
@@ -32,6 +34,11 @@ describe('agent chat input state', () => {
     assert.deepEqual(defaultVoiceActionCommandPhrases().cancel.ru, ['отмена', 'стоп']);
     assert.deepEqual(parseVoiceCommandList('отмена=стоп'), ['отмена', 'стоп']);
     assert.deepEqual(parseVoiceCommandList('cancel, stop'), ['cancel', 'stop']);
+    assert.deepEqual(
+      matchVoiceCommandAtEnd('Проверочный текст СТОП', [{ action: 'cancel', phrase: 'стоп' }]),
+      { action: 'cancel', phrase: 'стоп', matched: true, text: 'Проверочный текст' },
+    );
+    assert.equal(matchVoiceCommandInText("ну О'КЕЙ АГЕНТ давай", ["О'кей Агент"]).matched, true);
   });
 
   it('disables direct user input for sub-agent chats', () => {
@@ -181,6 +188,9 @@ describe('agent chat input state', () => {
     assert.match(source, /_syncVoiceCommandButton\(\)/);
     assert.match(source, /_voiceCommandHints\(\)/);
     assert.match(source, /_extractVoiceCommandAction\(text = ''\)/);
+    assert.match(source, /matchVoiceCommandAtEnd\(value, candidates\)/);
+    assert.match(source, /matchVoiceCommandInText\(text, \[this\._getWakeCommandPhrase\(\)\]\)\.matched/);
+    assert.doesNotMatch(source, /_escapeRegExp/);
     assert.match(source, /_handleVoiceCommandAction\(command\)/);
     assert.match(source, /_speakPendingAgentResponse\(\)/);
     assert.match(source, /_saveVoiceInputModeSettings\(\)/);
@@ -224,7 +234,7 @@ describe('agent chat input state', () => {
     assert.match(source, /this\._toggleRecording\(\{ reloadSettings: false \}\);/);
     assert.match(source, /async _toggleRecording\(\{ reloadSettings = true \} = \{\}\)/);
     assert.match(source, /if \(reloadSettings\) \{\s+await this\._loadVoiceInputSettings\(\);\s+\} else \{\s+this\._syncVoiceLanguageButton\(\);/);
-    assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
+    assert.doesNotMatch(source, /new RegExp\(`\(\?:\[\\\\s,\.;:!\?\]\+\|\^\)\(\$\{command\}\)/);
     assert.match(source, /command\.action === 'cancel'/);
     assert.match(source, /command\.action === 'delete'/);
     assert.match(source, /restartSpeechRecognition\(this\._voiceRecognitionLanguage\(\), \{ initialText: '' \}\)/);

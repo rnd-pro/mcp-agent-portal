@@ -30,6 +30,8 @@ import {
   defaultSendCommandPhrases,
   defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
+  matchVoiceCommandAtEnd,
+  matchVoiceCommandInText,
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
 } from '../../common/voice-input-defaults.js';
@@ -592,10 +594,6 @@ export class AgentChat extends Symbiote {
     return ['ru', 'es', 'en'].includes(interfaceLocale) ? interfaceLocale : 'en';
   }
 
-  _escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
   _extractVoiceCommandText(text = '') {
     let command = this._extractVoiceCommandAction(text);
     return {
@@ -609,24 +607,14 @@ export class AgentChat extends Symbiote {
     if (!value) return { matched: false, action: '', text: '' };
     let actions = ['send', 'cancel', 'delete', 'off'];
     let candidates = actions.flatMap((action) => this._getVoiceActionPhrases(action).map((phrase) => ({ action, phrase })));
-    candidates.sort((a, b) => b.phrase.length - a.phrase.length);
-    for (let { action, phrase } of candidates) {
-      let command = this._escapeRegExp(phrase);
-      let commandPattern = new RegExp(`(?:[\\s,.;:!?]+|^)(${command})[\\s,.;:!?]*$`, 'iu');
-      if (!commandPattern.test(value)) continue;
-      let cleaned = value.replace(commandPattern, '').trim();
-      if (action === 'send' && !cleaned) return { matched: false, action: '', text: value };
-      return { matched: true, action, phrase, text: cleaned };
-    }
-    return { matched: false, action: '', text: value };
+    let command = matchVoiceCommandAtEnd(value, candidates);
+    if (!command.matched) return { matched: false, action: '', text: value };
+    if (command.action === 'send' && !command.text) return { matched: false, action: '', text: value };
+    return command;
   }
 
   _matchesWakeCommand(text = '') {
-    let value = String(text || '').trim();
-    if (!value) return false;
-    let command = this._escapeRegExp(this._getWakeCommandPhrase());
-    let commandPattern = new RegExp(`(?:[\\s,.;:!?]+|^)(${command})(?:[\\s,.;:!?]+|$)`, 'iu');
-    return commandPattern.test(value);
+    return matchVoiceCommandInText(text, [this._getWakeCommandPhrase()]).matched;
   }
 
   async _toggleWakeMode() {
