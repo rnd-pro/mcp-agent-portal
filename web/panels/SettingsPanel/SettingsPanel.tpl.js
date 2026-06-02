@@ -40,15 +40,15 @@ export default`
   <div class="pg-voice-grid">
     <sn-field variant="compact">
       <span slot="label">English Start Command</span>
-      <input type="text" ref="voiceWakeCommandEnInput" placeholder="voice input">
+      <input type="text" ref="voiceWakeCommandEnInput" placeholder="О'кей Агент">
     </sn-field>
     <sn-field variant="compact">
       <span slot="label">Russian Start Command</span>
-      <input type="text" ref="voiceWakeCommandRuInput" placeholder="голосовой ввод">
+      <input type="text" ref="voiceWakeCommandRuInput" placeholder="О'кей Агент">
     </sn-field>
     <sn-field variant="compact">
       <span slot="label">Spanish Start Command</span>
-      <input type="text" ref="voiceWakeCommandEsInput" placeholder="entrada de voz">
+      <input type="text" ref="voiceWakeCommandEsInput" placeholder="О'кей Агент">
     </sn-field>
   </div>
   <div class="pg-voice-note">In Auto language mode, the recording panel uses commands for the detected interface language.</div>

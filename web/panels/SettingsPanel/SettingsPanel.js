@@ -8,6 +8,10 @@ import {
   setPortalLocaleMode,
   tPortal,
 } from '../../common/localization.js';
+import {
+  defaultWakeCommandPhrases,
+  normalizeWakeCommandPhrase,
+} from '../../common/voice-input-defaults.js';
 import { getLocalization } from 'symbiote-node/locale';
 
 function renderMetric(label, value, status = "") {
@@ -76,17 +80,14 @@ const DEFAULT_GATEWAY = {
 };
 
 function defaultVoiceCommands() {
+  let wakeDefaults = defaultWakeCommandPhrases();
   return {
     send: {
       en: 'send',
       ru: 'отправить',
       es: 'enviar',
     },
-    wake: {
-      en: 'voice input',
-      ru: 'голосовой ввод',
-      es: 'entrada de voz',
-    },
+    wake: wakeDefaults,
   };
 }
 
@@ -206,9 +207,9 @@ export class SettingsPanel extends Symbiote {
     this.ref.voiceSendCommandEnInput.value = saved.en || legacy || defaults.send.en;
     this.ref.voiceSendCommandRuInput.value = saved.ru || defaults.send.ru;
     this.ref.voiceSendCommandEsInput.value = saved.es || defaults.send.es;
-    this.ref.voiceWakeCommandEnInput.value = wake.en || defaults.wake.en;
-    this.ref.voiceWakeCommandRuInput.value = wake.ru || defaults.wake.ru;
-    this.ref.voiceWakeCommandEsInput.value = wake.es || defaults.wake.es;
+    this.ref.voiceWakeCommandEnInput.value = normalizeWakeCommandPhrase(wake.en || defaults.wake.en, 'en');
+    this.ref.voiceWakeCommandRuInput.value = normalizeWakeCommandPhrase(wake.ru || defaults.wake.ru, 'ru');
+    this.ref.voiceWakeCommandEsInput.value = normalizeWakeCommandPhrase(wake.es || defaults.wake.es, 'es');
   }
 
   _readVoiceInputSettings() {
@@ -224,9 +225,9 @@ export class SettingsPanel extends Symbiote {
         es: this.ref.voiceSendCommandEsInput.value.trim() || defaults.send.es,
       },
       wakeCommands: {
-        en: this.ref.voiceWakeCommandEnInput.value.trim() || defaults.wake.en,
-        ru: this.ref.voiceWakeCommandRuInput.value.trim() || defaults.wake.ru,
-        es: this.ref.voiceWakeCommandEsInput.value.trim() || defaults.wake.es,
+        en: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandEnInput.value, 'en'),
+        ru: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandRuInput.value, 'ru'),
+        es: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandEsInput.value, 'es'),
       },
     };
   }

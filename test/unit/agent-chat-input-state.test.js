@@ -7,10 +7,26 @@ import {
   buildChatTitleRequestNote,
   extractChatTitleFromAgentText,
 } from '../../web/panels/AgentChat/chat-title.js';
+import {
+  defaultWakeCommandPhrases,
+  normalizeWakeCommandPhrase,
+} from '../../web/common/voice-input-defaults.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 describe('agent chat input state', () => {
+  it('uses ok agent as the shared wake command default', () => {
+    assert.deepEqual(defaultWakeCommandPhrases(), {
+      en: "О'кей Агент",
+      ru: "О'кей Агент",
+      es: "О'кей Агент",
+    });
+    assert.equal(normalizeWakeCommandPhrase('voice input', 'en'), "О'кей Агент");
+    assert.equal(normalizeWakeCommandPhrase('голосовой ввод', 'ru'), "О'кей Агент");
+    assert.equal(normalizeWakeCommandPhrase('entrada de voz', 'es'), "О'кей Агент");
+    assert.equal(normalizeWakeCommandPhrase('assistant start', 'en'), 'assistant start');
+  });
+
   it('disables direct user input for sub-agent chats', () => {
     let state = getAgentChatInputState({
       adapter: 'pool',
@@ -206,6 +222,9 @@ describe('agent chat input state', () => {
     assert.match(settingsSource, /sendByCommandEnabled: Boolean\(current\.sendByCommandEnabled\)/);
     assert.match(settingsSource, /voiceResponseEnabled: Boolean\(current\.voiceResponseEnabled\)/);
     assert.match(settingsSource, /languageMode: \['auto', 'ru', 'es', 'en'\]\.includes\(current\.languageMode\)/);
+    assert.match(settingsSource, /defaultWakeCommandPhrases/);
+    assert.match(settingsSource, /normalizeWakeCommandPhrase\(wake\.en \|\| defaults\.wake\.en, 'en'\)/);
+    assert.match(settingsSource, /normalizeWakeCommandPhrase\(this\.ref\.voiceWakeCommandRuInput\.value, 'ru'\)/);
 
     let recorderSource = fs.readFileSync(path.join(ROOT, 'web/services/audio-recorder.js'), 'utf8');
     assert.match(recorderSource, /setLanguage\(language = ''\)/);

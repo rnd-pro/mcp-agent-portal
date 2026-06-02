@@ -26,6 +26,10 @@ import {
 } from '../../services/project-transaction-messages.js';
 import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
+import {
+  defaultWakeCommandPhrases,
+  normalizeWakeCommandPhrase,
+} from '../../common/voice-input-defaults.js';
 import { getLocalization } from 'symbiote-node/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import {
@@ -440,11 +444,7 @@ export class AgentChat extends Symbiote {
   }
 
   _defaultWakeCommandPhrases() {
-    return {
-      en: 'voice input',
-      ru: 'голосовой ввод',
-      es: 'entrada de voz',
-    };
+    return defaultWakeCommandPhrases();
   }
 
   _getVoiceCommandPhrase() {
@@ -476,9 +476,9 @@ export class AgentChat extends Symbiote {
         es: String(savedSend.es || sendDefaults.es).trim() || sendDefaults.es,
       };
       this._wakeCommandPhrases = {
-        en: String(savedWake.en || wakeDefaults.en).trim() || wakeDefaults.en,
-        ru: String(savedWake.ru || wakeDefaults.ru).trim() || wakeDefaults.ru,
-        es: String(savedWake.es || wakeDefaults.es).trim() || wakeDefaults.es,
+        en: normalizeWakeCommandPhrase(savedWake.en || wakeDefaults.en, 'en'),
+        ru: normalizeWakeCommandPhrase(savedWake.ru || wakeDefaults.ru, 'ru'),
+        es: normalizeWakeCommandPhrase(savedWake.es || wakeDefaults.es, 'es'),
       };
     } catch {
       this._voiceLanguageMode = this._autoVoiceLocale();
