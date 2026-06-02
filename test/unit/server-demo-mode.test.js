@@ -303,6 +303,7 @@ describe('server demo mode', () => {
         voiceInput: {
           sendByCommandEnabled: true,
           voiceResponseEnabled: true,
+          languageMode: 'ru',
           sendCommands: { ru: 'отправить сообщение' },
           wakeCommands: { ru: 'голосовой ввод' },
         },
@@ -317,6 +318,7 @@ describe('server demo mode', () => {
     assert.equal(settings.localization.mode, 'ru');
     assert.equal(settings.voiceInput.sendByCommandEnabled, true);
     assert.equal(settings.voiceInput.voiceResponseEnabled, true);
+    assert.equal(settings.voiceInput.languageMode, 'ru');
     assert.equal(settings.voiceInput.sendCommands.ru, 'отправить сообщение');
     assert.equal(settings.voiceInput.wakeCommands.ru, 'голосовой ввод');
     assert.equal(settings.telegramToken, '');

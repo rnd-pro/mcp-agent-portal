@@ -217,6 +217,7 @@ export class SettingsPanel extends Symbiote {
     return {
       sendByCommandEnabled: Boolean(current.sendByCommandEnabled),
       voiceResponseEnabled: Boolean(current.voiceResponseEnabled),
+      languageMode: ['auto', 'ru', 'es', 'en'].includes(current.languageMode) ? current.languageMode : 'auto',
       sendCommands: {
         en: this.ref.voiceSendCommandEnInput.value.trim() || defaults.send.en,
         ru: this.ref.voiceSendCommandRuInput.value.trim() || defaults.send.ru,

@@ -61,6 +61,7 @@ export class AgentChat extends Symbiote {
   _voiceResponseEnabled = false;
   _voiceResponseLastAgentKey = '';
   _speakingVoiceResponse = false;
+  _voiceLanguageMode = 'auto';
   init$ = {
     messages: [],
     messageItems: [],
@@ -379,9 +380,18 @@ export class AgentChat extends Symbiote {
     body.insertBefore(responseBtn, micBtn);
     this._voiceResponseBtn = responseBtn;
 
+    let languageBtn = document.createElement('button');
+    languageBtn.className = 'btn-voice-language';
+    languageBtn.type = 'button';
+    languageBtn.hidden = true;
+    languageBtn.setAttribute('aria-pressed', 'false');
+    body.insertBefore(languageBtn, responseBtn);
+    this._voiceLanguageBtn = languageBtn;
+
     micBtn.onclick = () => this._toggleRecording();
     wakeBtn.onclick = () => this._toggleWakeMode();
     responseBtn.onclick = () => this._toggleVoiceResponseMode();
+    languageBtn.onclick = () => this._cycleVoiceLanguageMode();
 
     // Live interim results callback
     this._audioRecorder.onInterim = (text, elapsed) => {
@@ -402,6 +412,7 @@ export class AgentChat extends Symbiote {
         ...(settings?.voiceInput || {}),
         sendByCommandEnabled: this._voiceCommandMode,
         voiceResponseEnabled: this._voiceResponseEnabled,
+        languageMode: this._voiceLanguageMode,
       };
       await fetch('/api/settings', {
         method: 'POST',
@@ -430,13 +441,13 @@ export class AgentChat extends Symbiote {
   }
 
   _getVoiceCommandPhrase() {
-    let locale = getLocalization().locale;
+    let locale = this._voiceCommandLocale();
     let phrases = this._voiceCommandPhrases || this._defaultVoiceCommandPhrases();
     return phrases[locale] || this._defaultVoiceCommandPhrases()[locale] || this._defaultVoiceCommandPhrases().en;
   }
 
   _getWakeCommandPhrase() {
-    let locale = getLocalization().locale;
+    let locale = this._voiceCommandLocale();
     let phrases = this._wakeCommandPhrases || this._defaultWakeCommandPhrases();
     return phrases[locale] || this._defaultWakeCommandPhrases()[locale] || this._defaultWakeCommandPhrases().en;
   }
@@ -451,6 +462,7 @@ export class AgentChat extends Symbiote {
       let legacy = String(settings?.voiceInput?.sendCommand || '').trim();
       this._voiceCommandMode = Boolean(settings?.voiceInput?.sendByCommandEnabled);
       this._voiceResponseEnabled = Boolean(settings?.voiceInput?.voiceResponseEnabled);
+      this._voiceLanguageMode = this._normalizeVoiceLanguageMode(settings?.voiceInput?.languageMode);
       this._voiceCommandPhrases = {
         en: String(savedSend.en || legacy || sendDefaults.en).trim() || sendDefaults.en,
         ru: String(savedSend.ru || sendDefaults.ru).trim() || sendDefaults.ru,
@@ -462,9 +474,41 @@ export class AgentChat extends Symbiote {
         es: String(savedWake.es || wakeDefaults.es).trim() || wakeDefaults.es,
       };
     } catch {
+      this._voiceLanguageMode = 'auto';
       this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
       this._wakeCommandPhrases = this._defaultWakeCommandPhrases();
     }
+  }
+
+  _normalizeVoiceLanguageMode(mode = 'auto') {
+    let value = String(mode || 'auto').trim().toLowerCase();
+    return ['auto', 'ru', 'es', 'en'].includes(value) ? value : 'auto';
+  }
+
+  _voiceLanguageOptions() {
+    return [
+      { mode: 'auto', short: 'Auto', label: tPortal('settings.voice.languageAuto'), lang: null },
+      { mode: 'ru', short: 'RU', label: tPortal('settings.voice.languageRu'), lang: 'ru-RU' },
+      { mode: 'es', short: 'ES', label: tPortal('settings.voice.languageEs'), lang: 'es-ES' },
+      { mode: 'en', short: 'EN', label: tPortal('settings.voice.languageEn'), lang: 'en-US' },
+    ];
+  }
+
+  _voiceLanguageOption() {
+    return this._voiceLanguageOptions().find((item) => item.mode === this._voiceLanguageMode) || this._voiceLanguageOptions()[0];
+  }
+
+  _voiceRecognitionLanguage() {
+    let option = this._voiceLanguageOption();
+    return option.lang || navigator.language || this._speechLocaleFromInterface();
+  }
+
+  _voiceCommandLocale() {
+    if (this._voiceLanguageMode !== 'auto') return this._voiceLanguageMode;
+    let browserLocale = String(navigator.language || '').slice(0, 2).toLowerCase();
+    if (['ru', 'es', 'en'].includes(browserLocale)) return browserLocale;
+    let interfaceLocale = getLocalization().locale;
+    return ['ru', 'es', 'en'].includes(interfaceLocale) ? interfaceLocale : 'en';
   }
 
   _escapeRegExp(value) {
@@ -510,6 +554,7 @@ export class AgentChat extends Symbiote {
       : tPortal('settings.voice.listenButton');
     if (this._micBtn) this._micBtn.hidden = this._wakeModeEnabled;
     this._syncVoiceResponseButton();
+    this._syncVoiceLanguageButton();
   }
 
   _syncVoiceResponseButton() {
@@ -537,6 +582,30 @@ export class AgentChat extends Symbiote {
     this._syncVoiceResponseButton();
   }
 
+  _syncVoiceLanguageButton() {
+    if (!this._voiceLanguageBtn) return;
+    let option = this._voiceLanguageOption();
+    this._voiceLanguageBtn.hidden = !this._wakeModeEnabled;
+    this._voiceLanguageBtn.disabled = !this._wakeModeEnabled;
+    this._voiceLanguageBtn.dataset.mode = option.mode;
+    this._voiceLanguageBtn.textContent = option.short;
+    this._voiceLanguageBtn.title = tPortal('settings.voice.languageButton', { language: option.label });
+    this._voiceLanguageBtn.setAttribute('aria-label', this._voiceLanguageBtn.title);
+    this._voiceLanguageBtn.setAttribute('aria-pressed', option.mode === 'auto' ? 'false' : 'true');
+  }
+
+  _cycleVoiceLanguageMode() {
+    let options = this._voiceLanguageOptions();
+    let index = options.findIndex((item) => item.mode === this._voiceLanguageMode);
+    let next = options[(index + 1) % options.length] || options[0];
+    this._voiceLanguageMode = next.mode;
+    this._saveVoiceInputModeSettings();
+    this._syncVoiceLanguageButton();
+    if (this._wakeModeEnabled && !this._wakePausedForRecording) {
+      this._restartWakeListening();
+    }
+  }
+
   _getLatestAgentSpeechMessage() {
     let messages = this.$.messages || [];
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -561,11 +630,15 @@ export class AgentChat extends Symbiote {
     this._voiceResponseLastAgentKey = this._getLatestAgentSpeechMessage()?.key || '';
   }
 
-  _speechLocale() {
+  _speechLocaleFromInterface() {
     let locale = getLocalization().locale;
     if (locale === 'ru') return 'ru-RU';
     if (locale === 'es') return 'es-ES';
     return 'en-US';
+  }
+
+  _speechLocale() {
+    return this._voiceRecognitionLanguage() || this._speechLocaleFromInterface();
   }
 
   _speakPendingAgentResponse() {
@@ -614,7 +687,7 @@ export class AgentChat extends Symbiote {
     }
 
     let recognition = new SpeechRecognition();
-    recognition.lang = navigator.language || 'en-US';
+    recognition.lang = this._voiceRecognitionLanguage();
     recognition.interimResults = true;
     recognition.continuous = true;
     this._wakeRecognition = recognition;
@@ -673,6 +746,17 @@ export class AgentChat extends Symbiote {
       this._wakeRecognition = null;
     }
     this._syncWakeButton();
+  }
+
+  _restartWakeListening() {
+    if (this._wakeRecognition) {
+      this._wakeRecognition.onresult = null;
+      this._wakeRecognition.onerror = null;
+      this._wakeRecognition.onend = null;
+      try { this._wakeRecognition.abort(); } catch (_) { /* already stopped */ }
+      this._wakeRecognition = null;
+    }
+    this._startWakeListening();
   }
 
   _pauseWakeListeningForRecording() {
@@ -840,6 +924,7 @@ export class AgentChat extends Symbiote {
         this._voiceCommandTextOverride = '';
         this._showVoicePreview('recording');
         this._startVoiceUiTimer();
+        this._audioRecorder.setLanguage(this._voiceRecognitionLanguage());
         await this._audioRecorder.start();
         this._micBtn?.classList.add('recording');
       } catch (err) {

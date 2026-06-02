@@ -18,6 +18,7 @@ export class AudioRecorder {
     this._resolved = false;
     this._startTime = 0;
     this._elapsedTimer = null;
+    this._language = '';
   }
 
   get isAvailable() {
@@ -30,6 +31,10 @@ export class AudioRecorder {
 
   set onStateChange(fn) { this._onStateChange = fn; }
   set onInterim(fn) { this._onInterim = fn; }
+
+  setLanguage(language = '') {
+    this._language = String(language || '').trim();
+  }
 
   get elapsed() {
     if (!this._startTime) return 0;
@@ -135,11 +140,15 @@ export class AudioRecorder {
 
   // ── Web Speech API ──
 
+  _recognitionLanguage() {
+    return this._language || navigator.language || 'en-US';
+  }
+
   _startSpeechRecognition() {
     return new Promise((resolveStart, rejectStart) => {
       let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       let recognition = new SpeechRecognition();
-      recognition.lang = navigator.language || 'en-US';
+      recognition.lang = this._recognitionLanguage();
       recognition.interimResults = true;
       recognition.continuous = true;
 

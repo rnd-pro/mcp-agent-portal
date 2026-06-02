@@ -115,7 +115,7 @@ describe('agent chat input state', () => {
   it('keeps a visible voice preview when recording cannot start or produce text', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.js'), 'utf8');
 
-    assert.match(source, /_showVoicePreview\('recording'\);\s+this\._startVoiceUiTimer\(\);\s+await this\._audioRecorder\.start\(\);/);
+    assert.match(source, /_showVoicePreview\('recording'\);\s+this\._startVoiceUiTimer\(\);\s+this\._audioRecorder\.setLanguage\(this\._voiceRecognitionLanguage\(\)\);\s+await this\._audioRecorder\.start\(\);/);
     assert.match(source, /_ensureVoicePreview\(mode = 'recording'\)/);
     assert.match(source, /_startVoiceUiTimer\(\)/);
     assert.match(source, /_formatVoiceElapsed\(elapsed = 0\)/);
@@ -137,12 +137,14 @@ describe('agent chat input state', () => {
     assert.match(source, /settings\?\.voiceInput\?\.wakeCommands/);
     assert.match(source, /settings\?\.voiceInput\?\.sendByCommandEnabled/);
     assert.match(source, /settings\?\.voiceInput\?\.voiceResponseEnabled/);
+    assert.match(source, /settings\?\.voiceInput\?\.languageMode/);
     assert.match(source, /settings\?\.voiceInput\?\.sendCommand/);
     assert.match(source, /_defaultVoiceCommandPhrases\(\)/);
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
     assert.match(source, /_matchesWakeCommand\(text = ''\)/);
     assert.match(source, /btn-wake-listen/);
     assert.match(source, /btn-voice-response/);
+    assert.match(source, /btn-voice-language/);
     assert.match(source, /speechSynthesis/);
     assert.match(source, /_toggleVoiceResponseMode\(\)/);
     assert.match(source, /_speakPendingAgentResponse\(\)/);
@@ -160,6 +162,14 @@ describe('agent chat input state', () => {
     assert.match(source, /JSON\.stringify\(message\) === JSON\.stringify\(current\[index\]\)/);
     assert.doesNotMatch(source, /m\.text === cur\[i\]\?\.text && m\.role === cur\[i\]\?\.role/);
     assert.match(source, /this\._micBtn\.hidden = this\._wakeModeEnabled/);
+    assert.match(source, /_normalizeVoiceLanguageMode\(mode = 'auto'\)/);
+    assert.match(source, /_voiceRecognitionLanguage\(\)/);
+    assert.match(source, /_voiceCommandLocale\(\)/);
+    assert.match(source, /let locale = this\._voiceCommandLocale\(\);/);
+    assert.match(source, /recognition\.lang = this\._voiceRecognitionLanguage\(\);/);
+    assert.match(source, /this\._audioRecorder\.setLanguage\(this\._voiceRecognitionLanguage\(\)\);/);
+    assert.match(source, /_cycleVoiceLanguageMode\(\)/);
+    assert.match(source, /_restartWakeListening\(\)/);
     assert.match(source, /_triggerVoiceInputFromWake\(\)/);
     assert.equal(source.includes("new RegExp(`(?:[\\\\s,.;:!?]+|^)(${command})[\\\\s,.;:!?]*$`, 'iu')"), true);
     assert.match(source, /chat-composer-voice-command-toggle', \(\) => this\._toggleVoiceCommandMode\(\)/);
@@ -177,5 +187,11 @@ describe('agent chat input state', () => {
     let settingsSource = fs.readFileSync(path.join(ROOT, 'web/panels/SettingsPanel/SettingsPanel.js'), 'utf8');
     assert.match(settingsSource, /sendByCommandEnabled: Boolean\(current\.sendByCommandEnabled\)/);
     assert.match(settingsSource, /voiceResponseEnabled: Boolean\(current\.voiceResponseEnabled\)/);
+    assert.match(settingsSource, /languageMode: \['auto', 'ru', 'es', 'en'\]\.includes\(current\.languageMode\)/);
+
+    let recorderSource = fs.readFileSync(path.join(ROOT, 'web/services/audio-recorder.js'), 'utf8');
+    assert.match(recorderSource, /setLanguage\(language = ''\)/);
+    assert.match(recorderSource, /_recognitionLanguage\(\)/);
+    assert.match(recorderSource, /recognition\.lang = this\._recognitionLanguage\(\);/);
   });
 });

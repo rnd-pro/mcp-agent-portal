@@ -265,6 +265,10 @@ function sanitizeDemoVoiceInput(value = {}) {
   if ('voiceResponseEnabled' in value) {
     result.voiceResponseEnabled = Boolean(value.voiceResponseEnabled);
   }
+  let languageMode = String(value.languageMode || '').trim();
+  if (['auto', 'ru', 'es', 'en'].includes(languageMode)) {
+    result.languageMode = languageMode;
+  }
   let sendCommands = sanitizeDemoVoiceCommands(value.sendCommands);
   if (Object.keys(sendCommands).length) result.sendCommands = sendCommands;
   let wakeCommands = sanitizeDemoVoiceCommands(value.wakeCommands);
