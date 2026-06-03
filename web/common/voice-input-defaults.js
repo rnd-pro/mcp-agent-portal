@@ -18,7 +18,7 @@ export const DEFAULT_VOICE_ACTION_COMMANDS = Object.freeze({
   }),
   delete: Object.freeze({
     en: Object.freeze(['delete', 'clear']),
-    ru: Object.freeze(['удали']),
+    ru: Object.freeze(['удали', 'удалить', 'очистить']),
     es: Object.freeze(['borra', 'eliminar']),
   }),
   off: Object.freeze({
@@ -88,6 +88,14 @@ function normalizeVoiceCommandCandidates(candidates = []) {
     .sort((a, b) => b.phrase.length - a.phrase.length);
 }
 
+export function wakeCommandCandidates(phrases = {}, locale = '') {
+  let selectedLocales = DEFAULT_VOICE_WAKE_COMMANDS[locale] ? [locale] : Object.keys(DEFAULT_VOICE_WAKE_COMMANDS);
+  let commands = selectedLocales.flatMap((itemLocale) => (
+    parseVoiceCommandList(phrases[itemLocale], [DEFAULT_VOICE_WAKE_COMMANDS[itemLocale]])
+  ));
+  return [...new Set(commands.map((command) => String(command || '').trim()).filter(Boolean))];
+}
+
 export function matchVoiceCommandAtEnd(text = '', candidates = []) {
   let value = String(text || '').trim();
   if (!value) return { matched: false, phrase: '', text: '' };
@@ -116,11 +124,19 @@ export function matchVoiceCommandInText(text = '', candidates = []) {
 }
 
 export function normalizeWakeCommandPhrase(value, locale) {
-  let command = String(value || '').trim();
   let fallback = DEFAULT_VOICE_WAKE_COMMANDS[locale] || DEFAULT_VOICE_WAKE_COMMAND;
-  if (!command) return fallback;
+  let commands = parseVoiceCommandList(value, [fallback]);
   let legacyCommands = LEGACY_VOICE_WAKE_COMMANDS[locale] || [];
-  let commandKey = command.toLocaleLowerCase();
-  if (legacyCommands.some((legacy) => String(legacy).toLocaleLowerCase() === commandKey)) return fallback;
-  return command;
+  let normalized = commands.map((command) => {
+    let commandKey = String(command).toLocaleLowerCase();
+    return legacyCommands.some((legacy) => String(legacy).toLocaleLowerCase() === commandKey) ? fallback : command;
+  });
+  let seen = new Set();
+  let unique = normalized.filter((command) => {
+    let key = String(command).toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return formatVoiceCommandList(unique.length ? unique : [fallback]);
 }

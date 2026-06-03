@@ -181,6 +181,63 @@ describe('server demo mode', () => {
     }
   });
 
+  it('does not echo voice transcription context notes in websocket demo replies', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+    let server = createServer();
+    server.on('upgrade', (req, socket, head) => {
+      if (!demo.handleUpgrade(req, socket, head)) socket.destroy();
+    });
+    let port = await listen(server);
+    try {
+      let createRes = makeRes();
+      await demo.routes['POST /api/chats'](makeReq('POST', '/api/chats', {}), createRes);
+      let { id } = createRes.json();
+
+      let visiblePrompt = 'Как дела';
+      let agentPrompt = [
+        '[Примечание: следующее сообщение получено через голосовую транскрибацию. В нем возможны ошибки распознавания; учитывай контекст и уточняй, если смысл неоднозначен.]',
+        '',
+        visiblePrompt,
+      ].join('\n');
+      let messageRes = makeRes();
+      await demo.routes['POST /api/chats/message'](
+        makeReq('POST', '/api/chats/message', { chatId: id, role: 'user', text: visiblePrompt }),
+        messageRes,
+      );
+
+      let ws = new WebSocket(`ws://127.0.0.1:${port}/ws/chat`);
+      await new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for demo chat.done')), 2000);
+        ws.on('open', () => {
+          ws.send(JSON.stringify({ method: 'chat.send', params: { chatId: id, prompt: agentPrompt } }));
+        });
+        ws.on('message', (buffer) => {
+          let msg = JSON.parse(String(buffer));
+          if (msg.method === 'chat.done') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        ws.on('error', reject);
+      });
+      ws.close();
+
+      let chatRes = makeRes();
+      await demo.routes['POST /api/chats/get'](makeReq('POST', '/api/chats/get', { id }), chatRes);
+      let chat = chatRes.json();
+      let demoReply = [...chat.messages].reverse().find((message) => message.role === 'agent');
+      assert.ok(demoReply);
+      assert.match(demoReply.text, /Вы написали: «Как дела»\./);
+      assert.doesNotMatch(demoReply.text, /Примечание/);
+      assert.doesNotMatch(demoReply.text, /голосовую транскрибацию/);
+    } finally {
+      server.close();
+    }
+  });
+
   it('accepts prefixed public demo monitor websocket routes', async () => {
     let demo = createServerDemoMode({
       projectRoot: process.cwd(),
@@ -247,6 +304,76 @@ describe('server demo mode', () => {
     assert.equal(chatRes.status, 200);
     assert.equal(chat.id, 'chat-public-stale');
     assert.ok(chat.subChats.length >= 2);
+  });
+
+  it('publishes split Symbiote demo projects instead of the legacy symbiote-node tab', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+
+    let historyRes = makeRes();
+    demo.routes['GET /api/projects/history'](makeReq('GET', '/api/projects/history'), historyRes);
+    let history = historyRes.json();
+    let ids = history.projects.map((project) => project.id);
+
+    assert.ok(ids.includes('symbiote-ui'));
+    assert.ok(ids.includes('symbiote-engine'));
+    assert.equal(ids.includes('symbiote-node'), false);
+    assert.ok(history.activeIds.includes('symbiote-ui'));
+    assert.ok(history.activeIds.includes('symbiote-engine'));
+  });
+
+  it('uses public source subdirectories for split Symbiote package projects', async () => {
+    let root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-symbiote-sources-'));
+    try {
+      let checkoutRoot = path.join(root, 'symbiote-ui');
+      fs.mkdirSync(path.join(checkoutRoot, 'packages/symbiote-ui/ui'), { recursive: true });
+      fs.mkdirSync(path.join(checkoutRoot, 'packages/symbiote-engine/engine'), { recursive: true });
+      fs.writeFileSync(path.join(checkoutRoot, 'README.md'), '# symbiote-node workspace\n');
+      fs.writeFileSync(path.join(checkoutRoot, 'packages/symbiote-ui/package.json'), '{"name":"symbiote-ui"}\n');
+      fs.writeFileSync(path.join(checkoutRoot, 'packages/symbiote-ui/ui/index.js'), 'export const ui = true;\n');
+      fs.writeFileSync(path.join(checkoutRoot, 'packages/symbiote-engine/package.json'), '{"name":"symbiote-engine"}\n');
+      fs.writeFileSync(path.join(checkoutRoot, '.public-source.json'), JSON.stringify({
+        projectId: 'symbiote-ui',
+        name: 'Symbiote UI',
+        repo: 'https://github.com/RND-PRO/symbiote-node.git',
+        ref: 'main',
+        sourceSubdir: 'packages/symbiote-ui',
+        syncedAt: '2026-06-03T00:00:00.000Z',
+      }));
+      fs.writeFileSync(path.join(root, 'sources.json'), JSON.stringify({
+        version: 1,
+        sources: [{
+          projectId: 'symbiote-ui',
+          name: 'Symbiote UI',
+          repo: 'https://github.com/RND-PRO/symbiote-node.git',
+          ref: 'main',
+          sourceSubdir: 'packages/symbiote-ui',
+        }],
+      }));
+
+      let demo = createServerDemoMode({
+        projectRoot: process.cwd(),
+        env: {
+          AGENT_PORTAL_DEMO_MODE: '1',
+          AGENT_PORTAL_PUBLIC_PROJECTS_ROOT: root,
+        },
+      });
+
+      let filesRes = makeRes();
+      demo.routes['GET /api/files/list'](makeReq('GET', '/api/files/list?project=symbiote-ui'), filesRes);
+      let body = filesRes.json();
+      let paths = body.files;
+
+      assert.equal(body.publicSource.projectId, 'symbiote-ui');
+      assert.equal(body.publicSource.sourceSubdir, 'packages/symbiote-ui');
+      assert.ok(paths.includes('package.json'));
+      assert.ok(paths.includes('ui/index.js'));
+      assert.equal(paths.some((filePath) => filePath.includes('symbiote-engine')), false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('covers public demo UI endpoints with safe mock data', async () => {

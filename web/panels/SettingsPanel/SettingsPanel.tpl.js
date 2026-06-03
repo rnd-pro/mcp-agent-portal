@@ -74,7 +74,7 @@ export default`
     </sn-field>
     <sn-field variant="compact">
       <span slot="label">Russian Command</span>
-      <input type="text" ref="voiceDeleteCommandRuInput" placeholder="удали">
+      <input type="text" ref="voiceDeleteCommandRuInput" placeholder="удали, удалить, очистить">
     </sn-field>
     <sn-field variant="compact">
       <span slot="label">Spanish Command</span>

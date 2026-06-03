@@ -34,6 +34,7 @@ import {
   matchVoiceCommandInText,
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
+  wakeCommandCandidates,
 } from '../../common/voice-input-defaults.js';
 import { getLocalization } from 'symbiote-node/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
@@ -487,19 +488,21 @@ export class AgentChat extends Symbiote {
   }
 
   _voiceCommandHints() {
-    let quote = (value) => `«${value}»`;
+    let commandList = (action) => this._getVoiceActionPhrases(action).join(', ');
     return [
-      tPortal('settings.voice.commandHintSend', { command: quote(this._getVoiceActionPhrases('send')[0]) }),
-      tPortal('settings.voice.commandHintCancel', { command: this._getVoiceActionPhrases('cancel').map(quote).join(' / ') }),
-      tPortal('settings.voice.commandHintDelete', { command: quote(this._getVoiceActionPhrases('delete')[0]) }),
-      tPortal('settings.voice.commandHintOff', { command: quote(this._getVoiceActionPhrases('off')[0]) }),
+      tPortal('settings.voice.commandHintSend', { command: commandList('send') }),
+      tPortal('settings.voice.commandHintCancel', { command: commandList('cancel') }),
+      tPortal('settings.voice.commandHintDelete', { command: commandList('delete') }),
+      tPortal('settings.voice.commandHintOff', { command: commandList('off') }),
     ];
   }
 
   _getWakeCommandPhrase() {
-    let locale = this._voiceCommandLocale();
-    let phrases = this._wakeCommandPhrases || this._defaultWakeCommandPhrases();
-    return phrases[locale] || this._defaultWakeCommandPhrases()[locale] || this._defaultWakeCommandPhrases().en;
+    return this._getWakeCommandCandidates()[0] || this._defaultWakeCommandPhrases().en;
+  }
+
+  _getWakeCommandCandidates() {
+    return wakeCommandCandidates(this._wakeCommandPhrases || this._defaultWakeCommandPhrases(), this._voiceCommandLocale());
   }
 
   async _loadVoiceInputSettings() {
@@ -614,7 +617,7 @@ export class AgentChat extends Symbiote {
   }
 
   _matchesWakeCommand(text = '') {
-    return matchVoiceCommandInText(text, [this._getWakeCommandPhrase()]).matched;
+    return matchVoiceCommandInText(text, this._getWakeCommandCandidates()).matched;
   }
 
   async _toggleWakeMode() {

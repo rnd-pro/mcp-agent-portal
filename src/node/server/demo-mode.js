@@ -22,6 +22,40 @@ import { json, parseBody } from './routes/http.js';
 import { createXrDiagnosticLogStore } from './xr-diagnostics-log.js';
 
 const PUBLIC_ROOTS = ['ARCHITECTURE.md', 'README.md', 'bin', 'cli', 'config', 'demo', 'docs', 'index.js', 'lib', 'package.json', 'packages', 'scripts', 'src', 'test', 'web'];
+const PUBLIC_PACKAGE_ROOTS = [
+  'ARCHITECTURE.md',
+  'LICENSE',
+  'README.md',
+  'bin',
+  'canvas',
+  'chat',
+  'cli',
+  'core',
+  'display',
+  'docs',
+  'engine',
+  'graph',
+  'handlers',
+  'index.js',
+  'layout',
+  'lib',
+  'manifest',
+  'package.json',
+  'packs',
+  'registry',
+  'rules',
+  'runtime',
+  'schemas',
+  'scripts',
+  'server',
+  'src',
+  'test',
+  'tests',
+  'themes',
+  'tokens',
+  'ui',
+  'xr',
+];
 const BLOCKED_SEGMENTS = new Set(['.env', '.git', '.ssh', 'node_modules', 'secrets', 'tmp']);
 const MAX_FILE_BYTES = 96 * 1024;
 const PUBLIC_SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx']);
@@ -104,8 +138,14 @@ function rndProReply(prompt = '') {
   ].join('\n');
 }
 
+function stripDemoPromptContext(prompt = '') {
+  return String(prompt)
+    .replace(/^\s*\[(?=[^\]]*(?:voice transcription|голосов[^\]]*транскрибац|transcripcion de voz|transcripción de voz))[^\]]+\]\s*/iu, '')
+    .trim();
+}
+
 function demoChatReply(prompt = '') {
-  let text = String(prompt).trim();
+  let text = stripDemoPromptContext(prompt);
   let preview = text.length > 260 ? `${text.slice(0, 257)}...` : text;
   return [
     preview ? `Вы написали: «${preview}».` : 'Сообщение получено.',
@@ -427,13 +467,19 @@ function normalizeProjectSource(rootPath, source) {
   let sourceRoot = path.join(rootPath, source.projectId);
   if (!fs.existsSync(sourceRoot) || !fs.statSync(sourceRoot).isDirectory()) return null;
   let meta = readJsonIfExists(path.join(sourceRoot, '.public-source.json')) || source;
+  let sourceSubdir = path.posix.normalize(String(meta.sourceSubdir || source.sourceSubdir || '').replaceAll('\\', '/'));
+  if (sourceSubdir === '.') sourceSubdir = '';
+  if (sourceSubdir.startsWith('../') || sourceSubdir === '..' || path.posix.isAbsolute(sourceSubdir)) return null;
+  let effectiveRoot = sourceSubdir ? path.join(sourceRoot, sourceSubdir) : sourceRoot;
+  if (!fs.existsSync(effectiveRoot) || !fs.statSync(effectiveRoot).isDirectory()) return null;
   return {
     projectId: source.projectId,
     name: meta.name || source.name || source.projectId,
     repo: meta.repo || source.repo || '',
     ref: meta.ref || source.ref || '',
+    sourceSubdir,
     syncedAt: meta.syncedAt || null,
-    rootPath: sourceRoot,
+    rootPath: effectiveRoot,
     publicPath: path.posix.join(DEMO_PUBLIC_PROJECTS_PATH, source.projectId),
   };
 }
@@ -548,7 +594,8 @@ function publicPathAllowed(projectRoot, requestedPath, aliases = []) {
   let parts = normalized.split('/');
   if (parts.some((part) => BLOCKED_SEGMENTS.has(part) || part.startsWith('.'))) return null;
   let first = parts[0];
-  if (!PUBLIC_ROOTS.includes(first)) return null;
+  let isPublicSource = aliases.some((alias) => String(alias).startsWith(DEMO_PUBLIC_PROJECTS_PATH));
+  if (!PUBLIC_ROOTS.includes(first) && !(isPublicSource && PUBLIC_PACKAGE_ROOTS.includes(first))) return null;
   return normalized;
 }
 
@@ -757,6 +804,7 @@ function publicSourceMetadata(source) {
     projectId: source.projectId,
     repo: source.repo,
     ref: source.ref,
+    sourceSubdir: source.sourceSubdir,
     syncedAt: source.syncedAt,
   };
 }

@@ -87,11 +87,18 @@ export const projectHistory = {
       lastOpened: Date.now() - 7200_000,
     },
     {
-      id: 'symbiote-node',
-      name: 'Symbiote Node',
-      path: '/workspace/agent-portal',
+      id: 'symbiote-ui',
+      name: 'Symbiote UI',
+      path: '/workspace/public-projects/symbiote-ui',
       color: '#fbbc04',
       lastOpened: Date.now() - 86400_000,
+    },
+    {
+      id: 'symbiote-engine',
+      name: 'Symbiote Engine',
+      path: '/workspace/public-projects/symbiote-engine',
+      color: '#00bcd4',
+      lastOpened: Date.now() - 129600_000,
     },
     {
       id: 'context-x',
@@ -115,7 +122,7 @@ export const projectHistory = {
       lastOpened: Date.now() - 604800_000,
     },
   ],
-  activeIds: ['agent-portal', 'agent-pool', 'project-graph', 'symbiote-node'],
+  activeIds: ['agent-portal', 'agent-pool', 'project-graph', 'symbiote-ui', 'symbiote-engine'],
 };
 
 // ── Chats ────────────────────────────────────────────────────────
@@ -210,22 +217,41 @@ export const chats = [
     ],
   },
 
-  // ── Chat 4: symbiote-node overview (README injected at build) ──
+  // ── Chat 4: symbiote-ui overview (README injected at build) ──
   {
     id: 'chat-4',
-    name: 'What is Symbiote Node?',
+    name: 'What is Symbiote UI?',
     adapter: 'pool',
     provider: 'gemini',
     model: 'gemini-2.5-pro',
     agent: 'single',
     createdAt: Date.now() - 259200_000,
     updatedAt: Date.now() - 259200_000,
-    projectId: 'symbiote-node',
+    projectId: 'symbiote-ui',
     messages: [
-      { role: 'user', text: 'Describe symbiote-node — the Studio UX framework, layout engine, and node graph system.' },
+      { role: 'user', text: 'Describe symbiote-ui — provider UI components, themes, layout helpers, WebMCP metadata, and SSR-safe UI contracts.' },
       { role: 'thinking', elapsed: 7, done: true, meta: { tools: 2, tokens: 5100, cost: 0.0153 } },
-      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/agent-portal/packages/symbiote-node' }, result: '{\n  "project": "symbiote-node",\n  "stats": { "files": 45, "functions": 128, "lines": 6200 },\n  "dirs": ["layout/", "canvas/", "node/", "inspector/", "engine/"]\n}' },
-      { role: 'agent', text: "__SUBREADME:packages/symbiote-node/README.md__" },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/public-projects/symbiote-ui' }, result: '{\n  "project": "symbiote-ui",\n  "stats": { "files": 96, "functions": 284, "lines": 14800 },\n  "dirs": ["ui/", "display/", "chat/", "layout/", "themes/", "tokens/"]\n}' },
+      { role: 'agent', text: "__SUBREADME:packages/symbiote-ui/README.md__" },
+    ],
+  },
+
+  // ── Chat 7: symbiote-engine overview (README injected at build) ──
+  {
+    id: 'chat-7',
+    name: 'What is Symbiote Engine?',
+    adapter: 'pool',
+    provider: 'gemini',
+    model: 'gemini-2.5-pro',
+    agent: 'single',
+    createdAt: Date.now() - 302400_000,
+    updatedAt: Date.now() - 302400_000,
+    projectId: 'symbiote-engine',
+    messages: [
+      { role: 'user', text: 'Describe symbiote-engine — graph runtime, CLI runtime commands, registry, persistence, and handlers.' },
+      { role: 'thinking', elapsed: 6, done: true, meta: { tools: 2, tokens: 4300, cost: 0.0129 } },
+      { role: 'tool', name: 'get_skeleton', input: { path: '/workspace/public-projects/symbiote-engine' }, result: '{\n  "project": "symbiote-engine",\n  "stats": { "files": 54, "functions": 176, "lines": 9200 },\n  "dirs": ["engine/", "packs/", "cli/", "registry/", "runtime/"]\n}' },
+      { role: 'agent', text: "__SUBREADME:packages/symbiote-engine/README.md__" },
     ],
   },
 

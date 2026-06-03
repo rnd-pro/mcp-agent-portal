@@ -14,6 +14,7 @@ import {
   matchVoiceCommandInText,
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
+  wakeCommandCandidates,
 } from '../../web/common/voice-input-defaults.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
@@ -31,12 +32,22 @@ describe('agent chat input state', () => {
     assert.equal(normalizeWakeCommandPhrase("О'кей Агент", 'en'), 'Okay Agent');
     assert.equal(normalizeWakeCommandPhrase("О'кей Агент", 'es'), 'Okey Agente');
     assert.equal(normalizeWakeCommandPhrase('assistant start', 'en'), 'assistant start');
+    assert.equal(matchVoiceCommandInText('okay agent', wakeCommandCandidates(defaultWakeCommandPhrases(), 'en')).matched, true);
+    assert.equal(matchVoiceCommandInText('hey agent', wakeCommandCandidates({ en: 'Okay Agent, Hey Agent' }, 'en')).matched, true);
+    assert.equal(matchVoiceCommandInText('hola agente', wakeCommandCandidates({ es: 'Okey Agente, Hola Agente' }, 'es')).matched, true);
+    assert.equal(normalizeWakeCommandPhrase('voice input, hey agent', 'en'), 'Okay Agent, hey agent');
     assert.deepEqual(defaultVoiceActionCommandPhrases().cancel.ru, ['отмена', 'стоп']);
+    assert.deepEqual(defaultVoiceActionCommandPhrases().delete.ru, ['удали', 'удалить', 'очистить']);
     assert.deepEqual(parseVoiceCommandList('отмена=стоп'), ['отмена', 'стоп']);
     assert.deepEqual(parseVoiceCommandList('cancel, stop'), ['cancel', 'stop']);
+    assert.deepEqual(parseVoiceCommandList(['удали'], defaultVoiceActionCommandPhrases().delete.ru), ['удали']);
     assert.deepEqual(
       matchVoiceCommandAtEnd('Проверочный текст СТОП', [{ action: 'cancel', phrase: 'стоп' }]),
       { action: 'cancel', phrase: 'стоп', matched: true, text: 'Проверочный текст' },
+    );
+    assert.deepEqual(
+      matchVoiceCommandAtEnd('Проверочный текст очистить', defaultVoiceActionCommandPhrases().delete.ru.map((phrase) => ({ action: 'delete', phrase }))),
+      { action: 'delete', phrase: 'очистить', matched: true, text: 'Проверочный текст' },
     );
     assert.equal(matchVoiceCommandInText("ну О'КЕЙ АГЕНТ давай", ["О'кей Агент"]).matched, true);
   });
@@ -175,6 +186,7 @@ describe('agent chat input state', () => {
     assert.match(source, /defaultVoiceActionCommandPhrases\(\)/);
     assert.match(source, /this\._voiceActionCommandPhrases = \{/);
     assert.match(source, /parseVoiceCommandList\(savedActions\.cancel\?\.ru, actionDefaults\.cancel\.ru\)/);
+    assert.match(source, /parseVoiceCommandList\(savedActions\.delete\?\.ru, actionDefaults\.delete\.ru\)/);
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
     assert.match(source, /_matchesWakeCommand\(text = ''\)/);
     assert.match(source, /btn-wake-listen/);
@@ -189,7 +201,9 @@ describe('agent chat input state', () => {
     assert.match(source, /_voiceCommandHints\(\)/);
     assert.match(source, /_extractVoiceCommandAction\(text = ''\)/);
     assert.match(source, /matchVoiceCommandAtEnd\(value, candidates\)/);
-    assert.match(source, /matchVoiceCommandInText\(text, \[this\._getWakeCommandPhrase\(\)\]\)\.matched/);
+    assert.match(source, /_getWakeCommandCandidates\(\)/);
+    assert.match(source, /wakeCommandCandidates\(this\._wakeCommandPhrases \|\| this\._defaultWakeCommandPhrases\(\), this\._voiceCommandLocale\(\)\)/);
+    assert.match(source, /matchVoiceCommandInText\(text, this\._getWakeCommandCandidates\(\)\)\.matched/);
     assert.doesNotMatch(source, /_escapeRegExp/);
     assert.match(source, /command\.matched && !this\._voiceCommandHandling && !this\._voiceCommandTriggered/);
     assert.match(source, /_handleVoiceCommandAction\(command\)/);
@@ -266,6 +280,7 @@ describe('agent chat input state', () => {
     assert.match(settingsSource, /this\.ref\.voiceOffCommandRuInput\.value/);
     assert.match(settingsSource, /actionCommands: \{/);
     assert.match(settingsSource, /parseVoiceCommandList\(this\.ref\.voiceCancelCommandRuInput\.value, defaults\.actions\.cancel\.ru\)/);
+    assert.match(settingsSource, /parseVoiceCommandList\(this\.ref\.voiceDeleteCommandRuInput\.value, defaults\.actions\.delete\.ru\)/);
     assert.match(settingsSource, /normalizeWakeCommandPhrase\(wake\.en \|\| defaults\.wake\.en, 'en'\)/);
     assert.match(settingsSource, /normalizeWakeCommandPhrase\(this\.ref\.voiceWakeCommandRuInput\.value, 'ru'\)/);
 
