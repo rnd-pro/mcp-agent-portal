@@ -164,6 +164,7 @@ let indexHtml = `<!DOCTYPE html>
 	        "symbiote-ui/xr": "${basePath}packages/symbiote-ui/xr/index.js",
 	        "symbiote-node": "${basePath}packages/symbiote-node/index.js",
 	        "symbiote-node/core": "${basePath}packages/symbiote-node/core.js",
+	        "symbiote-node/core/base-path.js": "${basePath}packages/symbiote-ui/core/base-path.js",
 	        "symbiote-node/ui": "${basePath}packages/symbiote-node/ui.js",
 	        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph.js",
 	        "symbiote-node/locale": "${basePath}packages/symbiote-node/locale.js",
