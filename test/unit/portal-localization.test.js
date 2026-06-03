@@ -211,6 +211,6 @@ describe('portal localization bootstrap', () => {
       app.indexOf('from "./common/localization.js";') < app.indexOf('from "symbiote-node/ui"'),
       'portal localization must run before symbiote-node/ui auto-detection',
     );
-    assert.ok(index.includes('"symbiote-node/locale": "/packages/symbiote-node/locale/index.js"'));
+    assert.ok(index.includes('"symbiote-node/locale": "/packages/symbiote-node/locale.js"'));
   });
 });

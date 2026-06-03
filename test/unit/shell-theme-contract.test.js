@@ -22,7 +22,7 @@ describe('portal shell theme contract', () => {
       'web/app.js must publish the default-provider theme scope for visual audits and shell contracts',
     );
 
-    let theme = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/themes/default-provider.js'), 'utf8');
+    let theme = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/themes/default-provider.js'), 'utf8');
     for (let token of [
       '--sn-theme-hue',
       '--sn-theme-chroma',
@@ -54,7 +54,7 @@ describe('portal shell theme contract', () => {
     }
     assert.equal(index.includes('style='), false, 'web/index.html must not carry inline visual styles');
     assert.ok(
-      index.includes('/packages/symbiote-node/icons/material-symbols.css'),
+      index.includes('/packages/symbiote-ui/icons/material-symbols.css'),
       'web/index.html must use the provider-hosted Material Symbols stylesheet for deterministic icon rendering',
     );
     assert.equal(
@@ -98,7 +98,7 @@ describe('portal shell theme contract', () => {
     let actionLogic = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.js'), 'utf8');
     let actionCss = fs.readFileSync(path.join(ROOT, 'web/panels/ActionBoard/ActionBoard.css.js'), 'utf8');
     let opsTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.tpl.js'), 'utf8');
-    let eventFeedCss = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/display/EventFeed/EventFeed.css.js'), 'utf8');
+    let eventFeedCss = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/display/EventFeed/EventFeed.css.js'), 'utf8');
 
     assert.ok(actionTemplate.includes('<sn-event-feed'), 'ActionBoard must compose the provider event feed');
     assert.ok(opsTemplate.includes('<sn-event-feed'), 'OpsPanel must compose the provider event feed');
@@ -302,7 +302,7 @@ describe('portal shell theme contract', () => {
       'web/panels/RuntimeControl/RuntimeControl.tpl.js',
       'web/panels/SettingsPanel/SettingsPanel.tpl.js',
       'web/panels/WorkflowExplorer/WorkflowExplorer.tpl.js',
-      'packages/symbiote-node/chat/ChatList/ChatList.tpl.js',
+      'node_modules/symbiote-ui/chat/ChatList/ChatList.tpl.js',
     ]) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
       assert.ok(
@@ -393,7 +393,7 @@ describe('portal shell theme contract', () => {
       assert.equal(source.includes('ui-badge'), false, `${relative} must not copy badge shell classes`);
     }
 
-    let dataTableSource = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/display/DataTable/DataTable.js'), 'utf8');
+    let dataTableSource = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/display/DataTable/DataTable.js'), 'utf8');
     assert.ok(dataTableSource.includes('sn-badge'), 'sn-data-table must compose the library status badge for structured badge cells');
   });
 
@@ -522,7 +522,7 @@ describe('portal shell theme contract', () => {
     assert.equal(source.includes('hsl(140'), false, 'ChatSidebar status icons must consume success tokens');
     assert.equal(source.includes('hsl(0'), false, 'ChatSidebar status icons must consume danger tokens');
 
-    let itemCss = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.css.js'), 'utf8');
+    let itemCss = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatSidebarItem/ChatSidebarItem.css.js'), 'utf8');
     for (let token of ['--sn-success-color', '--sn-danger-color', '--sn-node-selected']) {
       assert.ok(itemCss.includes(token), `ChatSidebarItem must expose status styling through ${token}`);
     }
@@ -674,7 +674,7 @@ describe('portal shell theme contract', () => {
   });
 
   it('keeps project graph socket colors token-driven', () => {
-    let source = fs.readFileSync(path.join(ROOT, 'packages/symbiote-node/canvas/project-graph-builder.js'), 'utf8');
+    let source = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/canvas/project-graph-builder.js'), 'utf8');
 
     for (let literal of ['#c87533', '#d4a04a']) {
       assert.equal(source.includes(literal), false, `project-graph-builder must not hard-code socket color ${literal}`);

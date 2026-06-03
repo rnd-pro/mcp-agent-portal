@@ -15,7 +15,7 @@ test('XR diagnostics page is a standalone public-provider harness', () => {
   assert.ok(html.includes('symbiote-node/xr'), 'diagnostic page must import XR through a public provider specifier');
   assert.ok(html.includes('"iwer": "/vendor/iwer/build/iwer.module.js?v=iwer-2-2-1"'), 'diagnostic page must expose the reviewed IWER browser bundle');
   assert.ok(html.includes('"@iwer/devui": "/vendor/iwer-devui/build/iwer-devui.module.js?v=devui-1-1-2"'), 'diagnostic page must expose the reviewed IWER DevUI browser bundle');
-  assert.ok(html.includes('/packages/symbiote-node/themes/default-provider.css'), 'diagnostic page must use the provider theme');
+  assert.ok(html.includes('/packages/symbiote-ui/themes/default-provider.css'), 'diagnostic page must use the provider theme');
   assert.ok(html.includes('class="panel"'), 'diagnostic page must include visible DOM panel probes');
   assert.ok(html.includes('id="emulate"'), 'diagnostic page must provide an explicit IWER install action');
   assert.ok(script.includes("from 'symbiote-node/xr'"), 'diagnostic script must consume public provider exports');
@@ -34,7 +34,7 @@ test('XR empty panels baseline starts from world-space panels before live UI', (
   let script = fs.readFileSync(path.join(ROOT, 'web/xr-panels-baseline.js'), 'utf8');
 
   assert.ok(html.includes('symbiote-node/xr'), 'empty panel baseline must import XR through a public provider specifier');
-  assert.ok(html.includes('/packages/symbiote-node/themes/default-provider.css'), 'empty panel baseline must use the provider theme');
+  assert.ok(html.includes('/packages/symbiote-ui/themes/default-provider.css'), 'empty panel baseline must use the provider theme');
   assert.ok(html.includes('XR Empty Panels Baseline'), 'page must be clearly scoped to empty panels');
   assert.ok(html.includes('src="xr-panels-baseline.js"'), 'empty panel baseline script must load inside the public demo route prefix');
   assert.ok(script.includes("from 'symbiote-node/xr'"), 'empty panel baseline must consume public provider exports');
@@ -68,10 +68,10 @@ test('XR visual audit page exposes agent-readable emulation checks', () => {
   let script = fs.readFileSync(path.join(ROOT, 'web/xr-visual-audit.js'), 'utf8');
 
   assert.ok(html.includes('XR Visual Audit'), 'visual audit page must be clearly scoped');
-  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr/index.js"'), 'visual audit must import XR through the public provider entrypoint');
+  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr.js"'), 'visual audit must import XR through the public provider entrypoint');
   assert.ok(html.includes('"iwer": "/vendor/iwer/build/iwer.module.js?v=iwer-2-2-1"'), 'visual audit must expose the reviewed IWER browser bundle');
   assert.ok(html.includes('"@iwer/devui": "/vendor/iwer-devui/build/iwer-devui.module.js?v=devui-1-1-2"'), 'visual audit must expose the reviewed IWER DevUI bundle');
-  assert.ok(html.includes('/packages/symbiote-node/themes/default-provider.css'), 'visual audit must inherit the provider theme');
+  assert.ok(html.includes('/packages/symbiote-ui/themes/default-provider.css'), 'visual audit must inherit the provider theme');
   assert.ok(html.includes('id="top-view"'), 'visual audit must expose a top-view spatial projection');
   assert.ok(html.includes('id="front-view"'), 'visual audit must expose a front-view spatial projection');
   assert.ok(html.includes('id="panel-map"'), 'visual audit must expose machine-readable panel maps');
@@ -612,7 +612,7 @@ test('XR Three panels baseline follows the Meta sample renderer pattern', () => 
   let script = fs.readFileSync(path.join(ROOT, 'web/xr-three-panels-baseline.js'), 'utf8');
 
   assert.ok(html.includes('"three": "/vendor/three/build/three.module.js?v=0-184-0"'), 'Three baseline must use the reviewed local Three bundle with HTMLTexture support');
-  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr/index.js"'), 'Three baseline must import XR through the public provider entrypoint');
+  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr.js"'), 'Three baseline must import XR through the public provider entrypoint');
   assert.ok(html.includes('XR Three Panels Baseline'), 'Three baseline must be clearly scoped');
   assert.ok(html.includes('rel="icon" href="data:,"'), 'Three baseline must not create favicon 404 noise in browser-agent smoke');
   assert.ok(html.includes('id="mode"'), 'Three baseline must expose explicit XR mode selection');
@@ -836,7 +836,7 @@ test('XR HTMLTexture minimal harness follows the official canvas-child texture p
 
   assert.ok(html.includes('XR HTMLTexture Minimal'), 'minimal harness must be clearly scoped');
   assert.ok(html.includes('"three": "/vendor/three/build/three.module.js?v=0-184-0"'), 'minimal harness must use the reviewed local Three bundle');
-  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr/index.js"'), 'minimal harness must consume public provider exports');
+  assert.ok(html.includes('"symbiote-node/xr": "/packages/symbiote-node/xr.js"'), 'minimal harness must consume public provider exports');
   assert.ok(html.includes('<canvas id="xr-canvas" layoutsubtree>'), 'minimal harness must make the WebGL canvas the layoutsubtree root');
   assert.ok(html.includes('<section id="html-source">'), 'minimal harness must keep the DOM source as a direct canvas child');
   assert.ok(html.includes('src="xr-htmltexture-minimal.js"'), 'minimal harness script must load inside the public demo route prefix');

@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const symbioteNodeGraphUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'graph', 'index.js')).href;
+const symbioteNodeGraphUrl = pathToFileURL(resolve(repoRoot, 'node_modules', 'symbiote-node', 'graph.js')).href;
 const loaderSource = `
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === 'symbiote-node/graph') {

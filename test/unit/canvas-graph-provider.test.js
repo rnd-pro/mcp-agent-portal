@@ -11,7 +11,7 @@ describe('CanvasGraph provider integration', () => {
     const [appSource, templateSource, shellSource] = await Promise.all([
       readFile(resolve(repoRoot, 'web', 'app.js'), 'utf8'),
       readFile(resolve(repoRoot, 'web', 'panels', 'dep-graph-template.js'), 'utf8'),
-      readFile(resolve(repoRoot, 'packages', 'symbiote-node', 'canvas', 'GraphExplorerShell', 'GraphExplorerShell.js'), 'utf8'),
+      readFile(resolve(repoRoot, 'node_modules', 'symbiote-ui', 'canvas', 'GraphExplorerShell', 'GraphExplorerShell.js'), 'utf8'),
     ]);
 
     assert.doesNotMatch(appSource, /components\/CanvasGraph\/CanvasGraph\.js/);

@@ -21,6 +21,7 @@ let ROOT_DIR = path.join(__dirname, '..', '..', '..');
 let WEB_DIR = path.join(ROOT_DIR, 'web');
 let DIST_WEB_DIR = path.join(ROOT_DIR, 'dist', 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
+let NODE_MODULE_PACKAGE_NAMES = new Set(['symbiote-node', 'symbiote-ui', 'symbiote-engine']);
 const DEFAULT_CHAT_AGENT = 'orchestrator';
 
 /** @type {Record<string, string>} */
@@ -91,7 +92,9 @@ function serveStaticFile(reqPath, method, res, options = {}) {
   if (pkgMatch) {
     let pkgName = pkgMatch[1];
     let restPath = pkgMatch[2] || 'index.js';
-    targetPath = path.join(PACKAGES_DIR, pkgName, restPath);
+    targetPath = NODE_MODULE_PACKAGE_NAMES.has(pkgName)
+      ? path.join(ROOT_DIR, 'node_modules', pkgName, restPath)
+      : path.join(PACKAGES_DIR, pkgName, restPath);
   } else if (vendorMatch) {
     let vendorName = vendorMatch[1];
     let restPath = vendorMatch[2] || 'index.js';

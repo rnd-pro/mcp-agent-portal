@@ -74,7 +74,7 @@ describe('network auth', () => {
       true,
     );
     assert.equal(
-      auth.requireNetworkAuthorization(makeReq('GET', '/packages/symbiote-node/xr/index.js'), assetRes),
+      auth.requireNetworkAuthorization(makeReq('GET', '/packages/symbiote-node/xr.js'), assetRes),
       true,
     );
     assert.equal(auth.listPending().length, 0);

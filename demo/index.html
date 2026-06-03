@@ -9,22 +9,29 @@
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-	<link rel="stylesheet" href="/packages/symbiote-node/icons/material-symbols.css">
-	<link rel="stylesheet" href="../packages/symbiote-node/themes/default-provider.css">
+	<link rel="stylesheet" href="/packages/symbiote-ui/icons/material-symbols.css">
+	<link rel="stylesheet" href="../packages/symbiote-ui/themes/default-provider.css">
 	<link rel="stylesheet" href="../web/style.css">
 <script type="importmap">
     {
       "imports": {
         "@symbiotejs/symbiote": "../node_modules/@symbiotejs/symbiote/core/index.js",
 	        "@symbiotejs/symbiote/": "../node_modules/@symbiotejs/symbiote/",
+	        "symbiote-ui": "../packages/symbiote-ui/index.js",
+	        "symbiote-ui/core": "../packages/symbiote-ui/core/index.js",
+	        "symbiote-ui/core/base-path.js": "../packages/symbiote-ui/core/base-path.js",
+	        "symbiote-ui/ui": "../packages/symbiote-ui/ui/index.js",
+	        "symbiote-ui/graph": "../packages/symbiote-ui/graph/index.js",
+	        "symbiote-ui/locale": "../packages/symbiote-ui/locale/index.js",
+	        "symbiote-ui/layout": "../packages/symbiote-ui/layout/index.js",
+	        "symbiote-ui/xr": "../packages/symbiote-ui/xr/index.js",
 	        "symbiote-node": "../packages/symbiote-node/index.js",
-	        "symbiote-node/core": "../packages/symbiote-node/core/index.js",
-	        "symbiote-node/core/base-path.js": "../packages/symbiote-node/core/base-path.js",
-	        "symbiote-node/ui": "../packages/symbiote-node/ui/index.js",
-	        "symbiote-node/graph": "../packages/symbiote-node/graph/index.js",
-	        "symbiote-node/locale": "../packages/symbiote-node/locale/index.js",
-	        "symbiote-node/layout": "../packages/symbiote-node/layout/index.js",
-	        "symbiote-node/xr": "../packages/symbiote-node/xr/index.js",
+	        "symbiote-node/core": "../packages/symbiote-node/core.js",
+	        "symbiote-node/ui": "../packages/symbiote-node/ui.js",
+	        "symbiote-node/graph": "../packages/symbiote-node/graph.js",
+	        "symbiote-node/locale": "../packages/symbiote-node/locale.js",
+	        "symbiote-node/layout": "../packages/symbiote-node/layout.js",
+	        "symbiote-node/xr": "../packages/symbiote-node/xr.js",
 	        "symbiote-node/chat/chat-context.js": "../packages/symbiote-node/chat/chat-context.js",
 	        "symbiote-node/display/highlight": "../packages/symbiote-node/display/highlight.js",
 	        "symbiote-node/display/markdown-formatter": "../packages/symbiote-node/display/markdown-formatter.js",

@@ -1047,7 +1047,7 @@ function createMcpResponse(projectRoot, publicSources, body = {}) {
   if (toolName === 'get_tracked_files') {
     return mcpContent(JSON.stringify([
       { path: 'src/node/server/demo-mode.js', reason: 'Public demo server contract' },
-      { path: 'packages/symbiote-node/xr/index.js', reason: 'XR provider API' },
+      { path: 'packages/symbiote-node/xr.js', reason: 'XR provider API' },
     ]));
   }
   if (toolName === 'untrack_files') {

@@ -114,13 +114,15 @@ mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
 
 fs.writeFileSync(mockPath, mockSrc);
 
-// ── Copy packages/symbiote-node/ ─────────────────────────────────
-console.log('  → Copying packages/symbiote-node/');
-copyDir(
-  path.join(ROOT, 'packages', 'symbiote-node'),
-  path.join(DIST, 'packages', 'symbiote-node'),
-  (name) => !SKIP_DIRS.has(name) && name !== '.git',
-);
+// ── Copy public Symbiote packages ────────────────────────────────
+for (let packageName of ['symbiote-node', 'symbiote-ui']) {
+  console.log(`  → Copying ${packageName}`);
+  copyDir(
+    path.join(ROOT, 'node_modules', packageName),
+    path.join(DIST, 'packages', packageName),
+    (name) => !SKIP_DIRS.has(name) && name !== '.git',
+  );
+}
 
 // ── Copy node_modules/@symbiotejs/symbiote/ ──────────────────────
 console.log('  → Copying @symbiotejs/symbiote');
@@ -144,22 +146,29 @@ let indexHtml = `<!DOCTYPE html>
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-	<link rel="stylesheet" href="/packages/symbiote-node/icons/material-symbols.css">
-	<link rel="stylesheet" href="${basePath}packages/symbiote-node/themes/default-provider.css">
+	<link rel="stylesheet" href="/packages/symbiote-ui/icons/material-symbols.css">
+	<link rel="stylesheet" href="${basePath}packages/symbiote-ui/themes/default-provider.css">
 	<link rel="stylesheet" href="${basePath}web/style.css">
 <script type="importmap">
     {
       "imports": {
         "@symbiotejs/symbiote": "${basePath}node_modules/@symbiotejs/symbiote/core/index.js",
 	        "@symbiotejs/symbiote/": "${basePath}node_modules/@symbiotejs/symbiote/",
+	        "symbiote-ui": "${basePath}packages/symbiote-ui/index.js",
+	        "symbiote-ui/core": "${basePath}packages/symbiote-ui/core/index.js",
+	        "symbiote-ui/core/base-path.js": "${basePath}packages/symbiote-ui/core/base-path.js",
+	        "symbiote-ui/ui": "${basePath}packages/symbiote-ui/ui/index.js",
+	        "symbiote-ui/graph": "${basePath}packages/symbiote-ui/graph/index.js",
+	        "symbiote-ui/locale": "${basePath}packages/symbiote-ui/locale/index.js",
+	        "symbiote-ui/layout": "${basePath}packages/symbiote-ui/layout/index.js",
+	        "symbiote-ui/xr": "${basePath}packages/symbiote-ui/xr/index.js",
 	        "symbiote-node": "${basePath}packages/symbiote-node/index.js",
-	        "symbiote-node/core": "${basePath}packages/symbiote-node/core/index.js",
-	        "symbiote-node/core/base-path.js": "${basePath}packages/symbiote-node/core/base-path.js",
-	        "symbiote-node/ui": "${basePath}packages/symbiote-node/ui/index.js",
-	        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph/index.js",
-	        "symbiote-node/locale": "${basePath}packages/symbiote-node/locale/index.js",
-	        "symbiote-node/layout": "${basePath}packages/symbiote-node/layout/index.js",
-	        "symbiote-node/xr": "${basePath}packages/symbiote-node/xr/index.js",
+	        "symbiote-node/core": "${basePath}packages/symbiote-node/core.js",
+	        "symbiote-node/ui": "${basePath}packages/symbiote-node/ui.js",
+	        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph.js",
+	        "symbiote-node/locale": "${basePath}packages/symbiote-node/locale.js",
+	        "symbiote-node/layout": "${basePath}packages/symbiote-node/layout.js",
+	        "symbiote-node/xr": "${basePath}packages/symbiote-node/xr.js",
 	        "symbiote-node/chat/chat-context.js": "${basePath}packages/symbiote-node/chat/chat-context.js",
 	        "symbiote-node/display/highlight": "${basePath}packages/symbiote-node/display/highlight.js",
 	        "symbiote-node/display/markdown-formatter": "${basePath}packages/symbiote-node/display/markdown-formatter.js",

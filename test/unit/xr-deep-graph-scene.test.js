@@ -5,8 +5,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const symbioteNodeUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'index.js')).href;
-const symbioteNodeXrUrl = pathToFileURL(resolve(repoRoot, 'packages', 'symbiote-node', 'xr', 'index.js')).href;
+const symbioteNodeUrl = pathToFileURL(resolve(repoRoot, 'node_modules', 'symbiote-node', 'index.js')).href;
+const symbioteNodeXrUrl = pathToFileURL(resolve(repoRoot, 'node_modules', 'symbiote-node', 'xr.js')).href;
 const loaderSource = `
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === 'symbiote-node') {

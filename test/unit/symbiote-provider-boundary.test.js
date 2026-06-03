@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const PACKAGE_ROOT = path.join(ROOT, 'packages/symbiote-node');
+const PACKAGE_ROOT = path.join(ROOT, 'node_modules/symbiote-node');
 const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
 const SCAN_ROOTS = ['web', 'src', 'demo', 'scripts'];
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'build', 'coverage']);
