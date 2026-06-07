@@ -1,6 +1,8 @@
 node_modules/
 tmp/
 .git/
+.gitmodules
+**/.gitmodules
 .github/
 .agent-portal/
 .portal/

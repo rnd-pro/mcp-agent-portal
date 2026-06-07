@@ -22,6 +22,8 @@ test('npm package keeps the web build script and generated dist output', () => {
 
   assert.equal(/^dist\/$/m.test(npmIgnore), false, 'published package must not ignore dist/');
   assert.match(npmIgnore, /^\.agent-portal\/$/m);
+  assert.match(npmIgnore, /^\.gitmodules$/m);
+  assert.match(npmIgnore, /^\*\*\/\.gitmodules$/m);
   assert.match(npmIgnore, /^\*\*\/\.project-graph-cache\.json$/m);
   assert.match(npmIgnore, /^!scripts\/build-web\.js$/m);
 });
