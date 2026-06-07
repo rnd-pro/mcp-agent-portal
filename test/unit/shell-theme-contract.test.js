@@ -466,6 +466,24 @@ describe('portal shell theme contract', () => {
     assert.equal(source.includes('.style.'), false, 'ActiveTasks must not use inline style mutation');
   });
 
+  it('keeps active task orchestration product-owned while composing provider primitives', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/ActiveTasks.js'), 'utf8');
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/ActiveTasks.tpl.js'), 'utf8');
+    let card = fs.readFileSync(path.join(ROOT, 'web/panels/ActiveTasks/TaskCard.js'), 'utf8');
+
+    assert.ok(source.includes("stateSync.on('tasks'"), 'ActiveTasks must stay wired to Agent Portal task state');
+    assert.ok(source.includes("serverName: 'agent-pool'"), 'ActiveTasks task operations are Agent Portal product orchestration');
+    for (let tool of ['list_tasks', 'cancel_task', 'finish_task']) {
+      assert.ok(source.includes(`name: '${tool}'`), `ActiveTasks must keep ${tool} in the product adapter`);
+    }
+    assert.ok(source.includes("from 'symbiote-ui/ui'"), 'ActiveTasks must consume provider UI helpers');
+    assert.ok(template.includes('<sn-button'), 'ActiveTasks refresh must use the provider button primitive');
+    assert.ok(template.includes('<sn-empty-state'), 'ActiveTasks empty state must use the provider empty-state primitive');
+    assert.ok(card.includes('<sn-card>'), 'TaskCard must use the provider card primitive');
+    assert.ok(card.includes('<sn-badge'), 'TaskCard must use the provider badge primitive');
+    assert.equal(source.includes("from 'symbiote-ui/task"), false, 'ActiveTasks must not invent a reusable task-board API before a product-neutral contract exists');
+  });
+
   it('keeps marketplace panel off copied shared shell classes', () => {
     let template = fs.readFileSync(path.join(ROOT, 'web/panels/Marketplace/Marketplace.tpl.js'), 'utf8');
     for (let sharedClass of ['ui-header', 'ui-title-large', 'ui-segmented-control', 'ui-field', 'ui-card-title']) {
