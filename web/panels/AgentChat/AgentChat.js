@@ -7,7 +7,7 @@ import {
   getRoute,
   parseQuery,
   updateParams,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
 import { ICONS } from '../../common/icons.js';
@@ -36,7 +36,7 @@ import {
   parseVoiceCommandList,
   wakeCommandCandidates,
 } from '../../common/voice-input-defaults.js';
-import { getLocalization } from 'symbiote-node/locale';
+import { getLocalization } from 'symbiote-ui/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import {
   buildChatTitleRequestNote,
@@ -82,7 +82,7 @@ export class AgentChat extends Symbiote {
     chatAdapter: '',
     adapterMeta: {},
     adapterOptionsHtml: '',
-    composerFooterHtml: '',
+    composerFooterControls: [],
     chatParams: {},
     attachedContext: [],
     isInputDisabled: true,
@@ -102,21 +102,22 @@ export class AgentChat extends Symbiote {
     this._bindComposer();
     this._loadVoiceInputSettings();
 
+    let composer = this._getComposer();
     this._ac = new ChatAutocomplete({
-      popupEl: this.ref.composer?.getAutocompleteElement?.(),
-      textareaEl: this.ref.composer?.getInputElement?.(),
+      popupEl: composer?.getAutocompleteElement?.(),
+      textareaEl: composer?.getInputElement?.(),
       onAttachFile: (newVal, path) => {
         this.$.inputVal = newVal;
-        this.ref.composer?.setValue?.(newVal);
+        this._getComposer()?.setValue?.(newVal);
         this._attachContext({ type: 'file', path, source: 'autocomplete' });
       },
       onInsertWorkflow: (newVal) => {
         this.$.inputVal = newVal;
-        this.ref.composer?.setValue?.(newVal);
+        this._getComposer()?.setValue?.(newVal);
       }
     });
 
-    this.ref.chatTranscript?.addEventListener('status-card-open', (event) => {
+    this._getTranscript()?.addEventListener('status-card-open', (event) => {
       let chatId = event.detail?.linkId;
       if (!chatId) return;
       dashState.activeChatId = chatId;
@@ -141,7 +142,7 @@ export class AgentChat extends Symbiote {
           }).catch(() => {});
         }
       },
-      onBackgroundToggle: (isActive) => this.ref.cellBg?.toggle(isActive),
+      onBackgroundToggle: (isActive) => this._setBackgroundActive(isActive),
       onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
       onMeta: (meta) => this._renderLiveStatus(meta),
       onProjectTransaction: (detail) => this._applyProjectTransactionEvent(detail),
@@ -179,7 +180,7 @@ export class AgentChat extends Symbiote {
       this._renderMessages();
       this._applyProjectTransactions(_msgs);
       this._updateEmptyState();
-      this._syncVoiceResponseButton();
+      this._syncVoiceControls();
       // Re-evaluate adapter options to lock provider when messages appear.
       queueMicrotask(() => this._updateComposerFooter());
     });
@@ -199,7 +200,7 @@ export class AgentChat extends Symbiote {
     this.sub('attachedContext', () => this._syncComposerComponent());
     this.sub('isInputDisabled', () => this._syncComposerComponent());
     this.sub('inputPlaceholder', () => this._syncComposerComponent());
-    this.sub('composerFooterHtml', () => this._syncComposerComponent());
+    this.sub('composerFooterControls', () => this._syncComposerComponent());
 
     // Sync state from router after all listeners are attached (fixes cold load bug)
     this._syncChatFromRouter();
@@ -213,18 +214,38 @@ export class AgentChat extends Symbiote {
     super.disconnectedCallback?.();
   }
 
+  _getWorkspace() {
+    return this.ref.workspace || this.querySelector('chat-workspace');
+  }
+
+  _getComposer() {
+    return this._getWorkspace()?.getComposer?.() || null;
+  }
+
+  _getTranscript() {
+    return this._getWorkspace()?.getTranscript?.() || null;
+  }
+
+  _setBackgroundActive(active) {
+    this._getWorkspace()?.setBackgroundState?.({
+      state: active ? 'streaming' : 'idle',
+      active: Boolean(active),
+    });
+  }
+
   _bindComposer() {
-    let composer = this.ref.composer;
-    if (!composer || this._composerBound) return;
+    let workspace = this._getWorkspace();
+    let composer = this._getComposer();
+    if (!workspace || !composer || this._composerBound) return;
     this._composerBound = true;
 
-    composer.addEventListener('chat-composer-input', (event) => {
+    workspace.addEventListener('chat-workspace-input', (event) => {
       let value = event.detail?.value || '';
       this.$.inputVal = value;
       this._ac?.check(value, event.detail?.selectionStart);
     });
 
-    composer.addEventListener('chat-composer-key', (event) => {
+    workspace.addEventListener('chat-workspace-key', (event) => {
       let key = event.detail?.key;
       let originalEvent = event.detail?.event;
       if (key === 'Escape') this._ac?.hide();
@@ -240,33 +261,74 @@ export class AgentChat extends Symbiote {
       }
     });
 
-    composer.addEventListener('chat-composer-submit', () => this._sendMessage());
-    composer.addEventListener('chat-composer-send', () => this._handleComposerSend());
-    composer.addEventListener('chat-composer-voice-approve', () => this._stopRecording({ autoSend: true }));
-    composer.addEventListener('chat-composer-voice-cancel', () => this._cancelVoiceResult());
-    composer.addEventListener('chat-composer-voice-send', () => this._confirmVoiceResult());
-    composer.addEventListener('chat-composer-param-change', (event) => this._handleComposerParamChange(event.detail));
-    composer.addEventListener('chat-composer-context-remove', (event) => {
-      this.$.attachedContext = removeAttachedContext(this.$.attachedContext, event.detail?.key);
-    });
-    composer.addEventListener('chat-composer-context-drop', (event) => {
-      let path = event.detail?.path;
-      if (path) this._attachContext({ type: 'file', path, source: 'drop' });
-    });
+    workspace.addEventListener('chat-workspace-submit', () => this._sendMessage());
+    workspace.addEventListener('chat-workspace-send', () => this._handleComposerSend());
+    workspace.addEventListener('chat-workspace-voice-intent', (event) => this._handleWorkspaceVoiceIntent(event.detail || {}));
+    workspace.addEventListener('chat-workspace-footer-intent', (event) => this._handleWorkspaceFooterIntent(event.detail || {}));
+    workspace.addEventListener('chat-workspace-context-intent', (event) => this._handleWorkspaceContextIntent(event.detail || {}));
 
     this._syncComposerComponent();
-    this._setupMicButton();
+    this._setupVoiceControls();
   }
 
   _syncComposerComponent() {
-    let composer = this.ref.composer;
-    if (!composer) return;
-    composer.setValue?.(this.$.inputVal || '');
-    composer.setAttachedContext?.(this.$.attachedContext || []);
-    composer.setDisabled?.(this.$.isInputDisabled);
-    composer.setPlaceholder?.(this.$.inputPlaceholder || '');
-    composer.setFooterHtml?.(this.$.composerFooterHtml || '');
-    composer.setSending?.(this._isSending);
+    this._getWorkspace()?.setComposerState?.({
+      value: this.$.inputVal || '',
+      attachedContext: this.$.attachedContext || [],
+      disabled: this.$.isInputDisabled,
+      placeholder: this.$.inputPlaceholder || '',
+      footerControls: this.$.composerFooterControls || [],
+      sending: this._isSending,
+      voiceControls: this._buildVoiceControlsConfig(),
+    });
+  }
+
+  _handleWorkspaceVoiceIntent(detail = {}) {
+    switch (detail.sourceEvent) {
+      case 'chat-composer-voice-input':
+        this._toggleRecording();
+        break;
+      case 'chat-composer-wake-listen':
+        this._toggleWakeMode();
+        break;
+      case 'chat-composer-voice-response-toggle':
+        this._toggleVoiceResponseMode();
+        break;
+      case 'chat-composer-voice-command-toggle':
+        this._toggleVoiceCommandMode();
+        break;
+      case 'chat-composer-voice-language-change':
+        this._setVoiceLanguageMode(detail.mode);
+        break;
+      case 'chat-composer-voice-approve':
+        this._stopRecording({ autoSend: true });
+        break;
+      case 'chat-composer-voice-cancel':
+        this._cancelVoiceResult();
+        break;
+      case 'chat-composer-voice-send':
+        this._confirmVoiceResult();
+        break;
+    }
+  }
+
+  _handleWorkspaceFooterIntent(detail = {}) {
+    if (detail.sourceEvent === 'chat-composer-footer-control-change') return;
+    if (detail.id === 'settings') {
+      globalThis.location.href = '/#resource-groups';
+      return;
+    }
+    if (detail.id) this._handleComposerParamChange(detail);
+  }
+
+  _handleWorkspaceContextIntent(detail = {}) {
+    if (detail.sourceEvent === 'chat-composer-context-remove') {
+      this.$.attachedContext = removeAttachedContext(this.$.attachedContext, detail.key);
+      return;
+    }
+    if (detail.sourceEvent === 'chat-composer-context-drop' && detail.path) {
+      this._attachContext({ type: 'file', path: detail.path, source: 'drop' });
+    }
   }
 
   _handleComposerSend() {
@@ -344,88 +406,21 @@ export class AgentChat extends Symbiote {
     this.$.attachedContext = mergeAttachedContext(this.$.attachedContext || [], item);
   }
 
-  /** Toggle empty attribute on chat-view based on message count */
   _updateEmptyState() {
-    let view = this.ref.chatView;
-    if (view) {
-      let hasMessages = this.$.messages && this.$.messages.length > 0;
-      view.toggleAttribute('empty', !hasMessages);
-    }
+    let hasMessages = this.$.messages && this.$.messages.length > 0;
+    this._getWorkspace()?.setEmpty?.(!hasMessages);
   }
 
-  /** Toggle send button between arrow_upward and stop */
-  _setupMicButton() {
-    let composer = this.ref.composer;
-    if (!composer || !this._audioRecorder.isAvailable) return;
-    let body = composer.querySelector('.composer-body:not(.voice-preview)');
-    let sendBtn = body?.querySelector('.btn-send');
-    if (!body || !sendBtn || body.querySelector('.btn-mic')) return;
-
-    let micBtn = document.createElement('button');
-    micBtn.className = 'btn-mic';
-    micBtn.type = 'button';
-    micBtn.title = 'Voice input';
-    micBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
-    body.insertBefore(micBtn, sendBtn);
-    this._micBtn = micBtn;
-
-    let wakeBtn = document.createElement('button');
-    wakeBtn.className = 'btn-wake-listen';
-    wakeBtn.type = 'button';
-    wakeBtn.title = tPortal('settings.voice.listenButton');
-    wakeBtn.setAttribute('aria-pressed', 'false');
-    wakeBtn.innerHTML = [
-      '<span class="material-symbols-outlined">hearing</span>',
-      '<span class="wake-command-text"></span>',
-    ].join('');
-    if (!this._audioRecorder.hasSpeechRecognition) {
-      wakeBtn.disabled = true;
-      wakeBtn.title = tPortal('settings.voice.listenUnavailable');
-    }
-    body.insertBefore(wakeBtn, micBtn);
-    this._wakeBtn = wakeBtn;
-
-    let responseBtn = document.createElement('button');
-    responseBtn.className = 'btn-voice-response';
-    responseBtn.type = 'button';
-    responseBtn.title = tPortal('settings.voice.speakResponse');
-    responseBtn.hidden = true;
-    responseBtn.innerHTML = '<span class="material-symbols-outlined">record_voice_over</span>';
-    body.insertBefore(responseBtn, micBtn);
-    this._voiceResponseBtn = responseBtn;
-
-    let languageBtn = document.createElement('button');
-    languageBtn.className = 'btn-voice-language';
-    languageBtn.type = 'button';
-    languageBtn.hidden = true;
-    languageBtn.setAttribute('aria-pressed', 'false');
-    body.insertBefore(languageBtn, responseBtn);
-    this._voiceLanguageBtn = languageBtn;
-
-    let commandBtn = document.createElement('button');
-    commandBtn.className = 'btn-voice-command';
-    commandBtn.type = 'button';
-    commandBtn.hidden = true;
-    commandBtn.setAttribute('aria-pressed', 'false');
-    body.insertBefore(commandBtn, languageBtn);
-    this._voiceCommandBtn = commandBtn;
-
-    micBtn.onclick = () => this._toggleRecording();
-    wakeBtn.onclick = () => this._toggleWakeMode();
-    responseBtn.onclick = () => this._toggleVoiceResponseMode();
-    languageBtn.onclick = (event) => this._handleVoiceLanguageClick(event);
-    commandBtn.onclick = () => this._toggleVoiceCommandMode();
-    this._syncVoiceCommandButton();
-    this._syncVoiceLanguageButton();
-
-    // Live interim results callback
+  _setupVoiceControls() {
+    if (this._voiceControlsBound) return;
+    this._voiceControlsBound = true;
     this._audioRecorder.onInterim = (text, elapsed) => {
       this._updateVoicePreview(text, elapsed);
     };
     this._audioRecorder.onStateChange = () => {
-      this._syncVoiceCommandButton();
-      this._syncVoiceLanguageButton();
+      this._syncVoiceControls();
     };
+    this._syncVoiceControls();
   }
 
   _toggleVoiceCommandMode() {
@@ -633,36 +628,74 @@ export class AgentChat extends Symbiote {
   }
 
   _syncWakeButton() {
-    if (!this._wakeBtn) return;
+    this._syncVoiceControls();
+  }
+
+  _buildVoiceControlsConfig() {
     let command = this._getWakeCommandPhrase();
-    this._wakeBtn.classList.toggle('listening', this._wakeModeEnabled);
-    this._wakeBtn.classList.toggle('has-command', this._wakeModeEnabled);
-    this._wakeBtn.setAttribute('aria-pressed', this._wakeModeEnabled ? 'true' : 'false');
-    this._wakeBtn.title = this._wakeModeEnabled
-      ? tPortal('settings.voice.listeningFor', { command })
-      : tPortal('settings.voice.listenButton');
-    let commandText = this._wakeBtn.querySelector('.wake-command-text');
-    if (commandText) {
-      commandText.textContent = this._wakeModeEnabled
-        ? tPortal('settings.voice.sayCommand', { command })
-        : '';
-    }
-    if (this._micBtn) this._micBtn.hidden = this._wakeModeEnabled;
-    this._syncVoiceResponseButton();
-    this._syncVoiceCommandButton();
-    this._syncVoiceLanguageButton();
+    let speechAvailable = Boolean(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance);
+    let recognitionAvailable = Boolean(this._audioRecorder.hasSpeechRecognition);
+    let active = this._voiceControlActive();
+    let languageOption = this._voiceLanguageOption();
+    let voiceState = this._audioRecorder.state === 'recording'
+      ? 'listening'
+      : this._audioRecorder.state === 'starting'
+        ? 'transcribing'
+        : this._audioRecorder.state === 'processing'
+          ? 'transcribing'
+          : this._audioRecorder.isAvailable
+            ? 'idle'
+            : 'disabled';
+
+    return {
+      input: {
+        visible: Boolean(this._audioRecorder.isAvailable) && !this._wakeModeEnabled,
+        enabled: Boolean(this._audioRecorder.isAvailable),
+        state: voiceState,
+      },
+      wakeListen: {
+        visible: Boolean(this._audioRecorder.isAvailable),
+        enabled: recognitionAvailable,
+        active: this._wakeModeEnabled,
+        commandText: this._wakeModeEnabled ? tPortal('settings.voice.sayCommand', { command }) : '',
+        title: this._wakeModeEnabled
+          ? tPortal('settings.voice.listeningFor', { command })
+          : recognitionAvailable
+            ? tPortal('settings.voice.listenButton')
+            : tPortal('settings.voice.listenUnavailable'),
+      },
+      response: {
+        visible: this._wakeModeEnabled,
+        enabled: this._wakeModeEnabled && speechAvailable,
+        active: this._voiceResponseEnabled,
+        speaking: this._speakingVoiceResponse,
+        title: speechAvailable ? tPortal('settings.voice.speakResponse') : tPortal('settings.voice.speakUnavailable'),
+      },
+      command: {
+        visible: active,
+        enabled: active,
+        active: this._voiceCommandMode,
+        text: tPortal('settings.voice.commandsButton'),
+        title: this._voiceCommandMode
+          ? tPortal('settings.voice.commandsEnabled')
+          : tPortal('settings.voice.commandsDisabled'),
+      },
+      language: {
+        visible: recognitionAvailable && active,
+        enabled: recognitionAvailable && active,
+        mode: languageOption.mode,
+        title: tPortal('settings.voice.languageButton', { language: languageOption.label }),
+        options: this._voiceLanguageOptions().map((item) => ({
+          mode: item.mode,
+          label: item.short,
+          title: item.label,
+        })),
+      },
+    };
   }
 
   _syncVoiceResponseButton() {
-    if (!this._voiceResponseBtn) return;
-    let available = Boolean(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance);
-    this._voiceResponseBtn.hidden = !this._wakeModeEnabled;
-    this._voiceResponseBtn.disabled = !this._wakeModeEnabled || !available;
-    this._voiceResponseBtn.classList.toggle('enabled', this._voiceResponseEnabled);
-    this._voiceResponseBtn.classList.toggle('speaking', this._speakingVoiceResponse);
-    this._voiceResponseBtn.title = !available
-      ? tPortal('settings.voice.speakUnavailable')
-      : tPortal('settings.voice.speakResponse');
+    this._syncVoiceControls();
   }
 
   _toggleVoiceResponseMode() {
@@ -683,51 +716,15 @@ export class AgentChat extends Symbiote {
   }
 
   _syncVoiceCommandButton() {
-    if (!this._voiceCommandBtn) return;
-    let active = this._voiceControlActive();
-    this._voiceCommandBtn.hidden = !active;
-    this._voiceCommandBtn.disabled = !active;
-    this._voiceCommandBtn.classList.toggle('active', this._voiceCommandMode);
-    this._voiceCommandBtn.setAttribute('aria-pressed', this._voiceCommandMode ? 'true' : 'false');
-    this._voiceCommandBtn.title = this._voiceCommandMode
-      ? tPortal('settings.voice.commandsEnabled')
-      : tPortal('settings.voice.commandsDisabled');
-    this._voiceCommandBtn.setAttribute('aria-label', this._voiceCommandBtn.title);
-    this._voiceCommandBtn.innerHTML = [
-      `<span class="material-symbols-outlined">${this._voiceCommandMode ? 'toggle_on' : 'toggle_off'}</span>`,
-      `<span class="voice-command-button-text">${escapeHtml(tPortal('settings.voice.commandsButton'))}</span>`,
-    ].join('');
+    this._syncVoiceControls();
   }
 
   _syncVoiceLanguageButton() {
-    if (!this._voiceLanguageBtn) return;
-    let option = this._voiceLanguageOption();
-    let available = Boolean(this._audioRecorder.hasSpeechRecognition);
-    let active = this._voiceControlActive();
-    this._voiceLanguageBtn.hidden = !available || !active;
-    this._voiceLanguageBtn.disabled = !available || !active;
-    this._voiceLanguageBtn.dataset.mode = option.mode;
-    this._voiceLanguageBtn.innerHTML = this._voiceLanguageOptions().map((item) => [
-      `<span class="voice-language-option${item.mode === option.mode ? ' active' : ''}" data-voice-language="${item.mode}">`,
-      escapeHtml(item.short),
-      '</span>',
-    ].join('')).join('');
-    this._voiceLanguageBtn.title = tPortal('settings.voice.languageButton', { language: option.label });
-    this._voiceLanguageBtn.setAttribute('aria-label', this._voiceLanguageBtn.title);
-    this._voiceLanguageBtn.setAttribute('aria-pressed', 'true');
+    this._syncVoiceControls();
   }
 
-  _nextVoiceLanguageMode() {
-    let options = this._voiceLanguageOptions();
-    let index = options.findIndex((item) => item.mode === this._voiceLanguageMode);
-    return (options[(index + 1) % options.length] || options[0]).mode;
-  }
-
-  _handleVoiceLanguageClick(event = {}) {
-    let targetMode = event.target?.closest?.('[data-voice-language]')?.dataset?.voiceLanguage;
-    let nextMode = targetMode || this._nextVoiceLanguageMode();
-    if (nextMode === this._voiceLanguageMode) return;
-    this._setVoiceLanguageMode(nextMode);
+  _syncVoiceControls() {
+    this._getWorkspace()?.setVoiceControls?.(this._buildVoiceControlsConfig());
   }
 
   async _setVoiceLanguageMode(mode) {
@@ -952,14 +949,14 @@ export class AgentChat extends Symbiote {
       }
     }
     let seconds = typeof elapsed === 'number' ? elapsed : this._audioRecorder.elapsed;
-    this.ref.composer?.setVoicePreview?.({
+    this._getComposer()?.setVoicePreview?.({
       mode: 'recording',
       status: this._formatVoiceElapsed(seconds),
       text: this._voiceInterimText || '',
       elapsed: true,
       commandHints: this._voiceCommandMode ? this._voiceCommandHints() : [],
     });
-    this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || this._voicePreview;
+    this._voicePreview = this._getComposer()?.getVoicePreviewElement?.() || this._voicePreview;
   }
 
   async _handleVoiceCommandAction(command) {
@@ -993,11 +990,7 @@ export class AgentChat extends Symbiote {
       this._stopWakeListening({ disableMode: true });
       this._audioRecorder.cancel();
       this._removeVoicePreview();
-      this._micBtn?.classList.remove('recording', 'processing');
-      let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = 'mic';
-      this._syncVoiceCommandButton();
-      this._syncVoiceLanguageButton();
+      this._syncVoiceControls();
     }
   }
 
@@ -1008,7 +1001,7 @@ export class AgentChat extends Symbiote {
   }
 
   _ensureVoicePreview(mode = 'recording') {
-    let composer = this.ref.composer;
+    let composer = this._getComposer();
     if (!composer?.isConnected) return;
 
     let needsPreview = !this._voicePreview?.isConnected || this._voicePreview?.hidden;
@@ -1026,7 +1019,7 @@ export class AgentChat extends Symbiote {
 
   /** Show the composer-owned voice preview. */
   _showVoicePreview(mode = 'recording') {
-    let composer = this.ref.composer;
+    let composer = this._getComposer();
     if (!composer) return;
     let recording = mode === 'recording';
     composer.setVoicePreview?.({
@@ -1057,17 +1050,15 @@ export class AgentChat extends Symbiote {
 
   _showVoiceError(message) {
     this._stopVoiceUiTimer();
-    this.ref.composer?.setVoicePreview?.({ mode: 'error', text: message });
-    this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
+    this._getComposer()?.setVoicePreview?.({ mode: 'error', text: message });
+    this._voicePreview = this._getComposer()?.getVoicePreviewElement?.() || null;
     this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
     this._voiceCommandTriggered = false;
     this._voiceCommandHandling = false;
     this._voiceCommandTextOverride = '';
-    this._micBtn?.classList.remove('recording', 'processing');
-    let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-    if (icon) icon.textContent = 'mic';
+    this._syncVoiceControls();
   }
 
   async _isMicrophonePermissionPrompt() {
@@ -1084,7 +1075,7 @@ export class AgentChat extends Symbiote {
   }
 
   _removeVoicePreview() {
-    this.ref.composer?.clearVoicePreview?.();
+    this._getComposer()?.clearVoicePreview?.();
     this._voicePreview = null;
     this._voiceCommandTriggered = false;
     this._voiceCommandHandling = false;
@@ -1112,7 +1103,7 @@ export class AgentChat extends Symbiote {
         this._startVoiceUiTimer();
         this._audioRecorder.setLanguage(this._voiceRecognitionLanguage());
         await this._audioRecorder.start();
-        this._micBtn?.classList.add('recording');
+        this._syncVoiceControls();
       } catch (err) {
         console.warn('[AgentChat] Primary mic start failed, trying fallback:', err.message);
         this._stopVoiceUiTimer();
@@ -1126,7 +1117,7 @@ export class AgentChat extends Symbiote {
             await this._audioRecorder.startMediaRecorder();
             this._showVoicePreview('recording');
             this._startVoiceUiTimer();
-            this._micBtn?.classList.add('recording');
+            this._syncVoiceControls();
           } catch (err2) {
             console.error('[AgentChat] Mic fallback also failed:', err2);
             let message = wasMicrophonePrompt
@@ -1148,10 +1139,13 @@ export class AgentChat extends Symbiote {
 
   async _stopRecording({ autoSend = false, textOverride = '' } = {}) {
     this._stopVoiceUiTimer();
-    this._micBtn?.classList.remove('recording');
-    this._micBtn?.classList.add('processing');
-    let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-    if (icon) icon.textContent = 'progress_activity';
+    this._getWorkspace()?.setVoiceControls?.({
+      input: {
+        visible: Boolean(this._audioRecorder.isAvailable) && !this._wakeModeEnabled,
+        enabled: Boolean(this._audioRecorder.isAvailable),
+        state: 'transcribing',
+      },
+    });
 
     try {
       let result = await this._audioRecorder.stop();
@@ -1159,8 +1153,8 @@ export class AgentChat extends Symbiote {
 
       // If no text from Speech API, try server transcription
       if (!text && result.audioBase64) {
-        this.ref.composer?.setVoicePreview?.({ mode: 'processing', status: 'Transcribing...', text: '', elapsed: true });
-        this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
+        this._getComposer()?.setVoicePreview?.({ mode: 'processing', status: 'Transcribing...', text: '', elapsed: true });
+        this._voicePreview = this._getComposer()?.getVoicePreviewElement?.() || null;
 
         let res = await fetch('/api/audio/transcribe', {
           method: 'POST',
@@ -1187,12 +1181,12 @@ export class AgentChat extends Symbiote {
         this._voiceCommandTextOverride = '';
         if (autoSend) {
           this._removeVoicePreview();
-          this.ref.composer?.setValue?.(text);
+          this._getComposer()?.setValue?.(text);
           this.$.inputVal = text;
           this._sendMessage({ voiceTranscribed: true });
         } else {
-          this.ref.composer?.setVoicePreview?.({ mode: 'result', text, editable: true });
-          this._voicePreview = this.ref.composer?.getVoicePreviewElement?.() || null;
+          this._getComposer()?.setVoicePreview?.({ mode: 'result', text, editable: true });
+          this._voicePreview = this._getComposer()?.getVoicePreviewElement?.() || null;
         }
       } else {
         let message = this._voicePermissionPromptBeforeStart
@@ -1204,16 +1198,14 @@ export class AgentChat extends Symbiote {
       console.error('[AgentChat] Transcription error:', err);
       this._showVoiceError('Transcription failed. Try again.');
     } finally {
-      this._micBtn?.classList.remove('processing');
-      let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = 'mic';
       this._voicePermissionPromptBeforeStart = false;
+      this._syncVoiceControls();
       this._resumeWakeListeningAfterRecording();
     }
   }
 
   _confirmVoiceResult() {
-    let body = this.ref.composer?.getVoicePreviewBody?.() || this._voicePreview?.querySelector('.voice-preview-body');
+    let body = this._getComposer()?.getVoicePreviewBody?.();
     let text = body?.textContent?.trim() || this._voiceResultText || '';
     this._removeVoicePreview();
     this._voiceInterimText = '';
@@ -1223,7 +1215,7 @@ export class AgentChat extends Symbiote {
     this._voiceCommandHandling = false;
     this._voiceCommandTextOverride = '';
     if (!text) return;
-    this.ref.composer?.setValue?.(text);
+    this._getComposer()?.setValue?.(text);
     this.$.inputVal = text;
     this._sendMessage({ voiceTranscribed: true });
   }
@@ -1238,23 +1230,21 @@ export class AgentChat extends Symbiote {
     this._voiceCommandHandling = false;
     this._voiceCommandTextOverride = '';
     this._audioRecorder.cancel();
-    this._micBtn?.classList.remove('recording', 'processing');
-    let icon = this._micBtn?.querySelector('.material-symbols-outlined');
-    if (icon) icon.textContent = 'mic';
+    this._syncVoiceControls();
     this._resumeWakeListeningAfterRecording();
   }
 
 
   _setSending(active, { speak = true } = {}) {
     this._isSending = active;
-    this.ref.composer?.setSending?.(active);
+    this._getComposer()?.setSending?.(active);
     this._renderMessages();
     if (!active && speak) this._speakPendingAgentResponse();
   }
 
   _focusInput() {
     requestAnimationFrame(() => {
-      let input = this.ref.composer?.getInputElement?.();
+      let input = this._getComposer()?.getInputElement?.();
       if (input && !input.disabled) input.focus();
     });
   }
@@ -1301,7 +1291,8 @@ export class AgentChat extends Symbiote {
     this._updatingOptions = true;
     if (paramsToMap.length > 0) {
       let paramsChanged = defaultParamsChanged;
-      let htmlStr = paramsToMap.map(p => {
+      let controls = paramsToMap.map(p => {
+        let priority = this._composerParamPriorityValue(p.id);
         let priorityClass = this._composerParamPriorityClass(p.id);
         if (p.type === 'select' && Array.isArray(p.options)) {
           let paramValue = currentParams[p.id];
@@ -1359,31 +1350,28 @@ export class AgentChat extends Symbiote {
             }
           }
           
-          let optionsHtml = '';
-          if (p.id === 'model' && !paramValue) {
-            optionsHtml += `<option value="" disabled selected>-- Model --</option>`;
-          }
-          
-          optionsHtml += p.options.map(opt => {
+          let options = p.options.map(opt => {
             let val = typeof opt === 'string' ? opt : opt.val;
             let text = typeof opt === 'string' ? opt : opt.text;
             // Show group metadata in option text for resource_group
             if (p.id === 'resource_group' && typeof opt === 'object' && opt.subtitle) {
               text += ` — ${opt.subtitle}`;
             }
-            let sel = val === paramValue ? 'selected' : '';
-            return `<option value="${escapeHtml(val)}" ${sel}>${escapeHtml(text)}</option>`;
-          }).join('');
+            return { value: val, label: text };
+          });
           
-          let disabledAttr = '';
+          let disabled = false;
+          let disabledTitle = '';
           let activeGroup = currentParams.resource_group;
           let groupIsActive = activeGroup && activeGroup !== 'none';
           if ((p.id === 'provider' || p.id === 'agent') && this.$.messages && this.$.messages.length > 0) {
-            disabledAttr = `disabled title="${escapeHtml(tPortal('text.locked'))}"`;
+            disabled = true;
+            disabledTitle = tPortal('text.locked');
           }
           // Disable provider+model when a resource group is active
           if ((p.id === 'provider' || p.id === 'model') && groupIsActive) {
-            disabledAttr = `disabled title="Managed by resource group: ${escapeHtml(activeGroup)}"`;
+            disabled = true;
+            disabledTitle = `Managed by resource group: ${activeGroup}`;
           }
 
           let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'resource_group' ? 'view_kanban' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
@@ -1395,7 +1383,18 @@ export class AgentChat extends Symbiote {
             titleText += ` (${currentOption.subtitle})`;
           }
           
-          return `<span class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(titleText)}"><span class="material-symbols-outlined">${iconName}</span><select class="composer-footer-select" data-param="${escapeHtml(p.id)}" aria-label="${escapeHtml(p.label)}" ${disabledAttr}>${optionsHtml}</select></span>`;
+          return {
+            id: p.id,
+            kind: 'select',
+            icon: iconName,
+            label: p.label,
+            title: disabledTitle || titleText,
+            value: paramValue || '',
+            options,
+            disabled,
+            priority,
+            className: `composer-param composer-param-${p.id} ${priorityClass}`,
+          };
         } else if (p.type === 'boolean') {
           let paramValue = currentParams[p.id];
           if (paramValue === undefined) {
@@ -1403,19 +1402,32 @@ export class AgentChat extends Symbiote {
             currentParams[p.id] = paramValue;
             paramsChanged = true;
           }
-          let checked = paramValue ? 'checked' : '';
           
-          return `<label class="composer-footer-btn composer-param composer-param-${escapeHtml(p.id)} ${priorityClass}" title="${escapeHtml(p.label)}">
-            <input type="checkbox" class="composer-footer-checkbox" data-param="${escapeHtml(p.id)}" ${checked} hidden>
-            <span class="material-symbols-outlined composer-toggle-icon">${paramValue ? 'toggle_on' : 'toggle_off'}</span>
-            <span class="composer-footer-label">${escapeHtml(p.label)}</span>
-          </label>`;
+          return {
+            id: p.id,
+            kind: 'checkbox',
+            icon: paramValue ? 'toggle_on' : 'toggle_off',
+            label: p.label,
+            title: p.label,
+            checked: Boolean(paramValue),
+            value: Boolean(paramValue),
+            priority,
+            className: `composer-param composer-param-${p.id} ${priorityClass}`,
+          };
         }
-        return '';
-      }).join('');
-      // Append settings button at the end of all selectors
-      htmlStr += '<a href="/#resource-groups" class="composer-footer-btn composer-settings-btn" title="Configure Resource Groups"><span class="material-symbols-outlined">settings</span></a>';
-      this.$.composerFooterHtml = htmlStr;
+        return null;
+      }).filter(Boolean);
+      controls.push({
+        id: 'settings',
+        kind: 'button',
+        icon: 'settings',
+        label: tPortal('text.settings'),
+        title: 'Configure Resource Groups',
+        priority: 1,
+        compact: true,
+        className: 'composer-settings-btn',
+      });
+      this.$.composerFooterControls = controls;
       // Batch-persist defaults only for local user/composer changes.
       if (paramsChanged) {
         this.$.chatParams = { ...currentParams };
@@ -1429,9 +1441,21 @@ export class AgentChat extends Symbiote {
         }
       }
     } else {
-      this.$.composerFooterHtml = '';
+      this.$.composerFooterControls = [];
     }
     this._updatingOptions = false;
+  }
+
+  _composerParamPriorityValue(paramId) {
+    switch (paramId) {
+      case 'agent': return 5;
+      case 'resource_group': return 4;
+      case 'model': return 3;
+      case 'provider':
+      case 'approval_mode': return 2;
+      case 'chatType': return 1;
+      default: return 1;
+    }
   }
 
   _composerParamPriorityClass(paramId) {
@@ -1509,7 +1533,7 @@ export class AgentChat extends Symbiote {
 
 
   _renderMessages() {
-    let transcript = this.ref.chatTranscript;
+    let transcript = this._getTranscript();
     if (!transcript) return;
     let isAtBottom = transcript.isAtBottom?.(10) ?? true;
 
@@ -1663,8 +1687,8 @@ export class AgentChat extends Symbiote {
     this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
     this.$.inputVal = '';
     this.$.attachedContext = []; // Clear context after send
-    this.ref.composer?.setValue?.('');
-    this.ref.composer?.resetInputHeight?.();
+    this._getComposer()?.setValue?.('');
+    this._getComposer()?.resetInputHeight?.();
     this._setSending(true);
 
     // Persist
@@ -1680,14 +1704,14 @@ export class AgentChat extends Symbiote {
       let structuredEvents = null;
 
       if (adapter === 'pool') {
-        if (this.ref.cellBg) this.ref.cellBg.toggle(true);
+        this._setBackgroundActive(true);
 
         reply = await this._wsClient.send(chatId, agentPrompt, sendParams, this._sessionId);
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
         this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.processing') }];
-        if (this.ref.cellBg) this.ref.cellBg.toggle(true);
+        this._setBackgroundActive(true);
 
         let payload = { ...sendParams, type: adapter, prompt: agentPrompt };
         if (!payload.timeout) payload.timeout = 300;
@@ -1745,7 +1769,7 @@ export class AgentChat extends Symbiote {
       this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.errorWithMessage', { message: err.message }) }];
     }
     this._setSending(false);
-    if (this.ref.cellBg) this.ref.cellBg.toggle(false);
+    this._setBackgroundActive(false);
   }
 
   _handlePulledChat(chat, detail = {}) {
@@ -1789,8 +1813,8 @@ export class AgentChat extends Symbiote {
   }
 
   _syncComposerParamsFromDom() {
-    if (!this.ref.composer) return false;
-    let selects = this.ref.composer.getParamControls?.() || [];
+    if (!this._getComposer()) return false;
+    let selects = this._getComposer().getParamControls?.() || [];
     let paramsObj = { ...this.$.chatParams };
     let hasChanges = false;
     for (let select of selects) {
@@ -1927,11 +1951,7 @@ export class AgentChat extends Symbiote {
     // Clean up any active voice recording
     this._removeVoicePreview();
     this._audioRecorder.cancel();
-    if (this._micBtn) {
-      this._micBtn.classList.remove('recording', 'processing');
-      let icon = this._micBtn.querySelector('.material-symbols-outlined');
-      if (icon) icon.textContent = 'mic';
-    }
+    this._syncVoiceControls();
     // Reset sending state — each chat manages its own task lifecycle independently.
     // The correct state will be restored below if the chat has a pendingTaskId.
     this._setSending(false, { speak: false });
@@ -1999,7 +2019,7 @@ export class AgentChat extends Symbiote {
    * @param {object|null} meta - { phase, messageCount, lastToolName, thinkingStatus } or null to clear
    */
   _renderLiveStatus(meta) {
-    this.ref.chatTranscript?.renderLiveStatus(meta);
+    this._getTranscript()?.renderLiveStatus(meta);
   }
 
   /**
@@ -2030,7 +2050,7 @@ export class AgentChat extends Symbiote {
           let status = task.status || 'running';
           let isDone = status === 'done' || status === 'error' || status === 'cancelled' || status === 'lost';
 
-          this.ref.chatTranscript?.updateStatusCard?.(taskId, {
+          this._getTranscript()?.updateStatusCard?.(taskId, {
             status,
             startedAt: task.startedAt,
             updatedAt: task.updatedAt,

@@ -1,8 +1,8 @@
 import { Symbiote } from "@symbiotejs/symbiote";
-import { sharedUiStyles as cssShared } from "symbiote-node/ui";
+import { sharedUiStyles as cssShared } from "symbiote-ui/ui";
 import cssLocal from "./SettingsPanel.css.js";
 import template from "./SettingsPanel.tpl.js";
-import { uiConfirm } from 'symbiote-node/ui';
+import { uiConfirm } from 'symbiote-ui/ui';
 import {
   getPortalLocaleOptions,
   setPortalLocaleMode,
@@ -16,7 +16,7 @@ import {
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
 } from '../../common/voice-input-defaults.js';
-import { getLocalization } from 'symbiote-node/locale';
+import { getLocalization } from 'symbiote-ui/locale';
 
 function renderMetric(label, value, status = "") {
   let metric = document.createElement("sn-metric");
