@@ -11,6 +11,7 @@ import {
 import {
   buildHash,
   buildDirectoryInfo,
+  createSourceDocument,
   getRoute,
   getSourceLanguage,
   isDirectoryLikePath,
@@ -158,12 +159,22 @@ export class CodeViewer extends Symbiote {
       const raw = file.raw || rawFile?.content || code;
       const isReadable = !(file.ctxTok && file.ctxTok > 0);
 
+      const document = createSourceDocument(
+        { content: code, raw },
+        {
+          path,
+          language: lang,
+          readable: isReadable,
+          statsText: file.codeTok && file.expanded ? formatStats(file) : "",
+        }
+      );
+
       viewer.showFile({
-        path,
-        raw,
-        lang,
-        isReadable,
-        statsText: file.codeTok && file.expanded ? formatStats(file) : "",
+        path: document.path,
+        raw: document.raw,
+        lang: document.language,
+        isReadable: document.readable,
+        statsText: document.statsText || "",
         transform: (context) => this._transformFile({ ...context, projectId }),
       });
 

@@ -6,6 +6,7 @@ import { tPortal } from '../../common/localization.js';
 import { events as dashEvents, state as dashState } from '../../dashboard-state.js';
 import {
   collapseTree,
+  buildResourceTreeFromEntries,
   highlightTreePath,
   setTreeItems,
   setupTreePanel,
@@ -95,7 +96,7 @@ export class FileTree extends Symbiote {
     if (tree) {
       tree.selectedId = item.id;
     }
-    if (item.type === 'directory') {
+    if (item.kind === 'directory') {
       emit('file-selected', { path: `${item.path}/` });
       return;
     }
@@ -117,7 +118,7 @@ export class FileTree extends Symbiote {
     highlightTreePath(this, path, { scroll: true });
   }
 
-  _buildTree(skeleton) {
+  _buildResourceEntries(skeleton) {
     const files = new Map();
     const nodes = skeleton.n || {};
 
@@ -156,60 +157,24 @@ export class FileTree extends Symbiote {
       }
     }
 
-    const root = { children: {}, files: [] };
-    for (const [file, meta] of files) {
-      const parts = file.split('/');
-      const name = parts.pop();
-      let node = root;
-      for (const part of parts) {
-        if (!node.children[part]) {
-          node.children[part] = { children: {}, files: [] };
-        }
-        node = node.children[part];
-      }
-      node.files.push({ f: file, name, ...meta });
-    }
-    return root;
-  }
-
-  _buildTreeItems(node, parentDir = '') {
-    let items = [];
-    let dirs = Object.keys(node.children).sort();
-    let files = node.files.sort((a, b) => a.name.localeCompare(b.name));
-
-    for (let dirName of dirs) {
-      let dir = parentDir ? `${parentDir}/${dirName}` : dirName;
-      items.push({
-        id: dir,
-        type: 'directory',
-        label: dirName,
-        path: dir,
-        icon: 'folder',
-        draggable: true,
-        payload: `${dir}/`,
-        children: this._buildTreeItems(node.children[dirName], dir),
-      });
-    }
-
-    for (let file of files) {
+    return [...files.entries()].map(([file, meta]) => {
+      let name = file.split('/').pop();
       let badges = [];
-      if (file.exports > 0) badges.push(`${file.exports}f`);
-      if (file.classes > 0) badges.push(`${file.classes}c`);
+      if (meta.exports > 0) badges.push(`${meta.exports}f`);
+      if (meta.classes > 0) badges.push(`${meta.classes}c`);
 
-      items.push({
-        id: file.f,
-        type: 'file',
-        label: file.name,
-        path: file.f,
-        icon: FileTree._getFileIcon(file.name),
+      return {
+        id: file,
+        kind: 'file',
+        label: name,
+        path: file,
+        icon: FileTree._getFileIcon(name),
         badges: badges.length > 0 ? [badges.join(' ')] : [],
         draggable: true,
-        payload: file.f,
-        muted: Boolean(file.nonSource),
-      });
-    }
-
-    return items;
+        payload: file,
+        muted: Boolean(meta.nonSource),
+      };
+    });
   }
 
   _renderTree(skeleton) {
@@ -218,14 +183,17 @@ export class FileTree extends Symbiote {
       return;
     }
 
-    this._treeData = this._buildTree(skeleton);
-    let count = Object.keys(this._treeData.children).length + this._treeData.files.length;
-    if (count === 0) {
+    this._treeData = this._buildResourceEntries(skeleton);
+    if (this._treeData.length === 0) {
       this._setPlaceholder(tPortal('text.noFilesFound'));
       return;
     }
 
-    this._treeItems = this._buildTreeItems(this._treeData);
+    this._treeItems = buildResourceTreeFromEntries(this._treeData, {
+      directoryIcon: 'folder',
+      fileIcon: 'insert_drive_file',
+      draggable: true,
+    });
     showTree(this);
     this._syncTreeItems();
   }
