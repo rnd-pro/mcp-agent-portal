@@ -267,11 +267,14 @@ function getWorkspaceId(projectId) {
 function setWorkspaceActive(workspace, active) {
   if (!workspace) return;
   if (workspace.$) {
+    if (workspace.$.active === active) return;
     workspace.$.active = active;
     return;
   }
   customElements.whenDefined('pg-workspace').then(() => {
-    if (workspace.isConnected && workspace.$) workspace.$.active = active;
+    if (workspace.isConnected && workspace.$ && workspace.$.active !== active) {
+      workspace.$.active = active;
+    }
   });
 }
 

@@ -132,6 +132,8 @@ describe('project scoped frontend data loading', () => {
     assert.match(appSource, /document\.createElement\('pg-workspace'\)/);
     assert.match(appSource, /workspace\.setAttribute\('project-id', workspaceId\);/);
     assert.match(appSource, /host\.querySelectorAll\('pg-workspace'\)/);
+    assert.match(appSource, /if \(workspace\.\$\.active === active\) return;/);
+    assert.match(appSource, /workspace\.isConnected && workspace\.\$ && workspace\.\$\.active !== active/);
     assert.match(appSource, /workspace\.\$\.active = active;/);
     assert.match(appSource, /activateWorkspace\(projectId\);/);
     assert.equal(appSource.includes('waitForElementApi'), false);
