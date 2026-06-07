@@ -6,6 +6,7 @@ import { getAgentChatInputState } from '../../web/panels/AgentChat/input-state.j
 import {
   defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
+  extractChatTitleFromAgentText,
   matchVoiceCommandAtEnd,
   matchVoiceCommandInText,
   normalizeWakeCommandPhrase,
@@ -14,7 +15,6 @@ import {
 } from 'symbiote-ui/ui';
 import {
   buildChatTitleRequestNote,
-  extractChatTitleFromAgentText,
 } from '../../web/panels/AgentChat/chat-title.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);

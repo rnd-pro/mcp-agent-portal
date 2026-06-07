@@ -24,6 +24,8 @@ html, body {
 
 /* === App shell — full viewport flex column === */
 .app-shell {
+  --sn-layout-resizer-hover-bg: color-mix(in srgb, var(--sn-node-selected) 28%, transparent);
+
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -273,23 +275,6 @@ layout-node[node-type="panel"]:hover ::-webkit-scrollbar-thumb {
 }
 layout-node[node-type="panel"]:hover ::-webkit-scrollbar-thumb:hover {
   background: var(--sn-scrollbar-thumb-hover);
-}
-
-/* Split resizer: invisible by default, visible on hover */
-layout-node .split-resizer {
-  background: transparent !important;
-}
-layout-node .split-resizer:hover,
-layout-node[resizing] .split-resizer {
-  background: var(--sn-layout-resizer-hover-bg) !important;
-}
-
-/* Action zones (split corners): match scrollbar color */
-action-zone .zone-icon {
-  color: var(--sn-scrollbar-thumb) !important;
-}
-action-zone:hover .zone-icon {
-  color: var(--sn-scrollbar-thumb-hover) !important;
 }
 
 /* Markdown details / summary */

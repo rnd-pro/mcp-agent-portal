@@ -8,6 +8,7 @@ import {
   defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
   escapeHtml,
+  extractChatTitleFromAgentText,
   getRoute,
   matchVoiceCommandAtEnd,
   matchVoiceCommandInText,
@@ -39,7 +40,6 @@ import { getLocalization } from 'symbiote-ui/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import {
   buildChatTitleRequestNote,
-  extractChatTitleFromAgentText,
 } from './chat-title.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 

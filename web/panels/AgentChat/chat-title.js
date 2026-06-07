@@ -1,21 +1,3 @@
-const CHAT_TITLE_MAX_WORDS = 8;
-const CHAT_TITLE_MAX_LENGTH = 72;
-
-function trimTitle(value = '') {
-  let title = String(value || '')
-    .replace(/[`*_#[\](){}<>]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^["'«“]+|["'»”]+$/g, '')
-    .trim();
-
-  if (!title) return '';
-
-  let words = title.split(/\s+/).filter(Boolean).slice(0, CHAT_TITLE_MAX_WORDS);
-  title = words.join(' ').slice(0, CHAT_TITLE_MAX_LENGTH).trim();
-  return title.replace(/[.,;:!?-]+$/g, '').trim();
-}
-
 export function buildChatTitleRequestNote(locale = 'en') {
   if (locale === 'ru') {
     return [
@@ -36,18 +18,4 @@ export function buildChatTitleRequestNote(locale = 'en') {
     'At the end of the final answer, add one separate line <chat-title>Short title</chat-title>.',
     'Use the user language and keep the title under 8 words. Do not explain this line.]',
   ].join(' ');
-}
-
-export function extractChatTitleFromAgentText(text = '') {
-  let source = String(text || '');
-  let match = source.match(/(?:^|\n)\s*<chat-title>\s*([^<\n]+?)\s*<\/chat-title>\s*(?=\n|$)/i);
-  if (!match) return { title: '', text: source, changed: false };
-
-  let title = trimTitle(match[1]);
-  let cleanText = source.replace(match[0], '\n').replace(/\n{3,}/g, '\n\n').trim();
-  return {
-    title,
-    text: cleanText,
-    changed: cleanText !== source,
-  };
 }
