@@ -67,6 +67,92 @@ export function registerPanelType(id, definition) {
   panelTypes[id] = definition;
 }
 
+const panelBehavior = {
+  navigation: {
+    importance: 78,
+    minInlineSize: 220,
+    minBlockSize: 220,
+    collapse: 'manual',
+    overflow: 'scroll-block',
+    responsiveMode: 'stack',
+    responsiveBreakpoint: 760,
+  },
+  primary: {
+    importance: 95,
+    minInlineSize: 520,
+    minBlockSize: 320,
+    collapse: 'never',
+    overflow: 'scroll-inline',
+    responsiveMode: 'scroll-inline',
+    responsiveBreakpoint: 860,
+  },
+  secondary: {
+    importance: 68,
+    minInlineSize: 320,
+    minBlockSize: 260,
+    collapse: 'auto',
+    overflow: 'scroll-block',
+    responsiveMode: 'stack',
+    responsiveBreakpoint: 760,
+  },
+  board: {
+    importance: 88,
+    minInlineSize: 480,
+    minBlockSize: 320,
+    collapse: 'never',
+    overflow: 'scroll-inline',
+    responsiveMode: 'scroll-inline',
+    responsiveBreakpoint: 860,
+  },
+  chat: {
+    importance: 42,
+    minInlineSize: 360,
+    minBlockSize: 320,
+    collapse: 'manual',
+    overflow: 'scroll-block',
+    responsiveMode: 'stack',
+    responsiveBreakpoint: 760,
+  },
+};
+
+const splitBehavior = {
+  workspace: {
+    importance: 100,
+    minInlineSize: 760,
+    minBlockSize: 460,
+    collapse: 'never',
+    overflow: 'scroll-inline',
+    responsiveMode: 'scroll-inline',
+    responsiveBreakpoint: 900,
+  },
+  stack: {
+    importance: 85,
+    minInlineSize: 620,
+    minBlockSize: 520,
+    collapse: 'never',
+    overflow: 'scroll-block',
+    responsiveMode: 'stack',
+    responsiveBreakpoint: 760,
+  },
+  chatDock: {
+    importance: 90,
+    minInlineSize: 820,
+    minBlockSize: 460,
+    collapse: 'never',
+    overflow: 'scroll-inline',
+    responsiveMode: 'scroll-inline',
+    responsiveBreakpoint: 900,
+  },
+};
+
+function panel(panelType, behavior = 'primary') {
+  return LayoutTree.createPanel(panelType, {}, panelBehavior[behavior] || behavior);
+}
+
+function split(direction, first, second, ratio, behavior = 'workspace') {
+  return LayoutTree.createSplit(direction, first, second, ratio, splitBehavior[behavior] || behavior);
+}
+
 /**
  * Helper to wrap layout with a global right-sidebar chat.
  * @param {Function} layoutFn
@@ -77,6 +163,8 @@ function withChat(layoutFn, isExpanded = false, options = {}) {
   return withGlobalPanel(layoutFn, 'agent-chat', {
     collapsed: !isExpanded,
     ratio: options.ratio ?? 0.65,
+    behavior: panelBehavior.chat,
+    splitBehavior: options.splitBehavior || splitBehavior.chatDock,
   });
 }
 
@@ -84,131 +172,131 @@ function withChat(layoutFn, isExpanded = false, options = {}) {
 
 registerSection('dashboard', {
   icon: 'forum', label: tPortal('text.chats'), order: 10, scope: 'home',
-  layout: () => LayoutTree.createPanel('agent-chat')
+  layout: () => panel('agent-chat', 'chat')
 });
 
 registerSection('action-board', {
   icon: 'monitor_heart', label: tPortal('text.actionBoard'), order: 20, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('action-board'), false, { ratio: 0.78 })
+  layout: withChat(() => panel('action-board', 'board'), false, { ratio: 0.78 })
 });
 
 registerSection('marketplace', {
   icon: 'storefront', label: tPortal('text.marketplace'), order: 25, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('marketplace'), false)
+  layout: withChat(() => panel('marketplace', 'board'), false)
 });
 
 registerSection('topology', {
   icon: 'hub', label: tPortal('text.topology'), order: 27, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('topology-panel'), false)
+  layout: withChat(() => panel('topology-panel', 'primary'), false)
 });
 
 registerSection('tool-explorer', {
   icon: 'build', label: tPortal('text.toolExplorer'), order: 28, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('tool-explorer'), false)
+  layout: withChat(() => panel('tool-explorer', 'primary'), false)
 });
 
 registerSection('orchestration', {
   icon: 'memory', label: tPortal('text.activeTasks'), order: 29, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('active-tasks'), false)
+  layout: withChat(() => panel('active-tasks', 'board'), false)
 });
 
 registerSection('workflows', {
   icon: 'account_tree', label: tPortal('text.workflows'), order: 29.1, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('workflow-exp'), false)
+  layout: withChat(() => panel('workflow-exp', 'primary'), false)
 });
 
 registerSection('pipelines', {
   icon: 'schema', label: tPortal('text.pipelines'), order: 29.2, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('pipeline-mgr'), false)
+  layout: withChat(() => panel('pipeline-mgr', 'primary'), false)
 });
 
 registerSection('resource-groups', {
   icon: 'view_kanban', label: tPortal('text.resourceGroups'), order: 29.5, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('group-mgr'), false)
+  layout: withChat(() => panel('group-mgr', 'board'), false)
 });
 
 registerSection('skills', {
   icon: 'school', label: tPortal('text.skills'), order: 30, scope: 'both',
-  layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createSplit('vertical',
-      LayoutTree.createPanel('agent-portal-tree'),
-      LayoutTree.createPanel('agent-portal-library'), 0.62
+  layout: withChat(() => split('horizontal',
+    split('vertical',
+      panel('agent-portal-tree', 'navigation'),
+      panel('agent-portal-library', 'navigation'), 0.62, 'stack'
     ),
-    LayoutTree.createSplit('horizontal',
-      LayoutTree.createPanel('skill-mgr'),
-      LayoutTree.createPanel('skill-meta'), 0.68
+    split('horizontal',
+      panel('skill-mgr', 'primary'),
+      panel('skill-meta', 'secondary'), 0.68
     ), 0.24
   ), false)
 });
 
 registerSection('peer-review', {
   icon: 'forum', label: tPortal('text.peerReview'), order: 31, scope: 'home',
-  layout: withChat(() => LayoutTree.createPanel('peer-review'), false)
+  layout: withChat(() => panel('peer-review', 'primary'), false)
 });
 
 registerSection('explorer', {
   icon: 'folder_open', label: tPortal('text.explorer'), order: 30, scope: 'project',
-  layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createSplit('vertical',
-      LayoutTree.createPanel('file-tree'),
-      LayoutTree.createPanel('active-context'), 0.7
+  layout: withChat(() => split('horizontal',
+    split('vertical',
+      panel('file-tree', 'navigation'),
+      panel('active-context', 'secondary'), 0.7, 'stack'
     ),
-    LayoutTree.createSplit('horizontal',
-      LayoutTree.createPanel('code-viewer'),
-      LayoutTree.createPanel('ctx-panel'), 0.65
+    split('horizontal',
+      panel('code-viewer', 'primary'),
+      panel('ctx-panel', 'secondary'), 0.65
     ), 0.2), false)
 });
 
 registerSection('graph', {
   icon: 'developer_board', label: tPortal('text.graph'), order: 40, scope: 'project',
-  layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('file-tree'),
-    LayoutTree.createSplit('horizontal',
-      LayoutTree.createPanel('dep-graph'),
-      LayoutTree.createPanel('graph-flows'), 0.78
+  layout: withChat(() => split('horizontal',
+    panel('file-tree', 'navigation'),
+    split('horizontal',
+      panel('dep-graph', 'primary'),
+      panel('graph-flows', 'secondary'), 0.78
     ), 0.18), false)
 });
 
 registerSection('follow', {
   icon: 'smart_toy', label: tPortal('text.follow'), order: 50, scope: 'project',
-  layout: withChat(() => LayoutTree.createSplit('horizontal',
-    LayoutTree.createPanel('file-tree'),
-    LayoutTree.createSplit('vertical',
-      LayoutTree.createSplit('horizontal',
-        LayoutTree.createPanel('dep-graph'),
-        LayoutTree.createPanel('code-viewer'), 0.65
+  layout: withChat(() => split('horizontal',
+    panel('file-tree', 'navigation'),
+    split('vertical',
+      split('horizontal',
+        panel('dep-graph', 'primary'),
+        panel('code-viewer', 'primary'), 0.65
       ),
-      LayoutTree.createPanel('monitor'), 0.72
+      panel('monitor', 'secondary'), 0.72, 'stack'
     ), 0.12), false)
 });
 
 registerSection('analysis', {
   icon: 'analytics', label: tPortal('text.analysis'), order: 60, scope: 'project',
-  layout: withChat(() => LayoutTree.createPanel('health'), false)
+  layout: withChat(() => panel('health', 'primary'), false)
 });
 
 registerSection('monitor', {
   icon: 'monitor_heart', label: tPortal('text.liveMonitor'), order: 70, scope: 'both',
-  layout: withChat(() => LayoutTree.createPanel('monitor'), false)
+  layout: withChat(() => panel('monitor', 'primary'), false)
 });
 
 registerSection('runtime', {
   icon: 'memory', label: tPortal('text.runtime'), order: 75, scope: 'both',
-  layout: withChat(() => LayoutTree.createPanel('runtime-control'), false)
+  layout: withChat(() => panel('runtime-control', 'primary'), false)
 });
 
 registerSection('spatial', {
   icon: 'view_in_ar', label: tPortal('text.spatial'), order: 77, scope: 'both',
-  layout: withChat(() => LayoutTree.createPanel('spatial-layout'), false)
+  layout: withChat(() => panel('spatial-layout', 'primary'), false)
 });
 
 registerSection('settings', {
   icon: 'settings', label: tPortal('text.settings'), order: 100, scope: 'both',
-  layout: withChat(() => LayoutTree.createPanel('settings'), false)
+  layout: withChat(() => panel('settings', 'secondary'), false)
 });
 
 registerSection('agent-chat', {
   icon: 'smart_toy', label: tPortal('text.agentChat'), order: 20, scope: 'project',
   // Do not wrap the standalone chat in withChat, as it IS the chat.
-  layout: () => LayoutTree.createPanel('agent-chat')
+  layout: () => panel('agent-chat', 'chat')
 });

@@ -26,7 +26,7 @@ describe('dashboard chat route', () => {
     assert.match(dashboard, /label:\s*tPortal\('text\.chats'\)/);
     assert.match(dashboard, /icon:\s*'forum'/);
     assert.match(dashboard, /scope:\s*'home'/);
-    assert.match(dashboard, /LayoutTree\.createPanel\('agent-chat'\)/);
+    assert.match(dashboard, /panel\('agent-chat',\s*'chat'\)/);
     assert.equal(dashboard.includes('pg-project-list'), false);
     assert.equal(dashboard.includes("createPanel('project-list')"), false);
     assert.equal(dashboard.includes('withChat'), false);
