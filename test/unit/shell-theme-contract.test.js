@@ -897,7 +897,17 @@ describe('portal shell theme contract', () => {
     assert.ok(workspace.includes('getHomeSections()'), 'workspace route preservation must validate home sections by workspace scope');
     assert.ok(workspace.includes('getProjectSections()'), 'workspace route preservation must validate project sections by workspace scope');
     assert.ok(workspace.includes('sections.some((section) => section.id === route.panel)'), 'workspace route preservation must not accept sections outside the active workspace scope');
+    assert.ok(workspace.includes('this._wasActive && typeof location !== \'undefined\' && this._currentHashBelongsToWorkspace()'), 'inactive workspaces must not overwrite their saved route with another workspace hash');
+    assert.ok(workspace.includes('if (!this._currentHashBelongsToWorkspace()) return;'), 'active workspaces must ignore hash changes that belong to another workspace');
     assert.ok(workspace.includes("navigate(defaultSection, '', { project: this._projectId })"), 'project workspace default navigation must keep the project route query');
+    assert.ok(workspace.includes('LayoutTree.createSidebarSubPanels'), 'PgWorkspace must precompute sidebar subpanels from its own layout tree');
+    assert.ok(workspace.includes("this.ref.sidebar.addEventListener('panel-close'"), 'PgWorkspace must own panel close actions for its isolated sidebar');
+    assert.ok(workspace.includes('this.ref.layout.joinPanels'), 'PgWorkspace panel close actions must operate on the matching isolated layout');
+    assert.ok(workspace.includes('this.ref.sidebar.updateSubPanels'), 'PgWorkspace must keep its isolated sidebar submenu synchronized with layout changes');
+    assert.ok(workspace.includes('PgWorkspace.rootStyles = css'), 'PgWorkspace must apply its own flex shell styles');
+    let workspaceCss = fs.readFileSync(path.join(ROOT, 'web/components/PgWorkspace/PgWorkspace.css.js'), 'utf8');
+    assert.ok(workspaceCss.includes('display: flex'), 'PgWorkspace host must lay out sidebar and content horizontally');
+    assert.ok(workspaceCss.includes(':host([hidden])'), 'Inactive workspaces must be hidden without destroying DOM state');
 
     for (let token of [
       '--sn-bg',

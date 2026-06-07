@@ -1,11 +1,11 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { getRoute, navigate, parseQuery } from 'symbiote-ui/ui';
+import { LayoutTree, getRoute, navigate, parseQuery } from 'symbiote-ui/ui';
 import { panelTypes, getHomeSections, getProjectSections, hasSection } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import { layoutMatchesSection } from '../../layout-policy.js';
-import { emit as dashEmit } from '../../dashboard-state.js';
 import { persistLayout, readLayout } from '../../common/ui-state.js';
 import tpl from './PgWorkspace.tpl.js';
+import css from './PgWorkspace.css.js';
 
 /**
  * PgWorkspace — isolated workspace container.
@@ -48,14 +48,24 @@ export class PgWorkspace extends Symbiote {
 
     this.ref.layout.sub?.('layoutTree', (tree) => {
       if (this._layoutStorageKey && tree) persistLayout(this._layoutStorageKey, tree);
+      if (this.$.active) this._scheduleSubPanelSync();
+    });
+
+    this.ref.layout.addEventListener('layout-change', () => this._syncSubPanels());
+
+    this.ref.sidebar.addEventListener('panel-close', (event) => {
+      let panelId = event.detail?.panelId;
+      if (panelId && typeof this.ref.layout.joinPanels === 'function') {
+        this.ref.layout.joinPanels(panelId);
+      }
     });
 
     // Active state handler — core freeze/unfreeze logic
     this.sub('active', (val) => {
       this.hidden = !val;
       if (!val) {
-        // Only save hash if workspace was previously active (not initial sub fire)
-        if (this._wasActive && typeof location !== 'undefined') {
+        // Preserve the workspace route; do not overwrite it with another tab's hash.
+        if (this._wasActive && typeof location !== 'undefined' && this._currentHashBelongsToWorkspace()) {
           this.lastHash = location.hash;
         }
         this.lastSection = '';
@@ -103,9 +113,14 @@ export class PgWorkspace extends Symbiote {
     // Only active workspace listens to hashchange
     window.addEventListener('hashchange', () => {
       if (!this.$.active) return;
+      if (!this._currentHashBelongsToWorkspace()) return;
       this.lastHash = location.hash;
       this._handleRoute();
     });
+  }
+
+  disconnectedCallback() {
+    clearTimeout(this._subPanelSyncTimer);
   }
 
   /**
@@ -114,9 +129,13 @@ export class PgWorkspace extends Symbiote {
    * which is the mechanism that keeps the highlight in sync after tab switch.
    */
   _initSections() {
-    let sections = this._projectId === 'global'
+    let baseSections = this._projectId === 'global'
       ? getHomeSections()
       : getProjectSections();
+    let sections = baseSections.map((section) => ({
+      ...section,
+      subPanels: this._getSubPanelsForSection(section.id),
+    }));
     this.ref.sidebar.setSections(sections);
     this._sectionsInitialized = true;
   }
@@ -143,7 +162,6 @@ export class PgWorkspace extends Symbiote {
   _handleRoute() {
     let route = getRoute();
     let section = route.panel;
-    let subPath = route.subpath;
 
     if (hasSection(section) && section !== this.lastSection) {
       this.lastSection = section;
@@ -162,13 +180,7 @@ export class PgWorkspace extends Symbiote {
       } else {
         this._fallbackLayout(section);
       }
-    }
-
-    // Explorer file routing
-    if (section === 'explorer' && subPath) {
-      requestAnimationFrame(() => {
-        dashEmit('file-selected', { path: subPath, fromRoute: true });
-      });
+      this._scheduleSubPanelSync();
     }
   }
 
@@ -176,7 +188,40 @@ export class PgWorkspace extends Symbiote {
     let layout = getPortalRuntimeLayout(section, this._projectId === 'global' ? null : this._projectId);
     if (layout) this.ref.layout.setLayout(layout);
   }
+
+  _getSubPanelsForSection(section) {
+    let storageKey = `pg-layout-v4-${this._projectId}-${section}`;
+    let fallback = getPortalRuntimeLayout(section, this._projectId === 'global' ? null : this._projectId);
+    let tree = readLayout(storageKey);
+    if (!layoutMatchesSection(section, tree, fallback)) tree = fallback;
+    return LayoutTree.createSidebarSubPanels(tree, panelTypes);
+  }
+
+  _scheduleSubPanelSync() {
+    clearTimeout(this._subPanelSyncTimer);
+    this._subPanelSyncTimer = setTimeout(() => this._syncSubPanels(), 100);
+  }
+
+  _syncSubPanels() {
+    if (!this.$.active) return;
+    let section = getRoute().panel;
+    if (!hasSection(section)) return;
+    let panelNodes = Array.from(this.ref.layout.querySelectorAll('layout-node[node-type="panel"]'));
+    let panels = panelNodes.map((panel, index) => {
+      let nodeData = panel.$.nodeData || {};
+      let panelType = nodeData.panelType || 'panel';
+      let config = panelTypes[panelType] || {};
+      return {
+        title: config.title || panelType,
+        icon: config.icon || 'dashboard',
+        panelId: panel.$.nodeId,
+        isMaster: index === 0,
+      };
+    });
+    this.ref.sidebar.updateSubPanels(section, panels.length > 1 ? panels : []);
+  }
 }
 
 PgWorkspace.template = tpl;
+PgWorkspace.rootStyles = css;
 PgWorkspace.reg('pg-workspace');

@@ -112,6 +112,32 @@ describe('project scoped frontend data loading', () => {
     assert.equal(projectTabsSource.includes("navigate('agent-chat', '', { project: data.id, chat: null })"), false);
   });
 
+  it('mounts isolated workspace layouts for project tabs instead of one global shell layout', () => {
+    let indexSource = readSource('web/index.html');
+    let demoIndexSource = readSource('demo/index.html');
+    let demoBuildSource = readSource('demo/build.js');
+    let appSource = readSource('web/app.js');
+
+    for (let [name, source] of [
+      ['web/index.html', indexSource],
+      ['demo/index.html', demoIndexSource],
+      ['demo/build.js', demoBuildSource],
+    ]) {
+      assert.match(source, /<div id="main-layout" class="app-workspace" data-workspace-host><\/div>/, `${name} must mount the workspace host`);
+      assert.equal(source.includes('id="app-sidebar"'), false, `${name} must not mount a global sidebar`);
+      assert.equal(source.includes('id="app-layout"'), false, `${name} must not mount a global panel layout`);
+    }
+    assert.match(appSource, /import "\.\/components\/PgWorkspace\/PgWorkspace\.js";/);
+    assert.match(appSource, /function ensureWorkspace\(projectId\)/);
+    assert.match(appSource, /document\.createElement\('pg-workspace'\)/);
+    assert.match(appSource, /workspace\.setAttribute\('project-id', workspaceId\);/);
+    assert.match(appSource, /host\.querySelectorAll\('pg-workspace'\)/);
+    assert.match(appSource, /workspace\.\$\.active = active;/);
+    assert.match(appSource, /activateWorkspace\(projectId\);/);
+    assert.equal(appSource.includes('waitForElementApi'), false);
+    assert.equal(appSource.includes('getSectionsForScope'), false);
+  });
+
   it('declares a runtime base path before API calls are patched', () => {
     let indexSource = readSource('web/index.html');
     let appSource = readSource('web/app.js');

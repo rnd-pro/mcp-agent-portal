@@ -1,9 +1,8 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
 import { tPortal } from "./common/localization.js";
-import { LayoutTree as t, applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-ui/ui";
-import { waitForElementApi } from "symbiote-ui/core";
-import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
+import { applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-ui/ui";
+import { panelTypes, hasSection } from "./router-registry.js";
 import { applyPortalProjectTransaction, getPortalProjectRuntime, getPortalRuntimeLayout } from "./services/portal-runtime.js";
 import { getTransactionLayoutRoots } from "./services/project-runtime-package.js";
 import { layoutMatchesSection } from "./layout-policy.js";
@@ -40,6 +39,7 @@ import "./panels/SkillManager/SkillManager.js";
 import "./panels/SkillManager/SkillMetadata.js";
 import "./panels/PeerReview/PeerReview.js";
 import "./components/ProjectTabs/ProjectTabs.js";
+import "./components/PgWorkspace/PgWorkspace.js";
 import { state as dashState, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
 import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
@@ -260,22 +260,41 @@ let _currentSection = '';
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
+function getWorkspaceId(projectId) {
+  return projectId || 'global';
+}
 
-/**
- * Pre-calculate subPanels for a section based on its layout tree.
- * This ensures the sidebar correctly shows expand chevrons for sections with multiple panels
- * even before the user navigates to them.
- * @param {string} sectionId
- * @param {string} projectId
- * @returns {Array<object>}
- */
-function getSubPanelsForSection(sectionId, projectId) {
-  let storageKey = `pg-layout-v4-${projectId || 'global'}-${sectionId}`;
-  let fallback = getPortalRuntimeLayout(sectionId, projectId);
-  let tree = readLayout(storageKey);
-  if (!layoutMatchesSection(sectionId, tree, fallback)) tree = fallback;
-  
-  return t.createSidebarSubPanels(tree, panelTypes);
+function setWorkspaceActive(workspace, active) {
+  if (!workspace) return;
+  if (workspace.$) {
+    workspace.$.active = active;
+    return;
+  }
+  customElements.whenDefined('pg-workspace').then(() => {
+    if (workspace.isConnected && workspace.$) workspace.$.active = active;
+  });
+}
+
+function ensureWorkspace(projectId) {
+  let host = document.getElementById('main-layout');
+  if (!host) return null;
+  let workspaceId = getWorkspaceId(projectId);
+  let workspace = host.querySelector(`pg-workspace[data-workspace-id="${workspaceId}"]`);
+  if (workspace) return workspace;
+  workspace = document.createElement('pg-workspace');
+  workspace.dataset.workspaceId = workspaceId;
+  workspace.setAttribute('project-id', workspaceId);
+  host.appendChild(workspace);
+  return workspace;
+}
+
+function activateWorkspace(projectId) {
+  let host = document.getElementById('main-layout');
+  if (!host) return;
+  let activeWorkspace = ensureWorkspace(projectId);
+  for (let workspace of host.querySelectorAll('pg-workspace')) {
+    setWorkspaceActive(workspace, workspace === activeWorkspace);
+  }
 }
 
 /**
@@ -284,6 +303,7 @@ function getSubPanelsForSection(sectionId, projectId) {
  */
 function handleProjectSwitch(projectId) {
   if (projectId === _currentProjectId && state.skeleton && skeletonMatchesProject(state.skeleton, projectId)) {
+    activateWorkspace(projectId);
     updateTopbarPath();
     return;
   }
@@ -291,25 +311,6 @@ function handleProjectSwitch(projectId) {
   _currentProjectId = projectId;
   if (previousProjectId !== undefined && previousProjectId !== projectId) {
     state.activeFile = null;
-  }
-
-  let sidebar = document.getElementById('app-sidebar');
-  let baseSections = getSectionsForScope(projectId);
-  let sections = baseSections.map(s => ({
-    ...s,
-    subPanels: getSubPanelsForSection(s.id, projectId)
-  }));
-  
-  if (sidebar) {
-    // Guard against element not yet upgraded by Symbiote —
-    // on cold load, setSections() can fire before renderCallback().
-    if (sidebar.$) {
-      sidebar.setSections(sections);
-    } else {
-      customElements.whenDefined('layout-sidebar').then(() => {
-        sidebar.setSections(sections);
-      });
-    }
   }
 
   // Update dashboard state (single source of truth for other panels)
@@ -334,6 +335,7 @@ function handleProjectSwitch(projectId) {
   }
 
   dashEmit('active-project-changed', { id: projectId });
+  activateWorkspace(projectId);
 
   // Re-fetch skeleton for the new project context
   // This triggers file-tree and dep-graph to re-render with correct data
@@ -389,29 +391,29 @@ function handleRoute() {
   if (hasSection(section) && section !== _currentSection) {
     _currentSection = section;
     let layout = document.getElementById('app-layout');
-    if (!layout) return;
+    if (layout) {
+      let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
+      layout.$['@storage-key'] = storageKey;
 
-    let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
-    layout.$['@storage-key'] = storageKey;
+      let fallback = getPortalRuntimeLayout(section, projectId);
+      let saved = readLayout(storageKey);
+      if (!layoutMatchesSection(section, saved, fallback)) saved = null;
 
-    let fallback = getPortalRuntimeLayout(section, projectId);
-    let saved = readLayout(storageKey);
-    if (!layoutMatchesSection(section, saved, fallback)) saved = null;
-
-    if (saved) {
-      try {
-        layout.setLayout(saved);
-      } catch {
+      if (saved) {
+        try {
+          layout.setLayout(saved);
+        } catch {
+          if (fallback) layout.setLayout(fallback);
+        }
+      } else {
         if (fallback) layout.setLayout(fallback);
       }
-    } else {
-      if (fallback) layout.setLayout(fallback);
-    }
 
-    // Trigger sidebar sub-menu sync after DOM settles
-    setTimeout(() => {
-      layout.dispatchEvent(new CustomEvent('layout-change'));
-    }, 100);
+      // Trigger sidebar sub-menu sync after DOM settles for the legacy single-layout fallback.
+      setTimeout(() => {
+        layout.dispatchEvent(new CustomEvent('layout-change'));
+      }, 100);
+    }
   }
 
   // Explorer file routing
@@ -463,53 +465,53 @@ async function u() {
     // Project is global route context; chat is section-scoped and should not leak across menu sections.
     registerGlobalParam('project');
 
-    // Register all panel types on the single layout
+    await customElements.whenDefined('pg-workspace');
+
+    // Legacy single-layout fallback: production shell now mounts isolated pg-workspace instances.
     let layout = document.getElementById('app-layout');
     let sidebar = document.getElementById('app-sidebar');
-    await Promise.all([
-      waitForElementApi(layout, 'registerPanelType'),
-      waitForElementApi(sidebar, 'setSections'),
-    ]);
-    if (layout) {
+    if (layout && sidebar) {
+      await Promise.all([
+        customElements.whenDefined('panel-layout'),
+        customElements.whenDefined('layout-sidebar'),
+      ]);
       for (const [e, t] of Object.entries(panelTypes)) {
         layout.registerPanelType?.(e, t);
       }
-      
+
       // Sync layout changes to sidebar sub-panels
-      if (sidebar) {
-        layout.addEventListener('layout-change', () => {
-          if (!_currentSection) return;
-          let panelNodes = Array.from(layout.querySelectorAll('layout-node[node-type="panel"]'));
-          
-          let panels = panelNodes.map((p, idx) => {
-            let nodeData = p.$.nodeData || {};
-            let pType = nodeData.panelType || 'panel';
-            let config = panelTypes[pType] || {};
-            return {
-              title: config.title || pType,
-              icon: config.icon || 'dashboard',
-              panelId: p.$.nodeId,
-              isMaster: idx === 0 // First panel is master (cannot be closed)
-            };
-          });
-          
-          let panelsToSet = panels.length > 1 ? panels : [];
-          sidebar.updateSubPanels(_currentSection, panelsToSet);
+      layout.addEventListener('layout-change', () => {
+        if (!_currentSection) return;
+        let panelNodes = Array.from(layout.querySelectorAll('layout-node[node-type="panel"]'));
+
+        let panels = panelNodes.map((p, idx) => {
+          let nodeData = p.$.nodeData || {};
+          let pType = nodeData.panelType || 'panel';
+          let config = panelTypes[pType] || {};
+          return {
+            title: config.title || pType,
+            icon: config.icon || 'dashboard',
+            panelId: p.$.nodeId,
+            isMaster: idx === 0 // First panel is master (cannot be closed)
+          };
         });
 
-        layout.sub?.('layoutTree', (tree) => {
-          let storageKey = layout.$['@storage-key'];
-          if (storageKey && tree) persistLayout(storageKey, tree);
-        });
+        let panelsToSet = panels.length > 1 ? panels : [];
+        sidebar.updateSubPanels(_currentSection, panelsToSet);
+      });
 
-        // Listen for panel close requests from the sidebar submenu
-        sidebar.addEventListener('panel-close', (e) => {
-          let pid = e.detail?.panelId;
-          if (pid && typeof layout.joinPanels === 'function') {
-            layout.joinPanels(pid);
-          }
-        });
-      }
+      layout.sub?.('layoutTree', (tree) => {
+        let storageKey = layout.$['@storage-key'];
+        if (storageKey && tree) persistLayout(storageKey, tree);
+      });
+
+      // Listen for panel close requests from the sidebar submenu
+      sidebar.addEventListener('panel-close', (e) => {
+        let pid = e.detail?.panelId;
+        if (pid && typeof layout.joinPanels === 'function') {
+          layout.joinPanels(pid);
+        }
+      });
     }
 
     // File selection routing
