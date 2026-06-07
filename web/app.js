@@ -2,10 +2,8 @@
 import "./common/base-path.js";
 import { tPortal } from "./common/localization.js";
 import { applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-ui/ui";
-import { panelTypes, hasSection } from "./router-registry.js";
-import { applyPortalProjectTransaction, getPortalProjectRuntime, getPortalRuntimeLayout } from "./services/portal-runtime.js";
+import { applyPortalProjectTransaction, getPortalProjectRuntime } from "./services/portal-runtime.js";
 import { getTransactionLayoutRoots } from "./services/project-runtime-package.js";
-import { layoutMatchesSection } from "./layout-policy.js";
 import { followController } from "./follow-controller.js";
 import "./components/FollowRibbon/FollowRibbon.js";
 import { subscribe as s, onEvent as i } from "./state.js";
@@ -42,7 +40,7 @@ import "./components/ProjectTabs/ProjectTabs.js";
 import "./components/PgWorkspace/PgWorkspace.js";
 import { state as dashState, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
-import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
+import { persistLayout, persistUiValue, readUiValue } from "./common/ui-state.js";
 
 export const state = { skeleton: null, skeletonProjectId: null, activeFile: null, ws: null, monitorEvents: [] };
 export { formatStats } from "symbiote-ui/display/format-utils";
@@ -252,11 +250,8 @@ function connectDashboardWS(e, t, o, _att = 0) {
   }
 }
 
-// ── Unified Layout Controller ────────────────────────────────────
-// Single sidebar + panel-layout, driven by URL hash.
-
-/** @type {string} Current section being displayed */
-let _currentSection = '';
+// ── Workspace Layout Controller ──────────────────────────────────
+// Each pg-workspace owns its sidebar and panel-layout, driven by URL hash.
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
@@ -298,6 +293,13 @@ function activateWorkspace(projectId) {
   for (let workspace of host.querySelectorAll('pg-workspace')) {
     setWorkspaceActive(workspace, workspace === activeWorkspace);
   }
+}
+
+function refreshActiveWorkspace(projectId) {
+  let host = document.getElementById('main-layout');
+  let workspaceId = getWorkspaceId(projectId);
+  let workspace = host?.querySelector(`pg-workspace[data-workspace-id="${workspaceId}"]`);
+  workspace?.refreshCurrentLayout?.();
 }
 
 /**
@@ -344,7 +346,6 @@ function handleProjectSwitch(projectId) {
   // This triggers file-tree and dep-graph to re-render with correct data
   state.skeleton = null;
   state.skeletonProjectId = projectId || null;
-  _currentSection = ''; // Force layout re-apply on next route
   api('/api/skeleton', { projectId }).then(sk => {
     if (_currentProjectId !== projectId) return;
     if (!skeletonMatchesProject(sk, projectId)) return;
@@ -390,35 +391,6 @@ function handleRoute() {
   let projectId = globals.project || null;
   handleProjectSwitch(projectId);
 
-  // Layout switch on section change
-  if (hasSection(section) && section !== _currentSection) {
-    _currentSection = section;
-    let layout = document.getElementById('app-layout');
-    if (layout) {
-      let storageKey = `pg-layout-v4-${projectId || 'global'}-${section}`;
-      layout.$['@storage-key'] = storageKey;
-
-      let fallback = getPortalRuntimeLayout(section, projectId);
-      let saved = readLayout(storageKey);
-      if (!layoutMatchesSection(section, saved, fallback)) saved = null;
-
-      if (saved) {
-        try {
-          layout.setLayout(saved);
-        } catch {
-          if (fallback) layout.setLayout(fallback);
-        }
-      } else {
-        if (fallback) layout.setLayout(fallback);
-      }
-
-      // Trigger sidebar sub-menu sync after DOM settles for the legacy single-layout fallback.
-      setTimeout(() => {
-        layout.dispatchEvent(new CustomEvent('layout-change'));
-      }, 100);
-    }
-  }
-
   // Explorer file routing
   if (section === 'explorer' && subPath) {
     state.activeFile = subPath;
@@ -437,8 +409,7 @@ function applyRuntimeTransaction(projectId, transaction) {
   let route = getRoute();
   let globals = parseQuery(route.query);
   if ((globals.project || null) === (projectId || null)) {
-    _currentSection = '';
-    handleRoute();
+    refreshActiveWorkspace(projectId);
   }
   document.documentElement.setAttribute('data-project-runtime-updated', transaction.id || 'transaction');
   document.dispatchEvent(new CustomEvent('agent-portal-project-runtime-updated', {
@@ -469,53 +440,6 @@ async function u() {
     registerGlobalParam('project');
 
     await customElements.whenDefined('pg-workspace');
-
-    // Legacy single-layout fallback: production shell now mounts isolated pg-workspace instances.
-    let layout = document.getElementById('app-layout');
-    let sidebar = document.getElementById('app-sidebar');
-    if (layout && sidebar) {
-      await Promise.all([
-        customElements.whenDefined('panel-layout'),
-        customElements.whenDefined('layout-sidebar'),
-      ]);
-      for (const [e, t] of Object.entries(panelTypes)) {
-        layout.registerPanelType?.(e, t);
-      }
-
-      // Sync layout changes to sidebar sub-panels
-      layout.addEventListener('layout-change', () => {
-        if (!_currentSection) return;
-        let panelNodes = Array.from(layout.querySelectorAll('layout-node[node-type="panel"]'));
-
-        let panels = panelNodes.map((p, idx) => {
-          let nodeData = p.$.nodeData || {};
-          let pType = nodeData.panelType || 'panel';
-          let config = panelTypes[pType] || {};
-          return {
-            title: config.title || pType,
-            icon: config.icon || 'dashboard',
-            panelId: p.$.nodeId,
-            isMaster: idx === 0 // First panel is master (cannot be closed)
-          };
-        });
-
-        let panelsToSet = panels.length > 1 ? panels : [];
-        sidebar.updateSubPanels(_currentSection, panelsToSet);
-      });
-
-      layout.sub?.('layoutTree', (tree) => {
-        let storageKey = layout.$['@storage-key'];
-        if (storageKey && tree) persistLayout(storageKey, tree);
-      });
-
-      // Listen for panel close requests from the sidebar submenu
-      sidebar.addEventListener('panel-close', (e) => {
-        let pid = e.detail?.panelId;
-        if (pid && typeof layout.joinPanels === 'function') {
-          layout.joinPanels(pid);
-        }
-      });
-    }
 
     // File selection routing
     events.addEventListener("file-selected", e => {

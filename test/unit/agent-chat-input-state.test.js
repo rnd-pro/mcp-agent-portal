@@ -178,6 +178,11 @@ describe('agent chat input state', () => {
     assert.match(source, /chat-workspace-context-intent/);
     assert.match(source, /_buildVoiceControlsConfig\(\)/);
     assert.match(source, /_getWorkspace\(\)\?\.setVoiceControls\?\.\(this\._buildVoiceControlsConfig\(\)\)/);
+    assert.match(source, /suspendLayout\(\)/);
+    assert.match(source, /resumeLayout\(\)/);
+    assert.match(source, /this\._voiceController\.stopWake\(\);/);
+    assert.match(source, /this\._voiceController\.cancelSpeech\(\);/);
+    assert.match(source, /if \(this\._resumeWakeAfterLayoutSuspend && this\._wakeModeEnabled\) \{/);
     assert.match(source, /composerFooterControls: \[\]/);
     assert.match(source, /footerControls: this\.\$\.composerFooterControls \|\| \[\]/);
     assert.match(source, /if \(detail\.sourceEvent === 'chat-composer-footer-control-change'\) return;/);

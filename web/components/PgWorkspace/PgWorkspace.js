@@ -1,5 +1,12 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { LayoutTree, getRoute, navigate, parseQuery } from 'symbiote-ui/ui';
+import {
+  LayoutTree,
+  getRoute,
+  navigate,
+  parseQuery,
+  resumeLayoutSubtree,
+  suspendLayoutSubtree,
+} from 'symbiote-ui/ui';
 import { panelTypes, getHomeSections, getProjectSections, hasSection } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import { layoutMatchesSection } from '../../layout-policy.js';
@@ -68,8 +75,12 @@ export class PgWorkspace extends Symbiote {
 
     // Active state handler — core freeze/unfreeze logic
     this.sub('active', (val) => {
-      this.hidden = !val;
       if (!val) {
+        suspendLayoutSubtree(this, {
+          reason: 'workspace-inactive',
+          workspaceId: this._projectId,
+        });
+        this.hidden = true;
         // Preserve the workspace route; do not overwrite it with another tab's hash.
         if (this._wasActive && typeof location !== 'undefined' && this._currentHashBelongsToWorkspace()) {
           this.lastHash = location.hash;
@@ -77,6 +88,12 @@ export class PgWorkspace extends Symbiote {
         this.lastSection = '';
         return;
       }
+
+      this.hidden = false;
+      resumeLayoutSubtree(this, {
+        reason: 'workspace-active',
+        workspaceId: this._projectId,
+      });
 
       // Mark as having been active at least once
       let isFirstActivation = !this._wasActive;
@@ -127,6 +144,10 @@ export class PgWorkspace extends Symbiote {
 
   disconnectedCallback() {
     clearTimeout(this._subPanelSyncTimer);
+    suspendLayoutSubtree(this, {
+      reason: 'workspace-disconnected',
+      workspaceId: this._projectId,
+    });
   }
 
   /**
@@ -185,6 +206,11 @@ export class PgWorkspace extends Symbiote {
     if (!sections.some((section) => section.id === route.panel)) return false;
     let projectId = parseQuery(route.query).project || 'global';
     return projectId === this._projectId;
+  }
+
+  refreshCurrentLayout() {
+    this.lastSection = '';
+    this._handleRoute();
   }
 
   _handleRoute() {

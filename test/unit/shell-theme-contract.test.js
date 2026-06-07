@@ -896,6 +896,11 @@ describe('portal shell theme contract', () => {
     assert.ok(router.includes("registerSection('spatial'"), 'Spatial section must be registered');
     assert.ok(workspace.includes('getHomeSections()'), 'workspace route preservation must validate home sections by workspace scope');
     assert.ok(workspace.includes('getProjectSections()'), 'workspace route preservation must validate project sections by workspace scope');
+    assert.ok(workspace.includes('suspendLayoutSubtree'), 'PgWorkspace must use symbiote-ui layout lifecycle suspension for inactive workspaces');
+    assert.ok(workspace.includes('resumeLayoutSubtree'), 'PgWorkspace must use symbiote-ui layout lifecycle resume for active workspaces');
+    assert.ok(workspace.includes("reason: 'workspace-inactive'"), 'PgWorkspace must name inactive layout lifecycle transitions');
+    assert.ok(workspace.includes("reason: 'workspace-active'"), 'PgWorkspace must name active layout lifecycle transitions');
+    assert.ok(workspace.includes('refreshCurrentLayout()'), 'PgWorkspace must expose a refresh path for runtime layout transactions');
     assert.ok(workspace.includes('sections.some((section) => section.id === route.panel)'), 'workspace route preservation must not accept sections outside the active workspace scope');
     assert.ok(workspace.includes('this._wasActive && typeof location !== \'undefined\' && this._currentHashBelongsToWorkspace()'), 'inactive workspaces must not overwrite their saved route with another workspace hash');
     assert.ok(workspace.includes('if (!this._currentHashBelongsToWorkspace()) return;'), 'active workspaces must ignore hash changes that belong to another workspace');

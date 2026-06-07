@@ -241,6 +241,27 @@ export class AgentChat extends Symbiote {
     super.disconnectedCallback?.();
   }
 
+  suspendLayout() {
+    this._resumeWakeAfterLayoutSuspend = this._wakeModeEnabled;
+    this._wakeTriggering = false;
+    this._wakePausedForRecording = false;
+    this._stopVoiceUiTimer();
+    this._audioRecorder.cancel();
+    this._voiceController.stopWake();
+    this._voiceController.cancelSpeech();
+    this._speakingVoiceResponse = false;
+    this._removeVoicePreview();
+    this._syncVoiceControls();
+  }
+
+  resumeLayout() {
+    this._syncVoiceControls();
+    if (this._resumeWakeAfterLayoutSuspend && this._wakeModeEnabled) {
+      this._startWakeListening();
+    }
+    this._resumeWakeAfterLayoutSuspend = false;
+  }
+
   _getWorkspace() {
     return this.ref.workspace || this.querySelector('chat-workspace');
   }

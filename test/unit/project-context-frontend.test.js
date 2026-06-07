@@ -136,6 +136,11 @@ describe('project scoped frontend data loading', () => {
     assert.match(appSource, /workspace\.isConnected && workspace\.\$ && workspace\.\$\.active !== active/);
     assert.match(appSource, /workspace\.\$\.active = active;/);
     assert.match(appSource, /activateWorkspace\(projectId\);/);
+    assert.match(appSource, /refreshActiveWorkspace\(projectId\);/);
+    assert.equal(appSource.includes("document.getElementById('app-layout')"), false);
+    assert.equal(appSource.includes("document.getElementById('app-sidebar')"), false);
+    assert.equal(appSource.includes('Legacy single-layout fallback'), false);
+    assert.equal(appSource.includes('_currentSection'), false);
     assert.equal(appSource.includes('waitForElementApi'), false);
     assert.equal(appSource.includes('getSectionsForScope'), false);
   });
