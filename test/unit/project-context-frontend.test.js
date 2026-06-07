@@ -146,7 +146,7 @@ describe('project scoped frontend data loading', () => {
 
     assert.match(indexSource, /<base href="\$\{basePath \|\| '\/'\}">/);
     assert.ok(indexSource.indexOf('<base href=') < indexSource.indexOf('<script type="importmap">'));
-    assert.match(indexSource, /src="app\.js\?v=xr-spatial-readiness"/);
+    assert.match(indexSource, /src="app\.js\?v=workspace-router-layout-fix"/);
     assert.ok(appSource.includes('import "./common/base-path.js";'));
   });
 });

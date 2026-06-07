@@ -903,11 +903,22 @@ describe('portal shell theme contract', () => {
     assert.ok(workspace.includes('LayoutTree.createSidebarSubPanels'), 'PgWorkspace must precompute sidebar subpanels from its own layout tree');
     assert.ok(workspace.includes("this.ref.sidebar.addEventListener('panel-close'"), 'PgWorkspace must own panel close actions for its isolated sidebar');
     assert.ok(workspace.includes('this.ref.layout.joinPanels'), 'PgWorkspace panel close actions must operate on the matching isolated layout');
+    assert.ok(workspace.includes("this.ref.sidebar.addEventListener('sidebar-section-select'"), 'PgWorkspace must own sidebar navigation for isolated project workspaces');
+    assert.ok(workspace.includes("this.ref.sidebar.addEventListener('click'"), 'PgWorkspace must keep a delegated fallback for sidebar item clicks');
+    assert.ok(workspace.includes("event.target?.closest?.('.sec-item')"), 'PgWorkspace sidebar click fallback must target section items');
+    assert.ok(workspace.includes('this._bindSidebarSectionClicks();'), 'PgWorkspace must bind visible sidebar items after section rendering');
+    assert.ok(workspace.includes('item._pgWorkspaceSectionId'), 'PgWorkspace sidebar item handlers must carry the resolved route section id');
+    assert.ok(workspace.includes("navigate(sectionId, '', { project: this._projectId })"), 'PgWorkspace sidebar navigation must preserve project query scope');
     assert.ok(workspace.includes('this.ref.sidebar.updateSubPanels'), 'PgWorkspace must keep its isolated sidebar submenu synchronized with layout changes');
     assert.ok(workspace.includes('PgWorkspace.rootStyles = css'), 'PgWorkspace must apply its own flex shell styles');
+    assert.ok(workspace.includes("this.$['ROUTER/panel']"), 'PgWorkspace must restore route context without dispatching recursive hashchange events');
+    assert.ok(workspace.includes("this.$['ROUTER/globalParams']"), 'PgWorkspace must preserve global project route params while restoring workspace hashes');
+    assert.equal(workspace.includes('new HashChangeEvent'), false, 'PgWorkspace must not synthesize hashchange while handling workspace activation');
     let workspaceCss = fs.readFileSync(path.join(ROOT, 'web/components/PgWorkspace/PgWorkspace.css.js'), 'utf8');
-    assert.ok(workspaceCss.includes('display: flex'), 'PgWorkspace host must lay out sidebar and content horizontally');
-    assert.ok(workspaceCss.includes(':host([hidden])'), 'Inactive workspaces must be hidden without destroying DOM state');
+    assert.match(workspaceCss, /pg-workspace\s*\{[\s\S]*display:\s*flex/, 'PgWorkspace Light DOM host selector must lay out sidebar and content horizontally');
+    assert.match(workspaceCss, /pg-workspace\[hidden\]\s*\{[\s\S]*display:\s*none/, 'Inactive workspaces must be hidden without destroying DOM state');
+    assert.match(workspaceCss, /pg-workspace\s*>\s*\.app-content/, 'PgWorkspace shell content styles must stay scoped to the active workspace host');
+    assert.equal(workspaceCss.includes(':host'), false, 'PgWorkspace Light DOM shell styles must not rely on Shadow DOM :host selectors');
 
     for (let token of [
       '--sn-bg',

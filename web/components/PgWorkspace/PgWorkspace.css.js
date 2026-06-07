@@ -1,6 +1,6 @@
 import { css } from '@symbiotejs/symbiote';
 export default css`
-:host {
+pg-workspace {
   display: flex;
   width: 100%;
   height: 100%;
@@ -8,18 +8,18 @@ export default css`
   min-height: 0;
 }
 
-:host([hidden]) {
+pg-workspace[hidden] {
   display: none;
 }
 
-.app-content {
+pg-workspace > .app-content {
   flex: 1;
   position: relative;
   overflow: hidden;
   min-width: 0;
 }
 
-.app-content > panel-layout {
+pg-workspace > .app-content > panel-layout {
   width: 100%;
   height: 100%;
 }
