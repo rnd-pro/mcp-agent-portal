@@ -16,6 +16,7 @@ import {
   parseQuery,
   parseVoiceCommandList,
   updateParams,
+  VoiceController,
   VoiceRuntime,
   wakeCommandCandidates,
 } from 'symbiote-ui/ui';
@@ -58,6 +59,33 @@ function sameChatMessages(next = [], current = []) {
 export class AgentChat extends Symbiote {
   static isoMode = true;
   _audioRecorder = new VoiceRuntime();
+  _voiceController = new VoiceController({
+    getLanguage: () => this._voiceRecognitionLanguage(),
+    getWakeCandidates: () => this._getWakeCommandCandidates(),
+    onWakeTriggered: () => this._triggerVoiceInputFromWake(),
+    onSpeechStart: () => {
+      this._speakingVoiceResponse = true;
+      this._syncVoiceResponseButton();
+    },
+    onSpeechEnd: () => {
+      this._speakingVoiceResponse = false;
+      this._resumeWakeListeningAfterRecording();
+      this._syncVoiceResponseButton();
+    },
+    onWakeError: (err) => {
+      let error = err?.error || '';
+      if (error === 'not-supported') {
+        this._showVoiceError('Continuous listening requires browser speech recognition.');
+      }
+      if (['not-allowed', 'service-not-allowed', 'not-supported', 'start-failed'].includes(error)) {
+        this._stopWakeListening({ disableMode: true });
+        return;
+      }
+      if (this._wakeModeEnabled && !this._wakePausedForRecording) {
+        this._syncWakeButton();
+      }
+    }
+  });
   _voiceCommandMode = false;
   _voiceCommandTriggered = false;
   _voiceCommandHandling = false;
@@ -67,7 +95,6 @@ export class AgentChat extends Symbiote {
   _wakeCommandPhrases = null;
   _wakeModeEnabled = false;
   _wakePausedForRecording = false;
-  _wakeRecognition = null;
   _wakeTriggering = false;
   _voiceResponseEnabled = false;
   _voiceResponseLastAgentKey = '';
@@ -209,6 +236,7 @@ export class AgentChat extends Symbiote {
     this._stopWakeListening({ disableMode: true });
     this._stopVoiceUiTimer();
     this._audioRecorder.cancel();
+    this._voiceController.destroy();
     this._removeVoicePreview();
     super.disconnectedCallback?.();
   }
@@ -632,7 +660,7 @@ export class AgentChat extends Symbiote {
 
   _buildVoiceControlsConfig() {
     let command = this._getWakeCommandPhrase();
-    let speechAvailable = Boolean(globalThis.speechSynthesis && globalThis.SpeechSynthesisUtterance);
+    let speechAvailable = VoiceController.hasSpeechSynthesis;
     let recognitionAvailable = Boolean(this._audioRecorder.hasSpeechRecognition);
     let active = this._voiceControlActive();
     let languageOption = this._voiceLanguageOption();
@@ -698,7 +726,7 @@ export class AgentChat extends Symbiote {
   }
 
   _toggleVoiceResponseMode() {
-    if (!this._wakeModeEnabled || !globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) return;
+    if (!this._wakeModeEnabled || !VoiceController.hasSpeechSynthesis) return;
     this._voiceResponseEnabled = !this._voiceResponseEnabled;
     if (this._voiceResponseEnabled) {
       let current = this._getLatestAgentSpeechMessage();
@@ -788,82 +816,20 @@ export class AgentChat extends Symbiote {
   }
 
   _cancelVoiceResponseSpeech() {
-    if (globalThis.speechSynthesis) globalThis.speechSynthesis.cancel();
+    this._voiceController.cancelSpeech();
     this._speakingVoiceResponse = false;
     this._resumeWakeListeningAfterRecording();
   }
 
   _speakAgentResponseText(text) {
-    if (!text || !globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) return;
-    if (this._speakingVoiceResponse) {
-      globalThis.speechSynthesis.cancel();
-      this._speakingVoiceResponse = false;
-    }
-
+    if (!text || !VoiceController.hasSpeechSynthesis) return;
     this._pauseWakeListeningForRecording();
-    let utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = this._speechLocale();
-    utterance.onend = () => {
-      this._speakingVoiceResponse = false;
-      this._syncVoiceResponseButton();
-      this._resumeWakeListeningAfterRecording();
-    };
-    utterance.onerror = utterance.onend;
-    this._speakingVoiceResponse = true;
-    this._syncVoiceResponseButton();
-    globalThis.speechSynthesis.cancel();
-    globalThis.speechSynthesis.speak(utterance);
+    this._voiceController.speak(text);
   }
 
   _startWakeListening() {
-    if (!this._wakeModeEnabled || this._wakeRecognition || this._audioRecorder.state !== 'idle') return;
-    let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      this._stopWakeListening({ disableMode: true });
-      this._showVoiceError('Continuous listening requires browser speech recognition.');
-      return;
-    }
-
-    let recognition = new SpeechRecognition();
-    recognition.lang = this._voiceRecognitionLanguage();
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    this._wakeRecognition = recognition;
-
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      if (this._matchesWakeCommand(transcript)) {
-        this._triggerVoiceInputFromWake();
-      }
-    };
-
-    recognition.onerror = (event) => {
-      this._wakeRecognition = null;
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        this._stopWakeListening({ disableMode: true });
-        return;
-      }
-      if (this._wakeModeEnabled && !this._wakePausedForRecording) {
-        this._syncWakeButton();
-      }
-    };
-
-    recognition.onend = () => {
-      this._wakeRecognition = null;
-      if (this._wakeModeEnabled && !this._wakePausedForRecording) {
-        setTimeout(() => this._startWakeListening(), 250);
-      }
-    };
-
-    try {
-      recognition.start();
-    } catch {
-      this._wakeRecognition = null;
-      this._stopWakeListening({ disableMode: true });
-    }
+    if (!this._wakeModeEnabled || this._audioRecorder.state !== 'idle') return;
+    this._voiceController.startWake();
   }
 
   _stopWakeListening({ disableMode = false } = {}) {
@@ -872,41 +838,19 @@ export class AgentChat extends Symbiote {
       this._voiceResponseLastAgentKey = '';
     }
     this._wakePausedForRecording = false;
-    if (disableMode && globalThis.speechSynthesis) {
-      globalThis.speechSynthesis.cancel();
-      this._speakingVoiceResponse = false;
-    }
-    if (this._wakeRecognition) {
-      this._wakeRecognition.onresult = null;
-      this._wakeRecognition.onerror = null;
-      this._wakeRecognition.onend = null;
-      try { this._wakeRecognition.abort(); } catch (_) { /* already stopped */ }
-      this._wakeRecognition = null;
-    }
+    this._voiceController.stopWake({ disableMode });
     this._syncWakeButton();
   }
 
   _restartWakeListening() {
-    if (this._wakeRecognition) {
-      this._wakeRecognition.onresult = null;
-      this._wakeRecognition.onerror = null;
-      this._wakeRecognition.onend = null;
-      try { this._wakeRecognition.abort(); } catch (_) { /* already stopped */ }
-      this._wakeRecognition = null;
-    }
+    this._voiceController.stopWake();
     this._startWakeListening();
   }
 
   _pauseWakeListeningForRecording() {
     if (!this._wakeModeEnabled) return;
     this._wakePausedForRecording = true;
-    if (this._wakeRecognition) {
-      this._wakeRecognition.onresult = null;
-      this._wakeRecognition.onerror = null;
-      this._wakeRecognition.onend = null;
-      try { this._wakeRecognition.abort(); } catch (_) { /* already stopped */ }
-      this._wakeRecognition = null;
-    }
+    this._voiceController.pauseWake();
     this._syncWakeButton();
   }
 
@@ -914,7 +858,7 @@ export class AgentChat extends Symbiote {
     if (!this._wakeModeEnabled) return;
     this._wakePausedForRecording = false;
     this._syncWakeButton();
-    this._startWakeListening();
+    this._voiceController.resumeWake();
   }
 
   _triggerVoiceInputFromWake() {

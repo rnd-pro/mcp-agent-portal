@@ -244,7 +244,8 @@ describe('agent chat input state', () => {
     assert.match(source, /command: \{/);
     assert.match(source, /language: \{/);
     assert.match(source, /this\._audioRecorder\.onStateChange = \(\) => \{[\s\S]*this\._syncVoiceControls\(\);/);
-    assert.match(source, /speechSynthesis/);
+    assert.match(source, /VoiceController\.hasSpeechSynthesis/);
+    assert.doesNotMatch(source, /_wakeRecognition/);
     assert.match(source, /_toggleVoiceResponseMode\(\)/);
     assert.match(source, /_syncVoiceCommandButton\(\)/);
     assert.match(source, /_voiceCommandHints\(\)/);
@@ -291,7 +292,10 @@ describe('agent chat input state', () => {
     assert.match(source, /visible: recognitionAvailable && active/);
     assert.match(source, /this\._audioRecorder\.restartSpeechRecognition\(language\);/);
     assert.match(source, /let locale = this\._voiceCommandLocale\(\);/);
-    assert.match(source, /recognition\.lang = this\._voiceRecognitionLanguage\(\);/);
+    assert.match(source, /getLanguage: \(\) => this\._voiceRecognitionLanguage\(\),/);
+    assert.match(source, /onSpeechEnd: \(\) => \{[\s\S]*this\._resumeWakeListeningAfterRecording\(\);[\s\S]*this\._syncVoiceResponseButton\(\);/);
+    assert.match(source, /error === 'not-supported'[\s\S]*Continuous listening requires browser speech recognition\./);
+    assert.match(source, /\['not-allowed', 'service-not-allowed', 'not-supported', 'start-failed'\]\.includes\(error\)/);
     assert.match(source, /this\._audioRecorder\.setLanguage\(this\._voiceRecognitionLanguage\(\)\);/);
     assert.match(source, /this\._syncWakeButton\(\);[\s\S]*this\._audioRecorder\.setLanguage\(language\);[\s\S]*restartSpeechRecognition\(language\);[\s\S]*if \(this\._wakeModeEnabled && !this\._wakePausedForRecording\) \{\s+this\._restartWakeListening\(\);/);
     assert.match(source, /_restartWakeListening\(\)/);
