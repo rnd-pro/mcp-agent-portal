@@ -1,4 +1,4 @@
-import { readJsonCache, writeJsonCache, readStringCache, writeStringCache } from 'symbiote-node/core';
+import { readJsonCache, writeJsonCache, readStringCache, writeStringCache } from 'symbiote-ui/core';
 import { stateSync } from '../state-sync.js';
 
 export { readJsonCache, writeJsonCache, readStringCache, writeStringCache };

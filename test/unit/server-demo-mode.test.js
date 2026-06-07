@@ -324,22 +324,19 @@ describe('server demo mode', () => {
     assert.ok(history.activeIds.includes('symbiote-engine'));
   });
 
-  it('uses public source subdirectories for split Symbiote package projects', async () => {
+  it('uses direct public sources for split Symbiote package projects', async () => {
     let root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-symbiote-sources-'));
     try {
       let checkoutRoot = path.join(root, 'symbiote-ui');
-      fs.mkdirSync(path.join(checkoutRoot, 'packages/symbiote-ui/ui'), { recursive: true });
-      fs.mkdirSync(path.join(checkoutRoot, 'packages/symbiote-engine/engine'), { recursive: true });
-      fs.writeFileSync(path.join(checkoutRoot, 'README.md'), '# symbiote-node workspace\n');
-      fs.writeFileSync(path.join(checkoutRoot, 'packages/symbiote-ui/package.json'), '{"name":"symbiote-ui"}\n');
-      fs.writeFileSync(path.join(checkoutRoot, 'packages/symbiote-ui/ui/index.js'), 'export const ui = true;\n');
-      fs.writeFileSync(path.join(checkoutRoot, 'packages/symbiote-engine/package.json'), '{"name":"symbiote-engine"}\n');
+      fs.mkdirSync(path.join(checkoutRoot, 'ui'), { recursive: true });
+      fs.writeFileSync(path.join(checkoutRoot, 'README.md'), '# symbiote-ui workspace\n');
+      fs.writeFileSync(path.join(checkoutRoot, 'package.json'), '{"name":"symbiote-ui"}\n');
+      fs.writeFileSync(path.join(checkoutRoot, 'ui/index.js'), 'export const ui = true;\n');
       fs.writeFileSync(path.join(checkoutRoot, '.public-source.json'), JSON.stringify({
         projectId: 'symbiote-ui',
         name: 'Symbiote UI',
-        repo: 'https://github.com/RND-PRO/symbiote-node.git',
+        repo: 'https://github.com/RND-PRO/symbiote-ui.git',
         ref: 'main',
-        sourceSubdir: 'packages/symbiote-ui',
         syncedAt: '2026-06-03T00:00:00.000Z',
       }));
       fs.writeFileSync(path.join(root, 'sources.json'), JSON.stringify({
@@ -347,9 +344,8 @@ describe('server demo mode', () => {
         sources: [{
           projectId: 'symbiote-ui',
           name: 'Symbiote UI',
-          repo: 'https://github.com/RND-PRO/symbiote-node.git',
+          repo: 'https://github.com/RND-PRO/symbiote-ui.git',
           ref: 'main',
-          sourceSubdir: 'packages/symbiote-ui',
         }],
       }));
 
@@ -367,7 +363,7 @@ describe('server demo mode', () => {
       let paths = body.files;
 
       assert.equal(body.publicSource.projectId, 'symbiote-ui');
-      assert.equal(body.publicSource.sourceSubdir, 'packages/symbiote-ui');
+      assert.equal(body.publicSource.sourceSubdir, '');
       assert.ok(paths.includes('package.json'));
       assert.ok(paths.includes('ui/index.js'));
       assert.equal(paths.some((filePath) => filePath.includes('symbiote-engine')), false);

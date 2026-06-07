@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import { tPortal } from '../../common/localization.js';
 import cssLocal from './RuntimeControl.css.js';
 import template from './RuntimeControl.tpl.js';

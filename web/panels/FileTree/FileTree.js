@@ -1,6 +1,6 @@
 // @ctx .context/web/panels/file-tree.ctx
 import Symbiote from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
+import 'symbiote-ui/ui';
 import { api, state, events, emit, getActiveRouteProjectId, skeletonMatchesProject } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
 import { events as dashEvents, state as dashState } from '../../dashboard-state.js';
@@ -12,7 +12,7 @@ import {
   showTree,
   showTreePlaceholder,
   syncTreeFilter,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 import template from './FileTree.tpl.js';
 import css from './FileTree.css.js';
 

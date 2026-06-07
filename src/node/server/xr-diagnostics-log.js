@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createXRThreeTroubleshootingSummary } from 'symbiote-node/xr';
+import { createXRThreeTroubleshootingSummary } from 'symbiote-ui/xr';
 
 const XR_DIAGNOSTIC_LOG_LIMIT = 80;
 const XR_DIAGNOSTIC_CLIENT_STALE_MS = 15000;

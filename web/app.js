@@ -1,8 +1,8 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
 import { tPortal } from "./common/localization.js";
-import { LayoutTree as t, applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-node/ui";
-import { waitForElementApi } from "symbiote-node/core";
+import { LayoutTree as t, applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-ui/ui";
+import { waitForElementApi } from "symbiote-ui/core";
 import { panelTypes, getSectionsForScope, hasSection } from "./router-registry.js";
 import { applyPortalProjectTransaction, getPortalProjectRuntime, getPortalRuntimeLayout } from "./services/portal-runtime.js";
 import { getTransactionLayoutRoots } from "./services/project-runtime-package.js";
@@ -45,8 +45,8 @@ import { stateSync } from "./state-sync.js";
 import { persistLayout, persistUiValue, readLayout, readUiValue } from "./common/ui-state.js";
 
 export const state = { skeleton: null, skeletonProjectId: null, activeFile: null, ws: null, monitorEvents: [] };
-export { formatStats } from "symbiote-node/display/format-utils";
-import { uiAlert } from "symbiote-node/ui";
+export { formatStats } from "symbiote-ui/display/format-utils";
+import { uiAlert } from "symbiote-ui/ui";
 window.alert = (msg) => uiAlert(msg);
 export const baseUrl = new URL(".", import.meta.url).href;
 

@@ -5,11 +5,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const symbioteNodeGraphUrl = pathToFileURL(resolve(repoRoot, 'node_modules', 'symbiote-node', 'graph.js')).href;
+const symbioteUiGraphUrl = pathToFileURL(resolve(repoRoot, 'node_modules', 'symbiote-ui', 'graph', 'index.js')).href;
 const loaderSource = `
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === 'symbiote-node/graph') {
-    return { url: ${JSON.stringify(symbioteNodeGraphUrl)}, shortCircuit: true };
+  if (specifier === 'symbiote-ui/graph') {
+    return { url: ${JSON.stringify(symbioteUiGraphUrl)}, shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }
@@ -46,7 +46,7 @@ describe('portal project runtime package adapter', () => {
     assert.equal(project.entry.graph, 'sections');
     assert.equal(project.entry.layout, 'graph');
     assert.equal(project.graphs.sections.nodes[0].kind, 'ui.section');
-    assert.equal(project.layouts.graph.componentRegistries[0].id, 'symbiote-node/ui');
+    assert.equal(project.layouts.graph.componentRegistries[0].id, 'symbiote-ui/ui');
     assert.equal(project.layouts.graph.componentRegistries[1].id, 'agent-portal/runtime-layouts');
     assert.equal(project.layouts.graph.root.children[0].component, 'pg-dep-graph');
     assert.deepEqual(project.agents.allowedTransactions, [

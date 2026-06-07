@@ -6,7 +6,7 @@ import {
   normalizeProjectGraphMetadata,
   pathMatchesPattern,
   validateProjectGraphMetadata,
-} from 'symbiote-node/graph';
+} from 'symbiote-ui/graph';
 
 describe('project graph metadata', () => {
   it('normalizes clusters and filters unusable entries', () => {
@@ -24,7 +24,7 @@ describe('project graph metadata', () => {
     assert.equal(metadata.clusters[1].color, 'var(--sn-graph-cluster-2)');
   });
 
-  it('accepts symbiote-node graph theme token references for cluster colors', () => {
+  it('accepts symbiote-ui graph theme token references for cluster colors', () => {
     const metadata = normalizeProjectGraphMetadata({
       clusters: [
         { label: 'Theme Token', color: 'var(--sn-graph-cluster-4)', paths: ['packages/'] },

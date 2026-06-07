@@ -1,7 +1,7 @@
 import { replaceIconsWithHtml } from '../common/icons.js';
-import { formatMarkdown as formatLibraryMarkdown } from 'symbiote-node/display/markdown-formatter';
+import { formatMarkdown as formatLibraryMarkdown } from 'symbiote-ui/display/markdown-formatter';
 
-export { escapeHtml, formatElapsed, formatMarkdownMentions } from 'symbiote-node/display/markdown-formatter';
+export { escapeHtml, formatElapsed, formatMarkdownMentions } from 'symbiote-ui/display/markdown-formatter';
 
 function resolvePortalImage(src, { basePath = '' } = {}) {
   let dir = basePath ? basePath.substring(0, basePath.lastIndexOf('/') + 1) : '';

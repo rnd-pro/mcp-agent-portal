@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createXRSpatialScene,
   createXRVisualTestSummary,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 
 function createAuditLayout() {
   return {

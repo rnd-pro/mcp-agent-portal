@@ -68,7 +68,7 @@ const DEMO_OPEN_LIBRARY_TREE = [
     path: 'skills',
     type: 'dir',
     children: [
-      { name: 'symbiote-node-ui.md', path: 'skills/symbiote-node-ui.md', type: 'file' },
+      { name: 'symbiote-ui.md', path: 'skills/symbiote-ui.md', type: 'file' },
       { name: 'public-demo.md', path: 'skills/public-demo.md', type: 'file' },
     ],
   },
@@ -208,7 +208,7 @@ function demoSubagentSpecs(parent) {
       tools: 4,
       tokens: 8400,
       prompt: `Audit the architecture context for "${label}" and identify reusable provider boundaries.`,
-      result: 'Architecture audit complete: reusable UI, graph, layout, theme, and XR behavior should stay in symbiote-node, while product routing and orchestration remain in Agent Portal.',
+      result: 'Architecture audit complete: reusable UI, graph, layout, theme, and XR behavior should stay in symbiote-ui, runtime execution should stay in symbiote-engine, while product routing and orchestration remain in Agent Portal.',
     },
     {
       slug: 'browser',
@@ -837,7 +837,7 @@ function demoGraphMetadata() {
         id: 'demo-ui',
         label: 'UI shell',
         description: 'Browser UI, panels, and Symbiote provider components.',
-        paths: ['web/', 'packages/symbiote-node/'],
+        paths: ['web/', 'packages/symbiote-ui/', 'packages/symbiote-engine/'],
       },
       {
         id: 'demo-server',
@@ -887,7 +887,8 @@ function demoPortalFileContent(filePath, source = 'team') {
     'This public demo shows the Agent Portal skill and workflow UI with safe mock data.',
     '',
     '- Private repository URLs, secrets, and runtime state are not exposed.',
-    '- Reusable UI behavior belongs in `symbiote-node` provider components.',
+    '- Reusable UI behavior belongs in `symbiote-ui` provider components.',
+    '- Runtime execution behavior belongs in `symbiote-engine`.',
     '- Product-specific orchestration remains in Agent Portal.',
   ].join('\n');
 }
@@ -905,7 +906,7 @@ function demoWorkflowList() {
     },
     {
       name: 'symbiote-provider-audit',
-      description: 'Audit UI primitives against symbiote-node provider boundaries.',
+      description: 'Audit UI primitives against symbiote-ui provider boundaries.',
       steps: [
         { id: 'catalog', name: 'Catalog primitives', description: 'Check public component coverage.', tools: ['discover'] },
         { id: 'theme', name: 'Theme coverage', description: 'Verify cascade tokens and aliases.', tools: ['audit'] },
@@ -947,10 +948,10 @@ function demoMarketplace() {
       source: 'https://rnd-pro.com/',
     },
     {
-      name: 'symbiote-node-provider',
+      name: 'symbiote-ui-provider',
       category: 'rnd-pro',
       command: 'npx',
-      args: ['-y', 'symbiote-node'],
+      args: ['-y', 'symbiote-ui'],
       description: 'UI provider contracts, layouts, themes, and XR primitives.',
       source: 'https://rnd-pro.com/',
     },
@@ -1047,7 +1048,7 @@ function createMcpResponse(projectRoot, publicSources, body = {}) {
   if (toolName === 'get_tracked_files') {
     return mcpContent(JSON.stringify([
       { path: 'src/node/server/demo-mode.js', reason: 'Public demo server contract' },
-      { path: 'packages/symbiote-node/xr.js', reason: 'XR provider API' },
+      { path: 'packages/symbiote-ui/xr.js', reason: 'XR provider API' },
     ]));
   }
   if (toolName === 'untrack_files') {

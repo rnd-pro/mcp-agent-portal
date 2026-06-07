@@ -2,7 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import { tPortal } from '../../common/localization.js';
 import template from './PeerReview.tpl.js';
-import { sharedUiStyles as css } from 'symbiote-node/ui';
+import { sharedUiStyles as css } from 'symbiote-ui/ui';
 import localCss from './PeerReview.css.js';
 
 export class PeerReview extends Symbiote {

@@ -31,7 +31,7 @@ describe('global shell theme contract', () => {
         assert.equal(
           source.includes(literal),
           false,
-          `${relative} must consume symbiote-node tokens instead of fallback literal ${literal}`,
+          `${relative} must consume symbiote-ui tokens instead of fallback literal ${literal}`,
         );
       }
     }

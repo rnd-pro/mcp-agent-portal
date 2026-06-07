@@ -15,7 +15,7 @@ import {
   getSourceLanguage,
   isDirectoryLikePath,
   parseQuery,
-} from "symbiote-node/ui";
+} from "symbiote-ui/ui";
 import template from "./CodeViewer.tpl.js";
 import css from "./CodeViewer.css.js";
 

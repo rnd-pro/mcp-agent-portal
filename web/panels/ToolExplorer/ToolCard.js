@@ -1,5 +1,5 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 
 export class ToolCard extends Symbiote {
   init$ = {

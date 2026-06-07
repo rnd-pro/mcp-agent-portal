@@ -47,7 +47,7 @@ describe('project scoped frontend data loading', () => {
     assert.match(codeViewerSource, /if \(requestId !== this\._loadRequestId\) return;/);
     assert.match(codeViewerSource, /resolveProjectPath\(path, projectId\)/);
 
-    assert.match(ctxPanelSource, /import \{ getSourceLanguage \} from 'symbiote-node\/ui';/);
+    assert.match(ctxPanelSource, /import \{ getSourceLanguage \} from 'symbiote-ui\/ui';/);
     assert.match(ctxPanelSource, /_loadRequestId = 0;/);
     assert.match(ctxPanelSource, /let projectId = detail\.projectId \|\| getActiveRouteProjectId\(\);/);
     assert.match(ctxPanelSource, /getSourceLanguage\(file\) === 'md'/);

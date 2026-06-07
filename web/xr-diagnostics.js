@@ -10,7 +10,7 @@ import {
   requestWebXRReferenceSpace,
   requestWebXRSession,
   syncWebXRCanvas,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 
 const enterButton = document.querySelector('#enter');
 const emulateButton = document.querySelector('#emulate');

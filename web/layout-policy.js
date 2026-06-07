@@ -1,4 +1,4 @@
-import { LayoutTree } from 'symbiote-node/ui';
+import { LayoutTree } from 'symbiote-ui/ui';
 import { getLayout } from './router-registry.js';
 
 export const sectionLayoutMigrations = {

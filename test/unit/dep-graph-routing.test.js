@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getGraphUrlParams, parseGraphHash, updateHashParam } from 'symbiote-node/ui';
+import { getGraphUrlParams, parseGraphHash, updateHashParam } from 'symbiote-ui/ui';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 

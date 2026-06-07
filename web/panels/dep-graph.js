@@ -2,8 +2,8 @@
  * dep-graph.js — Visual Project Graph
  *
  * Renders the project dependency graph as an interactive
- * symbiote-node graph visualization.
- * Uses symbiote-node's NodeCanvas with orthogonal routing,
+ * symbiote-ui graph visualization.
+ * Uses symbiote-ui's NodeCanvas with orthogonal routing,
  * readonly mode, and auto-layout.
  *
  * Phase 1: File-level graph (each file = node, imports = traces).
@@ -16,7 +16,7 @@ import {
   buildStructuredGraph,
   normalizeProjectGraphMetadata,
   prepareGraphBuild,
-} from 'symbiote-node/graph';
+} from 'symbiote-ui/graph';
 import {
   Frame,
   addGraphDirectoryFrames as addDirectoryFrames,
@@ -52,8 +52,8 @@ import {
   toggleGraphLayerButtonState as toggleLayerButtonState,
   ForceLayout,
   updateHashParam,
-} from 'symbiote-node/ui';
-import { findConnectionPath, resolveSymbolFile } from 'symbiote-node/graph';
+} from 'symbiote-ui/ui';
+import { findConnectionPath, resolveSymbolFile } from 'symbiote-ui/graph';
 import { api, state, events, emit, getActiveRouteProjectId, resolveProjectPath, skeletonMatchesProject } from '../app.js';
 import { emit as dashEmit, events as dashEvents, state as dashState } from '../dashboard-state.js';
 import { persistUiValue, readUiValue } from '../common/ui-state.js';
@@ -64,7 +64,7 @@ export class DepGraph extends Symbiote {
   init$ = {};
 
 
-  /** @type {import('symbiote-node/ui').NodeEditor|null} */
+  /** @type {import('symbiote-ui/ui').NodeEditor|null} */
   _editor = null;
   /** @type {boolean} Tracks whether a node was dragged (suppresses click-to-focus) */
   _wasDragged = false;
@@ -1507,7 +1507,7 @@ export class DepGraph extends Symbiote {
   /**
    * Post-render reflow: measure actual DOM SubgraphNode sizes and re-position
    * to eliminate overlaps. Uses a simple top-to-bottom column packing approach.
-   * @param {import('symbiote-node/ui').NodeEditor} editor
+   * @param {import('symbiote-ui/ui').NodeEditor} editor
    * @param {Object} _initialPositions
    * @returns {void}
    */
@@ -1583,7 +1583,7 @@ export class DepGraph extends Symbiote {
    * Restore drill-down state from a path (directory or file).
    * Finds the SubgraphNode whose params.path matches and drills in.
    * @param {string} targetPath - e.g. 'src/core/' or 'src/core/parser.js'
-   * @param {import('symbiote-node/ui').NodeEditor} editor
+   * @param {import('symbiote-ui/ui').NodeEditor} editor
    * @returns {boolean}
    */
 
@@ -1644,7 +1644,7 @@ export class DepGraph extends Symbiote {
 
   /**
    * Create directory grouping frames from dirFiles map and node positions
-   * @param {import('symbiote-node/ui').NodeEditor} editor
+   * @param {import('symbiote-ui/ui').NodeEditor} editor
    * @param {Map<string, string>} fileMap
    * @param {Map<string, string[]>} dirFiles
    * @param {Object<string, {x: number, y: number}>} positions

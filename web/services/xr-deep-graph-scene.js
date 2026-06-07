@@ -1,6 +1,6 @@
 import {
   createXRProjectDeepGraphProjection,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 
 export function createPortalXRDeepGraphScene(skeleton, options = {}) {
   let projection = createXRProjectDeepGraphProjection(skeleton, {

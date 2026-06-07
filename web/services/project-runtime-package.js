@@ -1,4 +1,4 @@
-import { createProjectRuntime } from 'symbiote-node/graph';
+import { createProjectRuntime } from 'symbiote-ui/graph';
 
 function sectionNode(section) {
   return {
@@ -17,7 +17,7 @@ function normalizeLayoutRecord(layouts) {
       {
         version: 'runtime-ui-v1',
         componentRegistries: [
-          { id: 'symbiote-node/ui', provider: 'symbiote-node' },
+          { id: 'symbiote-ui/ui', provider: 'symbiote-ui' },
           { id: 'agent-portal/runtime-layouts', provider: 'agent-portal' },
         ],
         root,
@@ -43,7 +43,7 @@ export function buildPortalProjectPackage({
     name: id,
     entry: { graph: 'sections', layout: firstLayout, theme },
     packs: [
-      { id: 'symbiote-node/ui', kind: 'provider' },
+      { id: 'symbiote-ui/ui', kind: 'provider' },
       { id: 'agent-portal/runtime-layouts', kind: 'domain-pack' },
     ],
     graphs: {

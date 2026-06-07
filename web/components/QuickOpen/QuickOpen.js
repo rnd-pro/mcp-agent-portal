@@ -5,7 +5,7 @@ import {
   collectQuickOpenFilesFromSkeleton,
   getRoute,
   parseQuery,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 import { state, events, emit } from '../../app.js';
 
 export class QuickOpen extends BaseQuickOpen {

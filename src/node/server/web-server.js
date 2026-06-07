@@ -21,7 +21,7 @@ let ROOT_DIR = path.join(__dirname, '..', '..', '..');
 let WEB_DIR = path.join(ROOT_DIR, 'web');
 let DIST_WEB_DIR = path.join(ROOT_DIR, 'dist', 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
-let NODE_MODULE_PACKAGE_NAMES = new Set(['symbiote-node', 'symbiote-ui', 'symbiote-engine']);
+let NODE_MODULE_PACKAGE_NAMES = new Set(['symbiote-ui', 'symbiote-engine']);
 const DEFAULT_CHAT_AGENT = 'orchestrator';
 
 /** @type {Record<string, string>} */

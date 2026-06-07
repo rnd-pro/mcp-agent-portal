@@ -2,7 +2,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './TopologyPanel.tpl.js';
 import cssLocal from './TopologyPanel.css.js';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 
 const TOPOLOGY_COLUMNS = [
   { key: 'name', label: 'Node ID' },

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { findConnectionPath, resolveSymbolFile } from 'symbiote-node/graph';
+import { findConnectionPath, resolveSymbolFile } from 'symbiote-ui/graph';
 
 test('resolveSymbolFile returns the file for a skeleton symbol', () => {
   const skeleton = {

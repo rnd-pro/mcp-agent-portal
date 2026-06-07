@@ -1,7 +1,7 @@
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import { tPortal } from '../../common/localization.js';
-import { ChatList as BaseChatList, updateParams } from 'symbiote-node/ui';
-import { uiConfirm } from 'symbiote-node/ui';
+import { ChatList as BaseChatList, updateParams } from 'symbiote-ui/ui';
+import { uiConfirm } from 'symbiote-ui/ui';
 
 export class ChatList extends BaseChatList {
   renderCallback() {

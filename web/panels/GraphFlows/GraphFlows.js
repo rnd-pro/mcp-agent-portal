@@ -2,7 +2,7 @@ import Symbiote from '@symbiotejs/symbiote';
 import { emit as dashEmit } from '../../dashboard-state.js';
 import { emit as appEmit, resolveProjectPath } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
-import { normalizeProjectGraphMetadata } from 'symbiote-node/graph';
+import { normalizeProjectGraphMetadata } from 'symbiote-ui/graph';
 import template from './GraphFlows.tpl.js';
 import css from './GraphFlows.css.js';
 

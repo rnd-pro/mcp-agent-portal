@@ -1,5 +1,5 @@
 /**
- * state-sync.js — Portal-specific wrapper around symbiote-node StateSync.
+ * state-sync.js — Portal-specific wrapper around symbiote-ui StateSync.
  *
  * Adds version-change detection banner and portal URL construction.
  *
@@ -9,7 +9,7 @@
  *   stateSync.on('chats', (chats) => { ... });
  *   stateSync.connect();
  */
-import { createStateSync } from 'symbiote-node/core';
+import { createStateSync } from 'symbiote-ui/core';
 
 const _sync = createStateSync();
 

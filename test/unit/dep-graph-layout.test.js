@@ -4,7 +4,7 @@ import {
   buildFlatGroups,
   buildGraphStatItems,
   prepareGraphBuild,
-} from 'symbiote-node/graph';
+} from 'symbiote-ui/graph';
 
 function createGraph() {
   return {

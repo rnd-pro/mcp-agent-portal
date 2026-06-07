@@ -1,1 +1,1 @@
-export * from 'symbiote-node/display/highlight';
+export * from 'symbiote-ui/display/highlight';

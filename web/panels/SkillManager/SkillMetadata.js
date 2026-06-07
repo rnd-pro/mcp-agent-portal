@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
+import 'symbiote-ui/ui';
 import { events } from '../../app.js';
 
 const FRONTMATTER_KEYS = ['name', 'description', 'category', 'tags', 'applies_to', 'token_cost', 'autoload', 'resource_group'];

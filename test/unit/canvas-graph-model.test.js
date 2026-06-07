@@ -8,7 +8,7 @@ import {
   collectSkeletonFiles,
   dirOf,
   resolveImport,
-} from 'symbiote-node/graph';
+} from 'symbiote-ui/graph';
 
 describe('canvas graph project model adapter', () => {
   it('builds a flat canvas model from project skeleton data', () => {
@@ -22,7 +22,7 @@ describe('canvas graph project model adapter', () => {
         'src/lib/util.js': ['format'],
       },
       I: {
-        'src/app.js': ['./lib/util', 'symbiote-node'],
+        'src/app.js': ['./lib/util', 'symbiote-ui'],
         'src/lib/util.js': ['./util'],
       },
       L: {

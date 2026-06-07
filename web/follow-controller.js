@@ -1,4 +1,4 @@
-import { FocusController } from 'symbiote-node/ui';
+import { FocusController } from 'symbiote-ui/ui';
 import { tPortal } from './common/localization.js';
 
 class FollowController extends FocusController {

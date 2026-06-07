@@ -1,9 +1,9 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './Marketplace.tpl.js';
-import { uiConfirm } from 'symbiote-node/ui';
+import { uiConfirm } from 'symbiote-ui/ui';
 import { tPortal } from '../../common/localization.js';
 import cssLocal from './Marketplace.css.js';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import './McpServerCard.js';
 import './McpCatalogSection.js';
 import './ContextCard.js';

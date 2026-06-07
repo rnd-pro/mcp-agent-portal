@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
+import 'symbiote-ui/ui';
 import { emit } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
 import {
@@ -9,7 +9,7 @@ import {
   showTree,
   showTreePlaceholder,
   syncTreeFilter,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 import template from './OpenLibraryTree.tpl.js';
 import css from './OpenLibraryTree.css.js';
 

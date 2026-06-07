@@ -3,8 +3,8 @@ import { mcpCall } from '../../common/mcp-call.js';
 import { tPortal } from '../../common/localization.js';
 import template from './WorkflowExplorer.tpl.js';
 import css from './WorkflowExplorer.css.js';
-import { sharedUiStyles as sharedCss } from 'symbiote-node/ui';
-import 'symbiote-node/ui';
+import { sharedUiStyles as sharedCss } from 'symbiote-ui/ui';
+import 'symbiote-ui/ui';
 import './WorkflowItem.js';
 import './WorkflowStep.js';
 

@@ -5,7 +5,7 @@ import {
   getRoute,
   parseQuery,
   updateParams,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import { stateSync } from '../../state-sync.js';
 import { persistUiValue, readUiValue } from '../../common/ui-state.js';

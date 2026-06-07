@@ -1,5 +1,5 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
+import 'symbiote-ui/ui';
 
 export class PipelineStep extends Symbiote {
   init$ = {

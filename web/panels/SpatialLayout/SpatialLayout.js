@@ -1,6 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import * as THREE from 'three';
-import { sharedUiStyles as cssShared, getRoute, parseQuery, buildHash } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared, getRoute, parseQuery, buildHash } from 'symbiote-ui/ui';
 import {
   WEBXR_FEATURES,
   WEBXR_MODES,
@@ -46,7 +46,7 @@ import {
   createWebXRLaunchRecommendation,
   hitTestXRPanels,
   readXRHtmlCanvasOriginTrialHeaderStatus,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 import { createProjectTransactionEvent } from '../../services/project-transaction-messages.js';
 import { events, state, skeletonMatchesProject } from '../../app.js';
 import { readLayout } from '../../common/ui-state.js';

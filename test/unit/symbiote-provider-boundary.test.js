@@ -5,14 +5,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const PACKAGE_ROOT = path.join(ROOT, 'node_modules/symbiote-node');
+const PACKAGE_ROOT = path.join(ROOT, 'node_modules/symbiote-ui');
 const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
 const SCAN_ROOTS = ['web', 'src', 'demo', 'scripts'];
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'build', 'coverage']);
 const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html']);
 const IMPORT_MAP_FILES = ['web/index.html', 'demo/index.html', 'demo/build.js'];
+const REQUIRED_BROWSER_IMPORTS = ['three'];
 const BROWSER_FORBIDDEN_SPECIFIERS = new Set([
-  'symbiote-node/engine',
 ]);
 
 function packageExportSpecifiers() {
@@ -78,7 +78,7 @@ function resolvesInsidePackage(file, specifier) {
 
 function importMapEntries(source) {
   let entries = new Set();
-  let pattern = /"([^"]+)":\s*"[^"]*packages\/symbiote-node\//g;
+  let pattern = /"([^"]+)":\s*"[^"]*packages\/symbiote-ui\//g;
   let match;
   while ((match = pattern.exec(source))) {
     entries.add(match[1]);
@@ -86,7 +86,7 @@ function importMapEntries(source) {
   return entries;
 }
 
-describe('symbiote-node provider consumer boundary', () => {
+describe('symbiote-ui provider consumer boundary', () => {
   it('uses package exports instead of private package paths', () => {
     let publicExports = packageExportSpecifiers();
     let files = SCAN_ROOTS.flatMap((dir) => walk(path.join(ROOT, dir)));
@@ -102,7 +102,7 @@ describe('symbiote-node provider consumer boundary', () => {
 	        if (isSymbiotePackage && !isPublicSpecifier(specifier, publicExports)) {
           violations.push(`${path.relative(ROOT, file)} imports non-exported ${specifier}`);
         }
-        if (specifier.startsWith('packages/symbiote-node/') || resolvesInsidePackage(file, specifier)) {
+        if (specifier.startsWith('packages/symbiote-ui/') || resolvesInsidePackage(file, specifier)) {
           violations.push(`${path.relative(ROOT, file)} imports private package path ${specifier}`);
         }
       }
@@ -146,6 +146,11 @@ describe('symbiote-node provider consumer boundary', () => {
       for (let specifier of entries) {
         if (!isPublicSpecifier(specifier, publicExports)) {
           violations.push(`${repoPath} maps non-exported ${specifier}`);
+        }
+      }
+      for (let specifier of REQUIRED_BROWSER_IMPORTS) {
+        if (!source.includes(`"${specifier}":`)) {
+          violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
         }
       }
     }

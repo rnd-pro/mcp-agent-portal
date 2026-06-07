@@ -39,7 +39,6 @@
     "@symbiotejs/symbiote": "3.8.0-webmcp.2",
     "iwer": "^2.2.1",
     "symbiote-engine": "0.3.0-alpha.6",
-    "symbiote-node": "0.3.0-alpha.6",
     "symbiote-ui": "0.3.0-alpha.11",
     "telegraf": "^4.16.3",
     "three": "^0.184.0",

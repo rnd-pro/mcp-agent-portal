@@ -2,7 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import { tPortal } from '../../common/localization.js';
 import template from './PipelineManager.tpl.js';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import css from './PipelineManager.css.js';
 import './PipelineItem.js';
 import './PipelineStep.js';

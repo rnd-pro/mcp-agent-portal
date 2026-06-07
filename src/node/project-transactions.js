@@ -1,4 +1,4 @@
-import { normalizeProjectTransaction } from 'symbiote-node/graph';
+import { normalizeProjectTransaction } from 'symbiote-ui/graph';
 
 const TRANSACTION_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 

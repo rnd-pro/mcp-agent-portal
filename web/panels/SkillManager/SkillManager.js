@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { events } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
-import 'symbiote-node/ui';
+import 'symbiote-ui/ui';
 import './SkillMetadata.js';
 import template from './SkillManager.tpl.js';
 import styles from './SkillManager.css.js';

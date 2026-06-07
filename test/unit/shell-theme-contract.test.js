@@ -7,10 +7,10 @@ import { fileURLToPath } from 'node:url';
 let ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 
 describe('portal shell theme contract', () => {
-  it('applies the symbiote-node default provider theme at the document root', () => {
+  it('applies the symbiote-ui default provider theme at the document root', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
-    assert.ok(source.includes('DEFAULT_PROVIDER_THEME'), 'web/app.js must import DEFAULT_PROVIDER_THEME from symbiote-node/ui');
-    assert.ok(source.includes('applyTheme'), 'web/app.js must import applyTheme from symbiote-node/ui');
+    assert.ok(source.includes('DEFAULT_PROVIDER_THEME'), 'web/app.js must import DEFAULT_PROVIDER_THEME from symbiote-ui/ui');
+    assert.ok(source.includes('applyTheme'), 'web/app.js must import applyTheme from symbiote-ui/ui');
     assert.match(
       source,
       /\b[a-zA-Z_$][\w$]*\(document\.documentElement,\s*[a-zA-Z_$][\w$]*\)/,
@@ -34,11 +34,11 @@ describe('portal shell theme contract', () => {
       '--sn-node-selected',
       '--sn-text',
     ]) {
-      assert.ok(theme.includes(token), `default symbiote-node theme must provide ${token}`);
+      assert.ok(theme.includes(token), `default symbiote-ui theme must provide ${token}`);
     }
   });
 
-  it('consumes symbiote-node theme tokens instead of copying provider colors', () => {
+  it('consumes symbiote-ui theme tokens instead of copying provider colors', () => {
     let css = fs.readFileSync(path.join(ROOT, 'web/style.css'), 'utf8');
     let index = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
     let icons = fs.readFileSync(path.join(ROOT, 'web/common/icons.js'), 'utf8');
@@ -625,8 +625,20 @@ describe('portal shell theme contract', () => {
     assert.equal(skillMetadata.includes('pg-placeholder'), false, 'SkillMetadata must not copy placeholder shell classes');
 
     let agentChat = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.js'), 'utf8');
+    let agentChatTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.tpl.js'), 'utf8');
+    let agentChatCss = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.css.js'), 'utf8');
     assert.equal(agentChat.includes('style="color'), false, 'AgentChat composer adapter must not inject inline colors');
     assert.equal(agentChat.includes('font-weight:500'), false, 'AgentChat composer adapter must leave typography to chat-composer CSS');
+    assert.ok(agentChatTemplate.includes('<chat-workspace'), 'AgentChat must compose the reusable symbiote-ui chat workspace');
+    assert.equal(agentChatTemplate.includes('<chat-composer'), false, 'AgentChat must not assemble chat-composer directly');
+    assert.equal(agentChatTemplate.includes('<chat-transcript'), false, 'AgentChat must not assemble chat-transcript directly');
+    assert.equal(agentChatTemplate.includes('<cell-bg'), false, 'AgentChat must not assemble cell-bg directly');
+    assert.equal(agentChatCss.includes('.chat-view'), false, 'AgentChat must not keep local chat-view CSS');
+    assert.equal(agentChatCss.includes('chat-composer .composer-body'), false, 'AgentChat must not style chat-composer internals');
+    assert.equal(agentChat.includes("composer.querySelector('.composer-body:not(.voice-preview)')"), false, 'AgentChat must not query composer internals');
+    assert.equal(agentChat.includes("querySelector('.voice-preview-body')"), false, 'AgentChat must not query voice preview internals');
+    assert.equal(fs.existsSync(path.join(ROOT, 'web/panels/AgentChat/ChatMessageItem.js')), false, 'AgentChat must not keep symbiote-ui re-export shims');
+    assert.ok(agentChat.includes('chat-workspace-voice-intent'), 'AgentChat must use workspace-level voice intents');
 
     let opsTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.tpl.js'), 'utf8');
     let opsCss = fs.readFileSync(path.join(ROOT, 'web/panels/OpsPanel/OpsPanel.css.js'), 'utf8');
@@ -683,18 +695,18 @@ describe('portal shell theme contract', () => {
     assert.ok(source.includes('var(--sn-dot-output)'), 'export sockets must inherit the provider output token');
   });
 
-  it('keeps spatial layout as a thin symbiote-node XR consumer', () => {
+  it('keeps spatial layout as a thin symbiote-ui XR consumer', () => {
     let logic = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.js'), 'utf8');
     let template = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.tpl.js'), 'utf8');
     let css = fs.readFileSync(path.join(ROOT, 'web/panels/SpatialLayout/SpatialLayout.css.js'), 'utf8');
     let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
     let workspace = fs.readFileSync(path.join(ROOT, 'web/components/PgWorkspace/PgWorkspace.js'), 'utf8');
 
-    assert.ok(logic.includes("from 'symbiote-node/xr'"), 'SpatialLayout must consume public symbiote-node/xr exports');
+    assert.ok(logic.includes("from 'symbiote-ui/xr'"), 'SpatialLayout must consume public symbiote-ui/xr exports');
     assert.ok(logic.includes('createXRSceneController'), 'SpatialLayout must use provider XR session controller');
     assert.ok(logic.includes('createXRPanelHost'), 'SpatialLayout must mount live runtime UI through the provider XR panel host');
     assert.ok(logic.includes('createXRHtmlCanvasRenderer'), 'SpatialLayout must use the provider HTML-in-Canvas bridge');
-    assert.ok(logic.includes('createXRDomPanelWorkbench'), 'SpatialLayout must delegate DOM-backed XR panel source preparation to symbiote-node/xr');
+    assert.ok(logic.includes('createXRDomPanelWorkbench'), 'SpatialLayout must delegate DOM-backed XR panel source preparation to symbiote-ui/xr');
     assert.ok(logic.includes('mountPreviewPanel'), 'SpatialLayout DOM preview must be built through the provider XR panel workbench');
     assert.ok(logic.includes('createXRThreePanelTextureBridge'), 'SpatialLayout XR texture sources must be bridged through the provider Three/WebXR path');
     assert.ok(logic.includes("this._statusItem('Surface', 'production:spatial-layout')"), 'SpatialLayout must visibly label itself as the production XR surface');
@@ -748,10 +760,10 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('readiness,'), 'SpatialLayout must post provider XR readiness diagnostics to the server timeline');
     assert.ok(logic.includes("from 'three'"), 'SpatialLayout host may supply Three to the optional provider adapter');
     assert.ok(logic.includes('createXRThreeWebXRAdapter'), 'SpatialLayout must use the provider Three/WebXR adapter for immersive panels');
-    assert.ok(logic.includes('createXRThreeRenderHost'), 'SpatialLayout must delegate Three renderer/camera/scene setup to symbiote-node/xr');
-    assert.ok(logic.includes('createXRThreeSessionController'), 'SpatialLayout must delegate Three/WebXR session lifecycle to symbiote-node/xr');
+    assert.ok(logic.includes('createXRThreeRenderHost'), 'SpatialLayout must delegate Three renderer/camera/scene setup to symbiote-ui/xr');
+    assert.ok(logic.includes('createXRThreeSessionController'), 'SpatialLayout must delegate Three/WebXR session lifecycle to symbiote-ui/xr');
     assert.ok(logic.includes("this._postXRDiagnostic('spatial-three-frame'"), 'SpatialLayout must post throttled provider frame diagnostics during immersive sessions');
-    assert.ok(logic.includes('createXRThreeSessionOptions'), 'SpatialLayout must build Three/WebXR session options through symbiote-node/xr');
+    assert.ok(logic.includes('createXRThreeSessionOptions'), 'SpatialLayout must build Three/WebXR session options through symbiote-ui/xr');
     assert.ok(logic.includes('const PRODUCTION_XR_MODE = WEBXR_MODES.immersiveAr'), 'SpatialLayout production headset path must be pinned to immersive-ar while Quest texture timing is debugged');
     assert.ok(logic.includes('preferredMode: PRODUCTION_XR_MODE'), 'SpatialLayout launch recommendation must use the AR-only production mode');
     assert.ok(logic.includes('probeMode: PRODUCTION_XR_MODE'), 'SpatialLayout launch gate must probe the same AR-only production mode');
@@ -768,11 +780,11 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('Deep focus degree'), 'SpatialLayout must surface provider-owned XR deep-graph focus diagnostics');
     assert.ok(logic.includes('Deep focus preview'), 'SpatialLayout must surface provider-owned focus preview coverage diagnostics');
     assert.ok(logic.includes('_renderDeepGraphOverlay'), 'SpatialLayout must render the provider XR deep-graph preview overlay');
-    assert.ok(logic.includes('createXRDeepGraphPreviewOverlay'), 'SpatialLayout must render deep graph preview overlays through symbiote-node/xr');
+    assert.ok(logic.includes('createXRDeepGraphPreviewOverlay'), 'SpatialLayout must render deep graph preview overlays through symbiote-ui/xr');
     assert.equal(logic.includes('for (let edge of this._deepGraph.preview.edges)'), false, 'SpatialLayout must not render deep graph edges locally');
     assert.equal(logic.includes('for (let graphNode of this._deepGraph.preview.nodes)'), false, 'SpatialLayout must not render deep graph nodes locally');
     assert.equal(logic.includes('Math.atan2'), false, 'SpatialLayout must not calculate deep graph edge angles locally');
-    assert.ok(logic.includes('this._threeXRSessionController?.getDiagnostics'), 'SpatialLayout must post/display Three session diagnostics from symbiote-node/xr');
+    assert.ok(logic.includes('this._threeXRSessionController?.getDiagnostics'), 'SpatialLayout must post/display Three session diagnostics from symbiote-ui/xr');
     assert.ok(logic.includes('_enterThreeXR'), 'SpatialLayout production XR must enter through the provider Three/WebXR path');
     assert.ok(logic.includes('spatial-production-xr-blocked'), 'SpatialLayout must report blocked production XR instead of falling through to a second renderer');
     assert.equal(logic.includes('createXRWebGLLayerPanelRenderer'), false, 'SpatialLayout must not keep a second production-like raw WebGL panel renderer');
@@ -812,8 +824,8 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('createXRThreePanelTextureBridge'), 'SpatialLayout must bridge the same DOM panel sources into the Three XR renderer');
     assert.ok(logic.includes('createXRThreeHtmlCanvasTextureResolver'), 'SpatialLayout must use provider HTML-in-Canvas texture resolver for Three XR panels');
     assert.ok(logic.includes('createXRThreeTextureCapabilitySummary'), 'SpatialLayout must report provider-owned Three texture capability diagnostics');
-    assert.ok(logic.includes('createXRSpatialWorkbenchSummary'), 'SpatialLayout must aggregate XR workbench status through symbiote-node/xr');
-    assert.ok(logic.includes('createXRWorkbenchDiagnosticPayload'), 'SpatialLayout must compose XR diagnostic payloads through symbiote-node/xr');
+    assert.ok(logic.includes('createXRSpatialWorkbenchSummary'), 'SpatialLayout must aggregate XR workbench status through symbiote-ui/xr');
+    assert.ok(logic.includes('createXRWorkbenchDiagnosticPayload'), 'SpatialLayout must compose XR diagnostic payloads through symbiote-ui/xr');
     assert.ok(logic.includes('createXRPanelGeometrySummary'), 'SpatialLayout must display provider-owned XR geometry summaries');
     assert.ok(logic.includes('textureQuality'), 'SpatialLayout must display provider-owned XR texture quality diagnostics');
     assert.ok(logic.includes('poseComfort'), 'SpatialLayout must display provider-owned XR pose comfort diagnostics');
@@ -821,17 +833,17 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('facing'), 'SpatialLayout must display provider-owned XR facing diagnostics');
     assert.ok(logic.includes('rotationAdjustment'), 'SpatialLayout must display provider-owned XR rotation adjustment diagnostics');
     assert.equal(logic.includes('contentViewport ='), false, 'SpatialLayout must not calculate XR content viewport locally');
-    assert.ok(logic.includes('createXRThemeSnapshot'), 'SpatialLayout must snapshot provider theme tokens through symbiote-node/xr');
+    assert.ok(logic.includes('createXRThemeSnapshot'), 'SpatialLayout must snapshot provider theme tokens through symbiote-ui/xr');
     assert.ok(logic.includes('hitTestXRPanels'), 'SpatialLayout must use provider pointer hit testing');
     assert.ok(logic.includes('hitTestXRPanelFrame'), 'SpatialLayout must use provider XR panel frame hit zones');
-    assert.ok(logic.includes('createXRPointerHitFromDomEvent'), 'SpatialLayout must normalize DOM fallback hits through symbiote-node/xr');
+    assert.ok(logic.includes('createXRPointerHitFromDomEvent'), 'SpatialLayout must normalize DOM fallback hits through symbiote-ui/xr');
     assert.ok(logic.includes('dispatchPointerEvent'), 'SpatialLayout must relay XR pointer events through the provider panel host');
     assert.ok(logic.includes('event.xrPanelPointer'), 'SpatialLayout must not recursively relay provider-origin synthetic pointer events');
     assert.ok(logic.includes('_relayingPanelPointer'), 'SpatialLayout must guard synchronous provider pointer relay from bubbling back into itself');
-    assert.ok(logic.includes('createXRPanelGestureState'), 'SpatialLayout must create XR gesture state through symbiote-node/xr');
-    assert.ok(logic.includes('updateXRPanelGesture'), 'SpatialLayout must update XR gestures through symbiote-node/xr');
-    assert.ok(logic.includes('createXRLayoutTransactionFromGesture'), 'SpatialLayout must create layout transactions through symbiote-node/xr');
-    assert.ok(logic.includes('createXRLayoutTransactionFromPanelPose'), 'SpatialLayout must persist Three XR panel poses through symbiote-node/xr');
+    assert.ok(logic.includes('createXRPanelGestureState'), 'SpatialLayout must create XR gesture state through symbiote-ui/xr');
+    assert.ok(logic.includes('updateXRPanelGesture'), 'SpatialLayout must update XR gestures through symbiote-ui/xr');
+    assert.ok(logic.includes('createXRLayoutTransactionFromGesture'), 'SpatialLayout must create layout transactions through symbiote-ui/xr');
+    assert.ok(logic.includes('createXRLayoutTransactionFromPanelPose'), 'SpatialLayout must persist Three XR panel poses through symbiote-ui/xr');
     assert.ok(logic.includes('frameTarget'), 'SpatialLayout must pass provider frame targets into XR gestures');
     assert.ok(logic.includes('XR hover frame'), 'SpatialLayout must display provider frame target diagnostics');
     assert.ok(logic.includes('XR resize size'), 'SpatialLayout must display provider resize size diagnostics');
@@ -858,7 +870,7 @@ describe('portal shell theme contract', () => {
     assert.ok(logic.includes('Three diagnostic panels'), 'SpatialLayout must expose provider strict texture diagnostic panel counts');
     assert.equal(logic.includes('packages/symbiote-node'), false, 'SpatialLayout must not deep-import provider files');
     let deepGraphAdapter = fs.readFileSync(path.join(ROOT, 'web/services/xr-deep-graph-scene.js'), 'utf8');
-    assert.ok(deepGraphAdapter.includes("from 'symbiote-node/xr'"), 'Deep graph adapter must consume public symbiote-node/xr exports');
+    assert.ok(deepGraphAdapter.includes("from 'symbiote-ui/xr'"), 'Deep graph adapter must consume public symbiote-ui/xr exports');
     assert.ok(deepGraphAdapter.includes('createXRProjectDeepGraphProjection'), 'Deep graph adapter must use provider-owned project graph projection');
     assert.equal(deepGraphAdapter.includes('buildGraphModelFromSkeleton'), false, 'Deep graph adapter must not build graph models locally');
     assert.equal(deepGraphAdapter.includes('packages/symbiote-node'), false, 'Deep graph adapter must not deep-import provider files');

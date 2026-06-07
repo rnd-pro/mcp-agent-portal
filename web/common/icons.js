@@ -3,5 +3,5 @@ export {
   ICON_MAP,
   renderIconHtml,
   replaceIconsWithHtml,
-} from 'symbiote-node/display/icons';
+} from 'symbiote-ui/display/icons';
 

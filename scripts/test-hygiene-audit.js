@@ -222,7 +222,8 @@ function auditSymbioteConsumerImports() {
   const scanRoots = ['web', 'src', 'demo', 'scripts', 'test']
     .map((root) => path.join(repoRoot, root));
   const sourceExts = new Set(['.js', '.mjs', '.cjs']);
-  const forbiddenRelativeImport = /(?:\.\.\/)+packages\/symbiote-node\//;
+  const forbiddenRelativeImport = /(?:\.\.\/)+packages\/symbiote-(?:node|ui|engine)\//;
+  const forbiddenBrowserFacadeImport = /from\s+['"]symbiote-node(?:\/(?:ui|graph|locale|layout|xr|display|chat|core)[^'"]*)?['"]|import\s+['"]symbiote-node\/(?:ui|graph|locale|layout|xr|display|chat|core)/;
 
   for (const root of scanRoots) {
     try {
@@ -239,7 +240,14 @@ function auditSymbioteConsumerImports() {
         addViolation(
           'symbiote-relative-import',
           repoPath,
-          'consumer code must import symbiote-node through public package subpaths, not relative packages/symbiote-node paths',
+          'consumer code must import Symbiote packages through public package subpaths, not relative package implementation paths',
+        );
+      }
+      if (forbiddenBrowserFacadeImport.test(content)) {
+        addViolation(
+          'symbiote-node-browser-import',
+          repoPath,
+          'browser and product code must consume symbiote-ui/symbiote-engine directly instead of the terminal symbiote-node facade',
         );
       }
     });
@@ -248,19 +256,23 @@ function auditSymbioteConsumerImports() {
 
 function auditSymbioteImportMaps() {
 	  const requiredImportMapEntries = [
-	    '"symbiote-node":',
-	    '"symbiote-node/core":',
-	    '"symbiote-node/core/base-path.js":',
-	    '"symbiote-node/ui":',
-	    '"symbiote-node/graph":',
-	    '"symbiote-node/locale":',
-	    '"symbiote-node/layout":',
-	    '"symbiote-node/chat/chat-context.js":',
-	    '"symbiote-node/display/highlight":',
-	    '"symbiote-node/display/markdown-formatter":',
-	    '"symbiote-node/display/format-utils":',
-	    '"symbiote-node/display/icons":',
-	    '"symbiote-node/display/event-feed-adapter":',
+	    '"symbiote-ui":',
+	    '"symbiote-ui/core":',
+	    '"symbiote-ui/core/base-path.js":',
+	    '"symbiote-ui/ui":',
+	    '"symbiote-ui/graph":',
+	    '"symbiote-ui/locale":',
+	    '"symbiote-ui/layout":',
+	    '"symbiote-ui/xr":',
+	    '"symbiote-ui/chat/chat-context.js":',
+	    '"symbiote-ui/display/highlight":',
+	    '"symbiote-ui/display/markdown-formatter":',
+	    '"symbiote-ui/display/format-utils":',
+	    '"symbiote-ui/display/icons":',
+	    '"symbiote-ui/display/event-feed-adapter":',
+	    '"symbiote-engine":',
+	    '"symbiote-engine/":',
+	    '"three":',
 	  ];
 
   const importMapFiles = [
@@ -288,11 +300,11 @@ function auditSymbioteImportMaps() {
 	        );
 	      }
 	    }
-	    if (content.includes('"symbiote-node/":')) {
+	    if (content.includes('"symbiote-node"') || content.includes('"symbiote-node/')) {
 	      addViolation(
-	        'symbiote-importmap-prefix',
+	        'symbiote-node-importmap',
 	        repoPath,
-	        'browser import maps must not include a broad symbiote-node/ prefix fallback',
+	        'browser import maps must not include the terminal symbiote-node facade',
 	      );
 	    }
 	  }

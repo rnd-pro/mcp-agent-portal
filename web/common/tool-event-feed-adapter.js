@@ -1,4 +1,4 @@
-import { createEventFeedAdapter } from 'symbiote-node/display/event-feed-adapter';
+import { createEventFeedAdapter } from 'symbiote-ui/display/event-feed-adapter';
 
 const CODE_TOOLS = [
   'default_api:view_file',

@@ -153,11 +153,11 @@ Then set `DEEPSEEK_API_KEY`. When this gateway is enabled, Agent Pool's `provide
 
 ### XR Diagnostics
 
-Agent Portal serves WebXR diagnostic pages for headset testing. The reusable XR capability, panel, theme, and HTML-in-Canvas contracts live in `symbiote-node/xr`; Agent Portal only supplies product routes and server configuration.
+Agent Portal serves WebXR diagnostic pages for headset testing. The reusable XR capability, panel, theme, and HTML-in-Canvas contracts live in `symbiote-ui/xr`; Agent Portal only supplies product routes and server configuration.
 
 For browser builds that require the HTML-in-Canvas origin trial, set `AGENT_PORTAL_HTML_IN_CANVAS_ORIGIN_TRIAL_TOKEN` in the runtime environment. Static HTML responses will include it as an HTTP `Origin-Trial` header and expose only non-secret boolean diagnostics to the page and `/api/xr-diagnostics/*` logs.
 
-The production XR demo URL is `https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict`. It must render through `SpatialLayout` and post production `symbiote-node/xr` diagnostics. Strict live-texture readiness and WebXR session launch stay separated: the app may enter an immersive session for headset/session diagnostics, but strict mode must hide untextured panels and report the exact HTML-in-Canvas blocker instead of showing empty or material-fallback panels as production UI. The Quest production path is AR-only while headset texture timing is being stabilized, so `SpatialLayout` requests `immersive-ar` directly instead of switching between Auto, AR, and VR. The `xr-three-panels-baseline.html`, `xr-panels-baseline.html`, and `xr-htmltexture-minimal.html` pages are diagnostic harnesses only; they are not production demo UI.
+The production XR demo URL is `https://playground.rnd-pro.com/demos/agent-portal-vr/#spatial?project=agent-portal&target=graph&texture=strict`. It must render through `SpatialLayout` and post production `symbiote-ui/xr` diagnostics. Strict live-texture readiness and WebXR session launch stay separated: the app may enter an immersive session for headset/session diagnostics, but strict mode must hide untextured panels and report the exact HTML-in-Canvas blocker instead of showing empty or material-fallback panels as production UI. The Quest production path is AR-only while headset texture timing is being stabilized, so `SpatialLayout` requests `immersive-ar` directly instead of switching between Auto, AR, and VR. The `xr-three-panels-baseline.html`, `xr-panels-baseline.html`, and `xr-htmltexture-minimal.html` pages are diagnostic harnesses only; they are not production demo UI.
 
 Use `npm run xr:production-smoke` for the local production route gate and `npm run xr:three-smoke` only for the Three/WebXR harness. Public headset debugging starts after the public production smoke confirms the deployed route is current.
 
@@ -230,7 +230,7 @@ If `.agent-portal` is configured as a private skills submodule, set its local re
 ```bash
 git config submodule..agent-portal.url <private-agent-portal-skills-remote>
 git submodule update --init .agent-portal
-git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp packages/symbiote-node
+git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp
 ```
 
 ### Agent Portal Skills (`.agent-portal/`)
@@ -251,7 +251,8 @@ See `.agent-portal/README.md` when project-local skills are installed.
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
 - [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration across CLI providers
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
-- [symbiote-node](https://github.com/RND-PRO/symbiote-node) — Studio UX framework with node graph editor
+- [symbiote-ui](https://github.com/RND-PRO/symbiote-ui) — Provider UI, graph, layout, XR, theme, and WebMCP contracts
+- [symbiote-engine](https://github.com/RND-PRO/symbiote-engine) — Runtime execution, CLI, registry, persistence, and handlers
 
 ## License
 

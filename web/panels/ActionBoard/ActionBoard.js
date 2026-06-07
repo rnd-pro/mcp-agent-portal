@@ -1,6 +1,6 @@
 import { Symbiote } from "@symbiotejs/symbiote";
 import { state, events } from "../../dashboard-state.js";
-import { sharedUiStyles as cssShared } from "symbiote-node/ui";
+import { sharedUiStyles as cssShared } from "symbiote-ui/ui";
 import { toToolEventFeedItems } from "../../common/tool-event-feed-adapter.js";
 import { tPortal } from "../../common/localization.js";
 import template from "./ActionBoard.tpl.js";

@@ -186,7 +186,7 @@ IDE ──stdio──→ Portal (master)
 
 ## Web Dashboard
 
-Built-in SPA with extensible section registry (`RouterRegistry` + `LayoutTree` from the public `symbiote-node/ui` provider entrypoint):
+Built-in SPA with extensible section registry (`RouterRegistry` + `LayoutTree` from the public `symbiote-ui/ui` provider entrypoint):
 
 | Section | Hash | Panel Components |
 |---------|------|-----------------|
@@ -221,9 +221,9 @@ New sections are registered via `registerSection()`. MCP servers can inject thei
 
 ### UI Provider Boundary
 
-Agent Portal is a product adapter over `symbiote-node` provider contracts. Reusable graph, layout, theme, display, chat, list, tree, and runtime UI primitives are consumed through public package exports such as `symbiote-node/ui`, `symbiote-node/layout`, `symbiote-node/graph`, `symbiote-node/manifest`, `symbiote-node/tokens/*`, `symbiote-node/rules/*`, `symbiote-node/schemas/*`, and `symbiote-node/custom-elements.json`. Portal code must not deep-import `packages/symbiote-node/**` implementation paths.
+Agent Portal is a product adapter over `symbiote-ui` and `symbiote-engine` provider contracts. Reusable graph, layout, theme, display, chat, list, tree, and browser UI primitives are consumed through public `symbiote-ui` package exports such as `symbiote-ui/ui`, `symbiote-ui/layout`, `symbiote-ui/graph`, `symbiote-ui/manifest`, `symbiote-ui/tokens/*`, `symbiote-ui/rules/*`, `symbiote-ui/schemas/*`, and `symbiote-ui/custom-elements.json`. Runtime execution contracts are consumed through `symbiote-engine`. Portal code must not deep-import provider implementation paths.
 
-Host-level product policy remains in `web/` and `src/`: route composition, project selection, adapter orchestration, API endpoints, persistence, and MCP proxying. Provider metadata is discoverable with `cd packages/symbiote-node && node engine/cli.js discover`; `node engine/cli.js list --json` is only the runtime graph node-driver menu.
+Host-level product policy remains in `web/` and `src/`: route composition, project selection, adapter orchestration, API endpoints, persistence, and MCP proxying. Provider metadata is discoverable with `npx symbiote-ui discover`; `symbiote-engine` owns runtime graph execution and handler packs.
 
 ## Plugin Architecture
 
@@ -386,7 +386,6 @@ mcp-agent-portal/
 ├── package.json
 ├── eslint.config.js
 ├── packages/                         # Git submodules
-│   ├── symbiote-node/                # UI framework (layout, canvas, themes)
 │   ├── project-graph-mcp/            # Codebase analysis MCP server
 │   └── agent-pool-mcp/               # Agent orchestration MCP server
 ├── src/node/
@@ -499,7 +498,8 @@ mcp-agent-portal/
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
 - [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration, file tracking, and workflow discovery
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
-- [symbiote-node](https://github.com/RND-PRO/symbiote-node) — Studio UX framework with node graph editor
+- [symbiote-ui](https://github.com/RND-PRO/symbiote-ui) — Provider UI, graph, layout, XR, theme, and WebMCP contracts
+- [symbiote-engine](https://github.com/RND-PRO/symbiote-engine) — Runtime execution, CLI, registry, persistence, and handlers
 
 ## License
 

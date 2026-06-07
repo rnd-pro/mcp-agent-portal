@@ -172,7 +172,7 @@ export const chats = [
       { role: 'tool', name: 'consult_peer', input: { question: 'What message types does AgentChat support?', context: 'Reviewing the UI rendering pipeline' }, result: '6 message types:\n1. user — text input\n2. agent — markdown with streaming cursor\n3. tool — collapsible cards with input/result\n4. thinking — elapsed time + meta chips (mode, tokens, cost)\n5. board — delegation cards with live status polling\n6. system — status notifications' },
 
       // 10. Final comprehensive response
-      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (gemini-2.5-pro)\n  ├── delegate_task → Coder (gemini-2.5-flash-lite)\n  ├── delegate_task → Reviewer (deepseek/deepseek-v4-pro)\n  └── consult_peer → Research (deepseek/deepseek-v4-flash)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-node](https://github.com/rnd-pro/symbiote-node) layout framework. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
+      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (gemini-2.5-pro)\n  ├── delegate_task → Coder (gemini-2.5-flash-lite)\n  ├── delegate_task → Reviewer (deepseek/deepseek-v4-pro)\n  └── consult_peer → Research (deepseek/deepseek-v4-flash)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-ui](https://github.com/rnd-pro/symbiote-ui) layout framework and [symbiote-engine](https://github.com/rnd-pro/symbiote-engine) runtime. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
 
       // 11. System message
       { role: 'system', text: '⏱ Session completed in 42s · 2 sub-agents · 11 tool calls · $0.0738 total' },
@@ -897,370 +897,370 @@ export const skeleton = {
     "BI": {
       "m": 1,
       "$": 5,
-      "f": "packages/symbiote-node/canvas/Breadcrumb/Breadcrumb.js",
+      "f": "packages/symbiote-ui/canvas/Breadcrumb/Breadcrumb.js",
       "l": 14
     },
     "bB": {
       "m": 3,
       "$": 3,
-      "f": "packages/symbiote-node/canvas/Breadcrumb/Breadcrumb.js",
+      "f": "packages/symbiote-ui/canvas/Breadcrumb/Breadcrumb.js",
       "l": 40
     },
     "CCR": {
       "m": 28,
-      "f": "packages/symbiote-node/canvas/CanvasConnectionRenderer.js",
+      "f": "packages/symbiote-ui/canvas/CanvasConnectionRenderer.js",
       "l": 7
     },
     "CV": {
       "m": 16,
-      "f": "packages/symbiote-node/canvas/CanvasViewport.js",
+      "f": "packages/symbiote-ui/canvas/CanvasViewport.js",
       "l": 11
     },
     "CR": {
       "m": 24,
-      "f": "packages/symbiote-node/canvas/ConnectionRenderer.js",
+      "f": "packages/symbiote-ui/canvas/ConnectionRenderer.js",
       "l": 14
     },
     "FS": {
       "m": 8,
-      "f": "packages/symbiote-node/canvas/FlowSimulator.js",
+      "f": "packages/symbiote-ui/canvas/FlowSimulator.js",
       "l": 16
     },
     "FL": {
       "m": 11,
-      "f": "packages/symbiote-node/canvas/ForceLayout.js",
+      "f": "packages/symbiote-ui/canvas/ForceLayout.js",
       "l": 16
     },
     "FM": {
       "m": 6,
-      "f": "packages/symbiote-node/canvas/FrameManager.js",
+      "f": "packages/symbiote-ui/canvas/FrameManager.js",
       "l": 13
     },
     "TI": {
       "m": 1,
       "$": 4,
-      "f": "packages/symbiote-node/canvas/GraphTabs/GraphTabs.js",
+      "f": "packages/symbiote-ui/canvas/GraphTabs/GraphTabs.js",
       "l": 22
     },
     "GT": {
       "m": 12,
       "$": 1,
-      "f": "packages/symbiote-node/canvas/GraphTabs/GraphTabs.js",
+      "f": "packages/symbiote-ui/canvas/GraphTabs/GraphTabs.js",
       "l": 48
     },
     "LOD": {
       "m": 6,
-      "f": "packages/symbiote-node/canvas/LODManager.js",
+      "f": "packages/symbiote-ui/canvas/LODManager.js",
       "l": 1
     },
     "mM": {
       "m": 9,
       "$": 1,
-      "f": "packages/symbiote-node/canvas/Minimap/Minimap.js",
+      "f": "packages/symbiote-ui/canvas/Minimap/Minimap.js",
       "l": 16
     },
     "NC": {
       "m": 47,
       "$": 3,
-      "f": "packages/symbiote-node/canvas/NodeCanvas/NodeCanvas.js",
+      "f": "packages/symbiote-ui/canvas/NodeCanvas/NodeCanvas.js",
       "l": 44
     },
     "NS": {
       "m": 9,
       "$": 4,
-      "f": "packages/symbiote-node/canvas/NodeSearch/NodeSearch.js",
+      "f": "packages/symbiote-ui/canvas/NodeSearch/NodeSearch.js",
       "l": 15
     },
     "NVM": {
       "m": 16,
-      "f": "packages/symbiote-node/canvas/NodeViewManager.js",
+      "f": "packages/symbiote-ui/canvas/NodeViewManager.js",
       "l": 17
     },
     "PE": {
       "m": 5,
-      "f": "packages/symbiote-node/canvas/PinExpansion.js",
+      "f": "packages/symbiote-ui/canvas/PinExpansion.js",
       "l": 2
     },
     "PC": {
       "m": 2,
-      "f": "packages/symbiote-node/canvas/PseudoConnection.js",
+      "f": "packages/symbiote-ui/canvas/PseudoConnection.js",
       "l": 11
     },
     "SS": {
       "m": 1,
-      "f": "packages/symbiote-node/canvas/SelectionSync.js",
+      "f": "packages/symbiote-ui/canvas/SelectionSync.js",
       "l": 10
     },
     "SM": {
       "m": 11,
-      "f": "packages/symbiote-node/canvas/SubgraphManager.js",
+      "f": "packages/symbiote-ui/canvas/SubgraphManager.js",
       "l": 20
     },
     "SR": {
       "m": 9,
-      "f": "packages/symbiote-node/canvas/SubgraphRouter.js",
+      "f": "packages/symbiote-ui/canvas/SubgraphRouter.js",
       "l": 2
     },
     "VA": {
       "m": 20,
-      "f": "packages/symbiote-node/canvas/ViewportActions.js",
+      "f": "packages/symbiote-ui/canvas/ViewportActions.js",
       "l": 12
     },
     "NE": {
       "m": 20,
-      "f": "packages/symbiote-node/core/Editor.js",
+      "f": "packages/symbiote-ui/core/Editor.js",
       "l": 23
     },
     "nN": {
       "m": 9,
-      "f": "packages/symbiote-node/core/Node.js",
+      "f": "packages/symbiote-ui/core/Node.js",
       "l": 12
     },
     "PM": {
       "m": 7,
-      "f": "packages/symbiote-node/core/Portal.js",
+      "f": "packages/symbiote-ui/core/Portal.js",
       "l": 20
     },
     "sS": {
       "m": 1,
-      "f": "packages/symbiote-node/core/Socket.js",
+      "f": "packages/symbiote-ui/core/Socket.js",
       "l": 24
     },
     "iI": {
       "m": 2,
-      "f": "packages/symbiote-node/core/Socket.js",
+      "f": "packages/symbiote-ui/core/Socket.js",
       "l": 79
     },
     "IC": {
       "m": 1,
-      "f": "packages/symbiote-node/core/Socket.js",
+      "f": "packages/symbiote-ui/core/Socket.js",
       "l": 145
     },
     "SN": {
       "m": 5,
-      "f": "packages/symbiote-node/core/SubgraphNode.js",
+      "f": "packages/symbiote-ui/core/SubgraphNode.js",
       "l": 15
     },
     "AC": {
       "m": 5,
       "$": 3,
-      "f": "packages/symbiote-node/demo/AiChat/AiChat.js",
+      "f": "packages/symbiote-ui/demo/AiChat/AiChat.js",
       "l": 60
     },
     "EL": {
       "m": 5,
       "$": 2,
-      "f": "packages/symbiote-node/demo/EventLog/EventLog.js",
+      "f": "packages/symbiote-ui/demo/EventLog/EventLog.js",
       "l": 23
     },
     "eE": {
       "m": 7,
-      "f": "packages/symbiote-node/engine/Executor.js",
+      "f": "packages/symbiote-engine/Executor.js",
       "l": 16
     },
     "gG": {
       "m": 11,
-      "f": "packages/symbiote-node/engine/Graph.js",
+      "f": "packages/symbiote-engine/Graph.js",
       "l": 34
     },
     "hH": {
       "m": 15,
-      "f": "packages/symbiote-node/plugins/History.js",
+      "f": "packages/symbiote-ui/plugins/History.js",
       "l": 19
     },
     "IP": {
       "m": 3,
       "$": 15,
-      "f": "packages/symbiote-node/inspector/InspectorPanel/InspectorPanel.js",
+      "f": "packages/symbiote-ui/inspector/InspectorPanel/InspectorPanel.js",
       "l": 15
     },
     "IPI": {
       "m": 0,
       "$": 3,
-      "f": "packages/symbiote-node/inspector/InspectorPanel/InspectorPanel.js",
+      "f": "packages/symbiote-ui/inspector/InspectorPanel/InspectorPanel.js",
       "l": 226
     },
     "ICI": {
       "m": 3,
       "$": 5,
-      "f": "packages/symbiote-node/inspector/InspectorPanel/InspectorPanel.js",
+      "f": "packages/symbiote-ui/inspector/InspectorPanel/InspectorPanel.js",
       "l": 238
     },
     "TP": {
       "m": 4,
       "$": 5,
-      "f": "packages/symbiote-node/inspector/TemplatePreview/TemplatePreview.js",
+      "f": "packages/symbiote-ui/inspector/TemplatePreview/TemplatePreview.js",
       "l": 23
     },
     "CF": {
       "m": 10,
-      "f": "packages/symbiote-node/interactions/ConnectFlow.js",
+      "f": "packages/symbiote-ui/interactions/ConnectFlow.js",
       "l": 20
     },
     "dD": {
       "m": 2,
-      "f": "packages/symbiote-node/interactions/Drag.js",
+      "f": "packages/symbiote-ui/interactions/Drag.js",
       "l": 10
     },
     "sS1": {
       "m": 9,
-      "f": "packages/symbiote-node/interactions/Selector.js",
+      "f": "packages/symbiote-ui/interactions/Selector.js",
       "l": 14
     },
     "SG": {
       "m": 4,
-      "f": "packages/symbiote-node/interactions/SnapGrid.js",
+      "f": "packages/symbiote-ui/interactions/SnapGrid.js",
       "l": 11
     },
     "zZ": {
       "m": 4,
-      "f": "packages/symbiote-node/interactions/Zoom.js",
+      "f": "packages/symbiote-ui/interactions/Zoom.js",
       "l": 10
     },
     "AZ": {
       "m": 7,
       "$": 6,
-      "f": "packages/symbiote-node/layout/ActionZone/ActionZone.js",
+      "f": "packages/symbiote-ui/layout/ActionZone/ActionZone.js",
       "l": 19
     },
     "lL": {
       "m": 24,
       "$": 8,
-      "f": "packages/symbiote-node/layout/Layout/Layout.js",
+      "f": "packages/symbiote-ui/layout/Layout/Layout.js",
       "l": 15
     },
     "LN": {
       "m": 14,
       "$": 24,
-      "f": "packages/symbiote-node/layout/LayoutNode/LayoutNode.js",
+      "f": "packages/symbiote-ui/layout/LayoutNode/LayoutNode.js",
       "l": 13
     },
     "LP": {
       "m": 4,
       "$": 5,
-      "f": "packages/symbiote-node/layout/LayoutPreview/LayoutPreview.js",
+      "f": "packages/symbiote-ui/layout/LayoutPreview/LayoutPreview.js",
       "l": 10
     },
     "LS": {
       "m": 11,
       "$": 6,
-      "f": "packages/symbiote-node/layout/LayoutSidebar/LayoutSidebar.js",
+      "f": "packages/symbiote-ui/layout/LayoutSidebar/LayoutSidebar.js",
       "l": 19
     },
     "SS1": {
       "m": 1,
       "$": 13,
-      "f": "packages/symbiote-node/layout/LayoutSidebar/SidebarSection.js",
+      "f": "packages/symbiote-ui/layout/LayoutSidebar/SidebarSection.js",
       "l": 13
     },
     "SSI": {
       "m": 1,
       "$": 5,
-      "f": "packages/symbiote-node/layout/LayoutSidebar/SidebarSection.js",
+      "f": "packages/symbiote-ui/layout/LayoutSidebar/SidebarSection.js",
       "l": 141
     },
     "PM1": {
       "m": 3,
       "$": 5,
-      "f": "packages/symbiote-node/layout/PanelMenu/PanelMenu.js",
+      "f": "packages/symbiote-ui/layout/PanelMenu/PanelMenu.js",
       "l": 9
     },
     "CI": {
       "m": 0,
       "$": 3,
-      "f": "packages/symbiote-node/menu/ContextMenu/ContextMenu.js",
+      "f": "packages/symbiote-ui/menu/ContextMenu/ContextMenu.js",
       "l": 14
     },
     "CM": {
       "m": 3,
       "$": 4,
-      "f": "packages/symbiote-node/menu/ContextMenu/ContextMenu.js",
+      "f": "packages/symbiote-ui/menu/ContextMenu/ContextMenu.js",
       "l": 27
     },
     "GF": {
       "m": 1,
       "$": 2,
-      "f": "packages/symbiote-node/node/GraphFrame/GraphFrame.js",
+      "f": "packages/symbiote-ui/node/GraphFrame/GraphFrame.js",
       "l": 14
     },
     "GN": {
       "m": 2,
       "$": 5,
-      "f": "packages/symbiote-node/node/GraphNode/GraphNode.js",
+      "f": "packages/symbiote-ui/node/GraphNode/GraphNode.js",
       "l": 31
     },
     "NS1": {
       "m": 1,
-      "f": "packages/symbiote-node/node/NodeSocket/NodeSocket.js",
+      "f": "packages/symbiote-ui/node/NodeSocket/NodeSocket.js",
       "l": 13
     },
     "PI": {
       "m": 2,
-      "f": "packages/symbiote-node/node/PortItem/PortItem.js",
+      "f": "packages/symbiote-ui/node/PortItem/PortItem.js",
       "l": 14
     },
     "PI1": {
       "m": 0,
       "$": 7,
-      "f": "packages/symbiote-node/palette/PaletteBrowser/PaletteBrowser.js",
+      "f": "packages/symbiote-ui/palette/PaletteBrowser/PaletteBrowser.js",
       "l": 15
     },
     "PC1": {
       "m": 1,
       "$": 2,
-      "f": "packages/symbiote-node/palette/PaletteBrowser/PaletteBrowser.js",
+      "f": "packages/symbiote-ui/palette/PaletteBrowser/PaletteBrowser.js",
       "l": 35
     },
     "PB": {
       "m": 5,
       "$": 1,
-      "f": "packages/symbiote-node/palette/PaletteBrowser/PaletteBrowser.js",
+      "f": "packages/symbiote-ui/palette/PaletteBrowser/PaletteBrowser.js",
       "l": 56
     },
     "rR": {
       "m": 5,
-      "f": "packages/symbiote-node/plugins/Readonly.js",
+      "f": "packages/symbiote-ui/plugins/Readonly.js",
       "l": 11
     },
     "CS": {
       "m": 6,
-      "f": "packages/symbiote-node/shapes/CircleShape.js",
+      "f": "packages/symbiote-ui/shapes/CircleShape.js",
       "l": 12
     },
     "CS1": {
       "m": 5,
-      "f": "packages/symbiote-node/shapes/CommentShape.js",
+      "f": "packages/symbiote-ui/shapes/CommentShape.js",
       "l": 13
     },
     "DS": {
       "m": 7,
-      "f": "packages/symbiote-node/shapes/DiamondShape.js",
+      "f": "packages/symbiote-ui/shapes/DiamondShape.js",
       "l": 12
     },
     "NS2": {
       "m": 7,
-      "f": "packages/symbiote-node/shapes/NodeShape.js",
+      "f": "packages/symbiote-ui/shapes/NodeShape.js",
       "l": 11
     },
     "PS": {
       "m": 6,
-      "f": "packages/symbiote-node/shapes/PillShape.js",
+      "f": "packages/symbiote-ui/shapes/PillShape.js",
       "l": 12
     },
     "RS": {
       "m": 4,
-      "f": "packages/symbiote-node/shapes/RectShape.js",
+      "f": "packages/symbiote-ui/shapes/RectShape.js",
       "l": 12
     },
     "SVG": {
       "m": 13,
-      "f": "packages/symbiote-node/shapes/SVGShape.js",
+      "f": "packages/symbiote-ui/shapes/SVGShape.js",
       "l": 61
     },
     "QT": {
       "m": 6,
       "$": 3,
-      "f": "packages/symbiote-node/toolbar/QuickToolbar/QuickToolbar.js",
+      "f": "packages/symbiote-ui/toolbar/QuickToolbar/QuickToolbar.js",
       "l": 29
     },
     "AP": {
@@ -1311,7 +1311,7 @@ export const skeleton = {
     "CB": {
       "m": 13,
       "$": 1,
-      "f": "packages/symbiote-node/effects/CellBg/CellBg.js",
+      "f": "packages/symbiote-ui/effects/CellBg/CellBg.js",
       "l": 31
     },
     "AB": {
@@ -1329,19 +1329,19 @@ export const skeleton = {
     "CSI": {
       "m": 1,
       "$": 14,
-      "f": "packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.js",
+      "f": "packages/symbiote-ui/chat/ChatSidebarItem/ChatSidebarItem.js",
       "l": 5
     },
     "CSS": {
       "m": 1,
       "$": 11,
-      "f": "packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.js",
+      "f": "packages/symbiote-ui/chat/ChatSidebarItem/ChatSidebarItem.js",
       "l": 90
     },
     "LO": {
       "m": 3,
       "$": 4,
-      "f": "packages/symbiote-node/display/LoadingOverlay/LoadingOverlay.js",
+      "f": "packages/symbiote-ui/display/LoadingOverlay/LoadingOverlay.js",
       "l": 5
     },
     "PW": {
@@ -1371,13 +1371,13 @@ export const skeleton = {
     "CB1": {
       "m": 6,
       "$": 8,
-      "f": "packages/symbiote-node/display/CodeBlock/CodeBlock.js",
+      "f": "packages/symbiote-ui/display/CodeBlock/CodeBlock.js",
       "l": 4
     },
     "CS3": {
       "m": 1,
       "$": 4,
-      "f": "packages/symbiote-node/display/CodeBlock/CodeBlock.js",
+      "f": "packages/symbiote-ui/display/CodeBlock/CodeBlock.js",
       "l": 46
     },
     "FR": {
@@ -1653,7 +1653,7 @@ export const skeleton = {
       "cS",
       "dS1"
     ],
-    "packages/symbiote-node/engine/GraphServer.js": [
+    "packages/symbiote-engine/GraphServer.js": [
       "cS1"
     ],
     "packages/agent-pool-mcp/src/tool-definitions.js": [
@@ -1970,20 +1970,20 @@ export const skeleton = {
       "FG",
       "SG3"
     ],
-    "packages/symbiote-node/canvas/AutoLayout.js": [
+    "packages/symbiote-ui/canvas/AutoLayout.js": [
       "AL",
       "TL1"
     ],
-    "packages/symbiote-node/core/GraphMermaid.js": [
+    "packages/symbiote-ui/core/GraphMermaid.js": [
       "TM1",
       "TG"
     ],
-    "packages/symbiote-node/core/GraphText.js": [
+    "packages/symbiote-ui/core/GraphText.js": [
       "TT",
       "TG1",
       "TE2"
     ],
-    "packages/symbiote-node/core/Socket.js": [
+    "packages/symbiote-ui/core/Socket.js": [
       "ui"
     ],
     "src/node/plugins/telegram/index.js": [
@@ -1991,7 +1991,7 @@ export const skeleton = {
       "de2",
       "oA"
     ],
-    "packages/symbiote-node/engine/AgentUICommands.js": [
+    "packages/symbiote-engine/AgentUICommands.js": [
       "la",
       "fo",
       "se",
@@ -1999,7 +1999,7 @@ export const skeleton = {
       "no",
       "cu"
     ],
-    "packages/symbiote-node/layout/LayoutRouter/LayoutRouter.js": [
+    "packages/symbiote-ui/layout/LayoutRouter/LayoutRouter.js": [
       "na",
       "pQ",
       "bQ",
@@ -2010,14 +2010,14 @@ export const skeleton = {
       "GP1",
       "GP2"
     ],
-    "packages/symbiote-node/engine/HandlerLoader.js": [
+    "packages/symbiote-engine/HandlerLoader.js": [
       "lH1",
       "wH"
     ],
-    "packages/symbiote-node/engine/Lifecycle.js": [
+    "packages/symbiote-engine/Lifecycle.js": [
       "rL1"
     ],
-    "packages/symbiote-node/layout/LayoutTree.js": [
+    "packages/symbiote-ui/layout/LayoutTree.js": [
       "se1",
       "de1",
       "gI2",
@@ -2033,12 +2033,12 @@ export const skeleton = {
       "uN",
       "gN"
     ],
-    "packages/symbiote-node/engine/Persistence.js": [
+    "packages/symbiote-engine/Persistence.js": [
       "TF2",
       "FF",
       "dG1"
     ],
-    "packages/symbiote-node/engine/Registry.js": [
+    "packages/symbiote-engine/Registry.js": [
       "NT",
       "rP2",
       "NT1",
@@ -2051,40 +2051,40 @@ export const skeleton = {
       "lP1",
       "cR1"
     ],
-    "packages/symbiote-node/engine/SocketTypes.js": [
+    "packages/symbiote-engine/SocketTypes.js": [
       "ST1",
       "ST2",
       "ST3",
       "AST",
       "SC1"
     ],
-    "packages/symbiote-node/engine/nanoid.js": [
+    "packages/symbiote-engine/nanoid.js": [
       "na1"
     ],
-    "packages/symbiote-node/engine/packs/transform/template-builder.handler.js": [
+    "packages/symbiote-engine/packs/transform/template-builder.handler.js": [
       "eP2"
     ],
-    "packages/symbiote-node/engine/packs/video-pack.js": [
+    "packages/symbiote-engine/packs/video-pack.js": [
       "VP"
     ],
-    "packages/symbiote-node/layout/LayoutRouter/routerSync.js": [
+    "packages/symbiote-ui/layout/LayoutRouter/routerSync.js": [
       "WR1",
       "PR1"
     ],
-    "packages/symbiote-node/shapes/SVGShape.js": [
+    "packages/symbiote-ui/shapes/SVGShape.js": [
       "SVG1"
     ],
-    "packages/symbiote-node/shapes/index.js": [
+    "packages/symbiote-ui/shapes/index.js": [
       "gS4",
       "rS4"
     ],
-    "packages/symbiote-node/themes/Palette.js": [
+    "packages/symbiote-ui/themes/Palette.js": [
       "aP"
     ],
-    "packages/symbiote-node/themes/Skin.js": [
+    "packages/symbiote-ui/themes/Skin.js": [
       "aS5"
     ],
-    "packages/symbiote-node/themes/Theme.js": [
+    "packages/symbiote-ui/themes/Theme.js": [
       "aT",
       "eT1"
     ],
@@ -2182,7 +2182,7 @@ export const skeleton = {
       "IH",
       "IWH"
     ],
-    "packages/symbiote-node/ui/index.js": [
+    "packages/symbiote-ui/ui/index.js": [
       "uC2",
       "uP2",
       "uA"
@@ -2265,29 +2265,29 @@ export const skeleton = {
 	      "check_errors.js",
 	      "temp_debug.js"
 	    ],
-    "packages/symbiote-node/canvas/": [
+    "packages/symbiote-ui/canvas/": [
       "ForceWorker.js"
     ],
-    "packages/symbiote-node/core/": [
+    "packages/symbiote-ui/core/": [
       "Connection.js",
       "Frame.js"
     ],
-    "packages/symbiote-node/demo/": [
+    "packages/symbiote-ui/demo/": [
       "benchmark.js",
       "demo.js"
     ],
-    "packages/symbiote-node/engine/": [
+    "packages/symbiote-engine/": [
       "History.js",
       "cli.js",
       "index.js"
     ],
-    "packages/symbiote-node/engine/extensions/grok-bridge/": [
+    "packages/symbiote-engine/extensions/grok-bridge/": [
       "background.js",
       "content.js",
       "sidepanel.js",
       "websocket-interceptor.js"
     ],
-    "packages/symbiote-node/engine/packs/ai/": [
+    "packages/symbiote-engine/packs/ai/": [
       "beat-detect.handler.js",
       "content-adapt.handler.js",
       "face-detect.handler.js",
@@ -2299,7 +2299,7 @@ export const skeleton = {
       "tts.handler.js",
       "whisper.handler.js"
     ],
-    "packages/symbiote-node/engine/packs/data/": [
+    "packages/symbiote-engine/packs/data/": [
       "db-query.handler.js",
       "news-accumulate.handler.js",
       "personas.handler.js",
@@ -2307,10 +2307,10 @@ export const skeleton = {
       "roles.handler.js",
       "rss-feed.handler.js"
     ],
-    "packages/symbiote-node/engine/packs/debug/": [
+    "packages/symbiote-engine/packs/debug/": [
       "inject.handler.js"
     ],
-    "packages/symbiote-node/engine/packs/flow/": [
+    "packages/symbiote-engine/packs/flow/": [
       "agent.handler.js",
       "if.handler.js",
       "loop.handler.js",
@@ -2319,12 +2319,12 @@ export const skeleton = {
       "switch.handler.js",
       "wait-all.handler.js"
     ],
-    "packages/symbiote-node/engine/packs/io/": [
+    "packages/symbiote-engine/packs/io/": [
       "http-request.handler.js",
       "read-file.handler.js",
       "write-file.handler.js"
     ],
-    "packages/symbiote-node/engine/packs/transform/": [
+    "packages/symbiote-engine/packs/transform/": [
       "anchor-match.handler.js",
       "effects-skeleton.handler.js",
       "json-parse.handler.js",
@@ -2334,20 +2334,20 @@ export const skeleton = {
       "template.handler.js",
       "timeline-build.handler.js"
     ],
-    "packages/symbiote-node/engine/packs/util/": [
+    "packages/symbiote-engine/packs/util/": [
       "delay.handler.js",
       "log.handler.js"
     ],
-    "packages/symbiote-node/": [
+    "packages/symbiote-ui/": [
       "index.js"
     ],
-    "packages/symbiote-node/layout/": [
+    "packages/symbiote-ui/layout/": [
       "index.js"
     ],
-    "packages/symbiote-node/node/CtrlItem/": [
+    "packages/symbiote-ui/node/CtrlItem/": [
       "CtrlItem.js"
     ],
-    "packages/symbiote-node/themes/": [
+    "packages/symbiote-ui/themes/": [
       "carbon.js",
       "dark.js",
       "ebook.js",
@@ -2610,7 +2610,7 @@ export const skeleton = {
       "terser.mjs",
       "walk.mjs"
     ],
-    "packages/symbiote-node/": [
+    "packages/symbiote-ui/": [
       ".git",
       ".gitignore",
       ".npmignore",
@@ -2619,106 +2619,106 @@ export const skeleton = {
       "README.md",
       "package.json"
     ],
-    "packages/symbiote-node/canvas/Breadcrumb/": [
+    "packages/symbiote-ui/canvas/Breadcrumb/": [
       "Breadcrumb.css.js",
       "Breadcrumb.tpl.js"
     ],
-    "packages/symbiote-node/canvas/GraphTabs/": [
+    "packages/symbiote-ui/canvas/GraphTabs/": [
       "GraphTabs.css.js",
       "GraphTabs.tpl.js"
     ],
-    "packages/symbiote-node/canvas/Minimap/": [
+    "packages/symbiote-ui/canvas/Minimap/": [
       "Minimap.css.js",
       "Minimap.tpl.js"
     ],
-    "packages/symbiote-node/canvas/NodeCanvas/": [
+    "packages/symbiote-ui/canvas/NodeCanvas/": [
       "NodeCanvas.css.js",
       "NodeCanvas.tpl.js"
     ],
-    "packages/symbiote-node/canvas/NodeSearch/": [
+    "packages/symbiote-ui/canvas/NodeSearch/": [
       "NodeSearch.css.js",
       "NodeSearch.tpl.js"
     ],
-    "packages/symbiote-node/demo/AiChat/": [
+    "packages/symbiote-ui/demo/AiChat/": [
       "AiChat.css.js",
       "AiChat.tpl.js"
     ],
-    "packages/symbiote-node/demo/EventLog/": [
+    "packages/symbiote-ui/demo/EventLog/": [
       "EventLog.css.js",
       "EventLog.tpl.js"
     ],
-    "packages/symbiote-node/demo/": [
+    "packages/symbiote-ui/demo/": [
       "benchmark.html",
       "index.html",
       "tree-layout-test.html"
     ],
-    "packages/symbiote-node/engine/extensions/grok-bridge/": [
+    "packages/symbiote-engine/extensions/grok-bridge/": [
       "manifest.json",
       "sidepanel.html"
     ],
-    "packages/symbiote-node/engine/": [
+    "packages/symbiote-engine/": [
       "package.json"
     ],
-    "packages/symbiote-node/inspector/InspectorPanel/": [
+    "packages/symbiote-ui/inspector/InspectorPanel/": [
       "InspectorPanel.css.js",
       "InspectorPanel.tpl.js"
     ],
-    "packages/symbiote-node/inspector/TemplatePreview/": [
+    "packages/symbiote-ui/inspector/TemplatePreview/": [
       "TemplatePreview.css.js",
       "TemplatePreview.tpl.js"
     ],
-    "packages/symbiote-node/layout/ActionZone/": [
+    "packages/symbiote-ui/layout/ActionZone/": [
       "ActionZone.css.js",
       "ActionZone.tpl.js"
     ],
-    "packages/symbiote-node/layout/Layout/": [
+    "packages/symbiote-ui/layout/Layout/": [
       "Layout.css.js",
       "Layout.tpl.js"
     ],
-    "packages/symbiote-node/layout/LayoutNode/": [
+    "packages/symbiote-ui/layout/LayoutNode/": [
       "LayoutNode.css.js",
       "LayoutNode.tpl.js"
     ],
-    "packages/symbiote-node/layout/LayoutPreview/": [
+    "packages/symbiote-ui/layout/LayoutPreview/": [
       "LayoutPreview.css.js",
       "LayoutPreview.tpl.js"
     ],
-    "packages/symbiote-node/layout/LayoutSidebar/": [
+    "packages/symbiote-ui/layout/LayoutSidebar/": [
       "LayoutSidebar.css.js",
       "LayoutSidebar.tpl.js"
     ],
-    "packages/symbiote-node/layout/PanelMenu/": [
+    "packages/symbiote-ui/layout/PanelMenu/": [
       "PanelMenu.css.js",
       "PanelMenu.tpl.js"
     ],
-    "packages/symbiote-node/menu/ContextMenu/": [
+    "packages/symbiote-ui/menu/ContextMenu/": [
       "ContextMenu.css.js",
       "ContextMenu.tpl.js"
     ],
-    "packages/symbiote-node/node/CtrlItem/": [
+    "packages/symbiote-ui/node/CtrlItem/": [
       "CtrlItem.css.js",
       "CtrlItem.tpl.js"
     ],
-    "packages/symbiote-node/node/GraphFrame/": [
+    "packages/symbiote-ui/node/GraphFrame/": [
       "GraphFrame.css.js",
       "GraphFrame.tpl.js"
     ],
-    "packages/symbiote-node/node/GraphNode/": [
+    "packages/symbiote-ui/node/GraphNode/": [
       "GraphNode.css.js",
       "GraphNode.tpl.js"
     ],
-    "packages/symbiote-node/node/NodeSocket/": [
+    "packages/symbiote-ui/node/NodeSocket/": [
       "NodeSocket.tpl.js"
     ],
-    "packages/symbiote-node/node/PortItem/": [
+    "packages/symbiote-ui/node/PortItem/": [
       "PortItem.css.js",
       "PortItem.tpl.js"
     ],
-    "packages/symbiote-node/palette/PaletteBrowser/": [
+    "packages/symbiote-ui/palette/PaletteBrowser/": [
       "PaletteBrowser.css.js",
       "PaletteBrowser.tpl.js"
     ],
-    "packages/symbiote-node/toolbar/QuickToolbar/": [
+    "packages/symbiote-ui/toolbar/QuickToolbar/": [
       "QuickToolbar.css.js",
       "QuickToolbar.tpl.js"
     ],
@@ -3432,31 +3432,31 @@ export const skeleton = {
       "path",
       "node:assert/strict"
     ],
-    "packages/symbiote-node/canvas/Breadcrumb/Breadcrumb.js": [
+    "packages/symbiote-ui/canvas/Breadcrumb/Breadcrumb.js": [
       "@symbiotejs/symbiote",
       "./Breadcrumb.tpl.js",
       "./Breadcrumb.css.js"
     ],
-    "packages/symbiote-node/canvas/CanvasConnectionRenderer.js": [
+    "packages/symbiote-ui/canvas/CanvasConnectionRenderer.js": [
       "../shapes/index.js"
     ],
-    "packages/symbiote-node/canvas/ConnectionRenderer.js": [
+    "packages/symbiote-ui/canvas/ConnectionRenderer.js": [
       "../shapes/index.js"
     ],
-    "packages/symbiote-node/canvas/FrameManager.js": [
+    "packages/symbiote-ui/canvas/FrameManager.js": [
       "../interactions/Drag.js"
     ],
-    "packages/symbiote-node/canvas/GraphTabs/GraphTabs.js": [
+    "packages/symbiote-ui/canvas/GraphTabs/GraphTabs.js": [
       "@symbiotejs/symbiote",
       "./GraphTabs.tpl.js",
       "./GraphTabs.css.js"
     ],
-    "packages/symbiote-node/canvas/Minimap/Minimap.js": [
+    "packages/symbiote-ui/canvas/Minimap/Minimap.js": [
       "@symbiotejs/symbiote",
       "./Minimap.tpl.js",
       "./Minimap.css.js"
     ],
-    "packages/symbiote-node/canvas/NodeCanvas/NodeCanvas.js": [
+    "packages/symbiote-ui/canvas/NodeCanvas/NodeCanvas.js": [
       "@symbiotejs/symbiote",
       "./NodeCanvas.tpl.js",
       "./NodeCanvas.css.js",
@@ -3486,53 +3486,53 @@ export const skeleton = {
       "../Breadcrumb/Breadcrumb.js",
       "../AutoLayout.js"
     ],
-    "packages/symbiote-node/canvas/NodeSearch/NodeSearch.js": [
+    "packages/symbiote-ui/canvas/NodeSearch/NodeSearch.js": [
       "@symbiotejs/symbiote",
       "./NodeSearch.tpl.js",
       "./NodeSearch.css.js"
     ],
-    "packages/symbiote-node/canvas/NodeViewManager.js": [
+    "packages/symbiote-ui/canvas/NodeViewManager.js": [
       "../interactions/Drag.js",
       "../interactions/Selector.js",
       "@symbiotejs/symbiote",
       "../shapes/index.js"
     ],
-    "packages/symbiote-node/core/Connection.js": [
+    "packages/symbiote-ui/core/Connection.js": [
       "./Socket.js"
     ],
-    "packages/symbiote-node/core/Editor.js": [
+    "packages/symbiote-ui/core/Editor.js": [
       "./Connection.js",
       "./Node.js",
       "./Socket.js",
       "./Frame.js"
     ],
-    "packages/symbiote-node/core/Frame.js": [
+    "packages/symbiote-ui/core/Frame.js": [
       "./Socket.js"
     ],
-    "packages/symbiote-node/core/Node.js": [
+    "packages/symbiote-ui/core/Node.js": [
       "./Socket.js"
     ],
-    "packages/symbiote-node/core/SubgraphNode.js": [
+    "packages/symbiote-ui/core/SubgraphNode.js": [
       "./Node.js",
       "./Editor.js",
       "./Socket.js"
     ],
-    "packages/symbiote-node/demo/AiChat/AiChat.js": [
+    "packages/symbiote-ui/demo/AiChat/AiChat.js": [
       "@symbiotejs/symbiote",
       "./AiChat.tpl.js",
       "./AiChat.css.js"
     ],
-    "packages/symbiote-node/demo/EventLog/EventLog.js": [
+    "packages/symbiote-ui/demo/EventLog/EventLog.js": [
       "@symbiotejs/symbiote",
       "./EventLog.tpl.js",
       "./EventLog.css.js"
     ],
-    "packages/symbiote-node/demo/benchmark.js": [
+    "packages/symbiote-ui/demo/benchmark.js": [
       "../index.js",
       "../canvas/NodeCanvas/NodeCanvas.js",
       "../node/GraphNode/GraphNode.js"
     ],
-    "packages/symbiote-node/demo/demo.js": [
+    "packages/symbiote-ui/demo/demo.js": [
       "../index.js",
       "../canvas/NodeCanvas/NodeCanvas.js",
       "../node/GraphNode/GraphNode.js",
@@ -3542,17 +3542,17 @@ export const skeleton = {
       "./AiChat/AiChat.js",
       "../layout/LayoutSidebar/LayoutSidebar.js"
     ],
-    "packages/symbiote-node/engine/Executor.js": [
+    "packages/symbiote-engine/Executor.js": [
       "./Registry.js",
       "./Graph.js",
       "./Lifecycle.js"
     ],
-    "packages/symbiote-node/engine/Graph.js": [
+    "packages/symbiote-engine/Graph.js": [
       "./nanoid.js",
       "./Registry.js",
       "./SocketTypes.js"
     ],
-    "packages/symbiote-node/engine/GraphServer.js": [
+    "packages/symbiote-engine/GraphServer.js": [
       "node:http",
       "node:fs/promises",
       "node:path",
@@ -3562,122 +3562,122 @@ export const skeleton = {
       "./Registry.js",
       "./HandlerLoader.js"
     ],
-    "packages/symbiote-node/engine/HandlerLoader.js": [
+    "packages/symbiote-engine/HandlerLoader.js": [
       "node:fs/promises",
       "node:path",
       "node:fs",
       "node:url",
       "./Registry.js"
     ],
-    "packages/symbiote-node/engine/Persistence.js": [
+    "packages/symbiote-engine/Persistence.js": [
       "./Graph.js"
     ],
-    "packages/symbiote-node/engine/Registry.js": [
+    "packages/symbiote-engine/Registry.js": [
       "./SocketTypes.js"
     ],
-    "packages/symbiote-node/engine/cli.js": [
+    "packages/symbiote-engine/cli.js": [
       "node:fs/promises",
       "node:path",
       "node:url",
       "node:perf_hooks",
       "./index.js"
     ],
-    "packages/symbiote-node/engine/packs/ai/beat-detect.handler.js": [
+    "packages/symbiote-engine/packs/ai/beat-detect.handler.js": [
       "child_process",
       "fs",
       "path",
       "os"
     ],
-    "packages/symbiote-node/engine/packs/ai/face-detect.handler.js": [
+    "packages/symbiote-engine/packs/ai/face-detect.handler.js": [
       "child_process",
       "fs",
       "path",
       "os"
     ],
-    "packages/symbiote-node/engine/packs/ai/grok-generate.handler.js": [
+    "packages/symbiote-engine/packs/ai/grok-generate.handler.js": [
       "fs/promises",
       "fs",
       "path"
     ],
-    "packages/symbiote-node/engine/packs/ai/kling-lipsync.handler.js": [
+    "packages/symbiote-engine/packs/ai/kling-lipsync.handler.js": [
       "crypto",
       "fs/promises",
       "fs",
       "child_process",
       "path"
     ],
-    "packages/symbiote-node/engine/packs/ai/lesson-generate.handler.js": [
+    "packages/symbiote-engine/packs/ai/lesson-generate.handler.js": [
       "node:fs/promises",
       "node:path"
     ],
-    "packages/symbiote-node/engine/packs/ai/opencode.handler.js": [
+    "packages/symbiote-engine/packs/ai/opencode.handler.js": [
       "fs",
       "path",
       "os"
     ],
-    "packages/symbiote-node/engine/packs/ai/replicate-lipsync.handler.js": [
+    "packages/symbiote-engine/packs/ai/replicate-lipsync.handler.js": [
       "fs/promises",
       "fs",
       "child_process",
       "path"
     ],
-    "packages/symbiote-node/engine/packs/ai/tts.handler.js": [
+    "packages/symbiote-engine/packs/ai/tts.handler.js": [
       "child_process",
       "fs",
       "path",
       "os"
     ],
-    "packages/symbiote-node/engine/packs/ai/whisper.handler.js": [
+    "packages/symbiote-engine/packs/ai/whisper.handler.js": [
       "child_process",
       "fs",
       "path"
     ],
-    "packages/symbiote-node/engine/packs/data/news-accumulate.handler.js": [
+    "packages/symbiote-engine/packs/data/news-accumulate.handler.js": [
       "node:fs/promises",
       "node:path"
     ],
-    "packages/symbiote-node/engine/packs/data/prompt-loader.handler.js": [
+    "packages/symbiote-engine/packs/data/prompt-loader.handler.js": [
       "node:fs/promises",
       "node:path"
     ],
-    "packages/symbiote-node/engine/packs/data/roles.handler.js": [
+    "packages/symbiote-engine/packs/data/roles.handler.js": [
       "node:fs/promises",
       "node:path"
     ],
-    "packages/symbiote-node/engine/packs/flow/loop.handler.js": [
+    "packages/symbiote-engine/packs/flow/loop.handler.js": [
       "../../Registry.js"
     ],
-    "packages/symbiote-node/engine/packs/io/read-file.handler.js": [
+    "packages/symbiote-engine/packs/io/read-file.handler.js": [
       "fs"
     ],
-    "packages/symbiote-node/engine/packs/io/write-file.handler.js": [
+    "packages/symbiote-engine/packs/io/write-file.handler.js": [
       "fs",
       "path"
     ],
-    "packages/symbiote-node/engine/packs/video-pack.js": [
+    "packages/symbiote-engine/packs/video-pack.js": [
       "../index.js"
     ],
-    "packages/symbiote-node/inspector/InspectorPanel/InspectorPanel.js": [
+    "packages/symbiote-ui/inspector/InspectorPanel/InspectorPanel.js": [
       "@symbiotejs/symbiote",
       "./InspectorPanel.tpl.js",
       "./InspectorPanel.css.js",
       "../TemplatePreview/TemplatePreview.js"
     ],
-    "packages/symbiote-node/inspector/TemplatePreview/TemplatePreview.js": [
+    "packages/symbiote-ui/inspector/TemplatePreview/TemplatePreview.js": [
       "@symbiotejs/symbiote",
       "./TemplatePreview.tpl.js",
       "./TemplatePreview.css.js",
       "../../engine/packs/transform/template-builder.handler.js"
     ],
-    "packages/symbiote-node/interactions/ConnectFlow.js": [
+    "packages/symbiote-ui/interactions/ConnectFlow.js": [
       "../core/Connection.js"
     ],
-    "packages/symbiote-node/layout/ActionZone/ActionZone.js": [
+    "packages/symbiote-ui/layout/ActionZone/ActionZone.js": [
       "@symbiotejs/symbiote",
       "./ActionZone.tpl.js",
       "./ActionZone.css.js"
     ],
-    "packages/symbiote-node/layout/Layout/Layout.js": [
+    "packages/symbiote-ui/layout/Layout/Layout.js": [
       "@symbiotejs/symbiote",
       "./../LayoutTree.js",
       "./Layout.tpl.js",
@@ -3686,94 +3686,94 @@ export const skeleton = {
       "./../LayoutPreview/LayoutPreview.js",
       "./../PanelMenu/PanelMenu.js"
     ],
-    "packages/symbiote-node/layout/LayoutNode/LayoutNode.js": [
+    "packages/symbiote-ui/layout/LayoutNode/LayoutNode.js": [
       "@symbiotejs/symbiote",
       "./LayoutNode.tpl.js",
       "./LayoutNode.css.js",
       "./../ActionZone/ActionZone.js"
     ],
-    "packages/symbiote-node/layout/LayoutPreview/LayoutPreview.js": [
+    "packages/symbiote-ui/layout/LayoutPreview/LayoutPreview.js": [
       "@symbiotejs/symbiote",
       "./LayoutPreview.tpl.js",
       "./LayoutPreview.css.js"
     ],
-    "packages/symbiote-node/layout/LayoutRouter/LayoutRouter.js": [
+    "packages/symbiote-ui/layout/LayoutRouter/LayoutRouter.js": [
       "@symbiotejs/symbiote"
     ],
-    "packages/symbiote-node/layout/LayoutRouter/routerSync.js": [
+    "packages/symbiote-ui/layout/LayoutRouter/routerSync.js": [
       "./LayoutRouter.js"
     ],
-    "packages/symbiote-node/layout/LayoutSidebar/LayoutSidebar.js": [
+    "packages/symbiote-ui/layout/LayoutSidebar/LayoutSidebar.js": [
       "@symbiotejs/symbiote",
       "./LayoutSidebar.tpl.js",
       "./LayoutSidebar.css.js",
       "../LayoutRouter/LayoutRouter.js",
       "./SidebarSection.js"
     ],
-    "packages/symbiote-node/layout/LayoutSidebar/SidebarSection.js": [
+    "packages/symbiote-ui/layout/LayoutSidebar/SidebarSection.js": [
       "@symbiotejs/symbiote",
       "../LayoutRouter/LayoutRouter.js"
     ],
-    "packages/symbiote-node/layout/PanelMenu/PanelMenu.js": [
+    "packages/symbiote-ui/layout/PanelMenu/PanelMenu.js": [
       "@symbiotejs/symbiote",
       "./PanelMenu.tpl.js",
       "./PanelMenu.css.js"
     ],
-    "packages/symbiote-node/menu/ContextMenu/ContextMenu.js": [
+    "packages/symbiote-ui/menu/ContextMenu/ContextMenu.js": [
       "@symbiotejs/symbiote",
       "./ContextMenu.tpl.js",
       "./ContextMenu.css.js"
     ],
-    "packages/symbiote-node/node/CtrlItem/CtrlItem.js": [
+    "packages/symbiote-ui/node/CtrlItem/CtrlItem.js": [
       "@symbiotejs/symbiote",
       "./CtrlItem.tpl.js",
       "./CtrlItem.css.js"
     ],
-    "packages/symbiote-node/node/GraphFrame/GraphFrame.js": [
+    "packages/symbiote-ui/node/GraphFrame/GraphFrame.js": [
       "@symbiotejs/symbiote",
       "./GraphFrame.tpl.js",
       "./GraphFrame.css.js"
     ],
-    "packages/symbiote-node/node/GraphNode/GraphNode.js": [
+    "packages/symbiote-ui/node/GraphNode/GraphNode.js": [
       "@symbiotejs/symbiote",
       "./GraphNode.tpl.js",
       "./GraphNode.css.js",
       "../PortItem/PortItem.js",
       "../CtrlItem/CtrlItem.js"
     ],
-    "packages/symbiote-node/node/NodeSocket/NodeSocket.js": [
+    "packages/symbiote-ui/node/NodeSocket/NodeSocket.js": [
       "@symbiotejs/symbiote",
       "./NodeSocket.tpl.js"
     ],
-    "packages/symbiote-node/node/PortItem/PortItem.js": [
+    "packages/symbiote-ui/node/PortItem/PortItem.js": [
       "@symbiotejs/symbiote",
       "./PortItem.tpl.js",
       "./PortItem.css.js"
     ],
-    "packages/symbiote-node/palette/PaletteBrowser/PaletteBrowser.js": [
+    "packages/symbiote-ui/palette/PaletteBrowser/PaletteBrowser.js": [
       "@symbiotejs/symbiote",
       "./PaletteBrowser.tpl.js",
       "./PaletteBrowser.css.js"
     ],
-    "packages/symbiote-node/shapes/CircleShape.js": [
+    "packages/symbiote-ui/shapes/CircleShape.js": [
       "./NodeShape.js"
     ],
-    "packages/symbiote-node/shapes/CommentShape.js": [
+    "packages/symbiote-ui/shapes/CommentShape.js": [
       "./NodeShape.js"
     ],
-    "packages/symbiote-node/shapes/DiamondShape.js": [
+    "packages/symbiote-ui/shapes/DiamondShape.js": [
       "./NodeShape.js"
     ],
-    "packages/symbiote-node/shapes/PillShape.js": [
+    "packages/symbiote-ui/shapes/PillShape.js": [
       "./NodeShape.js"
     ],
-    "packages/symbiote-node/shapes/RectShape.js": [
+    "packages/symbiote-ui/shapes/RectShape.js": [
       "./NodeShape.js"
     ],
-    "packages/symbiote-node/shapes/SVGShape.js": [
+    "packages/symbiote-ui/shapes/SVGShape.js": [
       "./NodeShape.js"
     ],
-    "packages/symbiote-node/shapes/index.js": [
+    "packages/symbiote-ui/shapes/index.js": [
       "./NodeShape.js",
       "./RectShape.js",
       "./PillShape.js",
@@ -3782,7 +3782,7 @@ export const skeleton = {
       "./CommentShape.js",
       "./SVGShape.js"
     ],
-    "packages/symbiote-node/toolbar/QuickToolbar/QuickToolbar.js": [
+    "packages/symbiote-ui/toolbar/QuickToolbar/QuickToolbar.js": [
       "@symbiotejs/symbiote",
       "./QuickToolbar.tpl.js",
       "./QuickToolbar.css.js"
@@ -3960,7 +3960,7 @@ export const skeleton = {
       "ws"
     ],
     "web/app.js": [
-      "symbiote-node",
+      "symbiote-ui",
       "./router-registry.js",
       "./follow-controller.js",
       "./components/follow-ribbon.js",
@@ -3990,10 +3990,10 @@ export const skeleton = {
       "./components/ProjectTabs/ProjectTabs.js",
       "./dashboard-state.js",
       "./state-sync.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
-    "packages/symbiote-node/effects/CellBg/CellBg.js": [
-      "symbiote-node"
+    "packages/symbiote-ui/effects/CellBg/CellBg.js": [
+      "symbiote-ui"
     ],
     "web/components/AgentBoard/AgentBoard.js": [
       "@symbiotejs/symbiote",
@@ -4005,21 +4005,21 @@ export const skeleton = {
     "web/components/ChatSidebar/ChatSidebar.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node",
+      "symbiote-ui",
       "../../state-sync.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
-    "packages/symbiote-node/chat/ChatSidebarItem/ChatSidebarItem.js": [
+    "packages/symbiote-ui/chat/ChatSidebarItem/ChatSidebarItem.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node"
+      "symbiote-ui"
     ],
-    "packages/symbiote-node/display/LoadingOverlay/LoadingOverlay.js": [
-      "symbiote-node"
+    "packages/symbiote-ui/display/LoadingOverlay/LoadingOverlay.js": [
+      "symbiote-ui"
     ],
     "web/components/PgWorkspace/PgWorkspace.js": [
       "@symbiotejs/symbiote",
-      "symbiote-node",
+      "symbiote-ui",
       "../../router-registry.js",
       "../../dashboard-state.js",
       "./PgWorkspace.tpl.js"
@@ -4027,13 +4027,13 @@ export const skeleton = {
     "web/components/ProjectTabs/ProjectTabs.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node",
-      "symbiote-node/ui"
+      "symbiote-ui",
+      "symbiote-ui/ui"
     ],
     "web/components/CanvasGraph/CanvasGraph.js": [
       "@symbiotejs/symbiote"
     ],
-    "packages/symbiote-node/display/CodeBlock/CodeBlock.js": [
+    "packages/symbiote-ui/display/CodeBlock/CodeBlock.js": [
       "@symbiotejs/symbiote",
       "../highlight.js",
       "../app.js"
@@ -4049,7 +4049,7 @@ export const skeleton = {
     "web/panels/ActionBoard/ActionBoard.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node/ui",
+      "symbiote-ui/ui",
       "../../common/tool-event-feed-adapter.js",
       "./ActionBoard.tpl.js"
     ],
@@ -4063,17 +4063,17 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../state-sync.js",
       "./ActiveTasks.tpl.js",
-      "symbiote-node/ui",
-      "symbiote-node/ui"
+      "symbiote-ui/ui",
+      "symbiote-ui/ui"
     ],
     "web/panels/AgentChat/AgentChat.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node",
+      "symbiote-ui",
       "./AgentChat.tpl.js",
       "./AgentChat.css.js",
-      "symbiote-node/ui",
-      "symbiote-node/ui",
+      "symbiote-ui/ui",
+      "symbiote-ui/ui",
       "../../common/icons.js",
       "../../utils/markdown-formatter.js",
       "../../services/chat-ws-client.js",
@@ -4087,56 +4087,56 @@ export const skeleton = {
     "web/panels/ChatList/ChatList.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node",
-      "symbiote-node/ui",
-      "symbiote-node/ui"
+      "symbiote-ui",
+      "symbiote-ui/ui",
+      "symbiote-ui/ui"
     ],
     "web/panels/GroupManager/GroupManager.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./GroupManager.tpl.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/Marketplace/Marketplace.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./Marketplace.tpl.js",
-      "symbiote-node/ui",
+      "symbiote-ui/ui",
       "./Marketplace.css.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/PeerReview/PeerReview.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./PeerReview.tpl.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/PipelineManager/PipelineManager.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./PipelineManager.tpl.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/ProjectItem/ProjectItem.js": [
       "@symbiotejs/symbiote",
       "./ProjectItem.css.js",
-      "symbiote-node/ui",
+      "symbiote-ui/ui",
       "./ProjectItem.tpl.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/ProjectList/ProjectList.js": [
       "@symbiotejs/symbiote",
       "../../dashboard-state.js",
-      "symbiote-node/ui",
+      "symbiote-ui/ui",
       "./ProjectList.tpl.js",
       "../ProjectItem/ProjectItem.js"
     ],
     "web/panels/SettingsPanel/SettingsPanel.js": [
       "@symbiotejs/symbiote",
-      "symbiote-node/ui",
+      "symbiote-ui/ui",
       "./SettingsPanel.css.js",
       "./SettingsPanel.tpl.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/SkillLibraryPanel/SkillListItem.js": [
       "@symbiotejs/symbiote",
@@ -4146,32 +4146,32 @@ export const skeleton = {
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./SkillManager.tpl.js",
-      "symbiote-node/ui",
-      "symbiote-node/ui"
+      "symbiote-ui/ui",
+      "symbiote-ui/ui"
     ],
     "web/panels/ToolExplorer/ToolExplorer.js": [
       "@symbiotejs/symbiote",
       "./ToolExplorer.tpl.js",
       "./ToolExplorer.css.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/Topology/TopologyPanel.js": [
       "@symbiotejs/symbiote",
       "./TopologyPanel.tpl.js",
       "./TopologyPanel.css.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/WorkflowExplorer/WorkflowExplorer.js": [
       "@symbiotejs/symbiote",
       "../../common/mcp-call.js",
       "./WorkflowExplorer.tpl.js",
       "./WorkflowExplorer.css.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/CodeViewer/CodeViewer.js": [
       "@symbiotejs/symbiote",
       "../app.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/CtxPanel/CtxPanel.js": [
       "@symbiotejs/symbiote",
@@ -4179,10 +4179,10 @@ export const skeleton = {
     ],
     "web/panels/dep-graph.js": [
       "@symbiotejs/symbiote",
-      "symbiote-node",
+      "symbiote-ui",
       "../app.js",
       "../services/skeleton-parser.js",
-      "symbiote-node/ui"
+      "symbiote-ui/ui"
     ],
     "web/panels/FileTree/FileTree.js": [
       "@symbiotejs/symbiote",
@@ -4197,7 +4197,7 @@ export const skeleton = {
       "../app.js"
     ],
     "web/router-registry.js": [
-      "symbiote-node"
+      "symbiote-ui"
     ],
     "web/services/chat-autocomplete.js": [
       "../utils/markdown-formatter.js"
@@ -4207,7 +4207,7 @@ export const skeleton = {
       "../dashboard-state.js"
     ],
     "web/services/skeleton-parser.js": [
-      "symbiote-node"
+      "symbiote-ui"
     ],
     "web/utils/markdown-formatter.js": [
       "../common/icons.js",

@@ -7,7 +7,7 @@ import process from 'node:process';
 import {
   createXRThreeDiagnosticServerSummary,
   createXRThreeTroubleshootingSummary,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 
 function parseArgs(argv) {
   let options = {

@@ -1,4 +1,4 @@
-import { extractProjectTransactionsFromMessages } from 'symbiote-node/graph';
+import { extractProjectTransactionsFromMessages } from 'symbiote-ui/graph';
 
 export { extractProjectTransactionsFromMessages };
 

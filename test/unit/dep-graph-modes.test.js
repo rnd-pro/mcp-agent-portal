@@ -4,7 +4,7 @@ import {
   getGraphPathStyleDisplay as getPathStyleDisplay,
   getNextGraphPathStyle as getNextPathStyle,
   resolveInitialGraphViewMode as resolveInitialViewMode,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 
 describe('dep-graph-modes', () => {
   it('resolveInitialViewMode supports mode query params', () => {

@@ -13,7 +13,7 @@ import {
   getLayout,
   hasSection,
   withGlobalPanel,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 import { tPortal } from './common/localization.js';
 
 export {

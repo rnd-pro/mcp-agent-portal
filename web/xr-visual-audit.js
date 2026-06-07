@@ -6,7 +6,7 @@ import {
   createXRVisualAgentReadinessSummary,
   createXRVisualTestSummary,
   getWebXRSupport,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 
 const caseSelect = document.querySelector('#case');
 const runButton = document.querySelector('#run');

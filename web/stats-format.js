@@ -1,1 +1,1 @@
-export { formatThousands, formatStats } from 'symbiote-node/display/format-utils';
+export { formatThousands, formatStats } from 'symbiote-ui/display/format-utils';

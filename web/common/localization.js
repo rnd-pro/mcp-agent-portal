@@ -4,7 +4,7 @@ import {
   normalizeLocaleMode,
   resolveLocaleForMode,
   translate,
-} from 'symbiote-node/locale';
+} from 'symbiote-ui/locale';
 import { PORTAL_LOCALE_MESSAGES } from './portal-locales.js';
 
 export const PORTAL_LOCALE_STORAGE_KEY = 'agentPortal.localeMode';

@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './GroupManager.tpl.js';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import cssLocal from './GroupManager.css.js';
 
 const PROVIDERS = ['codex', 'claude', 'opencode', 'gemini'];

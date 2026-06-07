@@ -90,6 +90,14 @@ function stripBadges(text) {
   return text.replace(/^(\[!\[.*?\]\(.*?\)\]\(.*?\)\s*\n?)+\n*/m, '');
 }
 
+function resolveReadmePath(relPath) {
+  let packageMatch = relPath.match(/^packages\/(symbiote-ui|symbiote-engine)\/(.+)$/);
+  if (packageMatch) {
+    return path.join(ROOT, 'node_modules', packageMatch[1], packageMatch[2]);
+  }
+  return path.join(ROOT, relPath);
+}
+
 let mockPath = path.join(DIST, 'demo', 'mock-data.js');
 let mockSrc = fs.readFileSync(mockPath, 'utf-8');
 
@@ -103,7 +111,7 @@ if (fs.existsSync(readmePath)) {
 
 // 2. Inject subproject READMEs → __SUBREADME:relative/path__
 mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
-  let fullPath = path.join(ROOT, relPath);
+  let fullPath = resolveReadmePath(relPath);
   if (fs.existsSync(fullPath)) {
     let content = stripBadges(fs.readFileSync(fullPath, 'utf-8'));
     return escapeForJsString(content);
@@ -115,7 +123,7 @@ mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
 fs.writeFileSync(mockPath, mockSrc);
 
 // ── Copy public Symbiote packages ────────────────────────────────
-for (let packageName of ['symbiote-node', 'symbiote-ui']) {
+for (let packageName of ['symbiote-ui', 'symbiote-engine']) {
   console.log(`  → Copying ${packageName}`);
   copyDir(
     path.join(ROOT, 'node_modules', packageName),
@@ -129,6 +137,13 @@ console.log('  → Copying @symbiotejs/symbiote');
 copyDir(
   path.join(ROOT, 'node_modules', '@symbiotejs', 'symbiote'),
   path.join(DIST, 'node_modules', '@symbiotejs', 'symbiote'),
+  (name) => name !== 'node_modules' && name !== '.git',
+);
+
+console.log('  → Copying three');
+copyDir(
+  path.join(ROOT, 'node_modules', 'three'),
+  path.join(DIST, 'vendor', 'three'),
   (name) => name !== 'node_modules' && name !== '.git',
 );
 
@@ -146,7 +161,7 @@ let indexHtml = `<!DOCTYPE html>
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-	<link rel="stylesheet" href="/packages/symbiote-ui/icons/material-symbols.css">
+	<link rel="stylesheet" href="${basePath}packages/symbiote-ui/icons/material-symbols.css">
 	<link rel="stylesheet" href="${basePath}packages/symbiote-ui/themes/default-provider.css">
 	<link rel="stylesheet" href="${basePath}web/style.css">
 <script type="importmap">
@@ -162,20 +177,15 @@ let indexHtml = `<!DOCTYPE html>
 	        "symbiote-ui/locale": "${basePath}packages/symbiote-ui/locale/index.js",
 	        "symbiote-ui/layout": "${basePath}packages/symbiote-ui/layout/index.js",
 	        "symbiote-ui/xr": "${basePath}packages/symbiote-ui/xr/index.js",
-	        "symbiote-node": "${basePath}packages/symbiote-node/index.js",
-	        "symbiote-node/core": "${basePath}packages/symbiote-node/core.js",
-	        "symbiote-node/core/base-path.js": "${basePath}packages/symbiote-ui/core/base-path.js",
-	        "symbiote-node/ui": "${basePath}packages/symbiote-node/ui.js",
-	        "symbiote-node/graph": "${basePath}packages/symbiote-node/graph.js",
-	        "symbiote-node/locale": "${basePath}packages/symbiote-node/locale.js",
-	        "symbiote-node/layout": "${basePath}packages/symbiote-node/layout.js",
-	        "symbiote-node/xr": "${basePath}packages/symbiote-node/xr.js",
-	        "symbiote-node/chat/chat-context.js": "${basePath}packages/symbiote-node/chat/chat-context.js",
-	        "symbiote-node/display/highlight": "${basePath}packages/symbiote-node/display/highlight.js",
-	        "symbiote-node/display/markdown-formatter": "${basePath}packages/symbiote-node/display/markdown-formatter.js",
-	        "symbiote-node/display/format-utils": "${basePath}packages/symbiote-node/display/format-utils.js",
-	        "symbiote-node/display/icons": "${basePath}packages/symbiote-node/display/icons.js",
-	        "symbiote-node/display/event-feed-adapter": "${basePath}packages/symbiote-node/display/event-feed-adapter.js"
+	        "symbiote-ui/chat/chat-context.js": "${basePath}packages/symbiote-ui/chat/chat-context.js",
+	        "symbiote-ui/display/highlight": "${basePath}packages/symbiote-ui/display/highlight.js",
+	        "symbiote-ui/display/markdown-formatter": "${basePath}packages/symbiote-ui/display/markdown-formatter.js",
+	        "symbiote-ui/display/format-utils": "${basePath}packages/symbiote-ui/display/format-utils.js",
+	        "symbiote-ui/display/icons": "${basePath}packages/symbiote-ui/display/icons.js",
+	        "symbiote-ui/display/event-feed-adapter": "${basePath}packages/symbiote-ui/display/event-feed-adapter.js",
+	        "symbiote-engine": "${basePath}packages/symbiote-engine/index.js",
+	        "symbiote-engine/": "${basePath}packages/symbiote-engine/",
+	        "three": "${basePath}vendor/three/build/three.module.js?v=0-184-0"
 	      }
     }
   </script>

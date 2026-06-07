@@ -2,7 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { stateSync } from '../../state-sync.js';
 import { tPortal } from '../../common/localization.js';
 import template from './ActiveTasks.tpl.js';
-import { sharedUiStyles as cssShared, uiConfirm } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared, uiConfirm } from 'symbiote-ui/ui';
 import css from './ActiveTasks.css.js';
 import './TaskCard.js';
 

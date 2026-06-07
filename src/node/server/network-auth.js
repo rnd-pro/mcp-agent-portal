@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { renderNetworkApprovalPage } from 'symbiote-node/display/network-approval-page';
+import { renderNetworkApprovalPage } from 'symbiote-ui/display/network-approval-page';
 import { json, parseBody } from './routes/http.js';
 
 const COOKIE_NAME = 'ap_lan_session';

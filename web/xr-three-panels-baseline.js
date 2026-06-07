@@ -32,7 +32,7 @@ import {
   createWebXRLaunchRecommendation,
   getWebXRSupport,
   readXRHtmlCanvasOriginTrialHeaderStatus,
-} from 'symbiote-node/xr';
+} from 'symbiote-ui/xr';
 
 const HTML_IN_CANVAS_ORIGIN_TRIAL_DIAGNOSTIC_HEADER = 'X-Agent-Portal-Origin-Trial';
 
@@ -674,7 +674,7 @@ function renderStatus(extra = {}) {
     ['XRReferenceSpace', String(Boolean(support.apis?.XRReferenceSpaceAvailable))],
     ['XR features', Array.isArray(support.features) ? support.features.join(', ') : '-'],
     ['Renderer', 'three-webxr'],
-    ['Provider adapter', 'symbiote-node/xr'],
+    ['Provider adapter', 'symbiote-ui/xr'],
     ['Drag model', adapterState.controller.dragModel || DRAG_MODEL],
     ['Render host', renderHost.getDiagnostics().version],
     ['Session controller', sessionState.version],

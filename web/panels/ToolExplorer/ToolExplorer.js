@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import template from './ToolExplorer.tpl.js';
 import cssLocal from './ToolExplorer.css.js';
-import { sharedUiStyles as cssShared } from 'symbiote-node/ui';
+import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import './ToolServerItem.js';
 import './ToolCard.js';
 

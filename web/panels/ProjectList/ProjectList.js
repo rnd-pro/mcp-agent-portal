@@ -1,6 +1,6 @@
 import { Symbiote } from "@symbiotejs/symbiote";
 import { state, events } from "../../dashboard-state.js";
-import { sharedUiStyles as cssShared } from "symbiote-node/ui";
+import { sharedUiStyles as cssShared } from "symbiote-ui/ui";
 import template from "./ProjectList.tpl.js";
 import "../ProjectItem/ProjectItem.js";
 

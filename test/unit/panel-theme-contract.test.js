@@ -65,7 +65,7 @@ describe('portal panel theme contract', () => {
     }
   });
 
-  it('keeps reusable product panels on symbiote-node font tokens', () => {
+  it('keeps reusable product panels on symbiote-ui font tokens', () => {
     for (let relative of PANEL_THEME_FILES) {
       let source = fs.readFileSync(path.join(ROOT, relative), 'utf8');
 

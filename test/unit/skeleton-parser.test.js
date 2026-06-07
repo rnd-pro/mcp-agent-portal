@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildFileGraph,
   buildStructuredGraph,
-} from 'symbiote-node/graph';
+} from 'symbiote-ui/graph';
 
 describe('project graph skeleton parser', () => {
   it('buildFileGraph skips external, missing, duplicate, and self imports', () => {

@@ -4,7 +4,7 @@ import {
   removeAttachedContext as _remove,
   formatAttachedContextBlock as _format,
   FILE_TYPE_HANDLER,
-} from 'symbiote-node/chat/chat-context.js';
+} from 'symbiote-ui/chat/chat-context.js';
 
 // --- Portal-specific type handlers ---
 

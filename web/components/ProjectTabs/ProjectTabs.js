@@ -1,7 +1,7 @@
-import { ProjectTabs } from 'symbiote-node/ui';
+import { ProjectTabs } from 'symbiote-ui/ui';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
-import { navigate, getRoute, parseQuery } from 'symbiote-node/ui';
-import { uiPrompt } from 'symbiote-node/ui';
+import { navigate, getRoute, parseQuery } from 'symbiote-ui/ui';
+import { uiPrompt } from 'symbiote-ui/ui';
 
 let configured = new WeakSet();
 

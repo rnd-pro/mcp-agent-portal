@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('CanvasGraph provider integration', () => {
-  it('uses the symbiote-node canvas graph tag without a portal wrapper', async () => {
+  it('uses the symbiote-ui canvas graph tag without a portal wrapper', async () => {
     const [appSource, templateSource, shellSource] = await Promise.all([
       readFile(resolve(repoRoot, 'web', 'app.js'), 'utf8'),
       readFile(resolve(repoRoot, 'web', 'panels', 'dep-graph-template.js'), 'utf8'),

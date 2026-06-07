@@ -15,7 +15,7 @@ import {
   shouldRestoreFlatFocus,
   renderClusterPanel,
   renderGraphStats,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 
 function createElement(tagName) {
   return {

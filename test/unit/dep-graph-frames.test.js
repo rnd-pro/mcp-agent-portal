@@ -4,7 +4,7 @@ import {
   addGraphDirectoryFrames as addDirectoryFrames,
   setGraphLayerVisible,
   toggleGraphLayerButtonState as toggleLayerButtonState,
-} from 'symbiote-node/ui';
+} from 'symbiote-ui/ui';
 
 test('addDirectoryFrames creates bounded frames for multi-file directories', () => {
   class TestFrame {

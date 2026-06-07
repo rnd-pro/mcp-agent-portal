@@ -21,9 +21,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Checkout demo submodules
-        run: git submodule update --init --depth=1 packages/symbiote-node
-
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:

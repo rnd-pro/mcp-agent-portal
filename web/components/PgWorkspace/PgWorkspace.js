@@ -1,5 +1,5 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import { getRoute, navigate, parseQuery } from 'symbiote-node/ui';
+import { getRoute, navigate, parseQuery } from 'symbiote-ui/ui';
 import { panelTypes, getHomeSections, getProjectSections, hasSection } from '../../router-registry.js';
 import { getPortalRuntimeLayout } from '../../services/portal-runtime.js';
 import { layoutMatchesSection } from '../../layout-policy.js';

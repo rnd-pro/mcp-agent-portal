@@ -1,6 +1,6 @@
 import { Symbiote } from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
-import { syncListItem } from 'symbiote-node/ui';
+import 'symbiote-ui/ui';
+import { syncListItem } from 'symbiote-ui/ui';
 import template from './SkillListItem.tpl.js';
 import css from './SkillListItem.css.js';
 

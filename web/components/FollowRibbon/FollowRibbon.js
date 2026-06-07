@@ -1,4 +1,4 @@
-import { StatusRibbon } from 'symbiote-node/ui';
+import { StatusRibbon } from 'symbiote-ui/ui';
 import { events } from '../../app.js';
 import css from './FollowRibbon.css.js';
 

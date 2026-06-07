@@ -155,8 +155,10 @@ function resolveRepoUrl(relativePath) {
     repoUrl = `https://raw.githubusercontent.com/rnd-pro/project-graph-mcp/main/${relativePath.replace('packages/project-graph-mcp/', '')}`;
   } else if (relativePath.startsWith('packages/agent-pool-mcp/')) {
     repoUrl = `https://raw.githubusercontent.com/rnd-pro/agent-pool-mcp/main/${relativePath.replace('packages/agent-pool-mcp/', '')}`;
-  } else if (relativePath.startsWith('packages/symbiote-node/')) {
-    repoUrl = `https://raw.githubusercontent.com/rnd-pro/symbiote-node/main/${relativePath.replace('packages/symbiote-node/', '')}`;
+  } else if (relativePath.startsWith('packages/symbiote-ui/')) {
+    repoUrl = `https://raw.githubusercontent.com/rnd-pro/symbiote-ui/main/${relativePath.replace('packages/symbiote-ui/', '')}`;
+  } else if (relativePath.startsWith('packages/symbiote-engine/')) {
+    repoUrl = `https://raw.githubusercontent.com/rnd-pro/symbiote-engine/main/${relativePath.replace('packages/symbiote-engine/', '')}`;
   }
   return repoUrl;
 }

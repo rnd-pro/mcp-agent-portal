@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resetLocalization } from 'symbiote-node/locale';
+import { resetLocalization } from 'symbiote-ui/locale';
 import {
   configurePortalLocalization,
   getPortalLocaleOptions,
@@ -208,9 +208,9 @@ describe('portal localization bootstrap', () => {
     let index = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
 
     assert.ok(
-      app.indexOf('from "./common/localization.js";') < app.indexOf('from "symbiote-node/ui"'),
-      'portal localization must run before symbiote-node/ui auto-detection',
+      app.indexOf('from "./common/localization.js";') < app.indexOf('from "symbiote-ui/ui"'),
+      'portal localization must run before symbiote-ui/ui auto-detection',
     );
-    assert.ok(index.includes('"symbiote-node/locale": "/packages/symbiote-node/locale.js"'));
+    assert.ok(index.includes('"symbiote-ui/locale": "/packages/symbiote-ui/locale/index.js"'));
   });
 });

@@ -1,7 +1,7 @@
 // @ctx .context/web/panels/ctx-panel.ctx
 import Symbiote from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
-import { getSourceLanguage } from 'symbiote-node/ui';
+import 'symbiote-ui/ui';
+import { getSourceLanguage } from 'symbiote-ui/ui';
 import { api, events, getActiveRouteProjectId, state } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
 import template from './CtxPanel.tpl.js';

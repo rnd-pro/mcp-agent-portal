@@ -1,6 +1,6 @@
 // @ctx .context/web/panels/live-monitor.ctx
 import Symbiote from "@symbiotejs/symbiote";
-import "symbiote-node/ui";
+import "symbiote-ui/ui";
 import { events as globalEvents } from "../../app.js";
 import { toToolEventFeedItems } from "../../common/tool-event-feed-adapter.js";
 import template from "./OpsPanel.tpl.js";

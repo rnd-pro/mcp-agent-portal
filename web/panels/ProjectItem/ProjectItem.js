@@ -1,8 +1,8 @@
 import { Symbiote } from "@symbiotejs/symbiote";
 import cssLocal from "./ProjectItem.css.js";
-import { sharedUiStyles as cssShared } from "symbiote-node/ui";
+import { sharedUiStyles as cssShared } from "symbiote-ui/ui";
 import template from "./ProjectItem.tpl.js";
-import { uiConfirm } from 'symbiote-node/ui';
+import { uiConfirm } from 'symbiote-ui/ui';
 import { tPortal } from '../../common/localization.js';
 
 export class ProjectItem extends Symbiote {

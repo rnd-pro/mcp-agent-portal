@@ -1,6 +1,6 @@
 import { Symbiote, html } from '@symbiotejs/symbiote';
-import 'symbiote-node/ui';
-import { bindListItemSelect, syncListItem } from 'symbiote-node/ui';
+import 'symbiote-ui/ui';
+import { bindListItemSelect, syncListItem } from 'symbiote-ui/ui';
 
 export class PipelineItem extends Symbiote {
   init$ = {
