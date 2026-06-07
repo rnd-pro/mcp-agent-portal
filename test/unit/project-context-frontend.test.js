@@ -98,11 +98,18 @@ describe('project scoped frontend data loading', () => {
     assert.match(projectTabsSource, /root\.style\.removeProperty\('--sn-composer-send-hover-bg'\);/);
   });
 
-  it('clears the selected chat when switching project tabs', () => {
+  it('restores the selected project tab workspace route instead of forcing chat', () => {
     let projectTabsSource = readSource('web/components/ProjectTabs/ProjectTabs.js');
 
-    assert.match(projectTabsSource, /navigate\('agent-chat', '', \{ project: id, chat: null \}\);/);
-    assert.match(projectTabsSource, /navigate\('agent-chat', '', \{ project: data\.id, chat: null \}\);/);
+    assert.match(projectTabsSource, /function rememberCurrentWorkspaceRoute\(\)/);
+    assert.match(projectTabsSource, /function activateWorkspaceRoute\(workspaceId\)/);
+    assert.match(projectTabsSource, /persistUiValue\(getWorkspaceRoutePath\(workspaceId\), hash, getWorkspaceRouteKey\(workspaceId\)\);/);
+    assert.match(projectTabsSource, /readUiValue\(getWorkspaceRoutePath\(workspaceId\), getWorkspaceRouteKey\(workspaceId\), ''\)/);
+    assert.match(projectTabsSource, /navigate\('explorer', '', \{ project: workspaceId \}\);/);
+    assert.match(projectTabsSource, /activateWorkspaceRoute\(id\);/);
+    assert.match(projectTabsSource, /activateWorkspaceRoute\(data\.id\);/);
+    assert.equal(projectTabsSource.includes("navigate('agent-chat', '', { project: id, chat: null })"), false);
+    assert.equal(projectTabsSource.includes("navigate('agent-chat', '', { project: data.id, chat: null })"), false);
   });
 
   it('declares a runtime base path before API calls are patched', () => {
