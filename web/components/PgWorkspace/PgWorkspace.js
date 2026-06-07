@@ -63,19 +63,6 @@ export class PgWorkspace extends Symbiote {
     this.ref.sidebar.addEventListener('sidebar-section-select', (event) => {
       event.preventDefault();
       let sectionId = event.detail?.sectionId || event.detail?.id;
-      this._lastSidebarSelectTime = Date.now();
-      this._navigateSidebarSection(sectionId);
-    });
-
-    this.ref.sidebar.addEventListener('click', (event) => {
-      let sectionItem = event.target?.closest?.('.sec-item');
-      if (!sectionItem || !this.ref.sidebar.contains(sectionItem)) return;
-      if (event.target?.closest?.('.sec-expand')) return;
-      if (Date.now() - (this._lastSidebarSelectTime || 0) < 100) return;
-      let sectionEl = sectionItem.closest('sidebar-section');
-      let sections = Array.from(this.ref.sidebar.querySelectorAll('sidebar-section'));
-      let index = sections.indexOf(sectionEl);
-      let sectionId = this._resolveSidebarSectionId(sectionEl, sectionItem, index);
       this._navigateSidebarSection(sectionId);
     });
 
@@ -156,7 +143,6 @@ export class PgWorkspace extends Symbiote {
       subPanels: this._getSubPanelsForSection(section.id),
     }));
     this.ref.sidebar.setSections(sections);
-    this._bindSidebarSectionClicks();
     this._sectionsInitialized = true;
   }
 
@@ -189,35 +175,6 @@ export class PgWorkspace extends Symbiote {
     } else {
       navigate(sectionId, '', { project: this._projectId });
     }
-  }
-
-  _bindSidebarSectionClicks() {
-    requestAnimationFrame(() => {
-      let sectionEls = Array.from(this.ref.sidebar.querySelectorAll('sidebar-section'));
-      sectionEls.forEach((sectionEl, index) => {
-        let item = sectionEl.querySelector('.sec-item');
-        if (!item) return;
-        item._pgWorkspaceSectionId = this._resolveSidebarSectionId(sectionEl, item, index);
-        if (item._pgWorkspaceSectionClickBound) return;
-        item._pgWorkspaceSectionClickBound = true;
-        item.addEventListener('click', (event) => {
-          if (event.target?.closest?.('.sec-expand')) return;
-          event.preventDefault();
-          event.stopPropagation();
-          this._navigateSidebarSection(event.currentTarget._pgWorkspaceSectionId);
-        }, true);
-      });
-    });
-  }
-
-  _resolveSidebarSectionId(sectionEl, sectionItem, index) {
-    let sectionState = this.ref.sidebar.$.sections?.[index];
-    if (sectionState?.sectionId) return sectionState.sectionId;
-    if (sectionEl?.$?.sectionId) return sectionEl.$.sectionId;
-    let label = sectionItem?.querySelector?.('.sec-label')?.textContent?.trim();
-    let icon = sectionItem?.querySelector?.('.sec-icon')?.textContent?.trim();
-    let sections = this._projectId === 'global' ? getHomeSections() : getProjectSections();
-    return sections.find((section) => section.label === label || section.icon === icon)?.id || '';
   }
 
   _currentHashBelongsToWorkspace() {

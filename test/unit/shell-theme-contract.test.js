@@ -904,10 +904,10 @@ describe('portal shell theme contract', () => {
     assert.ok(workspace.includes("this.ref.sidebar.addEventListener('panel-close'"), 'PgWorkspace must own panel close actions for its isolated sidebar');
     assert.ok(workspace.includes('this.ref.layout.joinPanels'), 'PgWorkspace panel close actions must operate on the matching isolated layout');
     assert.ok(workspace.includes("this.ref.sidebar.addEventListener('sidebar-section-select'"), 'PgWorkspace must own sidebar navigation for isolated project workspaces');
-    assert.ok(workspace.includes("this.ref.sidebar.addEventListener('click'"), 'PgWorkspace must keep a delegated fallback for sidebar item clicks');
-    assert.ok(workspace.includes("event.target?.closest?.('.sec-item')"), 'PgWorkspace sidebar click fallback must target section items');
-    assert.ok(workspace.includes('this._bindSidebarSectionClicks();'), 'PgWorkspace must bind visible sidebar items after section rendering');
-    assert.ok(workspace.includes('item._pgWorkspaceSectionId'), 'PgWorkspace sidebar item handlers must carry the resolved route section id');
+    assert.equal(workspace.includes("this.ref.sidebar.addEventListener('click'"), false, 'PgWorkspace must not depend on layout-sidebar internal click markup');
+    assert.equal(workspace.includes("event.target?.closest?.('.sec-item')"), false, 'PgWorkspace must consume sidebar-section-select instead of section DOM internals');
+    assert.equal(workspace.includes('_bindSidebarSectionClicks'), false, 'sidebar section click binding belongs in symbiote-ui');
+    assert.equal(workspace.includes('_pgWorkspaceSectionId'), false, 'PgWorkspace must not attach product route state to library DOM internals');
     assert.ok(workspace.includes("navigate(sectionId, '', { project: this._projectId })"), 'PgWorkspace sidebar navigation must preserve project query scope');
     assert.ok(workspace.includes('this.ref.sidebar.updateSubPanels'), 'PgWorkspace must keep its isolated sidebar submenu synchronized with layout changes');
     assert.ok(workspace.includes('PgWorkspace.rootStyles = css'), 'PgWorkspace must apply its own flex shell styles');
