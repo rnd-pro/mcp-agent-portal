@@ -1,18 +1,27 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { state as dashState, events as dashEvents, emit as dashEmit } from '../../dashboard-state.js';
 import {
+  blobToBase64,
   buildChatMessageItems,
   buildSessionMetaHtml,
+  defaultSendCommandPhrases,
+  defaultVoiceActionCommandPhrases,
+  defaultWakeCommandPhrases,
   escapeHtml,
   getRoute,
+  matchVoiceCommandAtEnd,
+  matchVoiceCommandInText,
+  normalizeWakeCommandPhrase,
   parseQuery,
+  parseVoiceCommandList,
   updateParams,
+  VoiceRuntime,
+  wakeCommandCandidates,
 } from 'symbiote-ui/ui';
 import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
 import { ICONS } from '../../common/icons.js';
 import { ChatWsClient } from '../../services/chat-ws-client.js';
-import { AudioRecorder } from '../../services/audio-recorder.js';
 import { ChatAutocomplete } from '../../services/chat-autocomplete.js';
 import {
   extractAttachedFilePaths,
@@ -26,16 +35,6 @@ import {
 } from '../../services/project-transaction-messages.js';
 import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
-import {
-  defaultSendCommandPhrases,
-  defaultVoiceActionCommandPhrases,
-  defaultWakeCommandPhrases,
-  matchVoiceCommandAtEnd,
-  matchVoiceCommandInText,
-  normalizeWakeCommandPhrase,
-  parseVoiceCommandList,
-  wakeCommandCandidates,
-} from '../../common/voice-input-defaults.js';
 import { getLocalization } from 'symbiote-ui/locale';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import {
@@ -58,7 +57,7 @@ function sameChatMessages(next = [], current = []) {
  */
 export class AgentChat extends Symbiote {
   static isoMode = true;
-  _audioRecorder = new AudioRecorder();
+  _audioRecorder = new VoiceRuntime();
   _voiceCommandMode = false;
   _voiceCommandTriggered = false;
   _voiceCommandHandling = false;
@@ -1151,22 +1150,27 @@ export class AgentChat extends Symbiote {
       let result = await this._audioRecorder.stop();
       let text = textOverride || this._voiceCommandTextOverride || result.text || '';
 
+      let audioBase64 = result.audioBase64 || '';
+      if (!audioBase64 && result.blob) {
+        audioBase64 = await blobToBase64(result.blob);
+      }
+
       // If no text from Speech API, try server transcription
-      if (!text && result.audioBase64) {
+      if (!text && audioBase64) {
         this._getComposer()?.setVoicePreview?.({ mode: 'processing', status: 'Transcribing...', text: '', elapsed: true });
         this._voicePreview = this._getComposer()?.getVoicePreviewElement?.() || null;
 
         let res = await fetch('/api/audio/transcribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audio: result.audioBase64, mimeType: result.mimeType }),
+          body: JSON.stringify({ audio: audioBase64, mimeType: result.mimeType }),
         });
         let data = await res.json();
         text = data.text || '';
 
         // Store audio for potential playback
-        if (result.audioBase64 && result.mimeType) {
-          this._voiceAudioUrl = `data:${result.mimeType};base64,${result.audioBase64}`;
+        if (audioBase64 && result.mimeType) {
+          this._voiceAudioUrl = `data:${result.mimeType};base64,${audioBase64}`;
         }
       }
 

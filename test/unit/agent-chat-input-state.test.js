@@ -4,10 +4,6 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { getAgentChatInputState } from '../../web/panels/AgentChat/input-state.js';
 import {
-  buildChatTitleRequestNote,
-  extractChatTitleFromAgentText,
-} from '../../web/panels/AgentChat/chat-title.js';
-import {
   defaultVoiceActionCommandPhrases,
   defaultWakeCommandPhrases,
   matchVoiceCommandAtEnd,
@@ -15,7 +11,11 @@ import {
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
   wakeCommandCandidates,
-} from '../../web/common/voice-input-defaults.js';
+} from 'symbiote-ui/ui';
+import {
+  buildChatTitleRequestNote,
+  extractChatTitleFromAgentText,
+} from '../../web/panels/AgentChat/chat-title.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -253,6 +253,11 @@ describe('agent chat input state', () => {
     assert.match(source, /_getWakeCommandCandidates\(\)/);
     assert.match(source, /wakeCommandCandidates\(this\._wakeCommandPhrases \|\| this\._defaultWakeCommandPhrases\(\), this\._voiceCommandLocale\(\)\)/);
     assert.match(source, /matchVoiceCommandInText\(text, this\._getWakeCommandCandidates\(\)\)\.matched/);
+    assert.match(source, /from 'symbiote-ui\/ui';/);
+    assert.match(source, /new VoiceRuntime\(\)/);
+    assert.match(source, /blobToBase64\(result\.blob\)/);
+    assert.equal(source.includes('../../common/voice-input-defaults.js'), false);
+    assert.equal(source.includes('../../services/audio-recorder.js'), false);
     assert.doesNotMatch(source, /_escapeRegExp/);
     assert.match(source, /command\.matched && !this\._voiceCommandHandling && !this\._voiceCommandTriggered/);
     assert.match(source, /_handleVoiceCommandAction\(command\)/);
@@ -327,11 +332,6 @@ describe('agent chat input state', () => {
     assert.match(settingsSource, /normalizeWakeCommandPhrase\(wake\.en \|\| defaults\.wake\.en, 'en'\)/);
     assert.match(settingsSource, /normalizeWakeCommandPhrase\(this\.ref\.voiceWakeCommandRuInput\.value, 'ru'\)/);
 
-    let recorderSource = fs.readFileSync(path.join(ROOT, 'web/services/audio-recorder.js'), 'utf8');
-    assert.match(recorderSource, /setLanguage\(language = ''\)/);
-    assert.match(recorderSource, /restartSpeechRecognition\(language = '', \{ initialText = this\._resultText\.trim\(\) \} = \{\}\)/);
-    assert.match(recorderSource, /_startSpeechRecognition\(\{ initialText = '', startTime = 0 \} = \{\}\)/);
-    assert.match(recorderSource, /_recognitionLanguage\(\)/);
-    assert.match(recorderSource, /recognition\.lang = this\._recognitionLanguage\(\);/);
+    assert.equal(fs.existsSync(path.join(ROOT, 'web/services/audio-recorder.js')), false);
   });
 });

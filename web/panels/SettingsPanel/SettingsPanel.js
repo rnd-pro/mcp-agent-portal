@@ -1,13 +1,4 @@
 import { Symbiote } from "@symbiotejs/symbiote";
-import { sharedUiStyles as cssShared } from "symbiote-ui/ui";
-import cssLocal from "./SettingsPanel.css.js";
-import template from "./SettingsPanel.tpl.js";
-import { uiConfirm } from 'symbiote-ui/ui';
-import {
-  getPortalLocaleOptions,
-  setPortalLocaleMode,
-  tPortal,
-} from '../../common/localization.js';
 import {
   defaultSendCommandPhrases,
   defaultVoiceActionCommandPhrases,
@@ -15,7 +6,16 @@ import {
   formatVoiceCommandList,
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
-} from '../../common/voice-input-defaults.js';
+  sharedUiStyles as cssShared,
+  uiConfirm,
+} from "symbiote-ui/ui";
+import cssLocal from "./SettingsPanel.css.js";
+import template from "./SettingsPanel.tpl.js";
+import {
+  getPortalLocaleOptions,
+  setPortalLocaleMode,
+  tPortal,
+} from '../../common/localization.js';
 import { getLocalization } from 'symbiote-ui/locale';
 
 function renderMetric(label, value, status = "") {
