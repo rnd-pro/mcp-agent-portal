@@ -10,11 +10,14 @@ import {
   escapeHtml,
   extractChatTitleFromAgentText,
   getRoute,
+  loadVoiceSettings,
   matchVoiceCommandAtEnd,
   matchVoiceCommandInText,
-  normalizeWakeCommandPhrase,
+  mergeServerVoiceSettings,
+  normalizeVoiceCommandSettings,
+  normalizeVoiceLanguageMode,
   parseQuery,
-  parseVoiceCommandList,
+  saveVoiceSettings,
   updateParams,
   VoiceController,
   VoiceRuntime,
@@ -480,6 +483,13 @@ export class AgentChat extends Symbiote {
 
   async _saveVoiceInputModeSettings() {
     try {
+      saveVoiceSettings({
+        commandMode: this._voiceCommandMode,
+        responseEnabled: this._voiceResponseEnabled,
+        languageMode: this._voiceLanguageMode,
+      });
+    } catch (_) {}
+    try {
       let settings = await fetch('/api/settings').then((res) => res.json());
       let voiceInput = {
         ...(settings?.voiceInput || {}),
@@ -549,50 +559,38 @@ export class AgentChat extends Symbiote {
   }
 
   async _loadVoiceInputSettings() {
+    let fallbackLocale = this._autoVoiceLocale();
+    this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
+    this._voiceActionCommandPhrases = this._defaultVoiceActionPhrases();
+    this._wakeCommandPhrases = this._defaultWakeCommandPhrases();
+
+    let localSettings = loadVoiceSettings(undefined, fallbackLocale);
+    this._voiceCommandMode = localSettings.commandMode;
+    this._voiceResponseEnabled = localSettings.responseEnabled;
+    this._voiceLanguageMode = localSettings.languageMode;
+
     try {
       let settings = await fetch('/api/settings').then((res) => res.json());
-      let sendDefaults = this._defaultVoiceCommandPhrases();
-      let wakeDefaults = this._defaultWakeCommandPhrases();
-      let actionDefaults = this._defaultVoiceActionPhrases();
-      let savedSend = settings?.voiceInput?.sendCommands || {};
-      let savedWake = settings?.voiceInput?.wakeCommands || {};
-      let savedActions = settings?.voiceInput?.actionCommands || {};
-      let legacy = String(settings?.voiceInput?.sendCommand || '').trim();
-      this._voiceCommandMode = Boolean(settings?.voiceInput?.sendByCommandEnabled);
-      this._voiceResponseEnabled = Boolean(settings?.voiceInput?.voiceResponseEnabled);
-      this._voiceLanguageMode = this._normalizeVoiceLanguageMode(settings?.voiceInput?.languageMode);
-      this._voiceCommandPhrases = {
-        en: String(savedSend.en || legacy || sendDefaults.en).trim() || sendDefaults.en,
-        ru: String(savedSend.ru || sendDefaults.ru).trim() || sendDefaults.ru,
-        es: String(savedSend.es || sendDefaults.es).trim() || sendDefaults.es,
-      };
-      this._wakeCommandPhrases = {
-        en: normalizeWakeCommandPhrase(savedWake.en || wakeDefaults.en, 'en'),
-        ru: normalizeWakeCommandPhrase(savedWake.ru || wakeDefaults.ru, 'ru'),
-        es: normalizeWakeCommandPhrase(savedWake.es || wakeDefaults.es, 'es'),
-      };
-      this._voiceActionCommandPhrases = {
-        cancel: {
-          en: parseVoiceCommandList(savedActions.cancel?.en, actionDefaults.cancel.en),
-          ru: parseVoiceCommandList(savedActions.cancel?.ru, actionDefaults.cancel.ru),
-          es: parseVoiceCommandList(savedActions.cancel?.es, actionDefaults.cancel.es),
+
+      let merged = mergeServerVoiceSettings(
+        {
+          commandMode: this._voiceCommandMode,
+          responseEnabled: this._voiceResponseEnabled,
+          languageMode: this._voiceLanguageMode,
         },
-        delete: {
-          en: parseVoiceCommandList(savedActions.delete?.en, actionDefaults.delete.en),
-          ru: parseVoiceCommandList(savedActions.delete?.ru, actionDefaults.delete.ru),
-          es: parseVoiceCommandList(savedActions.delete?.es, actionDefaults.delete.es),
-        },
-        off: {
-          en: parseVoiceCommandList(savedActions.off?.en, actionDefaults.off.en),
-          ru: parseVoiceCommandList(savedActions.off?.ru, actionDefaults.off.ru),
-          es: parseVoiceCommandList(savedActions.off?.es, actionDefaults.off.es),
-        },
-      };
+        settings?.voiceInput,
+        fallbackLocale
+      );
+      this._voiceCommandMode = merged.commandMode;
+      this._voiceResponseEnabled = merged.responseEnabled;
+      this._voiceLanguageMode = merged.languageMode;
+
+      let commandSettings = normalizeVoiceCommandSettings(settings?.voiceInput);
+      this._voiceCommandPhrases = commandSettings.sendCommands;
+      this._wakeCommandPhrases = commandSettings.wakeCommands;
+      this._voiceActionCommandPhrases = commandSettings.actionCommands;
     } catch {
-      this._voiceLanguageMode = this._autoVoiceLocale();
-      this._voiceCommandPhrases = this._defaultVoiceCommandPhrases();
-      this._voiceActionCommandPhrases = this._defaultVoiceActionPhrases();
-      this._wakeCommandPhrases = this._defaultWakeCommandPhrases();
+      // Network fetch error - keep what we have (either localStorage values or local defaults)
     } finally {
       this._syncVoiceCommandButton();
       this._syncVoiceLanguageButton();
@@ -600,9 +598,7 @@ export class AgentChat extends Symbiote {
   }
 
   _normalizeVoiceLanguageMode(mode = 'auto') {
-    let value = String(mode || 'auto').trim().toLowerCase();
-    if (['ru', 'es', 'en'].includes(value)) return value;
-    return this._autoVoiceLocale();
+    return normalizeVoiceLanguageMode(mode, this._autoVoiceLocale());
   }
 
   _voiceLanguageOptions() {

@@ -9,6 +9,7 @@ import {
   extractChatTitleFromAgentText,
   matchVoiceCommandAtEnd,
   matchVoiceCommandInText,
+  normalizeVoiceCommandSettings,
   normalizeWakeCommandPhrase,
   parseVoiceCommandList,
   wakeCommandCandidates,
@@ -41,6 +42,7 @@ describe('agent chat input state', () => {
     assert.deepEqual(parseVoiceCommandList('отмена=стоп'), ['отмена', 'стоп']);
     assert.deepEqual(parseVoiceCommandList('cancel, stop'), ['cancel', 'stop']);
     assert.deepEqual(parseVoiceCommandList(['удали'], defaultVoiceActionCommandPhrases().delete.ru), ['удали']);
+    assert.deepEqual(normalizeVoiceCommandSettings({ actionCommands: { cancel: { ru: 'отмена=стоп' } } }).actionCommands.cancel.ru, ['отмена', 'стоп']);
     assert.deepEqual(
       matchVoiceCommandAtEnd('Проверочный текст СТОП', [{ action: 'cancel', phrase: 'стоп' }]),
       { action: 'cancel', phrase: 'стоп', matched: true, text: 'Проверочный текст' },
@@ -228,19 +230,12 @@ describe('agent chat input state', () => {
     assert.match(source, /if \(requestChatTitle\) \{/);
     assert.match(source, /_extractVoiceCommandText\(text = ''\)/);
     assert.match(source, /_loadVoiceInputSettings\(\)/);
-    assert.match(source, /settings\?\.voiceInput\?\.sendCommands/);
-    assert.match(source, /settings\?\.voiceInput\?\.wakeCommands/);
-    assert.match(source, /settings\?\.voiceInput\?\.actionCommands/);
-    assert.match(source, /settings\?\.voiceInput\?\.sendByCommandEnabled/);
-    assert.match(source, /settings\?\.voiceInput\?\.voiceResponseEnabled/);
-    assert.match(source, /settings\?\.voiceInput\?\.languageMode/);
-    assert.match(source, /settings\?\.voiceInput\?\.sendCommand/);
+    assert.match(source, /mergeServerVoiceSettings/);
+    assert.match(source, /normalizeVoiceCommandSettings\(settings\?\.voiceInput\)/);
     assert.match(source, /_defaultVoiceCommandPhrases\(\)/);
     assert.match(source, /_defaultVoiceActionPhrases\(\)/);
     assert.match(source, /defaultVoiceActionCommandPhrases\(\)/);
-    assert.match(source, /this\._voiceActionCommandPhrases = \{/);
-    assert.match(source, /parseVoiceCommandList\(savedActions\.cancel\?\.ru, actionDefaults\.cancel\.ru\)/);
-    assert.match(source, /parseVoiceCommandList\(savedActions\.delete\?\.ru, actionDefaults\.delete\.ru\)/);
+    assert.match(source, /this\._voiceActionCommandPhrases = commandSettings\.actionCommands/);
     assert.match(source, /_defaultWakeCommandPhrases\(\)/);
     assert.match(source, /_matchesWakeCommand\(text = ''\)/);
     assert.match(source, /wakeListen: \{/);
@@ -329,17 +324,14 @@ describe('agent chat input state', () => {
     assert.match(settingsSource, /sendByCommandEnabled: Boolean\(current\.sendByCommandEnabled\)/);
     assert.match(settingsSource, /voiceResponseEnabled: Boolean\(current\.voiceResponseEnabled\)/);
     assert.match(settingsSource, /languageMode: \['auto', 'ru', 'es', 'en'\]\.includes\(current\.languageMode\)/);
-    assert.match(settingsSource, /defaultWakeCommandPhrases/);
-    assert.match(settingsSource, /defaultVoiceActionCommandPhrases/);
-    assert.match(settingsSource, /let actions = raw\.actionCommands \|\| \{\};/);
+    assert.match(settingsSource, /normalizeVoiceCommandSettings\(raw\)/);
     assert.match(settingsSource, /this\.ref\.voiceCancelCommandRuInput\.value/);
     assert.match(settingsSource, /this\.ref\.voiceDeleteCommandRuInput\.value/);
     assert.match(settingsSource, /this\.ref\.voiceOffCommandRuInput\.value/);
-    assert.match(settingsSource, /actionCommands: \{/);
-    assert.match(settingsSource, /parseVoiceCommandList\(this\.ref\.voiceCancelCommandRuInput\.value, defaults\.actions\.cancel\.ru\)/);
-    assert.match(settingsSource, /parseVoiceCommandList\(this\.ref\.voiceDeleteCommandRuInput\.value, defaults\.actions\.delete\.ru\)/);
-    assert.match(settingsSource, /normalizeWakeCommandPhrase\(wake\.en \|\| defaults\.wake\.en, 'en'\)/);
-    assert.match(settingsSource, /normalizeWakeCommandPhrase\(this\.ref\.voiceWakeCommandRuInput\.value, 'ru'\)/);
+    assert.match(settingsSource, /\.\.\.normalizeVoiceCommandSettings\(\{/);
+    assert.doesNotMatch(settingsSource, /defaultVoiceCommands/);
+    assert.doesNotMatch(settingsSource, /parseVoiceCommandList/);
+    assert.doesNotMatch(settingsSource, /normalizeWakeCommandPhrase/);
 
     assert.equal(fs.existsSync(path.join(ROOT, 'web/services/audio-recorder.js')), false);
   });

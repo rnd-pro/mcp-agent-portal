@@ -1,11 +1,7 @@
 import { Symbiote } from "@symbiotejs/symbiote";
 import {
-  defaultSendCommandPhrases,
-  defaultVoiceActionCommandPhrases,
-  defaultWakeCommandPhrases,
   formatVoiceCommandList,
-  normalizeWakeCommandPhrase,
-  parseVoiceCommandList,
+  normalizeVoiceCommandSettings,
   sharedUiStyles as cssShared,
   uiConfirm,
 } from "symbiote-ui/ui";
@@ -82,15 +78,6 @@ const DEFAULT_GATEWAY = {
     },
   },
 };
-
-function defaultVoiceCommands() {
-  let wakeDefaults = defaultWakeCommandPhrases();
-  return {
-    send: defaultSendCommandPhrases(),
-    wake: wakeDefaults,
-    actions: defaultVoiceActionCommandPhrases(),
-  };
-}
 
 export class SettingsPanel extends Symbiote {
   init$ = {};
@@ -201,62 +188,59 @@ export class SettingsPanel extends Symbiote {
   }
 
   _applyVoiceInputSettings(raw) {
-    let defaults = defaultVoiceCommands();
-    let saved = raw.sendCommands || {};
-    let wake = raw.wakeCommands || {};
-    let actions = raw.actionCommands || {};
-    let legacy = raw.sendCommand || '';
-    this.ref.voiceSendCommandEnInput.value = saved.en || legacy || defaults.send.en;
-    this.ref.voiceSendCommandRuInput.value = saved.ru || defaults.send.ru;
-    this.ref.voiceSendCommandEsInput.value = saved.es || defaults.send.es;
-    this.ref.voiceWakeCommandEnInput.value = normalizeWakeCommandPhrase(wake.en || defaults.wake.en, 'en');
-    this.ref.voiceWakeCommandRuInput.value = normalizeWakeCommandPhrase(wake.ru || defaults.wake.ru, 'ru');
-    this.ref.voiceWakeCommandEsInput.value = normalizeWakeCommandPhrase(wake.es || defaults.wake.es, 'es');
-    this.ref.voiceCancelCommandEnInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.cancel?.en, defaults.actions.cancel.en));
-    this.ref.voiceCancelCommandRuInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.cancel?.ru, defaults.actions.cancel.ru));
-    this.ref.voiceCancelCommandEsInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.cancel?.es, defaults.actions.cancel.es));
-    this.ref.voiceDeleteCommandEnInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.delete?.en, defaults.actions.delete.en));
-    this.ref.voiceDeleteCommandRuInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.delete?.ru, defaults.actions.delete.ru));
-    this.ref.voiceDeleteCommandEsInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.delete?.es, defaults.actions.delete.es));
-    this.ref.voiceOffCommandEnInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.off?.en, defaults.actions.off.en));
-    this.ref.voiceOffCommandRuInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.off?.ru, defaults.actions.off.ru));
-    this.ref.voiceOffCommandEsInput.value = formatVoiceCommandList(parseVoiceCommandList(actions.off?.es, defaults.actions.off.es));
+    let settings = normalizeVoiceCommandSettings(raw);
+    this.ref.voiceSendCommandEnInput.value = settings.sendCommands.en;
+    this.ref.voiceSendCommandRuInput.value = settings.sendCommands.ru;
+    this.ref.voiceSendCommandEsInput.value = settings.sendCommands.es;
+    this.ref.voiceWakeCommandEnInput.value = settings.wakeCommands.en;
+    this.ref.voiceWakeCommandRuInput.value = settings.wakeCommands.ru;
+    this.ref.voiceWakeCommandEsInput.value = settings.wakeCommands.es;
+    this.ref.voiceCancelCommandEnInput.value = formatVoiceCommandList(settings.actionCommands.cancel.en);
+    this.ref.voiceCancelCommandRuInput.value = formatVoiceCommandList(settings.actionCommands.cancel.ru);
+    this.ref.voiceCancelCommandEsInput.value = formatVoiceCommandList(settings.actionCommands.cancel.es);
+    this.ref.voiceDeleteCommandEnInput.value = formatVoiceCommandList(settings.actionCommands.delete.en);
+    this.ref.voiceDeleteCommandRuInput.value = formatVoiceCommandList(settings.actionCommands.delete.ru);
+    this.ref.voiceDeleteCommandEsInput.value = formatVoiceCommandList(settings.actionCommands.delete.es);
+    this.ref.voiceOffCommandEnInput.value = formatVoiceCommandList(settings.actionCommands.off.en);
+    this.ref.voiceOffCommandRuInput.value = formatVoiceCommandList(settings.actionCommands.off.ru);
+    this.ref.voiceOffCommandEsInput.value = formatVoiceCommandList(settings.actionCommands.off.es);
   }
 
   _readVoiceInputSettings() {
-    let defaults = defaultVoiceCommands();
     let current = this._settings?.voiceInput || {};
     return {
       sendByCommandEnabled: Boolean(current.sendByCommandEnabled),
       voiceResponseEnabled: Boolean(current.voiceResponseEnabled),
       languageMode: ['auto', 'ru', 'es', 'en'].includes(current.languageMode) ? current.languageMode : 'auto',
-      sendCommands: {
-        en: this.ref.voiceSendCommandEnInput.value.trim() || defaults.send.en,
-        ru: this.ref.voiceSendCommandRuInput.value.trim() || defaults.send.ru,
-        es: this.ref.voiceSendCommandEsInput.value.trim() || defaults.send.es,
-      },
-      wakeCommands: {
-        en: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandEnInput.value, 'en'),
-        ru: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandRuInput.value, 'ru'),
-        es: normalizeWakeCommandPhrase(this.ref.voiceWakeCommandEsInput.value, 'es'),
-      },
-      actionCommands: {
-        cancel: {
-          en: parseVoiceCommandList(this.ref.voiceCancelCommandEnInput.value, defaults.actions.cancel.en),
-          ru: parseVoiceCommandList(this.ref.voiceCancelCommandRuInput.value, defaults.actions.cancel.ru),
-          es: parseVoiceCommandList(this.ref.voiceCancelCommandEsInput.value, defaults.actions.cancel.es),
+      ...normalizeVoiceCommandSettings({
+        sendCommands: {
+          en: this.ref.voiceSendCommandEnInput.value,
+          ru: this.ref.voiceSendCommandRuInput.value,
+          es: this.ref.voiceSendCommandEsInput.value,
         },
-        delete: {
-          en: parseVoiceCommandList(this.ref.voiceDeleteCommandEnInput.value, defaults.actions.delete.en),
-          ru: parseVoiceCommandList(this.ref.voiceDeleteCommandRuInput.value, defaults.actions.delete.ru),
-          es: parseVoiceCommandList(this.ref.voiceDeleteCommandEsInput.value, defaults.actions.delete.es),
+        wakeCommands: {
+          en: this.ref.voiceWakeCommandEnInput.value,
+          ru: this.ref.voiceWakeCommandRuInput.value,
+          es: this.ref.voiceWakeCommandEsInput.value,
         },
-        off: {
-          en: parseVoiceCommandList(this.ref.voiceOffCommandEnInput.value, defaults.actions.off.en),
-          ru: parseVoiceCommandList(this.ref.voiceOffCommandRuInput.value, defaults.actions.off.ru),
-          es: parseVoiceCommandList(this.ref.voiceOffCommandEsInput.value, defaults.actions.off.es),
+        actionCommands: {
+          cancel: {
+            en: this.ref.voiceCancelCommandEnInput.value,
+            ru: this.ref.voiceCancelCommandRuInput.value,
+            es: this.ref.voiceCancelCommandEsInput.value,
+          },
+          delete: {
+            en: this.ref.voiceDeleteCommandEnInput.value,
+            ru: this.ref.voiceDeleteCommandRuInput.value,
+            es: this.ref.voiceDeleteCommandEsInput.value,
+          },
+          off: {
+            en: this.ref.voiceOffCommandEnInput.value,
+            ru: this.ref.voiceOffCommandRuInput.value,
+            es: this.ref.voiceOffCommandEsInput.value,
+          },
         },
-      },
+      }),
     };
   }
 
