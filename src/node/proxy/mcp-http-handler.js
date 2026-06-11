@@ -211,6 +211,11 @@ function handlePost(req, res, opts) {
         let result = await processMessage(m, req, opts, sessionId);
         if (result) results.push(result);
       }
+      if (results.length === 0) {
+        res.writeHead(202, { 'Mcp-Session-Id': sessionId });
+        res.end();
+        return;
+      }
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Mcp-Session-Id': sessionId,
@@ -218,11 +223,16 @@ function handlePost(req, res, opts) {
       res.end(JSON.stringify(results.length === 1 ? results[0] : results));
     } else {
       let result = await processMessage(msg, req, opts, sessionId);
+      if (!result) {
+        res.writeHead(202, { 'Mcp-Session-Id': sessionId });
+        res.end();
+        return;
+      }
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Mcp-Session-Id': sessionId,
       });
-      res.end(JSON.stringify(result || { jsonrpc: '2.0', id: msg.id, result: {} }));
+      res.end(JSON.stringify(result));
     }
   });
 }

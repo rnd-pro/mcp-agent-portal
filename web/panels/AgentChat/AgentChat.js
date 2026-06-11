@@ -10,6 +10,7 @@ import {
   escapeHtml,
   extractChatTitleFromAgentText,
   getRoute,
+  isTerminalWakeError,
   loadVoiceSettings,
   matchVoiceCommandAtEnd,
   matchVoiceCommandInText,
@@ -21,6 +22,8 @@ import {
   updateParams,
   VoiceController,
   VoiceRuntime,
+  voiceStartErrorMessage,
+  voiceWakeStartErrorMessage,
   wakeCommandCandidates,
 } from 'symbiote-ui/ui';
 import template from './AgentChat.tpl.js';
@@ -77,10 +80,8 @@ export class AgentChat extends Symbiote {
     },
     onWakeError: (err) => {
       let error = err?.error || '';
-      if (error === 'not-supported') {
-        this._showVoiceError('Continuous listening requires browser speech recognition.');
-      }
-      if (['not-allowed', 'service-not-allowed', 'not-supported', 'start-failed'].includes(error)) {
+      if (isTerminalWakeError(error)) {
+        this._showVoiceError(voiceWakeStartErrorMessage(error));
         this._stopWakeListening({ disableMode: true });
         return;
       }
@@ -1080,16 +1081,18 @@ export class AgentChat extends Symbiote {
             this._syncVoiceControls();
           } catch (err2) {
             console.error('[AgentChat] Mic fallback also failed:', err2);
-            let message = wasMicrophonePrompt
-              ? this._voicePermissionRefreshMessage()
-              : 'Microphone access denied. Check browser microphone permissions.';
+            let message = voiceStartErrorMessage({
+              wasMicrophonePrompt,
+              permissionRefreshMessage: this._voicePermissionRefreshMessage(),
+            });
             this._showVoiceError(message);
             this._resumeWakeListeningAfterRecording();
           }
         } else {
-          let message = wasMicrophonePrompt
-            ? this._voicePermissionRefreshMessage()
-            : 'Microphone access denied. Check browser microphone permissions.';
+          let message = voiceStartErrorMessage({
+            wasMicrophonePrompt,
+            permissionRefreshMessage: this._voicePermissionRefreshMessage(),
+          });
           this._showVoiceError(message);
           this._resumeWakeListeningAfterRecording();
         }
@@ -1256,9 +1259,7 @@ export class AgentChat extends Symbiote {
     this._updatingOptions = true;
     if (paramsToMap.length > 0) {
       let paramsChanged = defaultParamsChanged;
-      let controls = paramsToMap.map(p => {
-        let priority = this._composerParamPriorityValue(p.id);
-        let priorityClass = this._composerParamPriorityClass(p.id);
+      for (let p of paramsToMap) {
         if (p.type === 'select' && Array.isArray(p.options)) {
           let paramValue = currentParams[p.id];
           if (!paramValue && p.options.length > 0) {
@@ -1279,22 +1280,6 @@ export class AgentChat extends Symbiote {
               let rgDefaults = meta._resourceGroupDefaults || {};
               let preferred = (rgDefaults.byProvider?.[currentCtx] || p.preferred || []);
 
-              // Sort preferred models to the top of options
-              if (preferred.length > 0) {
-                let prefSet = new Set(preferred);
-                let prefOptions = [];
-                let restOptions = [];
-                for (let opt of p.options) {
-                  let val = typeof opt === 'string' ? opt : opt.val;
-                  if (prefSet.has(val)) {
-                    prefOptions.push(opt);
-                  } else {
-                    restOptions.push(opt);
-                  }
-                }
-                p.options = [...prefOptions, ...restOptions];
-              }
-
               // Default to first preferred model, or first option
               if (preferred.length > 0) {
                 let found = p.options.find(o => preferred.includes(typeof o === 'string' ? o : o.val));
@@ -1314,52 +1299,6 @@ export class AgentChat extends Symbiote {
               paramsChanged = true;
             }
           }
-          
-          let options = p.options.map(opt => {
-            let val = typeof opt === 'string' ? opt : opt.val;
-            let text = typeof opt === 'string' ? opt : opt.text;
-            // Show group metadata in option text for resource_group
-            if (p.id === 'resource_group' && typeof opt === 'object' && opt.subtitle) {
-              text += ` — ${opt.subtitle}`;
-            }
-            return { value: val, label: text };
-          });
-          
-          let disabled = false;
-          let disabledTitle = '';
-          let activeGroup = currentParams.resource_group;
-          let groupIsActive = activeGroup && activeGroup !== 'none';
-          if ((p.id === 'provider' || p.id === 'agent') && this.$.messages && this.$.messages.length > 0) {
-            disabled = true;
-            disabledTitle = tPortal('text.locked');
-          }
-          // Disable provider+model when a resource group is active
-          if ((p.id === 'provider' || p.id === 'model') && groupIsActive) {
-            disabled = true;
-            disabledTitle = `Managed by resource group: ${activeGroup}`;
-          }
-
-          let iconName = p.id === 'agent' ? 'smart_toy' : p.id === 'resource_group' ? 'view_kanban' : p.id === 'provider' ? 'dns' : p.id === 'model' ? 'neurology' : 'tune';
-          let currentOption = p.options.find(opt => (typeof opt === 'string' ? opt : opt.val) === paramValue);
-          let currentLabel = typeof currentOption === 'string' ? currentOption : currentOption?.text || p.label;
-          // Show subtitle (group metadata) as tooltip
-          let titleText = `${p.label}: ${currentLabel}`;
-          if (p.id === 'resource_group' && typeof currentOption === 'object' && currentOption?.subtitle) {
-            titleText += ` (${currentOption.subtitle})`;
-          }
-          
-          return {
-            id: p.id,
-            kind: 'select',
-            icon: iconName,
-            label: p.label,
-            title: disabledTitle || titleText,
-            value: paramValue || '',
-            options,
-            disabled,
-            priority,
-            className: `composer-param composer-param-${p.id} ${priorityClass}`,
-          };
         } else if (p.type === 'boolean') {
           let paramValue = currentParams[p.id];
           if (paramValue === undefined) {
@@ -1367,32 +1306,19 @@ export class AgentChat extends Symbiote {
             currentParams[p.id] = paramValue;
             paramsChanged = true;
           }
-          
-          return {
-            id: p.id,
-            kind: 'checkbox',
-            icon: paramValue ? 'toggle_on' : 'toggle_off',
-            label: p.label,
-            title: p.label,
-            checked: Boolean(paramValue),
-            value: Boolean(paramValue),
-            priority,
-            className: `composer-param composer-param-${p.id} ${priorityClass}`,
-          };
         }
-        return null;
-      }).filter(Boolean);
-      controls.push({
+      }
+      // Adapter/resource defaults belong to the chat payload; the composer only keeps a compact settings entry point.
+      this.$.composerFooterControls = [{
         id: 'settings',
         kind: 'button',
         icon: 'settings',
-        label: tPortal('text.settings'),
+        label: ' ',
         title: 'Configure Resource Groups',
         priority: 1,
         compact: true,
         className: 'composer-settings-btn',
-      });
-      this.$.composerFooterControls = controls;
+      }];
       // Batch-persist defaults only for local user/composer changes.
       if (paramsChanged) {
         this.$.chatParams = { ...currentParams };
@@ -1409,30 +1335,6 @@ export class AgentChat extends Symbiote {
       this.$.composerFooterControls = [];
     }
     this._updatingOptions = false;
-  }
-
-  _composerParamPriorityValue(paramId) {
-    switch (paramId) {
-      case 'agent': return 5;
-      case 'resource_group': return 4;
-      case 'model': return 3;
-      case 'provider':
-      case 'approval_mode': return 2;
-      case 'chatType': return 1;
-      default: return 1;
-    }
-  }
-
-  _composerParamPriorityClass(paramId) {
-    switch (paramId) {
-      case 'agent': return 'composer-priority-5';
-      case 'resource_group': return 'composer-priority-4';
-      case 'model': return 'composer-priority-3';
-      case 'provider': return 'composer-priority-2';
-      case 'approval_mode': return 'composer-priority-2';
-      case 'chatType': return 'composer-priority-1';
-      default: return 'composer-priority-1';
-    }
   }
 
   _getAgentDefaultApprovalMode(agentSlug) {

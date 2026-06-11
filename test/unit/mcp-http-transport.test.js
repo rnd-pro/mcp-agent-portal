@@ -121,6 +121,22 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.ok(names.includes('test_add'), 'Should include test_add');
   });
 
+  it('POST /mcp notification returns no JSON-RPC response body', async () => {
+    let initRes = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    });
+    let sessionId = initRes.headers['mcp-session-id'];
+
+    let res = await mcpRequest(port, {
+      jsonrpc: '2.0', method: 'notifications/initialized', params: {},
+    }, { headers: { 'mcp-session-id': sessionId } });
+
+    assert.equal(res.status, 202);
+    assert.equal(res.raw, '');
+    assert.equal(res.json, null);
+  });
+
   it('POST /mcp with tools/call routes to handler and returns result', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
