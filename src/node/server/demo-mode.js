@@ -310,6 +310,16 @@ function demoDevPlaneStatus() {
       groups: {},
       packageIds: [],
     },
+    mcp: {
+      expectedServerCount: 0,
+      configuredServerCount: 0,
+      npmServerCount: 0,
+      localServerCount: 0,
+      customServerCount: 0,
+      missingServerCount: 0,
+      entries: [],
+      issues: [],
+    },
     issues: [{
       level: 'info',
       code: 'dev-plane-demo-mode',

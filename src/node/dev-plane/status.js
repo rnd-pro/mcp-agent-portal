@@ -30,6 +30,19 @@ function emptySummary() {
   };
 }
 
+function emptyMcpSummary() {
+  return {
+    expectedServerCount: 0,
+    configuredServerCount: 0,
+    npmServerCount: 0,
+    localServerCount: 0,
+    customServerCount: 0,
+    missingServerCount: 0,
+    entries: [],
+    issues: [],
+  };
+}
+
 function sortedObject(value) {
   let result = {};
   for (let key of Object.keys(value).sort()) {
@@ -64,6 +77,118 @@ function summarizeManifest(manifest = {}) {
   };
 }
 
+function readServerEntries(mcpServers) {
+  if (!mcpServers) return [];
+  if (mcpServers instanceof Map) return [...mcpServers.entries()];
+  if (typeof mcpServers === 'object') return Object.entries(mcpServers);
+  return [];
+}
+
+function inferServerName(packageName) {
+  let name = String(packageName || '');
+  if (!name.endsWith('-mcp')) return null;
+  return name.slice(0, -4);
+}
+
+function isLocalishValue(value) {
+  let text = String(value || '').trim();
+  if (!text || /^[a-z]+:\/\//i.test(text)) return false;
+  return text.startsWith('/')
+    || text.startsWith('./')
+    || text.startsWith('../')
+    || text.includes('/')
+    || text.includes('\\');
+}
+
+function classifyServerResolution(settings, packageName) {
+  if (!settings) {
+    return {
+      configured: false,
+      resolution: 'missing',
+      issueCode: 'dev-plane-mcp-server-unconfigured',
+    };
+  }
+
+  let command = String(settings.command || '').trim();
+  let args = Array.isArray(settings.args) ? settings.args.map(arg => String(arg)) : [];
+
+  if (command === 'npx' && args.includes(packageName)) {
+    return {
+      configured: true,
+      resolution: 'npm',
+      issueCode: null,
+    };
+  }
+
+  if (isLocalishValue(command) || args.some(isLocalishValue)) {
+    return {
+      configured: true,
+      resolution: 'local',
+      issueCode: 'dev-plane-mcp-server-local-command',
+    };
+  }
+
+  return {
+    configured: true,
+    resolution: 'custom',
+    issueCode: 'dev-plane-mcp-server-custom-command',
+  };
+}
+
+function countResolution(summary, resolution) {
+  if (resolution === 'npm') summary.npmServerCount += 1;
+  if (resolution === 'local') summary.localServerCount += 1;
+  if (resolution === 'custom') summary.customServerCount += 1;
+  if (resolution === 'missing') summary.missingServerCount += 1;
+}
+
+function summarizeMcpSources(manifest = {}, mcpServers) {
+  let serverEntries = new Map(readServerEntries(mcpServers));
+  let packages = Array.isArray(manifest.packages) ? manifest.packages : [];
+  let entries = [];
+  let issues = [];
+
+  for (let pkg of packages) {
+    if (pkg?.group !== 'agent-portal') continue;
+    let serverName = inferServerName(pkg.packageName);
+    if (!serverName) continue;
+
+    let classification = classifyServerResolution(serverEntries.get(serverName), pkg.packageName);
+    let entry = {
+      serverName,
+      packageId: String(pkg.id || serverName),
+      packageName: String(pkg.packageName),
+      configured: classification.configured,
+      resolution: classification.resolution,
+      issueCodes: classification.issueCode ? [classification.issueCode] : [],
+    };
+    entries.push(entry);
+
+    if (classification.issueCode) {
+      issues.push({
+        severity: classification.resolution === 'missing' ? 'info' : 'warning',
+        code: classification.issueCode,
+        serverName,
+      });
+    }
+  }
+
+  entries.sort((a, b) => a.serverName.localeCompare(b.serverName));
+  let summary = {
+    ...emptyMcpSummary(),
+    expectedServerCount: entries.length,
+    entries,
+    issues,
+  };
+
+  for (let entry of entries) {
+    if (entry.configured) summary.configuredServerCount += 1;
+    countResolution(summary, entry.resolution);
+  }
+
+  return summary;
+}
+
 /**
  * @param {{ projectRoot?: string, env?: NodeJS.ProcessEnv, config?: object }} options
  * @returns {{ path: string, source: string, explicit: boolean }}
@@ -90,7 +215,7 @@ export function resolveDevPlaneRoot(options = {}) {
 }
 
 /**
- * @param {{ projectRoot?: string, env?: NodeJS.ProcessEnv, config?: object }} options
+ * @param {{ projectRoot?: string, env?: NodeJS.ProcessEnv, config?: object, mcpServers?: Map<string, object>|object }} options
  * @returns {object}
  */
 export function createDevPlaneStatus(options = {}) {
@@ -106,6 +231,7 @@ export function createDevPlaneStatus(options = {}) {
       root,
       manifest: null,
       summary: emptySummary(),
+      mcp: emptyMcpSummary(),
       issues: [
         makeIssue(
           explicit ? 'error' : 'info',
@@ -131,6 +257,7 @@ export function createDevPlaneStatus(options = {}) {
       root,
       manifest: null,
       summary: emptySummary(),
+      mcp: emptyMcpSummary(),
       issues: [packageResult.issue],
     };
   }
@@ -145,6 +272,7 @@ export function createDevPlaneStatus(options = {}) {
       root,
       manifest: null,
       summary: emptySummary(),
+      mcp: emptyMcpSummary(),
       issues: [
         makeIssue(
           'error',
@@ -168,6 +296,7 @@ export function createDevPlaneStatus(options = {}) {
       root,
       manifest: null,
       summary: emptySummary(),
+      mcp: emptyMcpSummary(),
       issues: [manifestResult.issue],
     };
   }
@@ -184,6 +313,7 @@ export function createDevPlaneStatus(options = {}) {
       dirtyPolicy: manifest.localPolicy?.dirtyWorktree || null,
     },
     summary: summarizeManifest(manifest),
+    mcp: summarizeMcpSources(manifest, options.mcpServers),
     issues: [],
   };
 }

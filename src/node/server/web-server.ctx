@@ -7,7 +7,7 @@ ROUTES:
   POST /api/mcp-call|proxy MCP tool call to child server
   GET /api/instances|list all registered MCP servers
   GET /api/project-info|portal metadata (name,path,agents,pid)
-  GET /api/runtime|runtime status plus sanitized Symbiote dev-plane manifest summary
+  GET /api/runtime|runtime status plus sanitized Symbiote dev-plane manifest and MCP source summary
   GET /api/runtime/health|compact runtime health counts
   GET /api/server-status|uptime,agents,monitors
   GET /api/network-auth/pending|local-only list of LAN browser approvals

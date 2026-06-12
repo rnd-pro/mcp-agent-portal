@@ -60,6 +60,9 @@ describe('api-routes-runtime', () => {
       packages: [
         { id: 'symbiote-ui', group: 'core', packageName: 'symbiote-ui' },
         { id: 'agent-portal', group: 'agent-portal', packageName: 'mcp-agent-portal' },
+        { id: 'agent-pool-mcp', group: 'agent-portal', packageName: 'agent-pool-mcp' },
+        { id: 'browser-x-mcp', group: 'agent-portal', packageName: 'browser-x-mcp' },
+        { id: 'project-graph-mcp', group: 'agent-portal', packageName: 'project-graph-mcp' },
       ],
     }));
     writeRuntimeStatus('portal', { state: 'running', pid: 1234, meta: { port: 8787 } });
@@ -67,8 +70,11 @@ describe('api-routes-runtime', () => {
 
     let proxyManager = {
       servers: new Map([
-        ['project-graph', {}],
-        ['agent-pool', {}],
+        ['project-graph', { command: 'npx', args: ['-y', 'project-graph-mcp'] }],
+        ['agent-pool', {
+          command: process.execPath,
+          args: [path.join(tempRoot, 'agent-pool-mcp', 'index.js')],
+        }],
       ]),
       monitors: new Set(['monitor-1']),
       getHealthStatus() {
@@ -102,8 +108,19 @@ describe('api-routes-runtime', () => {
     assert.deepEqual(body.instances, [{ name: 'project-graph', pid: 2222, connected: true }]);
     assert.equal(body.devPlane.ok, true);
     assert.equal(body.devPlane.state, 'ready');
-    assert.equal(body.devPlane.summary.packageCount, 2);
+    assert.equal(body.devPlane.summary.packageCount, 5);
+    assert.equal(body.devPlane.mcp.expectedServerCount, 3);
+    assert.equal(body.devPlane.mcp.configuredServerCount, 2);
+    assert.equal(body.devPlane.mcp.npmServerCount, 1);
+    assert.equal(body.devPlane.mcp.localServerCount, 1);
+    assert.equal(body.devPlane.mcp.missingServerCount, 1);
+    assert.deepEqual(body.devPlane.mcp.entries.map((entry) => [entry.serverName, entry.resolution]), [
+      ['agent-pool', 'local'],
+      ['browser-x', 'missing'],
+      ['project-graph', 'npm'],
+    ]);
     assert.equal(JSON.stringify(body.devPlane).includes(tempRoot), false);
+    assert.equal(JSON.stringify(body.devPlane).includes(process.execPath), false);
   });
 
   it('GET /api/runtime/health returns ok and compact counts', () => {

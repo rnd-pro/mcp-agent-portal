@@ -59,6 +59,12 @@ describe('dev-plane status', () => {
           expectedVersion: '1.0.0-alpha.4',
         },
         {
+          id: 'project-graph-mcp',
+          group: 'agent-portal',
+          packageName: 'project-graph-mcp',
+          expectedVersion: '0.8.0-alpha.1',
+        },
+        {
           id: 'cv',
           group: 'consumer',
           packageName: 'cv',
@@ -82,15 +88,138 @@ describe('dev-plane status', () => {
       dirtyPolicy: 'warn',
     });
     assert.deepEqual(status.summary.groups, {
-      'agent-portal': 1,
+      'agent-portal': 2,
       consumer: 1,
       core: 1,
     });
-    assert.equal(status.summary.packageCount, 3);
+    assert.equal(status.summary.packageCount, 4);
     assert.equal(status.summary.alternateSourceCount, 1);
     assert.equal(status.summary.browserImportCount, 1);
-    assert.deepEqual(status.summary.packageIds, ['agent-portal', 'cv', 'symbiote-ui']);
+    assert.deepEqual(status.summary.packageIds, ['agent-portal', 'cv', 'project-graph-mcp', 'symbiote-ui']);
+    assert.deepEqual(status.mcp, {
+      expectedServerCount: 1,
+      configuredServerCount: 0,
+      npmServerCount: 0,
+      localServerCount: 0,
+      customServerCount: 0,
+      missingServerCount: 1,
+      entries: [{
+        serverName: 'project-graph',
+        packageId: 'project-graph-mcp',
+        packageName: 'project-graph-mcp',
+        configured: false,
+        resolution: 'missing',
+        issueCodes: ['dev-plane-mcp-server-unconfigured'],
+      }],
+      issues: [{
+        severity: 'info',
+        code: 'dev-plane-mcp-server-unconfigured',
+        serverName: 'project-graph',
+      }],
+    });
     assert.equal(JSON.stringify(status).includes(workspaceRoot), false);
+  });
+
+  it('summarizes MCP source selection without exposing commands or paths', () => {
+    let workspaceRoot = makeTempRoot();
+    let projectRoot = path.join(workspaceRoot, 'agent-portal');
+    let devPlaneRoot = path.join(workspaceRoot, 'symbiote-dev-plane');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    writeDevPlane(devPlaneRoot, {
+      name: 'symbiote-dev-plane',
+      schemaVersion: 1,
+      packages: [
+        {
+          id: 'agent-pool-mcp',
+          group: 'agent-portal',
+          packageName: 'agent-pool-mcp',
+          expectedVersion: '1.0.0-alpha.1',
+        },
+        {
+          id: 'agent-portal',
+          group: 'agent-portal',
+          packageName: 'mcp-agent-portal',
+          expectedVersion: '1.0.0-alpha.4',
+        },
+        {
+          id: 'browser-x-mcp',
+          group: 'agent-portal',
+          packageName: 'browser-x-mcp',
+          expectedVersion: '0.2.0-alpha.1',
+        },
+        {
+          id: 'context-x-mcp',
+          group: 'agent-portal',
+          packageName: 'context-x-mcp',
+          expectedVersion: '0.2.0-alpha.1',
+        },
+        {
+          id: 'project-graph-mcp',
+          group: 'agent-portal',
+          packageName: 'project-graph-mcp',
+          expectedVersion: '0.8.0-alpha.1',
+        },
+        {
+          id: 'terminal-x-mcp',
+          group: 'agent-portal',
+          packageName: 'terminal-x-mcp',
+          expectedVersion: '0.2.0-alpha.1',
+        },
+      ],
+    });
+
+    let status = createDevPlaneStatus({
+      projectRoot,
+      env: {},
+      mcpServers: new Map([
+        ['agent-pool', {
+          command: process.execPath,
+          args: [path.join(workspaceRoot, 'agent-pool-mcp', 'index.js')],
+        }],
+        ['context-x', {
+          command: 'node',
+          args: ['dist/context-x.js'],
+        }],
+        ['project-graph', {
+          command: 'npx',
+          args: ['-y', 'project-graph-mcp'],
+        }],
+        ['terminal-x', {
+          command: 'terminal-x-mcp',
+          args: ['--stdio'],
+        }],
+      ]),
+    });
+
+    assert.equal(status.ok, true);
+    assert.equal(status.mcp.expectedServerCount, 5);
+    assert.equal(status.mcp.configuredServerCount, 4);
+    assert.equal(status.mcp.npmServerCount, 1);
+    assert.equal(status.mcp.localServerCount, 2);
+    assert.equal(status.mcp.customServerCount, 1);
+    assert.equal(status.mcp.missingServerCount, 1);
+    assert.deepEqual(status.mcp.entries.map((entry) => entry.serverName), [
+      'agent-pool',
+      'browser-x',
+      'context-x',
+      'project-graph',
+      'terminal-x',
+    ]);
+    assert.deepEqual(status.mcp.entries.map((entry) => [entry.serverName, entry.resolution]), [
+      ['agent-pool', 'local'],
+      ['browser-x', 'missing'],
+      ['context-x', 'local'],
+      ['project-graph', 'npm'],
+      ['terminal-x', 'custom'],
+    ]);
+    assert.deepEqual(status.mcp.issues.map((issue) => issue.code), [
+      'dev-plane-mcp-server-local-command',
+      'dev-plane-mcp-server-unconfigured',
+      'dev-plane-mcp-server-local-command',
+      'dev-plane-mcp-server-custom-command',
+    ]);
+    assert.equal(JSON.stringify(status.mcp).includes(workspaceRoot), false);
+    assert.equal(JSON.stringify(status.mcp).includes(process.execPath), false);
   });
 
   it('reports a missing implicit dev plane as an inactive diagnostic', () => {

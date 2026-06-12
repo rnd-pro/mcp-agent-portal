@@ -56,7 +56,12 @@ export function createRuntimeRoutes(ctx) {
       let runtimeStatuses = listRuntimeStatuses({ projectRoot });
       let instances = getInstances(proxyManager);
       let health = getHealthStatus(proxyManager);
-      let devPlane = createDevPlaneStatus({ projectRoot, env, config });
+      let devPlane = createDevPlaneStatus({
+        projectRoot,
+        env,
+        config,
+        mcpServers: proxyManager?.servers,
+      });
 
       json(res, {
         ok: true,
