@@ -1,0 +1,212 @@
+import path from 'node:path';
+import {
+  formatChatGoalIntentPromptBlock,
+  formatChatGoalPromptBlock,
+  formatChatGoalQueuePromptBlock,
+} from '../../iso/chat-goals.js';
+
+export const DEFAULT_CHAT_AGENT = 'orchestrator';
+
+export function isDelegateTool(toolName = '') {
+  return toolName === 'delegate_task'
+    || toolName === 'delegate_task_readonly'
+    || toolName === 'mcp_agent-portal_delegate_task'
+    || toolName === 'mcp_agent-portal_delegate_task_readonly';
+}
+
+function normalizeFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return [...new Set(files.map(file => String(file || '').trim()).filter(Boolean))];
+}
+
+function chatTitleFromPrompt(prompt = '') {
+  let text = String(prompt || '').trim();
+  return text.substring(0, 40) + (text.length > 40 ? '...' : '') || 'Delegated task';
+}
+
+function projectPathFromChat(sg, chat) {
+  if (!chat?.projectId) return null;
+  let project = sg.get(`projects/${chat.projectId}`);
+  return project?.path || null;
+}
+
+function normalizeGoalMessageList(value) {
+  if (!value) return [];
+  let list = Array.isArray(value) ? value : [value];
+  return list
+    .filter((item) => item && typeof item === 'object')
+    .filter((item) => item.id && (item.text || item.prompt || item.message));
+}
+
+function normalizeGoalMessageIds(value) {
+  if (!value) return [];
+  let list = Array.isArray(value) ? value : [value];
+  return [...new Set(list.map(id => String(id || '').trim()).filter(Boolean))];
+}
+
+function extractGoalQueueArgs(args = {}) {
+  let messages = [
+    ...normalizeGoalMessageList(args.goalQueueMessages),
+    ...normalizeGoalMessageList(args.goal_queue_messages),
+    ...normalizeGoalMessageList(args.queuedGoalMessages),
+    ...normalizeGoalMessageList(args.queued_goal_messages),
+  ];
+  let messageIds = normalizeGoalMessageIds(
+    args.goalMessageIds
+      || args.goal_message_ids
+      || args.goalQueueMessageIds
+      || args.goal_queue_message_ids,
+  );
+  delete args.goalQueueMessages;
+  delete args.goal_queue_messages;
+  delete args.queuedGoalMessages;
+  delete args.queued_goal_messages;
+  delete args.goalMessageIds;
+  delete args.goal_message_ids;
+  delete args.goalQueueMessageIds;
+  delete args.goal_queue_message_ids;
+  return { messages, messageIds };
+}
+
+function resolveGoalQueueMessages(goal, queueArgs = {}) {
+  let selected = [...(queueArgs.messages || [])];
+  let ids = new Set(queueArgs.messageIds || []);
+  if (ids.size && Array.isArray(goal?.queue)) {
+    for (let item of goal.queue) {
+      if (ids.has(item?.id)) selected.push(item);
+    }
+  }
+  let seen = new Set();
+  return selected.filter((item) => {
+    let key = item.id || `${item.delivery || ''}:${item.text || item.prompt || item.message}`;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function promptWithChatGoal(prompt, chat, sg, chatId, queueArgs = {}) {
+  let body = String(prompt || '');
+  let activeGoal = chat?.activeGoalId ? sg.getChatGoal(chat.activeGoalId) : null;
+  if (activeGoal) {
+    let parts = [];
+    if (!body.includes('[Active Goal]')) parts.push(formatChatGoalPromptBlock(activeGoal));
+    let queueBlock = formatChatGoalQueuePromptBlock(
+      activeGoal,
+      resolveGoalQueueMessages(activeGoal, queueArgs),
+    );
+    if (queueBlock && !body.includes('[Goal Queue]')) parts.push(queueBlock);
+    parts.push(body);
+    return parts.filter(Boolean).join('\n\n');
+  }
+  if (!chat?.goalIntentActive || body.includes('[Goal Intent]')) return body;
+  let goalIntentBlock = formatChatGoalIntentPromptBlock({
+    chatId,
+    projectId: chat.projectId || '',
+  });
+  return `${goalIntentBlock}\n\n${body}`;
+}
+
+/**
+ * Prepare delegate_task arguments so every chat-bound entry point follows the
+ * same orchestration defaults.
+ *
+ * @param {object} proxyManager
+ * @param {string} toolName
+ * @param {object} args
+ * @param {object} [options]
+ * @param {import('../state-graph.js').StateGraph} [options.stateGraph]
+ * @param {string} [options.source]
+ * @returns {Promise<{ args: object, chatId: string|null, parentChatId: string|null, createdChat: object|null }>}
+ */
+export async function prepareDelegateTaskCall(proxyManager, toolName, args = {}, options = {}) {
+  let next = { ...(args || {}) };
+  if (!isDelegateTool(toolName)) {
+    return { args: next, chatId: next.chat_id || next.chatId || null, parentChatId: next.parent_chat_id || next.parentChatId || null, createdChat: null };
+  }
+  let queueArgs = extractGoalQueueArgs(next);
+
+  let sg = options.stateGraph;
+  if (!sg) {
+    let mod = await import('../state-graph.js');
+    sg = mod.getStateGraph();
+  }
+
+  let source = options.source || 'mcp';
+  let explicitChatId = next.chat_id || next.chatId || null;
+  let parentChatId = next.parent_chat_id || next.parentChatId || null;
+  let explicitAgent = next.agent_slug || next.agent || null;
+  let createdChat = null;
+  let contextChatId = explicitChatId;
+  let contextChat = explicitChatId ? sg.getChat(explicitChatId) : null;
+  let isChildDelegation = Boolean(parentChatId && !explicitChatId);
+
+  if (isChildDelegation) {
+    let parentChat = sg.getChat(parentChatId) || sg.get(`chats/${parentChatId}`) || null;
+    let inheritedForDefaultAgent = !explicitAgent;
+    let childAgent = explicitAgent || DEFAULT_CHAT_AGENT;
+    let childResourceGroup = next.resource_group || (inheritedForDefaultAgent ? parentChat?.resource_group : null) || null;
+    let childApprovalMode = next.approval_mode || (inheritedForDefaultAgent ? parentChat?.approval_mode : null) || null;
+    let child = sg.createChat({
+      name: chatTitleFromPrompt(next.prompt),
+      adapter: 'pool',
+      agent: childAgent,
+      provider: childResourceGroup ? null : (next.provider || null),
+      model: childResourceGroup ? null : (next.model || null),
+      approval_mode: childApprovalMode,
+      resource_group: childResourceGroup,
+      parentChatId,
+      projectId: parentChat?.projectId || null,
+      activeGoalId: parentChat?.activeGoalId || null,
+      goalIntentActive: Boolean(parentChat?.goalIntentActive),
+      goalQueueMode: parentChat?.goalQueueMode || null,
+    }, source);
+    createdChat = sg.getChat(child.id) || { id: child.id };
+    next.chat_id = child.id;
+    contextChatId = child.id;
+    contextChat = createdChat;
+  }
+
+  if (!contextChat && parentChatId) {
+    contextChat = sg.getChat(parentChatId) || sg.get(`chats/${parentChatId}`) || null;
+    contextChatId = parentChatId;
+  }
+
+  if (!next.agent_slug && !next.agent) {
+    next.agent_slug = contextChat?.agent || DEFAULT_CHAT_AGENT;
+  }
+
+  if (!next.approval_mode && contextChat?.approval_mode) next.approval_mode = contextChat.approval_mode;
+  if (!next.resource_group && contextChat?.resource_group) next.resource_group = contextChat.resource_group;
+  if (!next.session_id && !next.sessionId && contextChat?.sessionId) next.session_id = contextChat.sessionId;
+  if (!next.cwd) {
+    next.cwd = projectPathFromChat(sg, contextChat)
+      || (proxyManager?.projectRoot && proxyManager.projectRoot !== '/' ? proxyManager.projectRoot : process.env.HOME);
+  }
+
+  if (next.resource_group && next.resource_group !== 'none') {
+    delete next.provider;
+    delete next.model;
+  } else {
+    if (!next.provider && contextChat?.provider) next.provider = contextChat.provider;
+    if (!next.model && contextChat?.model) next.model = contextChat.model;
+  }
+
+  if (contextChat) {
+    next.prompt = promptWithChatGoal(next.prompt, contextChat, sg, contextChatId, queueArgs);
+  }
+
+  let files = normalizeFiles(next.files);
+  if (files.length) next.files = files;
+  else delete next.files;
+
+  delete next.chatId;
+  delete next.parentChatId;
+  return { args: next, chatId: next.chat_id || contextChatId || null, parentChatId, createdChat };
+}
+
+export default {
+  DEFAULT_CHAT_AGENT,
+  isDelegateTool,
+  prepareDelegateTaskCall,
+};
