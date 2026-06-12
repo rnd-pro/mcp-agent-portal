@@ -200,7 +200,7 @@ function demoSubagentSpecs(parent) {
       name: 'Architecture audit',
       agent: 'architect',
       provider: 'codex',
-      model: 'gpt-5-codex',
+      model: 'gpt-5.5',
       icon: 'account_tree',
       color: 'var(--sn-provider-rnd-pro-color)',
       status: 'done',
@@ -411,7 +411,7 @@ function demoModels() {
       opencode: ['openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
       gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
       claude: ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash', 'claude-sonnet-4-6'],
-      codex: ['gpt-5-codex'],
+      codex: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
     },
     cliModels: [
       {

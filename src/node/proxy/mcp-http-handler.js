@@ -26,6 +26,22 @@ import crypto from 'node:crypto';
 
 const SERVER_INFO = { name: 'mcp-agent-portal', version: '2.0.0' };
 const PROTOCOL_VERSION = '2025-06-18';
+const CHAT_GOAL_TOOLS = new Set([
+  'create_goal',
+  'pause_goal',
+  'resume_goal',
+  'stop_goal',
+  'block_goal',
+  'complete_goal',
+  'delete_goal',
+  'enqueue_goal_message',
+  'list_goal_messages',
+  'mark_goal_message_applied',
+  'clear_goal_messages',
+  'get_goal',
+  'list_goals',
+  'select_goal',
+]);
 
 /**
  * Active session store
@@ -295,6 +311,20 @@ async function processMessage(msg, req, opts, sessionId) {
     if (sess && sess.chatId && isDelegate) {
       if (!args.parent_chat_id) {
         args.parent_chat_id = sess.chatId;
+      }
+    }
+    if (sess && sess.chatId && toolName === 'call_tool') {
+      let nestedName = args.name;
+      let nestedArgs = args.arguments || {};
+      let isNestedDelegate = nestedName === 'delegate_task' || nestedName === 'delegate_task_readonly' ||
+                             nestedName === 'mcp_agent-portal_delegate_task' || nestedName === 'mcp_agent-portal_delegate_task_readonly';
+      if (isNestedDelegate && !nestedArgs.parent_chat_id) {
+        args.arguments = { ...nestedArgs, parent_chat_id: sess.chatId };
+      }
+    }
+    if (sess && sess.chatId && CHAT_GOAL_TOOLS.has(toolName)) {
+      if (!args.chatId && !args.chat_id) {
+        args.chatId = sess.chatId;
       }
     }
 

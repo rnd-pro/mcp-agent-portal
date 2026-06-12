@@ -45,6 +45,7 @@ const LIGHT_DOM_ROOT_STYLE_FILES = [
   ['web/panels/WorkflowExplorer/WorkflowExplorer.css.js', 'pg-workflow-explorer'],
   ['web/panels/WorkflowExplorer/WorkflowItem.js', 'we-workflow-item'],
   ['web/panels/WorkflowExplorer/WorkflowStep.js', 'we-workflow-step'],
+  ['web/components/ThemeEditorPanel/ThemeEditorPanel.css.js', 'pg-theme-editor-panel'],
 ];
 
 function assertLightDomRootSelector(source, tag, relative) {

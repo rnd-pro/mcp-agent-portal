@@ -98,10 +98,12 @@ export class ChatWsClient {
     }
   }
 
-  send(chatId, prompt, chatParams, sessionId) {
+  send(chatId, prompt, chatParams, sessionId, options = {}) {
     return new Promise((resolve, reject) => {
       let ws = this._ensureChatWs();
       let startTime = Date.now();
+      let activeTaskId = '';
+      let ignoredTaskId = options.cancelTaskId || options.taskId || '';
       
       // Show initial thinking indicator via onMeta
       if (this.opts.onMeta) {
@@ -112,7 +114,8 @@ export class ChatWsClient {
         let params = { ...chatParams, chatId, prompt };
         if (!params.timeout) params.timeout = 600;
         if (sessionId) params.sessionId = sessionId;
-        ws.send(JSON.stringify({ method: 'chat.send', params }));
+        if (options.taskId) params.taskId = options.taskId;
+        ws.send(JSON.stringify({ method: options.method || 'chat.send', params }));
       };
 
       let isFinished = false;
@@ -142,10 +145,15 @@ export class ChatWsClient {
           let msg = JSON.parse(e.data);
           let evChatId = msg.params?.chatId;
           if (evChatId && evChatId !== chatId) return;
+          let eventTaskId = msg.params?.taskId || '';
+          if (eventTaskId && ignoredTaskId && eventTaskId === ignoredTaskId) return;
+          if (eventTaskId && activeTaskId && eventTaskId !== activeTaskId) return;
           
           switch (msg.method) {
             case 'chat.delegated': {
               // Server created the task — start periodic pulling for messages
+              activeTaskId = msg.params?.taskId || activeTaskId;
+              this.opts.onTaskStarted?.(msg.params || {});
               this._startPull(chatId);
               break;
             }
@@ -181,7 +189,7 @@ export class ChatWsClient {
                 }).catch(() => {
                   dashEmit("chats-updated");
                 }).finally(() => {
-                  if (this.opts.onDone) this.opts.onDone();
+                  if (this.opts.onDone) this.opts.onDone(msg.params || {});
                   resolve('');
                 });
               }, 500);
@@ -201,19 +209,21 @@ export class ChatWsClient {
               // Fetch current state from server
               this._pullMessages(chatId).then(() => {
                 dashEmit("chats-updated");
-                if (this.opts.onDone) this.opts.onDone();
+                if (this.opts.onDone) this.opts.onDone(msg.params || {});
               }).catch(() => {
-                if (this.opts.onDone) this.opts.onDone();
+                if (this.opts.onDone) this.opts.onDone(msg.params || {});
               });
 
               let errText = msg.params?.text || msg.params?.error || 'Unknown error';
+              this.opts.onError?.(errText, msg.params || {});
               resolve(errText);
               break;
             }
 
-            case 'chat.resumed': {
-              // Resume confirmed — start pulling
-              this._startPull(chatId);
+          case 'chat.resumed': {
+            // Resume confirmed — start pulling
+            this.opts.onTaskStarted?.(msg.params || {});
+            this._startPull(chatId);
               break;
             }
           }
@@ -238,6 +248,14 @@ export class ChatWsClient {
           reject(new Error('WebSocket connection failed'));
         }, { once: true });
       }
+    });
+  }
+
+  restart(chatId, prompt, chatParams, sessionId, taskId) {
+    return this.send(chatId, prompt, chatParams, sessionId, {
+      method: 'chat.restart',
+      taskId,
+      cancelTaskId: taskId,
     });
   }
 
@@ -313,7 +331,7 @@ export class ChatWsClient {
             }).catch(() => {
               dashEmit("chats-updated");
             }).finally(() => {
-              this.opts.onDone();
+              this.opts.onDone(msg.params || {});
             });
             break;
           }

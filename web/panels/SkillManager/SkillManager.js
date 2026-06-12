@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { events } from '../../app.js';
 import { tPortal } from '../../common/localization.js';
-import 'symbiote-ui/ui';
+import { parseQuery } from 'symbiote-ui/ui';
 import './SkillMetadata.js';
 import template from './SkillManager.tpl.js';
 import styles from './SkillManager.css.js';
@@ -33,6 +33,28 @@ function withActiveProject(url) {
   return `${url}${separator}project=${encodeURIComponent(projectId)}`;
 }
 
+function normalizeRoutePath(path) {
+  let value = String(path || '').trim();
+  if (!value || value.includes('\0') || value.split('/').includes('..')) return '';
+  if (value.startsWith('.agent-portal/') || value.startsWith('.open-library/')) return value;
+  if (value.startsWith('agent-portal/') || value.startsWith('open-library/')) return `.${value}`;
+  return `.agent-portal/${value.replace(/^\/+/, '')}`;
+}
+
+function routeFileRequest() {
+  let hash = String(location.hash || '').replace(/^#/, '');
+  let [routePart, query = ''] = hash.split('?');
+  let panel = routePart.split('/')[0] || '';
+  if (panel !== 'skills') return null;
+  let params = parseQuery(query);
+  let path = normalizeRoutePath(params.path);
+  if (!path) return null;
+  return {
+    path,
+    source: path.startsWith('.open-library/') ? 'open-library' : 'team',
+  };
+}
+
 export class SkillManager extends Symbiote {
   init$ = {
     filename: tPortal('text.selectFile'),
@@ -54,6 +76,8 @@ export class SkillManager extends Symbiote {
       if (path.startsWith('.agent-portal/')) this.loadFile(path);
       if (path.startsWith('.open-library/')) this.loadFile(path, { source: 'open-library' });
     });
+    this._onHashChange = () => this._loadRouteFile();
+    window.addEventListener('hashchange', this._onHashChange);
     this.ref.editor.addEventListener('source-editor-input', () => {
       this.setDirty(true);
       this.syncPreview();
@@ -62,6 +86,25 @@ export class SkillManager extends Symbiote {
     this.ref.preview.addEventListener('click', () => {
       if (this._currentPath && !this.ref.editor.disabled) this.setEditMode(true);
     });
+    this._loadRouteFile();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback?.();
+    window.removeEventListener('hashchange', this._onHashChange);
+  }
+
+  _loadRouteFile() {
+    let request = routeFileRequest();
+    if (!request || request.path === this._routePath) return;
+    this._routePath = request.path;
+    events.dispatchEvent(new CustomEvent('file-selected', {
+      detail: {
+        path: request.path,
+        source: request.source,
+        fromRoute: true,
+      },
+    }));
   }
 
   async fetchJson(url, options) {

@@ -4,8 +4,8 @@
  * Parses `.agent-portal/agents/*.md` files with YAML frontmatter and resolves skill composition.
  * 
  * Frontmatter schema:
- *   name, description, role, icon, color, resource_group, provider, model, models[], rotation,
- *   skills[], policy, approval_mode, visibleAgents[], max_concurrent, timeout
+ *   name, description, role, icon, color, resource_group, provider, model, models[],
+ *   skills[], visibleAgents[]
  * 
  * Skill resolution:
  *   - `skills: [X, Y]` → content prepended BEFORE agent body
@@ -102,15 +102,6 @@ function resolveSkills(body, skillNames, skillsDir) {
   return parts.join('\n\n---\n\n');
 }
 
-function approvalModeFromMeta(meta) {
-  let explicit = meta.approval_mode || meta.approvalMode || meta.access_mode || meta.accessMode;
-  if (explicit) return explicit;
-  if (meta.policy === 'read-only') return 'plan';
-  if (meta.policy === 'admin') return 'yolo';
-  if (meta.policy === 'read-write') return 'auto_edit';
-  return null;
-}
-
 /**
  * Parse a single agent file.
  * @param {string} filePath - absolute path to agent .md file
@@ -135,13 +126,8 @@ export function parseAgent(filePath, skillsDir) {
     provider: meta.provider || null,
     model: meta.model || null,
     models: Array.isArray(meta.models) ? meta.models : [],
-    rotation: meta.rotation || 'on_error',
     skills: skillNames,
-    policy: meta.policy || 'read-write',
-    approvalMode: approvalModeFromMeta(meta),
     visibleAgents: Array.isArray(meta.visibleAgents) ? meta.visibleAgents : [],
-    maxConcurrent: meta.max_concurrent || 1,
-    timeout: meta.timeout || 600,
     prompt,
     filePath,
   };
@@ -180,7 +166,6 @@ export function getAgentCatalog(agents) {
       description: agent.description,
       role: agent.role,
       resourceGroup: agent.resourceGroup,
-      approvalMode: agent.approvalMode,
     });
   }
   return catalog;

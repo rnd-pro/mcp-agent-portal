@@ -11,6 +11,8 @@ import { createRuntimeRoutes } from './api-routes-runtime.js';
 import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
+import { handlePortalGoalTool, isPortalGoalTool } from '../proxy/portal-goal-tools.js';
+import { isDelegateTool, prepareDelegateTaskCall } from '../proxy/chat-delegate-routing.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
 import { createNetworkAuthController } from './network-auth.js';
@@ -74,45 +76,58 @@ export function resolveWebRoot(options = {}) {
   return fs.existsSync(distIndexPath) ? distWebDir : webDir;
 }
 
-/**
- * Serve a static file from WEB_DIR or packages/.
- * @param {string} reqPath
- * @param {string} method
- * @param {http.ServerResponse} res
- */
-function serveStaticFile(reqPath, method, res, options = {}) {
+export function resolveStaticFileTarget(reqPath, options = {}) {
+  let rootDir = options.rootDir || ROOT_DIR;
   let webRoot = options.webRoot || WEB_DIR;
+  let packagesDir = options.packagesDir || PACKAGES_DIR;
   let normalizedPath = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, '');
   // Route /packages/<name>/... to packages/<name>/...
   let pkgMatch = normalizedPath.match(/^[/\\]?packages[/\\]([^/\\]+)[/\\]?(.*)/);
   // Route reviewed browser vendor modules from node_modules.
   let vendorMatch = normalizedPath.match(/^[/\\]?vendor[/\\]([^/\\]+)[/\\]?(.*)/);
+  // Route shared DOM-free helpers used by both Node and browser code.
+  let isoMatch = normalizedPath.match(/^[/\\]?src[/\\]iso[/\\]?(.*)/);
 
-  let targetPath;
   if (pkgMatch) {
     let pkgName = pkgMatch[1];
     let restPath = pkgMatch[2] || 'index.js';
-    targetPath = NODE_MODULE_PACKAGE_NAMES.has(pkgName)
-      ? path.join(ROOT_DIR, 'node_modules', pkgName, restPath)
-      : path.join(PACKAGES_DIR, pkgName, restPath);
-  } else if (vendorMatch) {
+    return NODE_MODULE_PACKAGE_NAMES.has(pkgName)
+      ? path.join(rootDir, 'node_modules', pkgName, restPath)
+      : path.join(packagesDir, pkgName, restPath);
+  }
+  if (vendorMatch) {
     let vendorName = vendorMatch[1];
     let restPath = vendorMatch[2] || 'index.js';
     if (vendorName === 'symbiote') {
-      targetPath = path.join(ROOT_DIR, 'node_modules', '@symbiotejs', 'symbiote', restPath);
+      return path.join(rootDir, 'node_modules', '@symbiotejs', 'symbiote', restPath);
     } else if (vendorName === 'iwer') {
-      targetPath = path.join(ROOT_DIR, 'node_modules', 'iwer', restPath);
+      return path.join(rootDir, 'node_modules', 'iwer', restPath);
     } else if (vendorName === 'iwer-devui') {
-      targetPath = path.join(ROOT_DIR, 'node_modules', '@iwer', 'devui', restPath);
+      return path.join(rootDir, 'node_modules', '@iwer', 'devui', restPath);
     } else if (vendorName === 'three') {
-      targetPath = path.join(ROOT_DIR, 'node_modules', 'three', restPath);
-    } else {
-      res.writeHead(403);
-      res.end('Forbidden vendor');
-      return;
+      return path.join(rootDir, 'node_modules', 'three', restPath);
     }
-  } else {
-    targetPath = path.join(webRoot, normalizedPath === '/' ? 'index.html' : normalizedPath);
+    return null;
+  }
+  if (isoMatch) {
+    let restPath = isoMatch[1] || '';
+    return path.join(rootDir, 'src', 'iso', restPath);
+  }
+  return path.join(webRoot, normalizedPath === '/' ? 'index.html' : normalizedPath);
+}
+
+/**
+ * Serve a static file from WEB_DIR, packages/, reviewed vendors, or shared iso helpers.
+ * @param {string} reqPath
+ * @param {string} method
+ * @param {http.ServerResponse} res
+ */
+function serveStaticFile(reqPath, method, res, options = {}) {
+  let targetPath = resolveStaticFileTarget(reqPath, options);
+  if (!targetPath) {
+    res.writeHead(403);
+    res.end('Forbidden vendor');
+    return;
   }
 
   if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
@@ -391,27 +406,19 @@ async function _routeToolCall(proxyManager, toolName, args) {
     return _routePortalToolCall(proxyManager, toolName, args);
   }
 
-  let isDelegate = toolName === 'delegate_task' || toolName === 'delegate_task_readonly' ||
-                   toolName === 'mcp_agent-portal_delegate_task' || toolName === 'mcp_agent-portal_delegate_task_readonly';
-  if (isDelegate && args.parent_chat_id && !args.chat_id) {
+  if (isDelegateTool(toolName)) {
     try {
-      let { getStateGraph } = await import('../state-graph.js');
-      let sg = getStateGraph();
-      let parentMeta = sg.get(`chats/${args.parent_chat_id}`);
-      let chat = sg.createChat({
-        name: (args.prompt || '').substring(0, 40) + ((args.prompt || '').length > 40 ? '...' : ''),
-        adapter: 'pool',
-        agent: args.agent_slug || null,
-        provider: args.provider || null,
-        model: args.model || null,
-        approval_mode: args.approval_mode || null,
-        parentChatId: args.parent_chat_id,
-        projectId: parentMeta ? parentMeta.projectId : null
-      }, 'mcp');
-      args.chat_id = chat.id;
-      proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+      let prepared = await prepareDelegateTaskCall(proxyManager, toolName, args, { source: 'mcp-http' });
+      args = prepared.args;
+      if (prepared.createdChat) {
+        proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: prepared.createdChat } });
+      }
     } catch (e) {
-      console.error(`[MCP Gateway] failed to auto-create chat for delegate_task:`, e.message);
+      console.error('[MCP Gateway] failed to prepare delegate_task:', e.message);
+      return {
+        content: [{ type: 'text', text: `Failed to prepare delegate_task: ${e.message}` }],
+        isError: true,
+      };
     }
   }
 
@@ -485,13 +492,15 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
       let parentMeta = sg.get(`chats/${args.parentChatId}`);
       if (parentMeta) projectId = parentMeta.projectId || null;
     }
+    let resourceGroup = args.resource_group || null;
     let chat = sg.createChat({
       name: args.name,
       adapter: args.adapter || 'pool',
       agent: args.agent || args.agent_slug || ((args.adapter || 'pool') === 'pool' ? DEFAULT_CHAT_AGENT : null),
-      provider: args.provider || null,
-      model: args.model || null,
+      provider: resourceGroup && resourceGroup !== 'none' ? null : (args.provider || null),
+      model: resourceGroup && resourceGroup !== 'none' ? null : (args.model || null),
       approval_mode: args.approval_mode || null,
+      resource_group: resourceGroup,
       chatType: args.chatType || null,
       parentChatId: args.parentChatId || null,
       projectId,
@@ -515,6 +524,10 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
 
   if (toolName === 'resume_chat') {
     return resumeChatTool(proxyManager, args);
+  }
+
+  if (isPortalGoalTool(toolName)) {
+    return handlePortalGoalTool(proxyManager, toolName, args, 'mcp-http');
   }
 
   if (toolName === 'remember') {

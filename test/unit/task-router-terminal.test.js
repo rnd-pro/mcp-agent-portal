@@ -6,11 +6,24 @@ import { fileURLToPath } from 'node:url';
 
 import {
   extractFinalAgentResponse,
+  formatProviderFallbackMessage,
   isTerminalTaskNotificationType,
 } from '../../src/node/proxy/task-router.js';
+import { ChatWsServer } from '../../src/node/proxy/chat-ws-server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TASK_ROUTER_PATH = resolve(__dirname, '../../src/node/proxy/task-router.js');
+const WS_OPEN = 1;
+
+function createWsClient() {
+  return {
+    readyState: WS_OPEN,
+    messages: [],
+    send(data) {
+      this.messages.push(JSON.parse(data));
+    },
+  };
+}
 
 describe('TaskRouter terminal lifecycle handling', () => {
   it('treats cancelled as a terminal task notification', () => {
@@ -25,7 +38,7 @@ describe('TaskRouter terminal lifecycle handling', () => {
 
     assert.match(source, /if \(type === 'cancelled'\) \{\n\s+this\._finalizeCancelledTask/);
     assert.match(source, /status: 'cancelled'/);
-    assert.match(source, /sg\.updateChatTask\(chatId, null\)/);
+    assert.match(source, /sg\.updateChatTask\(chatId, null, \{ expectedTaskId: taskId \}\)/);
     assert.match(source, /sg\.updateChat\(chatId, \{ lastTaskStatus: 'cancelled' \}\)/);
   });
 
@@ -53,6 +66,21 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.equal(extractFinalAgentResponse(text), 'pong');
   });
 
+  it('formats provider fallback events as persistent chat messages', () => {
+    assert.equal(
+      formatProviderFallbackMessage({
+        from: { provider: 'claude', model: 'deepseek/deepseek-v4-pro' },
+        to: { provider: 'codex', model: 'default' },
+        reason: 'exit code 1',
+      }),
+      'Provider fallback: claude/deepseek/deepseek-v4-pro -> codex/default. Reason: exit code 1',
+    );
+
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+    assert.match(source, /case 'provider_fallback':/);
+    assert.match(source, /msgs\.push\(\{ role: 'system', text \}\);/);
+  });
+
   it('replaces streaming agent text with the normalized final response', () => {
     let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
 
@@ -75,5 +103,37 @@ describe('TaskRouter terminal lifecycle handling', () => {
         < terminalBranch.indexOf("broadcastTaskEvent(taskId, method"),
       'project transactions must be persisted and broadcast before chat.done/chat.error closes the client listener',
     );
+  });
+
+  it('broadcasts task events with the subscribed chat id when params are omitted', () => {
+    let server = new ChatWsServer({ projectRoot: process.cwd() });
+    let client = createWsClient();
+
+    server.subscribe('task-1', client, 'chat-1');
+    server.broadcastTaskEvent('task-1', 'chat.ping');
+
+    assert.deepEqual(client.messages, [{
+      method: 'chat.ping',
+      params: { chatId: 'chat-1' },
+    }]);
+  });
+
+  it('preserves an explicit event chat id when broadcasting task events', () => {
+    let server = new ChatWsServer({ projectRoot: process.cwd() });
+    let client = createWsClient();
+
+    server.subscribe('task-1', client, 'subscribed-chat');
+    server.broadcastTaskEvent('task-1', 'chat.meta', {
+      chatId: 'event-chat',
+      tokenCount: 3,
+    });
+
+    assert.deepEqual(client.messages, [{
+      method: 'chat.meta',
+      params: {
+        chatId: 'event-chat',
+        tokenCount: 3,
+      },
+    }]);
   });
 });

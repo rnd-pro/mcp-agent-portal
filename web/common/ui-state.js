@@ -1,7 +1,38 @@
-import { readJsonCache, writeJsonCache, readStringCache, writeStringCache } from 'symbiote-ui/core';
+import {
+  readJsonCache as readJsonCacheSource,
+  writeJsonCache as writeJsonCacheSource,
+  readStringCache as readStringCacheSource,
+  writeStringCache as writeStringCacheSource,
+} from 'symbiote-ui/core';
 import { stateSync } from '../state-sync.js';
 
-export { readJsonCache, writeJsonCache, readStringCache, writeStringCache };
+export function readJsonCache(key) {
+  try {
+    return readJsonCacheSource(key);
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeJsonCache(key, value) {
+  try {
+    writeJsonCacheSource(key, value);
+  } catch {}
+}
+
+export function readStringCache(key) {
+  try {
+    return readStringCacheSource(key);
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeStringCache(key, value) {
+  try {
+    writeStringCacheSource(key, value);
+  } catch {}
+}
 
 export function readUiValue(path, cacheKey, fallback) {
   let serverValue = stateSync.get(path);

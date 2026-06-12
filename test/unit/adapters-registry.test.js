@@ -54,7 +54,7 @@ describe('adapters-registry', () => {
     assert.ok(values.includes('deepseek/deepseek-v4-pro'));
   });
 
-  it('exposes agent default approval modes from markdown metadata', async () => {
+  it('exposes agent resource groups without agent-owned runtime policy', async () => {
     let { setPortalRoot, listAdapterTypes } = await import('../../src/node/adapters/index.js');
     setPortalRoot(process.cwd());
 
@@ -64,8 +64,11 @@ describe('adapters-registry', () => {
     let backend = agentOptions.find(option => option.val === 'backend-engineer');
     let orchestrator = agentOptions.find(option => option.val === 'orchestrator');
 
-    assert.equal(reviewer.approvalMode, 'plan');
-    assert.equal(backend.approvalMode, 'auto_edit');
-    assert.equal(orchestrator.approvalMode, 'yolo');
+    assert.equal(reviewer.resourceGroup, 'review');
+    assert.equal(backend.resourceGroup, 'implementation');
+    assert.equal(orchestrator.resourceGroup, 'reasoning-heavy');
+    assert.equal('approvalMode' in reviewer, false);
+    assert.equal('approvalMode' in backend, false);
+    assert.equal('approvalMode' in orchestrator, false);
   });
 });

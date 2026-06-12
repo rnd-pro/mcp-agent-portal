@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 let ROOT = path.resolve(fileURLToPath(import.meta.url), '../../..');
 
@@ -36,6 +36,109 @@ describe('portal shell theme contract', () => {
     ]) {
       assert.ok(theme.includes(token), `default symbiote-ui theme must provide ${token}`);
     }
+  });
+
+  it('mounts the provider cascade theme widget and opens the provider editor panel', () => {
+    let index = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
+    let app = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
+    let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
+    let panelTemplate = fs.readFileSync(path.join(ROOT, 'web/components/ThemeEditorPanel/ThemeEditorPanel.tpl.js'), 'utf8');
+
+    assert.ok(index.includes('<cascade-theme-widget></cascade-theme-widget>'));
+    assert.equal(index.includes('storage-key='), false, 'theme widget should use the library default storage key');
+    assert.equal(index.includes('target-selector='), false, 'theme widget should target documentElement through library defaults');
+    assert.ok(app.includes('cascade-theme-open-full'));
+    assert.ok(app.includes("openPanel('theme-editor'"));
+    assert.ok(router.includes("'theme-editor'"));
+    assert.ok(router.includes("component: 'pg-theme-editor-panel'"));
+    assert.ok(panelTemplate.includes('<cascade-theme-editor></cascade-theme-editor>'));
+  });
+
+  it('keeps the provider cascade theme widget trigger on shell theme tokens', () => {
+    let widgetSource = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/themes/CascadeThemeWidget/CascadeThemeWidget.js'),
+      'utf8',
+    );
+    let widgetStyles = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/themes/CascadeThemeWidget/CascadeThemeWidget.css.js'),
+      'utf8',
+    );
+
+    assert.match(widgetSource, /syncOverlayTheme/);
+    assert.match(widgetSource, /let target = this\.\#resolveTarget\(\)/);
+    assert.match(widgetSource, /applyCascadeTheme\(target, this\.\#state, \{ notify: false \}\)/);
+    assert.match(widgetSource, /this\.\#syncPopoverTheme\(target\)/);
+    assert.match(widgetSource, /mountOverlayToDocument\(popover, this\.\#resolveTarget\(\)\)/);
+    assert.match(widgetStyles, /cascade-theme-widget \.ctw-trigger \{/);
+    assert.match(widgetStyles, /display: inline-flex;/);
+    assert.match(widgetStyles, /min-height: var\(--sn-shell-menu-action-height/);
+    assert.match(widgetStyles, /border: 1px solid transparent;/);
+    assert.match(widgetStyles, /border-radius: var\(--sn-layout-header-button-radius/);
+    assert.match(widgetStyles, /background: transparent;/);
+    assert.match(widgetStyles, /color: var\(--sn-text-dim\);/);
+    assert.match(widgetStyles, /font: inherit;/);
+    assert.match(widgetStyles, /font-size: var\(--sn-shell-menu-action-size/);
+    assert.match(widgetStyles, /cascade-theme-widget \.ctw-trigger:hover/);
+    assert.match(widgetStyles, /background: var\(--sn-node-hover\);/);
+  });
+
+  it('uses the provider chat workspace cell background without a portal duplicate', () => {
+    let agentTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.tpl.js'), 'utf8');
+    let agentStyles = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.css.js'), 'utf8');
+    let workspaceTemplate = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatWorkspace/ChatWorkspace.tpl.js'),
+      'utf8',
+    );
+    let workspaceStyles = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatWorkspace/ChatWorkspace.css.js'),
+      'utf8',
+    );
+    let transcriptStyles = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatTranscript/ChatTranscript.css.js'),
+      'utf8',
+    );
+    let workspaceSource = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatWorkspace/ChatWorkspace.js'),
+      'utf8',
+    );
+
+    assert.match(agentTemplate, /<chat-workspace class="chat-workspace-view"/);
+    assert.equal(agentTemplate.includes('<cell-bg'), false);
+    assert.equal(agentStyles.includes('radial-gradient'), false);
+    assert.equal(agentStyles.includes('chat-workspace-bg'), false);
+    assert.match(workspaceTemplate, /<cell-bg class="chat-workspace-bg"/);
+    assert.match(workspaceStyles, /\.chat-workspace-bg \{[\s\S]*position: absolute;[\s\S]*z-index: 0;/);
+    assert.match(workspaceStyles, /--sn-chat-overlay-stack-reserve/);
+    assert.match(transcriptStyles, /scroll-padding-block-end: var\(--sn-chat-overlay-stack-reserve/);
+    assert.match(workspaceSource, /setOverlayStackReserve/);
+  });
+
+  it('keeps provider chat background resize pulses and pattern-limited overlays', async () => {
+    let workspaceTemplate = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatWorkspace/ChatWorkspace.tpl.js'),
+      'utf8',
+    );
+    let cellBgStyles = fs.readFileSync(
+      path.join(ROOT, 'node_modules/symbiote-ui/effects/CellBg/CellBg.css.js'),
+      'utf8',
+    );
+    let themeUrl = pathToFileURL(
+      path.join(ROOT, 'node_modules/symbiote-ui/themes/cascade-theme.js'),
+    ).href;
+    let { createCascadeTheme } = await import(themeUrl);
+    let patternOff = createCascadeTheme({ mode: 'dark', pattern: 0 });
+    let patternOn = createCascadeTheme({ mode: 'dark', pattern: 100 });
+
+    assert.equal(workspaceTemplate.includes('auto-trigger="false"'), false);
+    assert.match(cellBgStyles, /radial-gradient\(circle at 50% -10%, var\(--sn-cell-glare\)/);
+    assert.match(cellBgStyles, /radial-gradient\(circle at 50% 50%, transparent 20%, var\(--sn-cell-vignette-mid\)/);
+    assert.doesNotMatch(cellBgStyles, /radial-gradient\(ellipse/);
+    assert.notEqual(patternOff.tokens['--sn-cell-base-alpha'], patternOn.tokens['--sn-cell-base-alpha']);
+    assert.notEqual(patternOff.tokens['--sn-cell-alpha-span'], patternOn.tokens['--sn-cell-alpha-span']);
+    assert.equal(patternOff.tokens['--sn-cell-glare'], patternOn.tokens['--sn-cell-glare']);
+    assert.equal(patternOff.tokens['--sn-cell-vignette-mid'], patternOn.tokens['--sn-cell-vignette-mid']);
+    assert.equal(patternOff.tokens['--sn-cell-vignette-edge'], patternOn.tokens['--sn-cell-vignette-edge']);
+    assert.equal(patternOff.tokens['--sn-cell-noise'], patternOn.tokens['--sn-cell-noise']);
   });
 
   it('consumes symbiote-ui theme tokens instead of copying provider colors', () => {

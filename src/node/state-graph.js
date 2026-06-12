@@ -19,6 +19,13 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import {
+  normalizeChatGoalInput,
+  normalizeChatGoalQueueDelivery,
+  normalizeChatGoalQueueMessage,
+  normalizeChatGoalQueueStatus,
+  normalizeChatGoalStatus,
+} from '../iso/chat-goals.js';
 
 // ── Paths ────────────────────────────────────────────────
 const STATE_DIR = path.join(os.homedir(), '.agent-portal');
@@ -51,6 +58,7 @@ function defaultState() {
     },
     projects: {},
     chats: {},
+    goals: {},
     tasks: {},
     layouts: {},
     settings: {
@@ -577,6 +585,9 @@ export class StateGraph extends EventEmitter {
               updatedAt: data.updatedAt || 0,
               createdAt: data.createdAt || 0,
               pendingTaskId: data.pendingTaskId || null,
+              activeGoalId: data.activeGoalId || null,
+              goalIntentActive: Boolean(data.goalIntentActive),
+              goalQueueMode: data.goalQueueMode || null,
             }});
           } catch { /* skip */ }
         }
@@ -744,6 +755,9 @@ export class StateGraph extends EventEmitter {
       updatedAt: now,
       createdAt: now,
       pendingTaskId: null,
+      activeGoalId: opts.activeGoalId || null,
+      goalIntentActive: Boolean(opts.goalIntentActive),
+      goalQueueMode: opts.goalQueueMode || null,
     }}], source);
 
     // Full chat data in file
@@ -765,6 +779,9 @@ export class StateGraph extends EventEmitter {
       messages: [],
       createdAt: now,
       updatedAt: now,
+      activeGoalId: opts.activeGoalId || null,
+      goalIntentActive: Boolean(opts.goalIntentActive),
+      goalQueueMode: opts.goalQueueMode || null,
     };
     this._queueChatWrite(id, chatData);
 
@@ -844,6 +861,249 @@ export class StateGraph extends EventEmitter {
     return nextTransactions;
   }
 
+  _mergeChatFile(chatId, updates = {}) {
+    let chat = this.getChat(chatId);
+    if (!chat) return null;
+    Object.assign(chat, updates, { updatedAt: Date.now() });
+    this._queueChatWrite(chatId, chat);
+    return chat;
+  }
+
+  getChatGoal(goalId) {
+    let goal = this.get(`goals/${goalId}`);
+    return goal ? JSON.parse(JSON.stringify({ id: goalId, ...goal })) : null;
+  }
+
+  _normalizeGoalQueue(queue = []) {
+    if (!Array.isArray(queue)) return [];
+    return queue
+      .map(normalizeChatGoalQueueMessage)
+      .filter((item) => item.id && item.text);
+  }
+
+  _setChatGoalQueue(goalId, current, queue, source, now = Date.now()) {
+    let next = {
+      ...current,
+      queue: this._normalizeGoalQueue(queue),
+      updatedAt: now,
+      updatedBy: source,
+    };
+    this.commit([{ op: 'set', path: `goals/${goalId}`, value: next }], source);
+    return { id: goalId, ...next };
+  }
+
+  listChatGoals({ chatId = null, projectId = null, status = null } = {}) {
+    let statusFilter = status ? normalizeChatGoalStatus(status) : null;
+    return Object.entries(this._state.goals || {})
+      .map(([id, goal]) => ({ id, ...goal }))
+      .filter((goal) => !chatId || goal.chatId === chatId)
+      .filter((goal) => !projectId || goal.projectId === projectId)
+      .filter((goal) => !statusFilter || normalizeChatGoalStatus(goal.status) === statusFilter)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  createChatGoal(opts = {}, source = 'system') {
+    let normalized = normalizeChatGoalInput(opts);
+    let id = opts.id || crypto.randomUUID().slice(0, 12);
+    let now = Date.now();
+    let chatId = opts.chatId || opts.chat_id || null;
+    let projectId = opts.projectId || opts.project_id || null;
+    if (chatId && !projectId) {
+      let chatMeta = this.get(`chats/${chatId}`);
+      let chatFile = this.getChat(chatId);
+      projectId = chatMeta?.projectId || chatFile?.projectId || null;
+    }
+    let goal = {
+      title: normalized.title,
+      description: normalized.description,
+      status: normalized.status,
+      chatId,
+      projectId,
+      context: normalized.context,
+      scenarios: normalized.scenarios,
+      queue: this._normalizeGoalQueue(opts.queue),
+      createdBy: opts.createdBy || opts.created_by || source,
+      updatedBy: opts.updatedBy || opts.updated_by || source,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    let ops = [{ op: 'set', path: `goals/${id}`, value: goal }];
+    if (chatId && normalized.status === 'active') {
+      ops.push({ op: 'merge', path: `chats/${chatId}`, value: { activeGoalId: id, updatedAt: now } });
+    }
+    this.commit(ops, source);
+    if (chatId && normalized.status === 'active') this._mergeChatFile(chatId, { activeGoalId: id });
+    return { id, ...goal };
+  }
+
+  enqueueChatGoalMessage(goalId, message = {}, source = 'system') {
+    let current = this.get(`goals/${goalId}`);
+    if (!current) return null;
+    let now = Date.now();
+    let item = normalizeChatGoalQueueMessage({
+      ...message,
+      id: message.id || crypto.randomUUID().slice(0, 12),
+      status: message.status || 'queued',
+      createdAt: message.createdAt || now,
+      updatedAt: now,
+      appliedAt: message.status === 'applied' ? (message.appliedAt || now) : message.appliedAt,
+      discardedAt: message.status === 'discarded' ? (message.discardedAt || now) : message.discardedAt,
+      createdBy: message.createdBy || message.created_by || source,
+      updatedBy: message.updatedBy || message.updated_by || source,
+    });
+    if (!item.text) return null;
+    let queue = [...this._normalizeGoalQueue(current.queue), item];
+    let goal = this._setChatGoalQueue(goalId, current, queue, source, now);
+    return { goal, item };
+  }
+
+  listChatGoalQueue(goalId, { delivery = null, status = 'queued' } = {}) {
+    let goal = this.get(`goals/${goalId}`);
+    if (!goal) return null;
+    let deliveryFilter = delivery ? normalizeChatGoalQueueDelivery(delivery) : null;
+    let statusFilter = status ? normalizeChatGoalQueueStatus(status) : null;
+    return this._normalizeGoalQueue(goal.queue)
+      .filter((item) => !deliveryFilter || item.delivery === deliveryFilter)
+      .filter((item) => !statusFilter || item.status === statusFilter);
+  }
+
+  updateChatGoalQueueMessage(goalId, messageId, updates = {}, source = 'system') {
+    let current = this.get(`goals/${goalId}`);
+    if (!current) return null;
+    let now = Date.now();
+    let found = null;
+    let queue = this._normalizeGoalQueue(current.queue).map((item) => {
+      if (item.id !== messageId) return item;
+      let status = updates.status ? normalizeChatGoalQueueStatus(updates.status) : item.status;
+      let next = normalizeChatGoalQueueMessage({
+        ...item,
+        ...updates,
+        status,
+        updatedAt: now,
+        updatedBy: updates.updatedBy || updates.updated_by || source,
+      });
+      if (status === 'applied' && !next.appliedAt) next.appliedAt = now;
+      if (status === 'discarded' && !next.discardedAt) next.discardedAt = now;
+      found = next;
+      return next;
+    });
+    if (!found) return null;
+    let goal = this._setChatGoalQueue(goalId, current, queue, source, now);
+    return { goal, item: found };
+  }
+
+  clearChatGoalQueue(goalId, { status = 'queued' } = {}, source = 'system') {
+    let current = this.get(`goals/${goalId}`);
+    if (!current) return null;
+    let statusFilter = status ? normalizeChatGoalQueueStatus(status) : null;
+    let queue = this._normalizeGoalQueue(current.queue);
+    let remaining = queue.filter((item) => statusFilter && item.status !== statusFilter);
+    let cleared = queue.filter((item) => !statusFilter || item.status === statusFilter);
+    let goal = this._setChatGoalQueue(goalId, current, remaining, source);
+    return { goal, cleared };
+  }
+
+  updateChatGoal(goalId, updates = {}, source = 'system') {
+    let current = this.get(`goals/${goalId}`);
+    if (!current) return null;
+    let now = Date.now();
+    let status = updates.status ? normalizeChatGoalStatus(updates.status) : current.status;
+    let next = {
+      ...current,
+      ...normalizeChatGoalInput({ ...current, ...updates, status }),
+      status,
+      queue: this._normalizeGoalQueue(updates.queue || current.queue),
+      updatedBy: updates.updatedBy || updates.updated_by || source,
+      updatedAt: now,
+    };
+
+    let reason = updates.reason || updates.blockedReason || updates.completedReason || '';
+    if (status === 'blocked') {
+      next.blockedAt = updates.blockedAt || current.blockedAt || now;
+      next.blockedReason = String(reason || current.blockedReason || '').trim();
+    }
+    if (status === 'paused') {
+      next.pausedAt = updates.pausedAt || current.pausedAt || now;
+      next.pausedReason = String(reason || current.pausedReason || '').trim();
+    }
+    if (status === 'completed') {
+      next.completedAt = updates.completedAt || current.completedAt || now;
+      next.completedReason = String(reason || current.completedReason || '').trim();
+    }
+    if (status === 'active') {
+      delete next.pausedAt;
+      delete next.pausedReason;
+      delete next.completedAt;
+      delete next.completedReason;
+      delete next.blockedAt;
+      delete next.blockedReason;
+    }
+
+    let ops = [{ op: 'set', path: `goals/${goalId}`, value: next }];
+    if (next.chatId && status === 'active') {
+      ops.push({ op: 'merge', path: `chats/${next.chatId}`, value: { activeGoalId: goalId, updatedAt: now } });
+    }
+    if (next.chatId && ['blocked', 'completed'].includes(status)) {
+      let chatMeta = this.get(`chats/${next.chatId}`);
+      if (chatMeta?.activeGoalId === goalId) {
+        ops.push({ op: 'merge', path: `chats/${next.chatId}`, value: { activeGoalId: null, updatedAt: now } });
+      }
+    }
+    this.commit(ops, source);
+    if (next.chatId && status === 'active') {
+      this._mergeChatFile(next.chatId, { activeGoalId: goalId });
+    }
+    if (next.chatId && ['blocked', 'completed'].includes(status)) {
+      let chat = this.getChat(next.chatId);
+      if (chat?.activeGoalId === goalId) this._mergeChatFile(next.chatId, { activeGoalId: null });
+    }
+    return { id: goalId, ...next };
+  }
+
+  deleteChatGoal(goalId, source = 'system') {
+    let current = this.get(`goals/${goalId}`);
+    if (!current) return null;
+    let now = Date.now();
+    let ops = [{ op: 'delete', path: `goals/${goalId}` }];
+    if (current.chatId) {
+      let chatMeta = this.get(`chats/${current.chatId}`);
+      if (chatMeta?.activeGoalId === goalId) {
+        ops.push({ op: 'merge', path: `chats/${current.chatId}`, value: { activeGoalId: null, updatedAt: now } });
+      }
+    }
+    this.commit(ops, source);
+    if (current.chatId) {
+      let chat = this.getChat(current.chatId);
+      if (chat?.activeGoalId === goalId) this._mergeChatFile(current.chatId, { activeGoalId: null });
+    }
+    return { id: goalId, ...current, status: 'deleted', deletedAt: now, updatedAt: now, updatedBy: source };
+  }
+
+  selectChatGoal(chatId, goalId = null, source = 'system') {
+    if (!chatId) throw new Error('Missing chatId');
+    let now = Date.now();
+    let goal = goalId ? this.get(`goals/${goalId}`) : null;
+    if (goalId && !goal) throw new Error(`Goal not found: ${goalId}`);
+    let ops = [{ op: 'merge', path: `chats/${chatId}`, value: { activeGoalId: goalId || null, updatedAt: now } }];
+    if (goalId) {
+      let chatMeta = this.get(`chats/${chatId}`) || {};
+      ops.push({
+        op: 'merge',
+        path: `goals/${goalId}`,
+        value: {
+          chatId,
+          projectId: goal.projectId || chatMeta.projectId || null,
+          updatedAt: now,
+          updatedBy: source,
+        },
+      });
+    }
+    this.commit(ops, source);
+    this._mergeChatFile(chatId, { activeGoalId: goalId || null });
+    return goalId ? this.getChatGoal(goalId) : null;
+  }
+
   // Delete a chat (graph + file).
   deleteChat(chatId, source = 'system') {
     this.commit([{ op: 'delete', path: `chats/${chatId}` }], source);
@@ -852,7 +1112,7 @@ export class StateGraph extends EventEmitter {
 
   // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
-    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin', 'lastTaskStatus']);
+    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin', 'lastTaskStatus', 'activeGoalId', 'goalIntentActive', 'goalQueueMode']);
     let filtered = {};
     for (let [k, v] of Object.entries(updates)) {
       if (!allowed.has(k)) continue;
@@ -885,9 +1145,12 @@ export class StateGraph extends EventEmitter {
   }
 
   // Set or clear pending task ID.
-  updateChatTask(chatId, taskId) {
+  updateChatTask(chatId, taskId, { expectedTaskId = null } = {}) {
     let chat = this.getChat(chatId);
     if (!chat) return;
+    if (!taskId && expectedTaskId && chat.pendingTaskId && chat.pendingTaskId !== expectedTaskId) {
+      return;
+    }
     if (taskId) chat.pendingTaskId = taskId;
     else delete chat.pendingTaskId;
     chat.updatedAt = Date.now();

@@ -33,7 +33,7 @@ export function resolveAdapter(type) {
 const DEFAULT_MODELS = {
   gemini: ['default', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
   claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  codex: ['default'],
+  codex: ['default', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
   opencode: ['default'],
 };
 
@@ -274,6 +274,12 @@ export function getAgentList() {
   return _agentCache;
 }
 
+export function invalidateAgentList() {
+  _agentCache = null;
+  _agentCacheTime = 0;
+  _agentCacheKey = '';
+}
+
 // Adapter metadata — describes providers and their parameters.
 // The UI uses this to build dynamic cascading selects:
 //   pool → Agent (from .agent-portal/agents/) → Provider → Model → ChatType
@@ -298,8 +304,10 @@ function loadResourceGroupPreferences() {
         model: config.model || null,
         profiles: Array.isArray(config.profiles) ? config.profiles : [],
         rotation_mode: config.rotation_mode || 'error_fallback',
+        approval_mode: config.approval_mode || config.approvalMode || null,
+        policy: config.policy || null,
         max_agents: config.max_agents || null,
-        fallback_profiles: Array.isArray(config.fallback_profiles) ? config.fallback_profiles : [],
+        timeout: config.timeout || null,
       });
       // Preferred models by provider
       if (config.model && !seen.has(`${provider}:${config.model}`)) {
@@ -327,7 +335,7 @@ function buildAdapterMetadata() {
   let agentOptions = getAgentList().map(a => {
     let acronyms = new Set(['qa', 'ui', 'api', 'db', 'ci', 'cd', 'ml', 'ai', 'devops', 'sre']);
     let name = a.slug.split('-').map(w => acronyms.has(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).join(' ');
-    return { val: a.slug, text: name, approvalMode: a.approvalMode, resourceGroup: a.resourceGroup || null };
+    return { val: a.slug, text: name, resourceGroup: a.resourceGroup || null };
   });
   agentOptions.unshift({ val: 'none', text: 'Direct (no agent)', resourceGroup: null });
 
@@ -336,7 +344,7 @@ function buildAdapterMetadata() {
   // Build resource_group selector options
   let groupOptions = [{ val: 'none', text: 'Manual (provider + model)' }];
   for (let g of rgPrefs.groups) {
-    let profileCount = g.profiles.length + g.fallback_profiles.length;
+    let profileCount = g.profiles.length;
     let subtitle = `${g.provider}${g.model ? ' / ' + g.model.split('/').pop() : ''}`;
     if (profileCount > 1) subtitle += ` · ${profileCount} profiles`;
     if (g.rotation_mode === 'round_robin') subtitle += ' · round-robin';

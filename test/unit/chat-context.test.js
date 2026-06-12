@@ -7,6 +7,17 @@ import {
   mergeAttachedContext,
   removeAttachedContext,
 } from '../../web/services/chat-context.js';
+import {
+  CHAT_GOAL_STATUSES,
+  buildPromptWithChatGoal,
+  filterChatGoalQueue,
+  formatChatGoalIntentPromptBlock,
+  formatChatGoalPromptBlock,
+  formatChatGoalQueuePromptBlock,
+  normalizeChatGoalQueueMessage,
+  normalizeChatGoalInput,
+  toChatGoalContextItem,
+} from '../../src/iso/chat-goals.js';
 
 test('mergeAttachedContext normalizes and deduplicates files', () => {
   let context = mergeAttachedContext([], { path: 'web/app.js' });
@@ -91,4 +102,70 @@ test('extractAttachedFilePaths returns only structured file context hints', () =
   });
 
   assert.deepEqual(extractAttachedFilePaths(context), ['web/app.js']);
+});
+
+test('chat goals normalize lifecycle input and prompt context', () => {
+  let normalized = normalizeChatGoalInput({
+    title: '  Ship chat goals  ',
+    description: '  Goal orchestration in chat. ',
+    context: ['Agent Portal', 'MCP'],
+    scenarios: [{ title: 'Goal intent' }, 'orchestrator updates'],
+    status: 'done',
+  });
+
+  assert.deepEqual(CHAT_GOAL_STATUSES, ['active', 'paused', 'blocked', 'completed']);
+  assert.equal(normalized.title, 'Ship chat goals');
+  assert.equal(normalized.description, 'Goal orchestration in chat.');
+  assert.equal(normalized.status, 'completed');
+  assert.deepEqual(normalized.context, ['Agent Portal', 'MCP']);
+  assert.deepEqual(normalized.scenarios, ['Goal intent', 'orchestrator updates']);
+
+  let goal = {
+    id: 'goal-1',
+    title: 'Publish latest build',
+    status: 'active',
+    description: 'Release and verify npm package.',
+    context: ['symbiote-ui', 'agent-portal'],
+    scenarios: ['goal intent', 'MCP tool'],
+  };
+  let block = formatChatGoalPromptBlock(goal);
+
+  assert.match(block, /\[Active Goal\]/);
+  assert.match(block, /"id": "goal-1"/);
+  assert.match(block, /"status": "active"/);
+  assert.match(block, /goal intent/);
+  assert.deepEqual(toChatGoalContextItem(goal), {
+    type: 'goal',
+    key: 'goal:goal-1',
+    goalId: 'goal-1',
+    name: 'Publish latest build',
+    title: 'Goal: Publish latest build',
+    icon: 'flag',
+    status: 'active',
+  });
+  assert.match(buildPromptWithChatGoal('Proceed.', goal), /^\[Active Goal\]/);
+  assert.equal(buildPromptWithChatGoal(`${block}\n\nProceed.`, goal), `${block}\n\nProceed.`);
+
+  let intentBlock = formatChatGoalIntentPromptBlock({ chatId: 'chat-1', projectId: 'project-1' });
+  assert.match(intentBlock, /^\[Goal Intent\]/);
+  assert.match(intentBlock, /"chatId": "chat-1"/);
+  assert.match(intentBlock, /"projectId": "project-1"/);
+  assert.match(intentBlock, /create_goal/);
+
+  let queueItem = normalizeChatGoalQueueMessage({
+    id: 'message-1',
+    text: '  Restart with this correction. ',
+    delivery: 'now',
+    status: 'pending',
+  });
+  assert.equal(queueItem.text, 'Restart with this correction.');
+  assert.equal(queueItem.delivery, 'goal');
+  assert.equal(queueItem.status, 'queued');
+
+  let queuedGoal = { ...goal, queue: [queueItem, { id: 'old', text: 'done', status: 'applied' }] };
+  assert.deepEqual(filterChatGoalQueue(queuedGoal, { status: 'queued' }).map(item => item.id), ['message-1']);
+  let queueBlock = formatChatGoalQueuePromptBlock(goal, [queueItem]);
+  assert.match(queueBlock, /^\[Goal Queue\]/);
+  assert.match(queueBlock, /"delivery": "goal"/);
+  assert.match(queueBlock, /Restart with this correction/);
 });

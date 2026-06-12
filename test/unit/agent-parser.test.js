@@ -29,9 +29,6 @@ models:
 visibleAgents:
   - backend-engineer
   - code-reviewer
-max_concurrent: 3
-timeout: 450
-approval_mode: plan
 ---
 Agent body`);
 
@@ -41,8 +38,9 @@ Agent body`);
     assert.equal(agent.resourceGroup, 'deepseek-pro-audit');
     assert.deepStrictEqual(agent.models, ['deepseek/deepseek-v4-pro']);
     assert.deepStrictEqual(agent.visibleAgents, ['backend-engineer', 'code-reviewer']);
-    assert.equal(agent.maxConcurrent, 3);
-    assert.equal(agent.timeout, 450);
-    assert.equal(agent.approvalMode, 'plan');
+    assert.equal('maxConcurrent' in agent, false);
+    assert.equal('timeout' in agent, false);
+    assert.equal('approvalMode' in agent, false);
+    assert.equal('policy' in agent, false);
   });
 });

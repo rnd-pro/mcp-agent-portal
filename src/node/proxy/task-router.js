@@ -24,6 +24,19 @@ export function extractFinalAgentResponse(text = '') {
   return body;
 }
 
+function formatProviderProfile(profile = {}) {
+  let provider = profile.provider || 'provider';
+  let model = profile.model || 'default';
+  return `${provider}/${model}`;
+}
+
+export function formatProviderFallbackMessage(event = {}) {
+  let from = formatProviderProfile(event.from);
+  let to = formatProviderProfile(event.to);
+  let suffix = event.reason ? ` Reason: ${event.reason}` : '';
+  return `Provider fallback: ${from} -> ${to}.${suffix}`;
+}
+
 /** Routes task notifications from child servers to WebSocket subscribers. */
 export class TaskRouter {
   /**
@@ -63,6 +76,14 @@ export class TaskRouter {
         if (data.arguments) summary.arguments = data.arguments;
         if (data.output) summary.output = data.output;
         if (data.status) summary.status = data.status;
+        if (data.type === 'provider_fallback') {
+          if (data.from) summary.from = data.from;
+          if (data.to) summary.to = data.to;
+          if (data.reason) summary.reason = data.reason;
+          if (data.resourceGroup) summary.resourceGroup = data.resourceGroup;
+          if (data.attempt) summary.attempt = data.attempt;
+          if (data.total) summary.total = data.total;
+        }
 
         // Initialize events array if needed
         let task = sg.get(`tasks/${taskId}`);
@@ -130,10 +151,10 @@ export class TaskRouter {
             let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
             let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
             this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
-            getStateGraph().updateChatTask(chatId, null);
+            getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
           }).catch(err => {
             console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
-            getStateGraph().updateChatTask(chatId, null);
+            getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
           });
         }
       }
@@ -159,14 +180,14 @@ export class TaskRouter {
 
         if (chatId) {
           this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
-          getStateGraph().updateChatTask(chatId, null);
+          getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
         }
         if (chatWsServer) {
           chatWsServer.broadcastTaskEvent(taskId, method, { taskId, chatId });
         }
       }).catch(err => {
         console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
-        if (chatId) getStateGraph().updateChatTask(chatId, null);
+        if (chatId) getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
         if (chatWsServer) {
           chatWsServer.broadcastTaskEvent(taskId, 'chat.error', {
             taskId,
@@ -269,6 +290,15 @@ export class TaskRouter {
         changed = true;
         break;
       }
+
+      case 'provider_fallback': {
+        let text = formatProviderFallbackMessage(data);
+        state.phase = 'thinking';
+        state.thinkingStatus = text;
+        msgs.push({ role: 'system', text });
+        changed = true;
+        break;
+      }
     }
 
     this._streamState.set(taskId, state);
@@ -352,7 +382,7 @@ export class TaskRouter {
       ));
       sg.replaceChatMessages(chatId, msgs);
     }
-    sg.updateChatTask(chatId, null);
+    sg.updateChatTask(chatId, null, { expectedTaskId: taskId });
     sg.updateChat(chatId, { lastTaskStatus: 'cancelled' });
     this.mcpProxy.broadcastMonitor?.({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
   }
@@ -446,7 +476,7 @@ export class TaskRouter {
 
     sg.replaceChatMessages(chatId, msgs);
     this._persistProjectTransactions(chat, taskId, text, parsedResult);
-    sg.updateChatTask(chatId, null);
+    sg.updateChatTask(chatId, null, { expectedTaskId: taskId });
     
 
     let lastTaskStatus = 'done';

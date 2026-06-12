@@ -64,6 +64,7 @@ export function createClaudeAdapter(config = {}) {
           ];
 
           let effectiveModel = model || config.model;
+          if (effectiveModel === 'default') effectiveModel = null;
           if (effectiveModel) {
             args.push('--model', effectiveModel);
           }
@@ -72,7 +73,12 @@ export function createClaudeAdapter(config = {}) {
 
           let spawnOpts = {
             cwd: cwd || process.env.HOME,
-            env: { ...process.env, TERM: 'dumb', CI: '1' },
+            env: {
+              ...process.env,
+              TERM: 'dumb',
+              CI: '1',
+              ...(effectiveModel ? { ANTHROPIC_SMALL_FAST_MODEL: effectiveModel } : {}),
+            },
             stdio: ['pipe', 'pipe', 'pipe'],
             detached: true,
           };

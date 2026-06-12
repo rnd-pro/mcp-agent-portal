@@ -101,6 +101,62 @@ describe('api-routes', () => {
     assert.equal(res.json().networkAccess.lanUrls[0], 'http://192.168.1.10:57580/');
   });
 
+  it('updates agent resource group frontmatter and refreshes the agent catalog', async () => {
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-resource-group-route-'));
+    let agentsDir = path.join(tmpDir, '.agent-portal', 'agents');
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(agentsDir, 'orchestrator.md'), `---
+name: orchestrator
+description: Routes work
+role: orchestrator
+resource_group: reasoning-heavy
+---
+
+Body
+`);
+
+    try {
+      let { createRoutes } = await import('../../src/node/server/api-routes.js');
+      let routes = createRoutes(makeRoutes(tmpDir));
+
+      let assignRes = makeRes();
+      await routes['POST /api/agents/resource-group'](
+        makeReq('POST', '/api/agents/resource-group', {
+          agent: 'orchestrator',
+          resourceGroup: 'implementation',
+        }),
+        assignRes,
+      );
+
+      assert.equal(assignRes.status, 200);
+      assert.equal(assignRes.json().agent.resourceGroup, 'implementation');
+      let assigned = await fs.readFile(path.join(agentsDir, 'orchestrator.md'), 'utf8');
+      assert.match(assigned, /^resource_group: implementation$/m);
+      assert.doesNotMatch(assigned, /^resource_group: reasoning-heavy$/m);
+
+      let catalogRes = makeRes();
+      routes['GET /api/agents'](makeReq('GET', '/api/agents'), catalogRes);
+      let catalogAgent = catalogRes.json().agents.find(agent => agent.slug === 'orchestrator');
+      assert.equal(catalogAgent.resourceGroup, 'implementation');
+
+      let clearRes = makeRes();
+      await routes['POST /api/agents/resource-group'](
+        makeReq('POST', '/api/agents/resource-group', {
+          agent: 'orchestrator',
+          resourceGroup: 'none',
+        }),
+        clearRes,
+      );
+
+      assert.equal(clearRes.status, 200);
+      assert.equal(clearRes.json().agent.resourceGroup, null);
+      let cleared = await fs.readFile(path.join(agentsDir, 'orchestrator.md'), 'utf8');
+      assert.doesNotMatch(cleared, /^resource_group:/m);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('records XR diagnostics posted by browser clients', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let routes = createRoutes(makeRoutes('/tmp/project'));

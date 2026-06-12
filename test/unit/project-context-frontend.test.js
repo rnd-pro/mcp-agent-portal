@@ -151,7 +151,27 @@ describe('project scoped frontend data loading', () => {
 
     assert.match(indexSource, /<base href="\$\{basePath \|\| '\/'\}">/);
     assert.ok(indexSource.indexOf('<base href=') < indexSource.indexOf('<script type="importmap">'));
-    assert.match(indexSource, /src="app\.js\?v=workspace-router-library-contract"/);
+    assert.match(indexSource, /src="app\.js\?v=workspace-router-theme-widget-agent-groups-overlay-tool-card-v2"/);
     assert.ok(appSource.includes('import "./common/base-path.js";'));
+  });
+
+  it('clears legacy layout cache through the safe cache helper during startup', () => {
+    let appSource = readSource('web/app.js');
+    let uiStateSource = readSource('web/common/ui-state.js');
+
+    assert.match(appSource, /function scheduleFrame\(callback\)/);
+    assert.match(appSource, /globalThis\.requestAnimationFrame \|\| globalThis\.window\?\.requestAnimationFrame/);
+    assert.match(appSource, /setTimeout\(callback, 0\);/);
+    assert.match(appSource, /registerGlobalParam\('project'\);\n  handleRoute\(\);\n\n  scheduleFrame\(async \(\) => \{/);
+    assert.match(appSource, /scheduleFrame\(async \(\) => \{/);
+    assert.equal(appSource.includes('requestAnimationFrame(async () => {'), false);
+    assert.match(appSource, /import \{ persistLayout, persistUiValue, readUiValue, writeStringCache \} from "\.\/common\/ui-state\.js";/);
+    assert.match(appSource, /writeStringCache\("pg-explorer-layout", null\);/);
+    assert.match(appSource, /writeStringCache\("pg-layout-v2", null\);/);
+    assert.match(appSource, /writeStringCache\("pg-layout-v3", null\);/);
+    assert.equal(appSource.includes('localStorage.removeItem'), false);
+    assert.match(uiStateSource, /readJsonCache as readJsonCacheSource/);
+    assert.match(uiStateSource, /export function readJsonCache\(key\)[\s\S]*catch \{[\s\S]*return undefined;/);
+    assert.match(uiStateSource, /export function writeStringCache\(key, value\)[\s\S]*catch \{\}/);
   });
 });

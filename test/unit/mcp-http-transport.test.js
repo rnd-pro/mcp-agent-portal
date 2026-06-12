@@ -6,13 +6,13 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mcpCall } from '../../web/common/mcp-call.js';
 
-function mcpRequest(port, body, { method = 'POST', headers = {} } = {}) {
+function mcpRequest(port, body, { method = 'POST', headers = {}, path: reqPath = '/mcp' } = {}) {
   return new Promise((resolve, reject) => {
     let data = typeof body === 'string' ? body : JSON.stringify(body);
     let req = http.request({
       hostname: '127.0.0.1',
       port,
-      path: '/mcp',
+      path: reqPath,
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -52,10 +52,18 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
       tools: [
         { name: 'test_echo', description: 'Echo back input', inputSchema: { type: 'object', properties: { msg: { type: 'string' } } } },
         { name: 'test_add', description: 'Add two numbers', inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } } } },
+        { name: 'call_tool', description: 'Proxy a tool', inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object' } } } },
+        { name: 'delegate_task_readonly', description: 'Delegate readonly task', inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, parent_chat_id: { type: 'string' } } } },
+        { name: 'create_goal', description: 'Create a goal', inputSchema: { type: 'object', properties: { title: { type: 'string' }, chatId: { type: 'string' } } } },
+        { name: 'enqueue_goal_message', description: 'Queue a goal message', inputSchema: { type: 'object', properties: { goalId: { type: 'string' }, text: { type: 'string' }, chatId: { type: 'string' } } } },
       ],
       onToolCall: async (name, args) => {
         if (name === 'test_echo') return { content: [{ type: 'text', text: args.msg || 'empty' }] };
         if (name === 'test_add') return { content: [{ type: 'text', text: String((args.a || 0) + (args.b || 0)) }] };
+        if (name === 'call_tool') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
+        if (name === 'delegate_task_readonly') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
+        if (name === 'create_goal') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
+        if (name === 'enqueue_goal_message') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
         throw new Error(`Unknown tool: ${name}`);
       },
       onResourcesList: async () => ({ resources: [] }),
@@ -152,6 +160,98 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.equal(res.status, 200);
     assert.ok(res.json.result, 'Should have result');
     assert.equal(res.json.result.content[0].text, 'hello world');
+  });
+
+  it('injects session chatId into chat-scoped goal tool calls', async () => {
+    let initRes = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    }, { path: '/mcp?chatId=chat-goal-1' });
+    let sessionId = initRes.headers['mcp-session-id'];
+
+    let res = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 33, method: 'tools/call',
+      params: { name: 'create_goal', arguments: { title: 'Ship goals' } },
+    }, { headers: { 'mcp-session-id': sessionId } });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.json.result.content[0].text), {
+      title: 'Ship goals',
+      chatId: 'chat-goal-1',
+    });
+  });
+
+  it('injects session chatId into chat-scoped goal queue tool calls', async () => {
+    let initRes = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    }, { path: '/mcp?chatId=chat-goal-queue-1' });
+    let sessionId = initRes.headers['mcp-session-id'];
+
+    let res = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 34, method: 'tools/call',
+      params: {
+        name: 'enqueue_goal_message',
+        arguments: { goalId: 'goal-1', text: 'Queue this.' },
+      },
+    }, { headers: { 'mcp-session-id': sessionId } });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.json.result.content[0].text), {
+      goalId: 'goal-1',
+      text: 'Queue this.',
+      chatId: 'chat-goal-queue-1',
+    });
+  });
+
+  it('injects session chatId into nested call_tool delegate calls', async () => {
+    let initRes = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    }, { path: '/mcp?chatId=parent-chat-1' });
+    let sessionId = initRes.headers['mcp-session-id'];
+
+    let res = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 35, method: 'tools/call',
+      params: {
+        name: 'call_tool',
+        arguments: {
+          name: 'delegate_task',
+          arguments: { prompt: 'Sub task' },
+        },
+      },
+    }, { headers: { 'mcp-session-id': sessionId } });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.json.result.content[0].text), {
+      name: 'delegate_task',
+      arguments: {
+        prompt: 'Sub task',
+        parent_chat_id: 'parent-chat-1',
+      },
+    });
+  });
+
+  it('injects session chatId into direct delegate tool calls', async () => {
+    let initRes = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    }, { path: '/mcp?chatId=direct-parent-chat-1' });
+    let sessionId = initRes.headers['mcp-session-id'];
+
+    let res = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 36, method: 'tools/call',
+      params: {
+        name: 'delegate_task_readonly',
+        arguments: { prompt: 'Direct sub task' },
+      },
+    }, { headers: { 'mcp-session-id': sessionId } });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.json.result.content[0].text), {
+      prompt: 'Direct sub task',
+      parent_chat_id: 'direct-parent-chat-1',
+    });
   });
 
   it('tools/call with test_add returns sum', async () => {

@@ -20,7 +20,10 @@ describe('Task State Cache — StateGraph integration', () => {
   });
 
   after(async () => {
-    for (let graph of graphs) graph.flush();
+    for (let graph of graphs) {
+      await graph.flushChatWrites();
+      graph.flush();
+    }
     await fsp.rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -251,5 +254,126 @@ describe('Task State Cache — StateGraph integration', () => {
     sg.deleteChat(id, 'test');
     assert.equal(sg.getChat(id), null);
     await sg.flushChatWrites();
+  });
+
+  it('creates, binds, pauses, resumes, blocks, completes, and deletes chat goals', async () => {
+    let chatDir = path.join(tmpDir, 'goal-chat-files');
+    let sg = createStateGraph({
+      snapshotPath: path.join(tmpDir, 'goal-chat-snap.json'),
+      walPath: path.join(tmpDir, 'goal-chat-wal.log'),
+      chatsDir: chatDir,
+    });
+
+    let { id: chatId } = sg.createChat({ name: 'Goal Chat', projectId: 'project-1' }, 'test');
+    let goal = sg.createChatGoal({
+      chatId,
+      projectId: 'project-1',
+      title: 'Ship goal support',
+      description: 'Create, pause, block, complete, and delete goals from chat.',
+      context: ['state graph', 'mcp tools'],
+      scenarios: ['goal intent'],
+      createdBy: 'orchestrator',
+    }, 'test');
+
+    assert.equal(goal.status, 'active');
+    assert.equal(sg.get(`goals/${goal.id}`).chatId, chatId);
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, goal.id);
+    assert.equal(sg.getChat(chatId).activeGoalId, goal.id);
+
+    let queued = sg.enqueueChatGoalMessage(goal.id, {
+      text: 'Check the browser before finishing.',
+      delivery: 'after',
+    }, 'test');
+    assert.equal(queued.item.status, 'queued');
+    assert.equal(queued.item.delivery, 'after');
+    assert.equal(sg.listChatGoalQueue(goal.id).length, 1);
+
+    let applied = sg.enqueueChatGoalMessage(goal.id, {
+      text: 'Restart the goal with this correction.',
+      delivery: 'goal',
+      status: 'applied',
+    }, 'test');
+    assert.equal(applied.item.delivery, 'goal');
+    assert.equal(applied.item.status, 'applied');
+    assert.ok(applied.item.appliedAt);
+
+    let marked = sg.updateChatGoalQueueMessage(goal.id, queued.item.id, { status: 'applied' }, 'test');
+    assert.equal(marked.item.status, 'applied');
+    assert.ok(marked.item.appliedAt);
+    assert.equal(sg.listChatGoalQueue(goal.id).length, 0);
+
+    sg.enqueueChatGoalMessage(goal.id, { text: 'Queue me', delivery: 'after' }, 'test');
+    let cleared = sg.clearChatGoalQueue(goal.id, {}, 'test');
+    assert.equal(cleared.cleared.length, 1);
+    assert.equal(sg.listChatGoalQueue(goal.id).length, 0);
+
+    let paused = sg.updateChatGoal(goal.id, {
+      status: 'paused',
+      reason: 'User paused the goal',
+      updatedBy: 'user',
+    }, 'test');
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.pausedReason, 'User paused the goal');
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, goal.id);
+    assert.equal(sg.getChat(chatId).activeGoalId, goal.id);
+
+    let resumed = sg.updateChatGoal(goal.id, {
+      status: 'active',
+      updatedBy: 'user',
+    }, 'test');
+    assert.equal(resumed.status, 'active');
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, goal.id);
+    assert.equal(sg.getChat(chatId).activeGoalId, goal.id);
+
+    let blocked = sg.updateChatGoal(goal.id, {
+      status: 'blocked',
+      reason: 'Waiting for npm auth',
+      updatedBy: 'orchestrator',
+    }, 'test');
+    assert.equal(blocked.status, 'blocked');
+    assert.equal(blocked.blockedReason, 'Waiting for npm auth');
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, null);
+    assert.equal(sg.getChat(chatId).activeGoalId, null);
+
+    sg.selectChatGoal(chatId, goal.id, 'test');
+    let completed = sg.updateChatGoal(goal.id, {
+      status: 'completed',
+      reason: 'Verified in browser',
+      updatedBy: 'orchestrator',
+    }, 'test');
+    assert.equal(completed.status, 'completed');
+    assert.ok(completed.completedAt);
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, null);
+    assert.equal(sg.getChat(chatId).activeGoalId, null);
+
+    assert.deepEqual(sg.listChatGoals({ chatId }).map(item => item.id), [goal.id]);
+
+    let deleteGoal = sg.createChatGoal({ chatId, title: 'Delete me' }, 'test');
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, deleteGoal.id);
+    let deleted = sg.deleteChatGoal(deleteGoal.id, 'test');
+    assert.equal(deleted.status, 'deleted');
+    assert.equal(sg.getChatGoal(deleteGoal.id), null);
+    assert.equal(sg.get(`chats/${chatId}`).activeGoalId, null);
+    assert.equal(sg.getChat(chatId).activeGoalId, null);
+  });
+
+  it('clears pending chat tasks only when the terminal event matches the current task', async () => {
+    let chatDir = path.join(tmpDir, 'task-restart-chat-files');
+    let sg = createStateGraph({
+      snapshotPath: path.join(tmpDir, 'task-restart-chat-snap.json'),
+      walPath: path.join(tmpDir, 'task-restart-chat-wal.log'),
+      chatsDir: chatDir,
+    });
+
+    let { id: chatId } = sg.createChat({ name: 'Restart Chat' }, 'test');
+    sg.updateChatTask(chatId, 'task-old');
+    sg.updateChatTask(chatId, 'task-new');
+    sg.updateChatTask(chatId, null, { expectedTaskId: 'task-old' });
+    assert.equal(sg.getChat(chatId).pendingTaskId, 'task-new');
+    assert.equal(sg.get(`chats/${chatId}`).pendingTaskId, 'task-new');
+
+    sg.updateChatTask(chatId, null, { expectedTaskId: 'task-new' });
+    assert.equal(sg.getChat(chatId).pendingTaskId, undefined);
+    assert.equal(sg.get(`chats/${chatId}`).pendingTaskId, null);
   });
 });

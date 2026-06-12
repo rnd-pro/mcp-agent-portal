@@ -127,7 +127,7 @@ describe('mcp-server integration', () => {
     
     const data = JSON.parse(res.content[0].text);
     assert.strictEqual(data.id, 'debug_protocol/03-hypothesize');
-    assert.strictEqual(data.group, 'heavy-thinkers');
+    assert.strictEqual(data.group, 'reasoning-heavy');
     assert.ok(data.content.includes('# Step 3: Formulate Hypothesis'));
   });
 });

@@ -1,8 +1,16 @@
 // @ctx mcp-multiplexer.ctx
 import { createInterface } from 'node:readline';
 import { ToolIndex } from './tool-index.js';
-
-const DEFAULT_CHAT_AGENT = 'orchestrator';
+import {
+  GOAL_META_TOOLS,
+  handlePortalGoalTool,
+  isPortalGoalTool,
+} from './portal-goal-tools.js';
+import {
+  DEFAULT_CHAT_AGENT,
+  isDelegateTool,
+  prepareDelegateTaskCall,
+} from './chat-delegate-routing.js';
 
 /**
  * Smart Tool Gateway — exposes 3 meta-tools instead of proxying all child tools.
@@ -59,6 +67,7 @@ export let META_TOOLS = [
         provider: { type: 'string', description: 'CLI provider for pool chats (e.g. "codex", "gemini", "opencode", "claude"). Optional.' },
         model: { type: 'string', description: 'Model to preselect for this chat. Optional.' },
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode: yolo, auto_edit, or plan. Optional.' },
+        resource_group: { type: 'string', description: 'Resource group for pool orchestration. Optional.' },
         chatType: { type: 'string', description: 'Chat type preset (e.g. "standard", "planning", "review"). Optional.' },
         parentChatId: { type: 'string', description: 'Parent chat ID for delegation hierarchy. Set this when an orchestrator creates a sub-chat for a delegated task. Optional.' },
         projectId: { type: 'string', description: 'Project ID to scope this chat to. Optional — inherits from parent chat if not specified.' },
@@ -91,6 +100,7 @@ export let META_TOOLS = [
         prompt: { type: 'string', description: 'New user prompt to send into the chat.' },
         provider: { type: 'string', description: 'Override CLI provider for this turn. Defaults to saved chat provider.' },
         model: { type: 'string', description: 'Override model for this turn. Defaults to saved chat model.' },
+        resource_group: { type: 'string', description: 'Override resource group for this turn. Defaults to saved chat resource group.' },
         session_id: { type: 'string', description: 'Override provider session/thread ID. Defaults to saved chat sessionId.' },
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Override access mode. Defaults to saved chat approval mode.' },
         agent: { type: 'string', description: 'Override agent role slug. Alias for agent_slug.' },
@@ -98,11 +108,14 @@ export let META_TOOLS = [
         cwd: { type: 'string', description: 'Override working directory. Defaults to the chat project path or portal project root.' },
         context_mode: { type: 'string', enum: ['auto', 'off'], description: 'Context package mode passed to delegate_task. Default: auto.' },
         files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths passed to delegate_task as structured context hints.' },
+        goalMessageIds: { type: 'array', items: { type: 'string' }, description: 'Queued goal message IDs to mark applied and inject into this run.' },
+        goal_message_ids: { type: 'array', items: { type: 'string' }, description: 'Alias for goalMessageIds.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600.' },
       },
       required: ['chatId', 'prompt'],
     },
   },
+  ...GOAL_META_TOOLS,
   {
     name: 'remember',
     description: 'Save a key-value pair in the global persistent memory. Use this to remember user preferences, environment specifics, or cross-workflow insights.',
@@ -131,6 +144,28 @@ export let META_TOOLS = [
 function _extractTaskId(result) {
   let text = result?.content?.map(c => c.text || '').join('\n') || '';
   return text.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] || null;
+}
+
+function normalizeIdList(value) {
+  if (!value) return [];
+  let list = Array.isArray(value) ? value : [value];
+  return [...new Set(list.map(id => String(id || '').trim()).filter(Boolean))];
+}
+
+function broadcastGoalUpdate(proxyManager, goal) {
+  if (!goal?.id) return;
+  proxyManager.broadcastMonitor?.({
+    jsonrpc: '2.0',
+    method: 'patch',
+    params: { path: 'goals.updated', value: goal },
+  });
+  if (goal.chatId) {
+    proxyManager.broadcastMonitor?.({
+      jsonrpc: '2.0',
+      method: 'patch',
+      params: { path: 'chats.updated', value: goal.chatId },
+    });
+  }
 }
 
 /**
@@ -162,11 +197,19 @@ export async function resumeChatTool(proxyManager, args = {}) {
   }
   if (!cwd) cwd = proxyManager.projectRoot !== '/' ? proxyManager.projectRoot : process.env.HOME;
 
-  let provider = args.provider || chat.provider || undefined;
-  let model = args.model || chat.model || undefined;
-  let sessionId = args.session_id || args.sessionId || chat.sessionId || undefined;
-  let approvalMode = args.approval_mode || chat.approval_mode || undefined;
-  let agentSlug = args.agent || args.agent_slug || chat.agent || DEFAULT_CHAT_AGENT;
+  let goalQueueMessages = [];
+  let goalMessageIds = normalizeIdList(args.goalMessageIds || args.goal_message_ids);
+  let activeGoalId = chat.activeGoalId || sg.get(`chats/${chatId}`)?.activeGoalId || null;
+  if (activeGoalId && goalMessageIds.length) {
+    let updatedGoal = null;
+    for (let messageId of goalMessageIds) {
+      let result = sg.updateChatGoalQueueMessage(activeGoalId, messageId, { status: 'applied' }, 'mcp');
+      if (!result) continue;
+      goalQueueMessages.push(result.item);
+      updatedGoal = result.goal;
+    }
+    if (updatedGoal) broadcastGoalUpdate(proxyManager, updatedGoal);
+  }
 
   sg.appendChatMessage(chatId, { role: 'user', text: prompt });
   proxyManager.broadcastMonitor?.({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
@@ -177,16 +220,21 @@ export async function resumeChatTool(proxyManager, args = {}) {
     cwd,
     chat_id: chatId,
   };
-  if (provider) delegateArgs.provider = provider;
-  if (model) delegateArgs.model = model;
-  if (sessionId) delegateArgs.session_id = sessionId;
-  if (approvalMode) delegateArgs.approval_mode = approvalMode;
-  if (agentSlug && agentSlug !== 'none') delegateArgs.agent_slug = agentSlug;
+  if (args.provider) delegateArgs.provider = args.provider;
+  if (args.model) delegateArgs.model = args.model;
+  if (args.resource_group) delegateArgs.resource_group = args.resource_group;
+  if (args.session_id || args.sessionId) delegateArgs.session_id = args.session_id || args.sessionId;
+  if (args.approval_mode) delegateArgs.approval_mode = args.approval_mode;
+  if (args.agent || args.agent_slug) delegateArgs.agent_slug = args.agent || args.agent_slug;
   if (args.context_mode === 'auto' || args.context_mode === 'off') delegateArgs.context_mode = args.context_mode;
+  if (goalQueueMessages.length) delegateArgs.goalQueueMessages = goalQueueMessages;
   if (Array.isArray(args.files)) {
     let files = [...new Set(args.files.map(file => String(file || '').trim()).filter(Boolean))];
     if (files.length) delegateArgs.files = files;
   }
+
+  let prepared = await prepareDelegateTaskCall(proxyManager, 'delegate_task', delegateArgs, { source: 'mcp' });
+  delegateArgs = prepared.args;
 
   let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
     name: 'delegate_task',
@@ -209,10 +257,11 @@ export async function resumeChatTool(proxyManager, args = {}) {
         ok: true,
         chatId,
         taskId,
-        provider: provider || null,
-        model: model || null,
-        approval_mode: approvalMode || null,
-        session_id: sessionId || null,
+        provider: delegateArgs.provider || null,
+        model: delegateArgs.model || null,
+        resource_group: delegateArgs.resource_group || null,
+        approval_mode: delegateArgs.approval_mode || null,
+        session_id: delegateArgs.session_id || null,
         delegate: result?.content?.[0]?.text || '',
       }, null, 2),
     }],
@@ -492,13 +541,15 @@ export class MCPMultiplexer {
           if (parentMeta) projectId = parentMeta.projectId || null;
         }
         
+        let resourceGroup = args.resource_group || null;
         let chat = sg.createChat({
           name: args.name,
           adapter: args.adapter || 'pool',
           agent: args.agent || args.agent_slug || ((args.adapter || 'pool') === 'pool' ? DEFAULT_CHAT_AGENT : null),
-          provider: args.provider || null,
-          model: args.model || null,
+          provider: resourceGroup && resourceGroup !== 'none' ? null : (args.provider || null),
+          model: resourceGroup && resourceGroup !== 'none' ? null : (args.model || null),
           approval_mode: args.approval_mode || null,
+          resource_group: resourceGroup,
           chatType: args.chatType || null,
           parentChatId: args.parentChatId || null,
           projectId,
@@ -534,6 +585,16 @@ export class MCPMultiplexer {
 
       if (toolName === 'resume_chat') {
         let result = await resumeChatTool(this.proxyManager, args);
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result,
+        });
+        return;
+      }
+
+      if (isPortalGoalTool(toolName)) {
+        let result = await handlePortalGoalTool(this.proxyManager, toolName, args, 'mcp');
         this.sendToIde({
           jsonrpc: '2.0',
           id: msg.id,
@@ -597,25 +658,23 @@ export class MCPMultiplexer {
           return;
         }
 
-        if (['delegate_task', 'delegate_task_readonly'].includes(realToolName) && realArgs.parent_chat_id && !realArgs.chat_id) {
+        if (isDelegateTool(realToolName)) {
           try {
-            let { getStateGraph } = await import('../state-graph.js');
-            let sg = getStateGraph();
-            let parentMeta = sg.get(`chats/${realArgs.parent_chat_id}`);
-            let chat = sg.createChat({
-              name: (realArgs.prompt || '').substring(0, 40) + ((realArgs.prompt || '').length > 40 ? '...' : ''),
-              adapter: 'pool',
-              agent: realArgs.agent_slug || null,
-              provider: realArgs.provider || null,
-              model: realArgs.model || null,
-              approval_mode: realArgs.approval_mode || null,
-              parentChatId: realArgs.parent_chat_id,
-              projectId: parentMeta ? parentMeta.projectId : null
-            }, 'mcp');
-            realArgs.chat_id = chat.id;
-            this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+            let prepared = await prepareDelegateTaskCall(this.proxyManager, realToolName, realArgs, { source: 'mcp' });
+            realArgs = prepared.args;
+            if (prepared.createdChat) {
+              this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: prepared.createdChat } });
+            }
           } catch (e) {
-            console.error('[MCP Multiplexer] failed to auto-create chat for delegate_task:', e.message);
+            this.sendToIde({
+              jsonrpc: '2.0',
+              id: msg.id,
+              result: {
+                content: [{ type: 'text', text: `Failed to prepare delegate_task: ${e.message}` }],
+                isError: true,
+              },
+            });
+            return;
           }
         }
 
@@ -686,7 +745,7 @@ export class MCPMultiplexer {
       let req = this.requestMap.get(msg.id);
       this.requestMap.delete(msg.id);
       
-      if (req.toolName === 'delegate_task' && msg.result && msg.result.content) {
+      if (isDelegateTool(req.toolName) && msg.result && msg.result.content) {
         let delegateText = msg.result.content[0]?.text || '';
         let taskIdMatch = delegateText.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
         let taskId = taskIdMatch?.[1];

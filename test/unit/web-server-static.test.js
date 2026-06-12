@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   HTML_IN_CANVAS_ORIGIN_TRIAL_ENV,
   createStaticFileHeaders,
+  resolveStaticFileTarget,
   resolveWebRoot,
   resolveHtmlInCanvasOriginTrialToken,
 } from '../../src/node/server/web-server.js';
@@ -45,6 +46,27 @@ test('web server honors explicit web root override', () => {
   let root = resolveWebRoot({ env: { AGENT_PORTAL_WEB_ROOT: '/tmp/agent-portal-web' } });
 
   assert.equal(root, '/tmp/agent-portal-web');
+});
+
+test('web server exposes shared iso helpers without exposing arbitrary source routes', () => {
+  let tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-static-'));
+  try {
+    let target = resolveStaticFileTarget('/src/iso/chat-goals.js', {
+      rootDir: tmp,
+      webRoot: path.join(tmp, 'web'),
+      packagesDir: path.join(tmp, 'packages'),
+    });
+    let arbitrarySource = resolveStaticFileTarget('/src/node/state-graph.js', {
+      rootDir: tmp,
+      webRoot: path.join(tmp, 'web'),
+      packagesDir: path.join(tmp, 'packages'),
+    });
+
+    assert.equal(target, path.join(tmp, 'src', 'iso', 'chat-goals.js'));
+    assert.equal(arbitrarySource, path.join(tmp, 'web', '/src/node/state-graph.js'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('web server prefers built web root when production dist exists', () => {

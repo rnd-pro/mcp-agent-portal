@@ -11,6 +11,7 @@ import {
   extractChatTitleFromAgentText,
   getRoute,
   isTerminalWakeError,
+  layoutOverlayStack,
   loadVoiceSettings,
   matchVoiceCommandAtEnd,
   matchVoiceCommandInText,
@@ -37,6 +38,12 @@ import {
   mergeAttachedContext,
   removeAttachedContext,
 } from '../../services/chat-context.js';
+import {
+  formatChatGoalIntentPromptBlock,
+  formatChatGoalPromptBlock,
+  formatChatGoalQueuePromptBlock,
+  toChatGoalContextItem,
+} from '../../../src/iso/chat-goals.js';
 import {
   applyProjectTransactions,
   applyProjectTransactionsFromMessages,
@@ -104,6 +111,10 @@ export class AgentChat extends Symbiote {
   _voiceResponseLastAgentKey = '';
   _speakingVoiceResponse = false;
   _voiceLanguageMode = 'auto';
+  _overlayLayoutBound = false;
+  _overlayLayoutFrame = 0;
+  _overlayLayoutResizeObserver = null;
+  _overlayLayoutSyncHandler = null;
   init$ = {
     messages: [],
     messageItems: [],
@@ -115,6 +126,22 @@ export class AgentChat extends Symbiote {
     composerFooterControls: [],
     chatParams: {},
     attachedContext: [],
+    isComposerActionMenuOpen: false,
+    planningModeActive: false,
+    goalModeActive: false,
+    actionMenuOpenTitle: tPortal('chat.actions.open'),
+    actionMenuPlanningTitle: tPortal('chat.actions.planningMode'),
+    actionMenuGoalTitle: tPortal('chat.actions.goalMode'),
+    activeGoal: null,
+    goalCancelTitle: tPortal('chat.goal.cancelIntent'),
+    goalPauseTitle: tPortal('chat.goal.pause'),
+    goalResumeTitle: tPortal('chat.goal.resume'),
+    goalStopTitle: tPortal('chat.goal.stop'),
+    goalDeleteTitle: tPortal('chat.goal.delete'),
+    goalQueueModeTitle: tPortal('chat.goal.queueMode'),
+    goalQueueNowTitle: tPortal('chat.goal.queueNow'),
+    goalQueueAfterTitle: tPortal('chat.goal.queueAfter'),
+    goalQueueClearTitle: tPortal('chat.goal.queueClear'),
     isInputDisabled: true,
     isSubagentChat: false,
     inputPlaceholder: tPortal('chat.placeholder.ready'),
@@ -177,13 +204,22 @@ export class AgentChat extends Symbiote {
       onMeta: (meta) => this._renderLiveStatus(meta),
       onProjectTransaction: (detail) => this._applyProjectTransactionEvent(detail),
       onPulledChat: (chat, detail) => this._handlePulledChat(chat, detail),
-      onDone: () => {
+      onTaskStarted: (detail = {}) => {
+        this._activeTaskId = detail.taskId || this._activeTaskId || '';
+        this._setSending(true);
+      },
+      onDone: (detail = {}) => {
+        if (this._isStaleTaskEvent(detail)) return;
+        this._activeTaskId = '';
         this._pendingAgentTitleChatId = '';
         this._setSending(false);
         this._renderLiveStatus(null);
         this._updateEmptyState();
+        this._dispatchNextQueuedGoalMessage();
       },
-      onError: (_errText) => {
+      onError: (_errText, detail = {}) => {
+        if (this._isStaleTaskEvent(detail)) return;
+        this._activeTaskId = '';
         this._setSending(false, { speak: false });
         this._renderLiveStatus(null);
         this._updateEmptyState();
@@ -223,20 +259,40 @@ export class AgentChat extends Symbiote {
     this.sub('adapterMeta', () => this._updateComposerFooter());
     this.sub('chatParams', () => {
       if (!this._updatingOptions) this._updateComposerFooter();
+      this._syncActionMenuFlags();
       this._updateInputState();
     });
     this.sub('isSubagentChat', () => this._updateInputState());
     this.sub('inputVal', () => this._syncComposerComponent());
     this.sub('attachedContext', () => this._syncComposerComponent());
+    this.sub('activeGoal', () => {
+      this._syncActiveGoalContext();
+      this._syncActionMenuFlags();
+      this._updateComposerFooter();
+    });
+    this.sub('goalModeActive', () => {
+      this._syncActionMenuDom();
+      this._syncGoalStatusDom();
+    });
+    this.sub('isComposerActionMenuOpen', () => {
+      if (this.ref.composerActionMenu) {
+        this.ref.composerActionMenu.hidden = !this.$.isComposerActionMenuOpen;
+      }
+      this._queueOverlayStackSync();
+      this._syncComposerComponent();
+    });
     this.sub('isInputDisabled', () => this._syncComposerComponent());
     this.sub('inputPlaceholder', () => this._syncComposerComponent());
     this.sub('composerFooterControls', () => this._syncComposerComponent());
 
     // Sync state from router after all listeners are attached (fixes cold load bug)
     this._syncChatFromRouter();
+    this._syncActionMenuDom();
+    this._syncGoalStatusDom();
   }
 
   disconnectedCallback() {
+    this._disposeOverlayStackLayout();
     this._stopWakeListening({ disableMode: true });
     this._stopVoiceUiTimer();
     this._audioRecorder.cancel();
@@ -316,19 +372,98 @@ export class AgentChat extends Symbiote {
     workspace.addEventListener('chat-workspace-submit', () => this._sendMessage());
     workspace.addEventListener('chat-workspace-send', () => this._handleComposerSend());
     workspace.addEventListener('chat-workspace-voice-intent', (event) => this._handleWorkspaceVoiceIntent(event.detail || {}));
+    workspace.addEventListener('chat-workspace-leading-intent', (event) => this._handleWorkspaceLeadingIntent(event.detail || {}));
     workspace.addEventListener('chat-workspace-footer-intent', (event) => this._handleWorkspaceFooterIntent(event.detail || {}));
     workspace.addEventListener('chat-workspace-context-intent', (event) => this._handleWorkspaceContextIntent(event.detail || {}));
 
     this._syncComposerComponent();
     this._setupVoiceControls();
+    this._bindOverlayStackLayout();
+  }
+
+  _bindOverlayStackLayout() {
+    if (this._overlayLayoutBound) return;
+    this._overlayLayoutBound = true;
+    this._overlayLayoutSyncHandler = () => this._queueOverlayStackSync();
+    globalThis.addEventListener?.('resize', this._overlayLayoutSyncHandler);
+    globalThis.addEventListener?.('scroll', this._overlayLayoutSyncHandler, { capture: true });
+    if (typeof ResizeObserver === 'function') {
+      this._overlayLayoutResizeObserver = new ResizeObserver(this._overlayLayoutSyncHandler);
+      for (let element of [
+        this._getWorkspace(),
+        this._getComposer(),
+        this.ref.goalStatus,
+        this.ref.composerActionMenu,
+      ]) {
+        if (element) this._overlayLayoutResizeObserver.observe(element);
+      }
+    }
+    this._queueOverlayStackSync();
+  }
+
+  _disposeOverlayStackLayout() {
+    if (this._overlayLayoutFrame) {
+      cancelAnimationFrame(this._overlayLayoutFrame);
+      this._overlayLayoutFrame = 0;
+    }
+    if (this._overlayLayoutSyncHandler) {
+      globalThis.removeEventListener?.('resize', this._overlayLayoutSyncHandler);
+      globalThis.removeEventListener?.('scroll', this._overlayLayoutSyncHandler, { capture: true });
+      this._overlayLayoutSyncHandler = null;
+    }
+    this._overlayLayoutResizeObserver?.disconnect?.();
+    this._overlayLayoutResizeObserver = null;
+    this._overlayLayoutBound = false;
+  }
+
+  _queueOverlayStackSync() {
+    if (this._overlayLayoutFrame) return;
+    this._overlayLayoutFrame = requestAnimationFrame(() => {
+      this._overlayLayoutFrame = 0;
+      this._syncOverlayStackLayout();
+    });
+  }
+
+  _syncOverlayStackLayout() {
+    let workspace = this._getWorkspace();
+    let composer = this._getComposer();
+    let statusEl = this.ref.goalStatus;
+    if (!workspace || !composer) return;
+    let container = workspace.querySelector?.('.chat-workspace-main') || workspace;
+    let menu = this.ref.composerActionMenu;
+    let menuAnchor = composer.querySelector?.('.composer-leading-btn')
+      || composer.shadowRoot?.querySelector?.('.composer-leading-btn')
+      || composer;
+    let overlays = [];
+    if (menu) {
+      overlays.push({
+        element: menu,
+        anchor: menuAnchor,
+        align: 'start',
+        inlineOffset: -4,
+        caretTarget: menuAnchor,
+        caretProperty: '--composer-action-menu-caret-left',
+      });
+    }
+    if (statusEl) overlays.push(statusEl);
+    let result = layoutOverlayStack({
+      anchor: composer,
+      overlays,
+      container,
+      placement: 'block-start',
+      align: 'center',
+      reserveTarget: workspace,
+    });
+    workspace.setOverlayStackReserve?.(result.reserveBlockSize || 0);
   }
 
   _syncComposerComponent() {
     this._getWorkspace()?.setComposerState?.({
       value: this.$.inputVal || '',
-      attachedContext: this.$.attachedContext || [],
+      attachedContext: this._composerAttachedContext(),
       disabled: this.$.isInputDisabled,
       placeholder: this.$.inputPlaceholder || '',
+      leadingControls: this._buildComposerLeadingControls(),
       footerControls: this.$.composerFooterControls || [],
       sending: this._isSending,
       voiceControls: this._buildVoiceControlsConfig(),
@@ -373,8 +508,16 @@ export class AgentChat extends Symbiote {
     if (detail.id) this._handleComposerParamChange(detail);
   }
 
+  _handleWorkspaceLeadingIntent(detail = {}) {
+    if (detail.id === 'actions') this._toggleComposerActionMenu(detail.anchorRect || null);
+  }
+
   _handleWorkspaceContextIntent(detail = {}) {
     if (detail.sourceEvent === 'chat-composer-context-remove') {
+      if (String(detail.key || '').startsWith('goal:')) {
+        this._clearActiveGoal();
+        return;
+      }
       this.$.attachedContext = removeAttachedContext(this.$.attachedContext, detail.key);
       return;
     }
@@ -386,6 +529,10 @@ export class AgentChat extends Symbiote {
   _handleComposerSend() {
     let targetChatId = this._loadedChatId || dashState.activeChatId;
     if (this._isSending && targetChatId) {
+      if (this.$.activeGoal?.id && String(this.$.inputVal || '').trim()) {
+        this._handleInFlightGoalMessage();
+        return;
+      }
       let chat = dashState.chats?.find(c => c.id === targetChatId);
       let taskId = chat?.pendingTaskId || this.$.chatParams?.pendingTaskId;
       this._wsClient?.stop(targetChatId, taskId);
@@ -406,12 +553,13 @@ export class AgentChat extends Symbiote {
       delete updatedParams.model;
     }
     if (id === 'agent') {
-      updatedParams.approval_mode = this._getAgentDefaultApprovalMode(val);
       // Auto-select resource group from agent binding
       let agentGroup = this._getAgentResourceGroup(val);
       if (agentGroup) {
         updatedParams.resource_group = agentGroup;
       }
+      updatedParams.approval_mode = this._getResourceGroupDefaultApprovalMode(updatedParams.resource_group)
+        || this._getAgentDefaultApprovalMode(val);
     }
     if (id === 'resource_group') {
       // When switching groups, clear manual provider/model overrides
@@ -419,6 +567,7 @@ export class AgentChat extends Symbiote {
         delete updatedParams.provider;
         delete updatedParams.model;
       }
+      updatedParams.approval_mode = this._getResourceGroupDefaultApprovalMode(val) || updatedParams.approval_mode;
     }
 
     this.$.chatParams = updatedParams;
@@ -456,6 +605,364 @@ export class AgentChat extends Symbiote {
 
   _attachContext(item) {
     this.$.attachedContext = mergeAttachedContext(this.$.attachedContext || [], item);
+  }
+
+  _composerAttachedContext() {
+    let attachedContext = this.$.attachedContext || [];
+    let goal = this.$.activeGoal || null;
+    let goalItem = toChatGoalContextItem(goal);
+    return goalItem ? mergeAttachedContext(attachedContext, goalItem) : attachedContext;
+  }
+
+  _isGoalIntentActive() {
+    return this.$.chatParams?.goalIntentActive === true || this.$.chatParams?.goalIntentActive === 'true';
+  }
+
+  _goalQueueMode() {
+    return this.$.chatParams?.goalQueueMode === 'goal' ? 'goal' : 'after';
+  }
+
+  _setGoalQueueMode(mode, { persist = true } = {}) {
+    let goalQueueMode = mode === 'goal' ? 'goal' : 'after';
+    let currentParams = this.$.chatParams || {};
+    this.$.chatParams = { ...currentParams, goalQueueMode };
+    this._syncGoalStatusDom();
+    if (!persist) return;
+    let chatId = this._loadedChatId || dashState.activeChatId;
+    if (!chatId || this._loadingChatState) return;
+    fetch('/api/chats/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId, goalQueueMode }),
+    }).catch((err) => {
+      console.warn('[AgentChat] goal queue mode update failed:', err.message);
+    });
+  }
+
+  _setGoalIntentActive(active, { persist = true } = {}) {
+    let goalIntentActive = Boolean(active);
+    let currentParams = this.$.chatParams || {};
+    this.$.chatParams = { ...currentParams, goalIntentActive };
+    this.$.goalModeActive = goalIntentActive;
+    this._syncGoalStatusDom();
+    if (!persist) return;
+    let chatId = this._loadedChatId || dashState.activeChatId;
+    if (!chatId || this._loadingChatState) return;
+    fetch('/api/chats/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId, goalIntentActive }),
+    }).catch((err) => {
+      console.warn('[AgentChat] goal intent update failed:', err.message);
+    });
+  }
+
+  _handleGoalControl() {
+    this.closeComposerActionMenu();
+    this._setGoalIntentActive(!this._isGoalIntentActive());
+  }
+
+  _toggleComposerActionMenu(anchorRect = null) {
+    if (this.$.isComposerActionMenuOpen) {
+      this.closeComposerActionMenu();
+      return;
+    }
+    this.openComposerActionMenu(anchorRect);
+  }
+
+  openComposerActionMenu(anchorRect = null) {
+    this.$.isComposerActionMenuOpen = true;
+    if (this.ref.composerActionMenu) {
+      this.ref.composerActionMenu.hidden = false;
+    }
+    this._positionComposerActionMenu(anchorRect);
+    requestAnimationFrame(() => this._positionComposerActionMenu(anchorRect));
+    this._queueOverlayStackSync();
+    this._syncActionMenuFlags();
+  }
+
+  closeComposerActionMenu() {
+    this.$.isComposerActionMenuOpen = false;
+    if (this.ref.composerActionMenu) {
+      this.ref.composerActionMenu.hidden = true;
+    }
+    this._syncOverlayStackLayout();
+    this._queueOverlayStackSync();
+  }
+
+  onComposerActionClick(event) {
+    let action = event.currentTarget?.dataset?.action || '';
+    if (action === 'planning') {
+      this._togglePlanningMode();
+      this.closeComposerActionMenu();
+      return;
+    }
+    if (action === 'goal') {
+      this._handleGoalControl();
+    }
+  }
+
+  _togglePlanningMode() {
+    let currentParams = this.$.chatParams || {};
+    let currentIsPlan = currentParams.approval_mode === 'plan';
+    let fallback = this._getAgentDefaultApprovalMode(currentParams.agent);
+    let nextMode = currentIsPlan ? (fallback === 'plan' ? 'yolo' : fallback) : 'plan';
+    this._handleComposerParamChange({ id: 'approval_mode', value: nextMode });
+    this._syncActionMenuFlags();
+  }
+
+  _syncActionMenuFlags() {
+    this.$.planningModeActive = this.$.chatParams?.approval_mode === 'plan';
+    this.$.goalModeActive = this._isGoalIntentActive();
+    this._syncActionMenuDom();
+    this._syncGoalStatusDom();
+  }
+
+  _syncActionMenuDom() {
+    let menu = this.ref.composerActionMenu;
+    if (!menu) return;
+    let states = {
+      planning: Boolean(this.$.planningModeActive),
+      goal: Boolean(this.$.goalModeActive),
+    };
+    for (let [action, active] of Object.entries(states)) {
+      let item = menu.querySelector(`.composer-action-item[data-action="${action}"]`);
+      if (!item) continue;
+      item.setAttribute('aria-pressed', active ? 'true' : 'false');
+      let switchEl = item.querySelector('.composer-action-switch');
+      if (switchEl) switchEl.dataset.active = active ? 'true' : 'false';
+    }
+  }
+
+  _positionComposerActionMenu(anchorRect = null) {
+    let menu = this.ref.composerActionMenu;
+    if (!menu) return;
+    menu.dataset.placement = 'above';
+    this._syncOverlayStackLayout();
+    this._queueOverlayStackSync();
+  }
+
+  _goalStatusLabel(status = '') {
+    let key = `chat.goal.status.${status || 'active'}`;
+    let label = tPortal(key);
+    return label === `portal.${key}` ? (status || 'active') : label;
+  }
+
+  _syncGoalStatusDom() {
+    let statusEl = this.ref.goalStatus;
+    if (!statusEl) return;
+    let goal = this.$.activeGoal || null;
+    let intentActive = this._isGoalIntentActive();
+    let shouldShow = Boolean(goal?.id) || intentActive;
+    statusEl.hidden = !shouldShow;
+    if (!shouldShow) return;
+
+    let status = goal?.status || 'intent';
+    statusEl.dataset.status = status;
+    if (this.ref.goalStatusIcon) {
+      this.ref.goalStatusIcon.textContent = goal?.id ? 'flag' : 'track_changes';
+    }
+    if (this.ref.goalStatusTitle) {
+      this.ref.goalStatusTitle.textContent = goal?.title || tPortal('chat.goal.awaitingTitle');
+    }
+    if (this.ref.goalStatusMeta) {
+      this.ref.goalStatusMeta.textContent = goal?.id
+        ? this._goalStatusLabel(status)
+        : tPortal('chat.goal.awaitingMeta');
+    }
+
+    let isActive = status === 'active';
+    let isPaused = status === 'paused';
+    let queue = Array.isArray(goal?.queue) ? goal.queue.filter(item => item?.status === 'queued') : [];
+    let queueMode = this._goalQueueMode();
+    if (this.ref.goalCancelButton) this.ref.goalCancelButton.hidden = Boolean(goal?.id);
+    if (this.ref.goalPauseButton) this.ref.goalPauseButton.hidden = !goal?.id || !isActive;
+    if (this.ref.goalResumeButton) this.ref.goalResumeButton.hidden = !goal?.id || !isPaused;
+    if (this.ref.goalStopButton) this.ref.goalStopButton.hidden = !goal?.id;
+    if (this.ref.goalDeleteButton) this.ref.goalDeleteButton.hidden = !goal?.id;
+    if (this.ref.goalQueuePanel) this.ref.goalQueuePanel.hidden = !goal?.id;
+    if (this.ref.goalQueueLabel) {
+      this.ref.goalQueueLabel.textContent = tPortal('chat.goal.queueCount', { count: queue.length });
+    }
+    if (this.ref.goalQueueNowButton) {
+      this.ref.goalQueueNowButton.dataset.active = queueMode === 'goal' ? 'true' : 'false';
+      this.ref.goalQueueNowButton.setAttribute('aria-pressed', queueMode === 'goal' ? 'true' : 'false');
+    }
+    if (this.ref.goalQueueAfterButton) {
+      this.ref.goalQueueAfterButton.dataset.active = queueMode === 'after' ? 'true' : 'false';
+      this.ref.goalQueueAfterButton.setAttribute('aria-pressed', queueMode === 'after' ? 'true' : 'false');
+    }
+    if (this.ref.goalQueueClearButton) this.ref.goalQueueClearButton.hidden = queue.length === 0;
+    this._queueOverlayStackSync();
+  }
+
+  async onGoalLifecycleClick(event) {
+    let action = event.currentTarget?.dataset?.goalAction || '';
+    if (action === 'cancel-intent') {
+      this._setGoalIntentActive(false);
+      return;
+    }
+    if (action === 'queue-goal') {
+      this._setGoalQueueMode('goal');
+      return;
+    }
+    if (action === 'queue-after') {
+      this._setGoalQueueMode('after');
+      return;
+    }
+    if (action === 'clear-queue') {
+      await this._clearGoalQueue();
+      return;
+    }
+    await this._updateGoalLifecycle(action);
+  }
+
+  async _recordGoalQueueMessage({ text, delivery = 'after', status = 'queued' } = {}) {
+    let goalId = this.$.activeGoal?.id || '';
+    if (!goalId || !String(text || '').trim()) return null;
+    try {
+      let res = await fetch('/api/goals/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goalId, text, delivery, status }),
+      });
+      let data = await res.json();
+      if (!res.ok) return null;
+      this.$.activeGoal = data.goal || this.$.activeGoal;
+      return data.message || null;
+    } catch (err) {
+      console.warn('[AgentChat] goal queue update failed:', err.message);
+      return null;
+    }
+  }
+
+  async _clearGoalQueue() {
+    let goalId = this.$.activeGoal?.id || '';
+    if (!goalId) return;
+    try {
+      let res = await fetch('/api/goals/queue/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goalId }),
+      });
+      let data = await res.json();
+      if (res.ok) this.$.activeGoal = data.goal || this.$.activeGoal;
+    } catch (err) {
+      console.warn('[AgentChat] goal queue clear failed:', err.message);
+    }
+  }
+
+  async _handleInFlightGoalMessage({ voiceTranscribed = false } = {}) {
+    if (!this.$.activeGoal?.id) return;
+    if (this._goalQueueMode() === 'goal') {
+      let taskId = this._activeTaskId || this.$.chatParams?.pendingTaskId || '';
+      if (!taskId) {
+        await this._queueComposerInputAfterGoal();
+        return;
+      }
+      let queuedMessage = await this._recordGoalQueueMessage({
+        text: this.$.inputVal,
+        delivery: 'goal',
+        status: 'applied',
+      });
+      await this._sendMessage({ voiceTranscribed, restartTaskId: taskId, queuedGoalMessages: queuedMessage ? [queuedMessage] : [] });
+      return;
+    }
+    await this._queueComposerInputAfterGoal();
+  }
+
+  async _queueComposerInputAfterGoal() {
+    let prompt = String(this.$.inputVal || '').trim();
+    if (!prompt) return;
+    let contextText = formatAttachedContextBlock(this.$.attachedContext || []);
+    let text = contextText ? contextText + prompt : prompt;
+    let message = await this._recordGoalQueueMessage({ text, delivery: 'after', status: 'queued' });
+    if (!message) return;
+    this.$.inputVal = '';
+    this.$.attachedContext = [];
+    this._getComposer()?.setValue?.('');
+    this._getComposer()?.resetInputHeight?.();
+  }
+
+  async _dispatchNextQueuedGoalMessage() {
+    if (this._dispatchingQueuedGoalMessage || !this.$.activeGoal?.id || !this._isGoalIntentActive()) return;
+    let queue = Array.isArray(this.$.activeGoal.queue) ? this.$.activeGoal.queue : [];
+    let item = queue.find(message => message?.status === 'queued' && message?.delivery === 'after' && message?.text);
+    if (!item) return;
+    this._dispatchingQueuedGoalMessage = true;
+    try {
+      let res = await fetch('/api/goals/queue/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goalId: this.$.activeGoal.id, messageId: item.id }),
+      });
+      let data = await res.json();
+      if (!res.ok) return;
+      this.$.activeGoal = data.goal || this.$.activeGoal;
+      await this._sendMessage({
+        promptOverride: item.text,
+        queuedGoalMessages: [data.message || item],
+      });
+    } catch (err) {
+      console.warn('[AgentChat] queued goal dispatch failed:', err.message);
+    } finally {
+      this._dispatchingQueuedGoalMessage = false;
+    }
+  }
+
+  async _updateGoalLifecycle(action) {
+    let goalId = this.$.activeGoal?.id || '';
+    if (!goalId) return;
+    let endpoints = {
+      pause: '/api/goals/pause',
+      resume: '/api/goals/resume',
+      stop: '/api/goals/stop',
+      delete: '/api/goals/delete',
+    };
+    let endpoint = endpoints[action];
+    if (!endpoint) return;
+    try {
+      let res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goalId }),
+      });
+      let data = await res.json();
+      if (!res.ok) return;
+      if (action === 'pause') {
+        this.$.activeGoal = data.goal || this.$.activeGoal;
+        this._setGoalIntentActive(false);
+        return;
+      }
+      if (action === 'resume') {
+        this.$.activeGoal = data.goal || this.$.activeGoal;
+        this._setGoalIntentActive(true);
+        return;
+      }
+      this.$.activeGoal = null;
+      this._setGoalIntentActive(false);
+    } catch (err) {
+      console.warn('[AgentChat] goal lifecycle update failed:', err.message);
+    }
+  }
+
+  _clearActiveGoal() {
+    let chatId = this._loadedChatId || dashState.activeChatId || null;
+    this.$.activeGoal = null;
+    this._setGoalIntentActive(false, { persist: false });
+    if (!chatId) return;
+    fetch('/api/chats/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId, activeGoalId: null, goalIntentActive: false }),
+    }).catch((err) => {
+      console.warn('[AgentChat] goal clear failed:', err.message);
+    });
+  }
+
+  _syncActiveGoalContext() {
+    this._syncComposerComponent();
+    this._syncGoalStatusDom();
   }
 
   _updateEmptyState() {
@@ -991,6 +1498,7 @@ export class AgentChat extends Symbiote {
       commandHints: recording && this._voiceCommandMode ? this._voiceCommandHints() : [],
     });
     this._voicePreview = composer.getVoicePreviewElement?.() || null;
+    this._queueOverlayStackSync();
   }
 
   _startVoiceUiTimer() {
@@ -1013,6 +1521,7 @@ export class AgentChat extends Symbiote {
     this._stopVoiceUiTimer();
     this._getComposer()?.setVoicePreview?.({ mode: 'error', text: message });
     this._voicePreview = this._getComposer()?.getVoicePreviewElement?.() || null;
+    this._queueOverlayStackSync();
     this._voiceInterimText = '';
     this._voiceResultText = '';
     this._voiceAudioUrl = null;
@@ -1041,6 +1550,7 @@ export class AgentChat extends Symbiote {
     this._voiceCommandTriggered = false;
     this._voiceCommandHandling = false;
     this._voiceCommandTextOverride = '';
+    this._queueOverlayStackSync();
   }
 
   async _toggleRecording({ reloadSettings = true } = {}) {
@@ -1273,7 +1783,8 @@ export class AgentChat extends Symbiote {
                 paramValue = typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val;
               }
             } else if (p.id === 'approval_mode') {
-              paramValue = this._getAgentDefaultApprovalMode(currentParams.agent);
+              paramValue = this._getResourceGroupDefaultApprovalMode(currentParams.resource_group)
+                || this._getAgentDefaultApprovalMode(currentParams.agent);
             } else if (p.id === 'model') {
               // Use preferred models from resource groups instead of hardcoded defaults
               let currentCtx = adapter === 'pool' ? currentParams.provider : adapter;
@@ -1308,17 +1819,8 @@ export class AgentChat extends Symbiote {
           }
         }
       }
-      // Adapter/resource defaults belong to the chat payload; the composer only keeps a compact settings entry point.
-      this.$.composerFooterControls = [{
-        id: 'settings',
-        kind: 'button',
-        icon: 'settings',
-        label: ' ',
-        title: 'Configure Resource Groups',
-        priority: 1,
-        compact: true,
-        className: 'composer-settings-btn',
-      }];
+      // Adapter/resource defaults belong to the chat payload; the composer only keeps compact entry points.
+      this.$.composerFooterControls = this._buildComposerFooterControls({ settings: true });
       // Batch-persist defaults only for local user/composer changes.
       if (paramsChanged) {
         this.$.chatParams = { ...currentParams };
@@ -1332,16 +1834,51 @@ export class AgentChat extends Symbiote {
         }
       }
     } else {
-      this.$.composerFooterControls = [];
+      this.$.composerFooterControls = this._buildComposerFooterControls({ settings: false });
     }
     this._updatingOptions = false;
   }
 
+  _buildComposerFooterControls({ settings = true } = {}) {
+    let controls = [];
+    if (settings) {
+      controls.push({
+        id: 'settings',
+        kind: 'button',
+        icon: 'settings',
+        label: ' ',
+        title: tPortal('chat.configureResourceGroups'),
+        priority: 1,
+        compact: true,
+        className: 'composer-settings-btn',
+      });
+    }
+    return controls;
+  }
+
+  _buildComposerLeadingControls() {
+    return [{
+      id: 'actions',
+      kind: 'button',
+      icon: 'add',
+      label: ' ',
+      title: this.$.actionMenuOpenTitle,
+      priority: 0,
+      compact: true,
+      active: Boolean(this.$.isComposerActionMenuOpen),
+      className: 'composer-action-menu-btn',
+    }];
+  }
+
   _getAgentDefaultApprovalMode(agentSlug) {
-    if (!agentSlug || agentSlug === 'none') return 'yolo';
-    let agentParam = this.$.adapterMeta?.pool?.parameters?.find(p => p.id === 'agent');
-    let option = agentParam?.options?.find(opt => (typeof opt === 'string' ? opt : opt.val) === agentSlug);
-    return typeof option === 'object' && option.approvalMode ? option.approvalMode : 'yolo';
+    return this._getResourceGroupDefaultApprovalMode(this._getAgentResourceGroup(agentSlug)) || 'yolo';
+  }
+
+  _getResourceGroupDefaultApprovalMode(groupName) {
+    if (!groupName || groupName === 'none') return null;
+    let groups = this.$.adapterMeta?._resourceGroupDefaults?.groups || [];
+    let group = groups.find(item => item?.name === groupName);
+    return group?.approval_mode || group?.approvalMode || null;
   }
 
   _getAgentResourceGroup(agentSlug) {
@@ -1366,12 +1903,13 @@ export class AgentChat extends Symbiote {
       next.agent = this._getDefaultPoolAgentSlug();
     }
     if (next.agent && next.agent !== 'none') {
-      if (!next.approval_mode) {
-        next.approval_mode = this._getAgentDefaultApprovalMode(next.agent);
-      }
       let agentGroup = this._getAgentResourceGroup(next.agent);
       if (agentGroup && (!next.resource_group || next.resource_group === 'none')) {
         next.resource_group = agentGroup;
+      }
+      if (!next.approval_mode) {
+        next.approval_mode = this._getResourceGroupDefaultApprovalMode(next.resource_group)
+          || this._getAgentDefaultApprovalMode(next.agent);
       }
     }
     return next;
@@ -1472,9 +2010,24 @@ export class AgentChat extends Symbiote {
     return tPortal('settings.voice.transcriptionNote');
   }
 
-  _buildAgentPrompt(prompt, { voiceTranscribed = false, requestChatTitle = false } = {}) {
+  _buildAgentPrompt(prompt, { voiceTranscribed = false, requestChatTitle = false, queuedGoalMessages = [] } = {}) {
     let parts = [];
     if (voiceTranscribed) parts.push(this._voiceTranscriptionPromptNote());
+    let body = String(prompt || '');
+    if (this._isGoalIntentActive()) {
+      let goalBlock = formatChatGoalPromptBlock(this.$.activeGoal);
+      if (goalBlock && !body.includes('[Active Goal]')) {
+        parts.push(goalBlock);
+        let queueBlock = formatChatGoalQueuePromptBlock(this.$.activeGoal, queuedGoalMessages);
+        if (queueBlock && !body.includes('[Goal Queue]')) parts.push(queueBlock);
+      } else if (!goalBlock && !body.includes('[Goal Intent]')) {
+        let routeParams = parseQuery(getRoute().query || '');
+        parts.push(formatChatGoalIntentPromptBlock({
+          chatId: this._loadedChatId || dashState.activeChatId || '',
+          projectId: dashState.activeProjectId || routeParams.project || '',
+        }));
+      }
+    }
     parts.push(prompt);
     if (requestChatTitle) {
       parts.push(buildChatTitleRequestNote(getLocalization().locale));
@@ -1482,12 +2035,18 @@ export class AgentChat extends Symbiote {
     return parts.join('\n\n');
   }
 
-  async _sendMessage({ voiceTranscribed = false } = {}) {
+  async _sendMessage({ voiceTranscribed = false, restartTaskId = '', queuedGoalMessages = [], promptOverride = '' } = {}) {
     this._syncComposerParamsFromDom();
     if (this.$.isInputDisabled) return;
-    if (this._isSending) return;
+    if (this._isSending && !restartTaskId) {
+      if (this.$.activeGoal?.id && String(this.$.inputVal || '').trim()) {
+        await this._handleInFlightGoalMessage({ voiceTranscribed });
+      }
+      return;
+    }
     let chatId = this._loadedChatId || dashState.activeChatId;
-    let prompt = this.$.inputVal.trim();
+    let overridePrompt = String(promptOverride || '').trim();
+    let prompt = overridePrompt || this.$.inputVal.trim();
     if (!prompt) return;
     let sendParams = this._getChatSendParams();
     let persistedParams = this._getPersistedChatParams(sendParams);
@@ -1537,7 +2096,7 @@ export class AgentChat extends Symbiote {
       });
     }
 
-    let attachedContext = this.$.attachedContext || [];
+    let attachedContext = overridePrompt ? [] : (this.$.attachedContext || []);
     let attachedFiles = extractAttachedFilePaths(attachedContext);
     if (attachedFiles.length) {
       let existingFiles = Array.isArray(sendParams.files) ? sendParams.files : [];
@@ -1548,14 +2107,18 @@ export class AgentChat extends Symbiote {
     if (contextText) {
       prompt = contextText + prompt;
     }
-    let agentPrompt = this._buildAgentPrompt(prompt, { voiceTranscribed, requestChatTitle });
+    let agentPrompt = this._buildAgentPrompt(prompt, { voiceTranscribed, requestChatTitle, queuedGoalMessages });
+    let sendRunId = (this._sendRunId || 0) + 1;
+    this._sendRunId = sendRunId;
 
     this._snapshotVoiceResponseBaseline();
     this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
-    this.$.inputVal = '';
-    this.$.attachedContext = []; // Clear context after send
-    this._getComposer()?.setValue?.('');
-    this._getComposer()?.resetInputHeight?.();
+    if (!overridePrompt) {
+      this.$.inputVal = '';
+      this.$.attachedContext = []; // Clear context after send
+      this._getComposer()?.setValue?.('');
+      this._getComposer()?.resetInputHeight?.();
+    }
     this._setSending(true);
 
     // Persist
@@ -1573,7 +2136,9 @@ export class AgentChat extends Symbiote {
       if (adapter === 'pool') {
         this._setBackgroundActive(true);
 
-        reply = await this._wsClient.send(chatId, agentPrompt, sendParams, this._sessionId);
+        reply = restartTaskId
+          ? await this._wsClient.restart(chatId, agentPrompt, sendParams, this._sessionId, restartTaskId)
+          : await this._wsClient.send(chatId, agentPrompt, sendParams, this._sessionId);
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
@@ -1635,12 +2200,18 @@ export class AgentChat extends Symbiote {
     } catch (err) {
       this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.errorWithMessage', { message: err.message }) }];
     }
-    this._setSending(false);
-    this._setBackgroundActive(false);
+    if (this._sendRunId === sendRunId) {
+      this._setSending(false);
+      this._setBackgroundActive(false);
+    }
   }
 
   _handlePulledChat(chat, detail = {}) {
     let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+    if ('activeGoal' in (chat || {}) || 'activeGoalId' in (chat || {})) {
+      this.$.activeGoal = chat.activeGoal || null;
+    }
+    if (detail.final) this._setLoadedChatParams(chat || {});
     if (!detail.final) return messages;
     return this._applyAgentGeneratedChatTitle(chat?.id, messages);
   }
@@ -1704,6 +2275,10 @@ export class AgentChat extends Symbiote {
     }
     delete params.chatId;
     delete params.sessionId;
+    delete params.activeGoal;
+    delete params.activeGoalId;
+    delete params.goalIntentActive;
+    delete params.goalQueueMode;
     delete params.prompt;
     delete params.type;
     if (params.resource_group && params.resource_group !== 'none') {
@@ -1714,7 +2289,7 @@ export class AgentChat extends Symbiote {
   }
 
   _getPersistedChatParams(params = this.$.chatParams || {}) {
-    let allowed = ['agent', 'provider', 'model', 'approval_mode', 'resource_group', 'chatType'];
+    let allowed = ['agent', 'provider', 'model', 'approval_mode', 'resource_group', 'chatType', 'goalIntentActive', 'goalQueueMode'];
     let result = {};
     let hasResourceGroup = params.resource_group && params.resource_group !== 'none';
     for (let key of allowed) {
@@ -1755,6 +2330,7 @@ export class AgentChat extends Symbiote {
       this.$.chatName = chat.name || this.$.chatName || 'Chat';
       this.$.chatAdapter = chat.adapter || this.$.chatAdapter || 'pool';
       this.$.isSubagentChat = Boolean(chat.parentChatId);
+      this.$.activeGoal = chat.activeGoal || null;
       let msgs = this._cleanLoadedMessages(chat.messages || []);
       if (!sameChatMessages(msgs, this.$.messages)) this.$.messages = msgs;
       this._applyProjectTransactionEvent({
@@ -1792,6 +2368,8 @@ export class AgentChat extends Symbiote {
       'projectTransactions',
       'sessionId',
       'pendingTaskId',
+      'activeGoal',
+      'activeGoalId',
       'createdAt',
       'updatedAt',
     ];
@@ -1827,6 +2405,8 @@ export class AgentChat extends Symbiote {
       this.$.chatName = tPortal('text.newChat');
       this.$.chatAdapter = 'pool';
       this.$.chatParams = {};
+      this.$.activeGoal = null;
+      this._activeTaskId = '';
       this.$.isSubagentChat = false;
       this._sessionId = null;
       this.$.sessionMetaHtml = '';
@@ -1856,6 +2436,7 @@ export class AgentChat extends Symbiote {
       this.$.chatName = chat.name || 'Chat';
       this.$.chatAdapter = chat.adapter || 'pool';
       this.$.isSubagentChat = Boolean(chat.parentChatId);
+      this.$.activeGoal = chat.activeGoal || null;
       let msgs = this._cleanLoadedMessages(chat.messages || []);
       this.$.messages = msgs;
       this._applyProjectTransactionEvent({
@@ -1863,6 +2444,7 @@ export class AgentChat extends Symbiote {
         transactions: chat.projectTransactions || [],
       });
       this._sessionId = chat.sessionId || null;
+      this._activeTaskId = chat.pendingTaskId || '';
       
       this._setLoadedChatParams(chat);
       
@@ -1887,6 +2469,11 @@ export class AgentChat extends Symbiote {
    */
   _renderLiveStatus(meta) {
     this._getTranscript()?.renderLiveStatus(meta);
+  }
+
+  _isStaleTaskEvent(detail = {}) {
+    let taskId = detail?.taskId || '';
+    return Boolean(taskId && this._activeTaskId && taskId !== this._activeTaskId);
   }
 
   /**

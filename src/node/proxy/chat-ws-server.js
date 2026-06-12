@@ -2,6 +2,7 @@ import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
+import { prepareDelegateTaskCall } from './chat-delegate-routing.js';
 
 const DEFAULT_CHAT_AGENT = 'orchestrator';
 
@@ -26,6 +27,8 @@ export class ChatWsServer {
           let msg = JSON.parse(data.toString());
           if (msg.method === 'chat.send') {
             await this._handleChatSend(ws, msg.params || {});
+          } else if (msg.method === 'chat.restart') {
+            await this._handleChatRestart(ws, msg.params || {});
           } else if (msg.method === 'chat.resume') {
             await this._handleChatResume(ws, msg.params || {});
           } else if (msg.method === 'chat.cancel') {
@@ -50,13 +53,14 @@ export class ChatWsServer {
 
   async _handleChatSend(ws, params) {
     let { chatId, prompt, sessionId, timeout, model, provider, approval_mode, resource_group, context_mode } = params;
-    let agentSlug = params.agent || params.agent_slug || DEFAULT_CHAT_AGENT;
+    let agentSlug = params.agent || params.agent_slug || null;
     if (!prompt) return;
 
     let sg = getStateGraph();
     if (!chatId || !sg.getChat(chatId)) {
       let cwd = params.cwd || this.mcpProxy.projectRoot;
       let proj = sg.addProject({ path: cwd, name: path.basename(cwd) });
+      agentSlug = agentSlug || DEFAULT_CHAT_AGENT;
 
       let chat = sg.createChat({
         name: prompt.substring(0, 40) + (prompt.length > 40 ? '...' : ''),
@@ -64,7 +68,8 @@ export class ChatWsServer {
         agent: agentSlug && agentSlug !== 'none' ? agentSlug : null,
         provider: provider || null,
         model: model || null,
-        approval_mode: approval_mode || null
+        approval_mode: approval_mode || null,
+        resource_group: resource_group || null,
       });
       chatId = chat.id;
       sg.appendChatMessage(chatId, { role: 'user', content: prompt });
@@ -93,6 +98,8 @@ export class ChatWsServer {
       }
     }
 
+    if (!agentSlug) agentSlug = DEFAULT_CHAT_AGENT;
+
     if (resource_group && resource_group !== 'none') {
       provider = null;
       model = null;
@@ -116,6 +123,8 @@ export class ChatWsServer {
       delegateArgs.chat_id = chatId;
     }
 
+    delegateArgs = (await prepareDelegateTaskCall(this.mcpProxy, 'delegate_task', delegateArgs, { source: 'chat' })).args;
+
     try {
       let result = await this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
         name: 'delegate_task',
@@ -138,7 +147,7 @@ export class ChatWsServer {
         this.subscribe(taskId, ws, chatId);
         getStateGraph().updateChatTask(chatId, taskId);
 
-                if (this.mcpProxy.taskRouter) {
+        if (this.mcpProxy.taskRouter) {
           this.mcpProxy.taskRouter.replayCachedNotifications(taskId);
         }
       }
@@ -155,6 +164,26 @@ export class ChatWsServer {
     }
   }
 
+  async _handleChatRestart(ws, params) {
+    let { chatId } = params;
+    let taskId = params.taskId;
+    if (!taskId && chatId) {
+      let chat = getStateGraph().getChat(chatId);
+      taskId = chat?.pendingTaskId;
+    }
+    if (taskId) {
+      try {
+        await this.mcpProxy.requestFromChild('agent-pool', 'tools/call', {
+          name: 'cancel_task',
+          arguments: { task_id: taskId },
+        });
+      } catch (err) {
+        console.error('[Chat] Failed to cancel task before restart:', err.message);
+      }
+    }
+    await this._handleChatSend(ws, params);
+  }
+
   async _handleChatResume(ws, params) {
     let { chatId, taskId } = params;
     if (!taskId) return;
@@ -165,13 +194,13 @@ export class ChatWsServer {
       let result = await fetchTaskResult(this.mcpProxy, taskId);
       let text = result.content?.find(c => c.text && !c.text.startsWith('__EVENTS__:'))?.text || '';
       
-      if (text && !text.includes('still running')) {
+          if (text && !text.includes('still running')) {
         if (text.includes('Task not found')) {
           this._recoverLostTask(ws, chatId, taskId);
         } else {
           ws.send(JSON.stringify({ method: 'chat.done', params: { chatId, taskId } }));
           this.unsubscribe(taskId);
-          getStateGraph().updateChatTask(chatId, null);
+          getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
         }
       } else {
         // Task still running — client will start pulling messages via /api/chats/get
@@ -205,7 +234,7 @@ export class ChatWsServer {
         ws.send(JSON.stringify({ method: 'chat.done', params: { taskId } }));
       }
       this.unsubscribe(taskId);
-      sg.updateChatTask(chatId, null);
+      sg.updateChatTask(chatId, null, { expectedTaskId: taskId });
     } else {
       // Task status unknown — check if PID is still alive
       let pid = task?.pid;
@@ -219,7 +248,7 @@ export class ChatWsServer {
         ws.send(JSON.stringify({ method: 'chat.error', params: { taskId, text: 'Task was lost (server restart). Please try again.' } }));
       }
       this.unsubscribe(taskId);
-      sg.updateChatTask(chatId, null);
+      sg.updateChatTask(chatId, null, { expectedTaskId: taskId });
     }
   }
 
@@ -253,12 +282,12 @@ export class ChatWsServer {
     this.chatSubscriptions.delete(taskId);
   }
 
-  broadcastTaskEvent(taskId, method, params) {
+  broadcastTaskEvent(taskId, method, params = {}) {
     let clients = this.chatSubscriptions.get(taskId);
     if (clients) {
-      // Include chatId so the client can filter events by chat ownership
-      let chatId = params.chatId ?? this.taskChatMap.get(taskId);
-      let payload = JSON.stringify({ method, params: { ...params, chatId } });
+      let eventParams = params && typeof params === 'object' ? params : {};
+      let chatId = eventParams.chatId ?? this.taskChatMap.get(taskId);
+      let payload = JSON.stringify({ method, params: { ...eventParams, chatId } });
       for (let client of clients) {
         if (client.readyState === 1) {
           client.send(payload);

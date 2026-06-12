@@ -1,11 +1,76 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { readConfig } from '../../config-store.js';
 import { getStateGraph } from '../../state-graph.js';
 import { getFlywheelStats } from '../../mlops/flywheel.js';
-import { listAdapterTypes, getAgentList } from '../../adapters/index.js';
+import { listAdapterTypes, getAgentList, invalidateAgentList } from '../../adapters/index.js';
 import { REGISTRY, getRegistryByCategory } from '../marketplace-registry.js';
 import { getLogPath } from '../../ops/runtime.js';
 import { createXrDiagnosticLogStore } from '../xr-diagnostics-log.js';
 import { json, parseBody } from './http.js';
+
+function normalizeAgentSlug(value) {
+  let slug = String(value || '').trim();
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(slug)) {
+    throw new Error('Invalid agent slug');
+  }
+  return slug;
+}
+
+function normalizeAgentResourceGroup(value) {
+  let group = String(value || '').trim();
+  if (!group || group === 'none') return null;
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(group)) {
+    throw new Error('Invalid resource group');
+  }
+  return group;
+}
+
+function yamlScalar(value) {
+  let text = String(value || '');
+  return /^[A-Za-z0-9._-]+$/.test(text) ? text : JSON.stringify(text);
+}
+
+function setFrontmatterScalar(content, key, value) {
+  let marker = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  let line = value ? `${key}: ${yamlScalar(value)}` : null;
+  if (!marker) {
+    return line ? `---\n${line}\n---\n\n${String(content || '').replace(/^\n+/, '')}` : content;
+  }
+
+  let before = content.slice(0, marker.index);
+  let body = content.slice(marker.index + marker[0].length);
+  let lines = marker[1].split(/\r?\n/);
+  let found = false;
+  let nextLines = [];
+  for (let current of lines) {
+    if (new RegExp(`^${key}\\s*:`).test(current)) {
+      found = true;
+      if (line) nextLines.push(line);
+    } else {
+      nextLines.push(current);
+    }
+  }
+  if (!found && line) nextLines.push(line);
+  return `${before}---\n${nextLines.join('\n').replace(/\n+$/, '')}\n---\n${body}`;
+}
+
+async function updateAgentResourceGroup(projectRoot, agentSlug, resourceGroup) {
+  let slug = normalizeAgentSlug(agentSlug);
+  let group = normalizeAgentResourceGroup(resourceGroup);
+  let agentsDir = path.join(path.resolve(projectRoot), '.agent-portal', 'agents');
+  let agentPath = path.join(agentsDir, `${slug}.md`);
+  let realDir = await fs.realpath(agentsDir);
+  let targetDir = await fs.realpath(path.dirname(agentPath));
+  if (targetDir !== realDir) throw new Error('Agent path must stay inside .agent-portal/agents');
+  let stat = await fs.lstat(agentPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Agent file is not editable');
+  let content = await fs.readFile(agentPath, 'utf8');
+  let nextContent = setFrontmatterScalar(content, 'resource_group', group);
+  await fs.writeFile(agentPath, nextContent, 'utf8');
+  invalidateAgentList();
+  return { slug, resourceGroup: group };
+}
 
 /**
  * @param {{ proxyManager: any, projectRoot: string }} ctx
@@ -69,6 +134,20 @@ export function createCoreRoutes(ctx) {
 
     'GET /api/agents': (_req, res) => {
       json(res, { agents: getAgentList() });
+    },
+
+    'POST /api/agents/resource-group': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let agent = await updateAgentResourceGroup(
+          projectRoot,
+          body.agent || body.agentSlug || body.slug,
+          body.resourceGroup || body.resource_group,
+        );
+        json(res, { ok: true, agent });
+      } catch (error) {
+        json(res, { error: error.message }, 400);
+      }
     },
 
     'GET /api/xr-diagnostics/logs': (_req, res) => {

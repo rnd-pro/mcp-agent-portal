@@ -156,6 +156,62 @@ async function run() {
     ws.close();
   });
 
+  await test('chat.send uses persisted chat agent when agent param is omitted', async () => {
+    let ws = await connectChatClient();
+    let { getStateGraph } = await import('../../src/node/state-graph.js');
+    let sg = getStateGraph();
+    let project = sg.addProject({ path: process.cwd(), name: 'agent-portal' });
+    let chat = sg.createChat({
+      name: 'Persisted agent chat',
+      projectId: project.id,
+      agent: 'qa-engineer',
+      resource_group: 'verification',
+      provider: 'gemini',
+      model: 'default',
+    }, 'test');
+    let originalRequest = proxyManager.requestFromChild;
+    let capturedArgs = null;
+    proxyManager.requestFromChild = async (_server, _method, payload) => {
+      capturedArgs = payload.arguments;
+      return {
+        isError: false,
+        content: [{ type: 'text', text: 'Delegated task 11111111-2222-4333-8444-555555555555' }]
+      };
+    };
+
+    try {
+      let receivedDelegated = new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.delegated')), 10000);
+        ws.on('message', (data) => {
+          let msg = JSON.parse(data.toString());
+          if (msg.method === 'chat.delegated') {
+            clearTimeout(timer);
+            resolve(msg);
+          }
+        });
+      });
+
+      ws.send(JSON.stringify({
+        method: 'chat.send',
+        params: {
+          chatId: chat.id,
+          prompt: 'use persisted agent',
+        }
+      }));
+
+      await receivedDelegated;
+
+      assert.equal(capturedArgs.agent_slug, 'qa-engineer');
+      assert.equal(capturedArgs.resource_group, 'verification');
+      assert.equal(capturedArgs.provider, undefined);
+      assert.equal(capturedArgs.model, undefined);
+    } finally {
+      proxyManager.requestFromChild = originalRequest;
+      sg.deleteChat(chat.id, 'test');
+      ws.close();
+    }
+  });
+
   await test('chat.send forwards structured files and context mode to delegate_task', async () => {
     let ws = await connectChatClient();
     let originalRequest = proxyManager.requestFromChild;

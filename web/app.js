@@ -38,9 +38,10 @@ import "./panels/SkillManager/SkillMetadata.js";
 import "./panels/PeerReview/PeerReview.js";
 import "./components/ProjectTabs/ProjectTabs.js";
 import "./components/PgWorkspace/PgWorkspace.js";
+import "./components/ThemeEditorPanel/ThemeEditorPanel.js";
 import { state as dashState, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
-import { persistLayout, persistUiValue, readUiValue } from "./common/ui-state.js";
+import { persistLayout, persistUiValue, readUiValue, writeStringCache } from "./common/ui-state.js";
 
 export const state = { skeleton: null, skeletonProjectId: null, activeFile: null, ws: null, monitorEvents: [] };
 export { formatStats } from "symbiote-ui/display/format-utils";
@@ -255,6 +256,15 @@ function connectDashboardWS(e, t, o, _att = 0) {
 /** @type {string|null|undefined} Current project ID from URL — undefined = never set */
 let _currentProjectId = undefined;
 
+function scheduleFrame(callback) {
+  let raf = globalThis.requestAnimationFrame || globalThis.window?.requestAnimationFrame;
+  if (typeof raf === 'function') {
+    raf(callback);
+    return;
+  }
+  setTimeout(callback, 0);
+}
+
 function getWorkspaceId(projectId) {
   return projectId || 'global';
 }
@@ -394,7 +404,7 @@ function handleRoute() {
   // Explorer file routing
   if (section === 'explorer' && subPath) {
     state.activeFile = subPath;
-    requestAnimationFrame(() => {
+    scheduleFrame(() => {
       emit('file-selected', { path: subPath, projectId, fromRoute: true });
     });
   }
@@ -418,9 +428,26 @@ function applyRuntimeTransaction(projectId, transaction) {
   return project;
 }
 
+function getActiveWorkspaceLayout() {
+  let workspace = document.querySelector('pg-workspace:not([hidden])');
+  return workspace?.ref?.layout || workspace?.querySelector?.('panel-layout') || null;
+}
+
+function openThemeEditorPanel(event) {
+  event.preventDefault?.();
+  let layout = getActiveWorkspaceLayout();
+  if (!layout || typeof layout.openPanel !== 'function') return;
+  layout.openPanel('theme-editor', {
+    reuseExisting: true,
+    uiInvoked: true,
+    source: 'cascade-theme-widget',
+  });
+}
+
 async function u() {
   n(document.documentElement, o);
   document.documentElement.dataset.themeScope = 'default-provider';
+  document.addEventListener('cascade-theme-open-full', openThemeEditorPanel);
   let runtimeApi = {
     getProject: (projectId = null) => getPortalProjectRuntime(projectId).getProject(),
     applyTransaction: applyRuntimeTransaction,
@@ -435,10 +462,12 @@ async function u() {
     if (transaction) applyRuntimeTransaction(projectId, transaction);
   });
 
-  requestAnimationFrame(async () => {
-    // Project is global route context; chat is section-scoped and should not leak across menu sections.
-    registerGlobalParam('project');
+  // Initial route mount must not depend on frame scheduling in embedded webviews.
+  registerGlobalParam('project');
+  handleRoute();
 
+  scheduleFrame(async () => {
+    // Project is global route context; chat is section-scoped and should not leak across menu sections.
     await customElements.whenDefined('pg-workspace');
 
     // File selection routing
@@ -480,9 +509,9 @@ async function u() {
       updateTopbarPath();
     } catch {}
 
-    localStorage.removeItem("pg-explorer-layout");
-    localStorage.removeItem("pg-layout-v2");
-    localStorage.removeItem("pg-layout-v3");
+    writeStringCache("pg-explorer-layout", null);
+    writeStringCache("pg-layout-v2", null);
+    writeStringCache("pg-layout-v3", null);
 
     // Initial sidebar + route setup
     let savedProjectId = readUiValue('ui/activeProjectId', 'pg-active-project-id', null);

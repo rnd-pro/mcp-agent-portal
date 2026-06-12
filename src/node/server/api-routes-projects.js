@@ -55,6 +55,14 @@ export function createProjectRoutes(deps = {}) {
       params: { path: 'chats.created', value: chat },
     });
   };
+  let broadcastGoalUpdate = (goal) => {
+    proxyManager?.broadcastMonitor?.({
+      jsonrpc: '2.0',
+      method: 'patch',
+      params: { path: 'goals.updated', value: goal },
+    });
+    if (goal?.chatId) broadcastChatUpdate(goal.chatId);
+  };
 
   return {
     // ── Project History ───────────────────────────────────
@@ -149,6 +157,211 @@ export function createProjectRoutes(deps = {}) {
       json(res, { chats: sg.listChats() });
     },
 
+    'GET /api/goals': (req, res) => {
+      let url = new URL(req.url, 'http://localhost');
+      let sg = getStateGraph();
+      json(res, {
+        goals: sg.listChatGoals({
+          chatId: url.searchParams.get('chatId') || null,
+          projectId: url.searchParams.get('projectId') || null,
+          status: url.searchParams.get('status') || null,
+        }),
+      });
+    },
+
+    'POST /api/goals': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        if (!body.title) return json(res, { error: 'Missing title' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.createChatGoal(body, 'http');
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/get': async (req, res) => {
+      try {
+        let { goalId, id } = await parseBody(req);
+        let sg = getStateGraph();
+        let goal = sg.getChatGoal(goalId || id);
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/select': async (req, res) => {
+      try {
+        let { chatId, goalId } = await parseBody(req);
+        if (!chatId) return json(res, { error: 'Missing chatId' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.selectChatGoal(chatId, goalId || null, 'http');
+        if (goal) broadcastGoalUpdate(goal);
+        else broadcastChatUpdate(chatId);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/block': async (req, res) => {
+      try {
+        let { goalId, id, reason } = await parseBody(req);
+        if (!(goalId || id) || !reason) return json(res, { error: 'Missing goalId or reason' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.updateChatGoal(goalId || id, { status: 'blocked', reason }, 'http');
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/pause': async (req, res) => {
+      try {
+        let { goalId, id, reason } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.updateChatGoal(goalId || id, { status: 'paused', reason: reason || 'Paused by user' }, 'http');
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/resume': async (req, res) => {
+      try {
+        let { goalId, id } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.updateChatGoal(goalId || id, { status: 'active' }, 'http');
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/stop': async (req, res) => {
+      try {
+        let { goalId, id, reason } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.updateChatGoal(goalId || id, { status: 'completed', reason: reason || 'Stopped by user' }, 'http');
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/complete': async (req, res) => {
+      try {
+        let { goalId, id, reason } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.updateChatGoal(goalId || id, { status: 'completed', reason }, 'http');
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/delete': async (req, res) => {
+      try {
+        let { goalId, id } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let goal = sg.deleteChatGoal(goalId || id, 'http');
+        if (!goal) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(goal);
+        json(res, { ok: true, goal });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/queue': async (req, res) => {
+      try {
+        let { goalId, id, text, delivery, status } = await parseBody(req);
+        if (!(goalId || id) || !text) return json(res, { error: 'Missing goalId or text' }, 400);
+        let sg = getStateGraph();
+        let result = sg.enqueueChatGoalMessage(goalId || id, {
+          text,
+          delivery: delivery || 'after',
+          status: status || 'queued',
+          createdBy: 'http',
+        }, 'http');
+        if (!result) return json(res, { error: 'Goal not found or message empty' }, 404);
+        broadcastGoalUpdate(result.goal);
+        json(res, { ok: true, goal: result.goal, message: result.item });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/queue/list': async (req, res) => {
+      try {
+        let { goalId, id, delivery, status } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let messages = sg.listChatGoalQueue(goalId || id, {
+          delivery: delivery || null,
+          status: status || 'queued',
+        });
+        if (!messages) return json(res, { error: 'Goal not found' }, 404);
+        json(res, { ok: true, messages });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/queue/apply': async (req, res) => {
+      try {
+        let { goalId, id, messageId, message_id } = await parseBody(req);
+        if (!(goalId || id) || !(messageId || message_id)) {
+          return json(res, { error: 'Missing goalId or messageId' }, 400);
+        }
+        let sg = getStateGraph();
+        let result = sg.updateChatGoalQueueMessage(
+          goalId || id,
+          messageId || message_id,
+          { status: 'applied' },
+          'http',
+        );
+        if (!result) return json(res, { error: 'Queued goal message not found' }, 404);
+        broadcastGoalUpdate(result.goal);
+        json(res, { ok: true, goal: result.goal, message: result.item });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/goals/queue/clear': async (req, res) => {
+      try {
+        let { goalId, id, status } = await parseBody(req);
+        if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
+        let sg = getStateGraph();
+        let result = sg.clearChatGoalQueue(goalId || id, { status: status || 'queued' }, 'http');
+        if (!result) return json(res, { error: 'Goal not found' }, 404);
+        broadcastGoalUpdate(result.goal);
+        json(res, { ok: true, goal: result.goal, cleared: result.cleared });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
     'POST /api/chats': async (req, res) => {
       try {
         let opts = await parseBody(req);
@@ -168,6 +381,7 @@ export function createProjectRoutes(deps = {}) {
         let sg = getStateGraph();
         let chat = sg.getChat(id);
         if (!chat) return json(res, { error: 'Chat not found' }, 404);
+        if (chat.activeGoalId) chat.activeGoal = sg.getChatGoal(chat.activeGoalId);
         json(res, chat);
       } catch (err) {
         json(res, { error: err.message }, 400);

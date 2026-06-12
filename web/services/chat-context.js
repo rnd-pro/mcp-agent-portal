@@ -85,8 +85,38 @@ const GRAPH_STORY_BEAT_HANDLER = {
   },
 };
 
+const GOAL_TYPE_HANDLER = {
+  normalize(input) {
+    let goalId = String(input.goalId || input.id || '').trim();
+    let name = String(input.name || input.title || goalId).trim();
+    return {
+      type: 'goal',
+      key: `goal:${goalId}`,
+      goalId,
+      name: name || 'Goal',
+      title: input.title || `Goal: ${name || goalId}`,
+      icon: input.icon || 'flag',
+      status: input.status || 'active',
+      source: input.source || 'goal',
+    };
+  },
+  contextKey(item) {
+    return item.key || `goal:${item.goalId}`;
+  },
+  formatPayload(item) {
+    return {
+      type: 'goal',
+      goalId: item.goalId,
+      title: item.name,
+      status: item.status,
+      source: item.source,
+    };
+  },
+};
+
 const TYPE_HANDLERS = {
   'file': FILE_TYPE_HANDLER,
+  'goal': GOAL_TYPE_HANDLER,
   'graph-cluster': GRAPH_CLUSTER_HANDLER,
   'graph-story-beat': GRAPH_STORY_BEAT_HANDLER,
 };
