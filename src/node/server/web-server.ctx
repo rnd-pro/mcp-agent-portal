@@ -7,6 +7,8 @@ ROUTES:
   POST /api/mcp-call|proxy MCP tool call to child server
   GET /api/instances|list all registered MCP servers
   GET /api/project-info|portal metadata (name,path,agents,pid)
+  GET /api/runtime|runtime status plus sanitized Symbiote dev-plane manifest summary
+  GET /api/runtime/health|compact runtime health counts
   GET /api/server-status|uptime,agents,monitors
   GET /api/network-auth/pending|local-only list of LAN browser approvals
   POST /api/network-auth/approve|local-only approve LAN browser session
@@ -20,4 +22,5 @@ PATTERNS: fail-fast config|exit(2) restart|raw http.createServer|no framework
 ENV:
   AGENT_PORTAL_PORT|optional fixed port used by restart to preserve the current direct UI URL
   AGENT_PORTAL_NETWORK_AUTH|set 0 only behind a trusted gateway that owns access policy
+  SYMBIOTE_DEV_PLANE_ROOT|optional local root for manifest-level dev-plane diagnostics
 DEPS: local-gateway.js|mcp-proxy.js|network-access.js|network-auth.js

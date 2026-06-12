@@ -47,6 +47,21 @@ describe('api-routes-runtime', () => {
   });
 
   it('GET /api/runtime returns server summary, runtime statuses, health, and instances', () => {
+    let devPlaneRoot = path.join(tempRoot, 'symbiote-dev-plane');
+    fs.mkdirSync(devPlaneRoot, { recursive: true });
+    fs.writeFileSync(path.join(devPlaneRoot, 'package.json'), JSON.stringify({
+      name: 'symbiote-dev-plane',
+      version: '0.1.0',
+      type: 'module',
+    }));
+    fs.writeFileSync(path.join(devPlaneRoot, 'dev-plane.json'), JSON.stringify({
+      name: 'symbiote-dev-plane',
+      schemaVersion: 1,
+      packages: [
+        { id: 'symbiote-ui', group: 'core', packageName: 'symbiote-ui' },
+        { id: 'agent-portal', group: 'agent-portal', packageName: 'mcp-agent-portal' },
+      ],
+    }));
     writeRuntimeStatus('portal', { state: 'running', pid: 1234, meta: { port: 8787 } });
     writeRuntimeStatus('worker', { state: 'starting' });
 
@@ -65,7 +80,11 @@ describe('api-routes-runtime', () => {
         ];
       },
     };
-    let routes = createRuntimeRoutes({ proxyManager, projectRoot: tempRoot });
+    let routes = createRuntimeRoutes({
+      proxyManager,
+      projectRoot: tempRoot,
+      env: { SYMBIOTE_DEV_PLANE_ROOT: devPlaneRoot },
+    });
     let res = makeRes();
 
     routes['GET /api/runtime']({}, res);
@@ -81,6 +100,10 @@ describe('api-routes-runtime', () => {
     assert.deepEqual(body.health, { 'project-graph': { status: 'healthy', failures: 0 } });
     assert.deepEqual(body.runtimeStatuses.map((status) => status.name), ['portal', 'worker']);
     assert.deepEqual(body.instances, [{ name: 'project-graph', pid: 2222, connected: true }]);
+    assert.equal(body.devPlane.ok, true);
+    assert.equal(body.devPlane.state, 'ready');
+    assert.equal(body.devPlane.summary.packageCount, 2);
+    assert.equal(JSON.stringify(body.devPlane).includes(tempRoot), false);
   });
 
   it('GET /api/runtime/health returns ok and compact counts', () => {

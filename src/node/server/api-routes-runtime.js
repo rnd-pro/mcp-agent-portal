@@ -1,4 +1,5 @@
 import { listRuntimeStatuses } from '../ops/runtime.js';
+import { createDevPlaneStatus } from '../dev-plane/status.js';
 
 /** JSON response helper */
 function json(res, data, status = 200) {
@@ -44,17 +45,18 @@ function getHealthStatus(proxyManager) {
 
 /**
  * Build non-destructive runtime API routes.
- * @param {{ proxyManager: any, projectRoot: string }} ctx
+ * @param {{ proxyManager: any, projectRoot: string, env?: NodeJS.ProcessEnv, config?: object }} ctx
  * @returns {Record<string, (req: any, res: any) => void>}
  */
 export function createRuntimeRoutes(ctx) {
-  let { proxyManager, projectRoot } = ctx;
+  let { proxyManager, projectRoot, env = process.env, config = {} } = ctx;
 
   return {
     'GET /api/runtime': (_req, res) => {
       let runtimeStatuses = listRuntimeStatuses({ projectRoot });
       let instances = getInstances(proxyManager);
       let health = getHealthStatus(proxyManager);
+      let devPlane = createDevPlaneStatus({ projectRoot, env, config });
 
       json(res, {
         ok: true,
@@ -65,6 +67,7 @@ export function createRuntimeRoutes(ctx) {
           monitors: collectionSize(proxyManager?.monitors),
         },
         health,
+        devPlane,
         runtimeStatuses,
         instances,
       });
