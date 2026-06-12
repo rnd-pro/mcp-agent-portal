@@ -61,6 +61,7 @@ export function createRuntimeRoutes(ctx) {
         env,
         config,
         mcpServers: proxyManager?.servers,
+        inactiveMcpServers: proxyManager?.inactiveServers,
       });
 
       json(res, {

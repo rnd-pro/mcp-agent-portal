@@ -102,6 +102,7 @@ describe('dev-plane status', () => {
       npmServerCount: 0,
       localServerCount: 0,
       customServerCount: 0,
+      disabledServerCount: 0,
       missingServerCount: 1,
       entries: [{
         serverName: 'project-graph',
@@ -189,15 +190,22 @@ describe('dev-plane status', () => {
           args: ['--stdio'],
         }],
       ]),
+      inactiveMcpServers: {
+        'browser-x': {
+          command: 'node',
+          args: ['browser-x-mcp/src/mcp-server.js'],
+        },
+      },
     });
 
     assert.equal(status.ok, true);
     assert.equal(status.mcp.expectedServerCount, 5);
-    assert.equal(status.mcp.configuredServerCount, 4);
+    assert.equal(status.mcp.configuredServerCount, 5);
     assert.equal(status.mcp.npmServerCount, 1);
     assert.equal(status.mcp.localServerCount, 2);
     assert.equal(status.mcp.customServerCount, 1);
-    assert.equal(status.mcp.missingServerCount, 1);
+    assert.equal(status.mcp.disabledServerCount, 1);
+    assert.equal(status.mcp.missingServerCount, 0);
     assert.deepEqual(status.mcp.entries.map((entry) => entry.serverName), [
       'agent-pool',
       'browser-x',
@@ -207,14 +215,14 @@ describe('dev-plane status', () => {
     ]);
     assert.deepEqual(status.mcp.entries.map((entry) => [entry.serverName, entry.resolution]), [
       ['agent-pool', 'local'],
-      ['browser-x', 'missing'],
+      ['browser-x', 'disabled'],
       ['context-x', 'local'],
       ['project-graph', 'npm'],
       ['terminal-x', 'custom'],
     ]);
     assert.deepEqual(status.mcp.issues.map((issue) => issue.code), [
       'dev-plane-mcp-server-local-command',
-      'dev-plane-mcp-server-unconfigured',
+      'dev-plane-mcp-server-disabled',
       'dev-plane-mcp-server-local-command',
       'dev-plane-mcp-server-custom-command',
     ]);

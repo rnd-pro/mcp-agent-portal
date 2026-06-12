@@ -63,6 +63,8 @@ export class MCPProxyManager {
     this.projectRoot = projectRoot;
     /** @type {Map<string, object>} */
     this.servers = new Map();
+    /** @type {Map<string, object>} */
+    this.inactiveServers = new Map();
     /** @type {Set<import('ws').WebSocket>} */
     this.monitors = new Set();
     /** @type {Set<Function>} */
@@ -82,12 +84,17 @@ export class MCPProxyManager {
   }
 
   loadConfig() {
+    this.inactiveServers.clear();
     try {
       if (fs.existsSync(CONFIG_PATH)) {
         let config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
         if (config.mcpServers) {
           for (let [name, settings] of Object.entries(config.mcpServers)) {
             if (DISABLED_MCP_SERVERS.has(name)) {
+              this.inactiveServers.set(name, {
+                ...settings,
+                inactiveReason: 'disabled',
+              });
               continue;
             }
             let color = `hsl(${Math.floor(Math.random() * 360)}, 65%, 55%)`;
@@ -575,6 +582,14 @@ export class MCPProxyManager {
         config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
       }
       config.mcpServers = {};
+      for (let [name, s] of this.inactiveServers) {
+        if (s.isRemote) continue; // Don't persist remote WS clients
+        config.mcpServers[name] = {
+          command: s.command,
+          args: s.args,
+          ...(s.env ? { env: s.env } : {}),
+        };
+      }
       for (let [name, s] of this.servers) {
         if (s.isRemote) continue; // Don't persist remote WS clients
         config.mcpServers[name] = {

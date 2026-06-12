@@ -447,6 +447,7 @@ describe('server demo mode', () => {
         npmServerCount: 0,
         localServerCount: 0,
         customServerCount: 0,
+        disabledServerCount: 0,
         missingServerCount: 0,
         entries: [],
         issues: [],

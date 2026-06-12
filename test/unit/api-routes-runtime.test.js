@@ -62,6 +62,7 @@ describe('api-routes-runtime', () => {
         { id: 'agent-portal', group: 'agent-portal', packageName: 'mcp-agent-portal' },
         { id: 'agent-pool-mcp', group: 'agent-portal', packageName: 'agent-pool-mcp' },
         { id: 'browser-x-mcp', group: 'agent-portal', packageName: 'browser-x-mcp' },
+        { id: 'context-x-mcp', group: 'agent-portal', packageName: 'context-x-mcp' },
         { id: 'project-graph-mcp', group: 'agent-portal', packageName: 'project-graph-mcp' },
       ],
     }));
@@ -74,6 +75,12 @@ describe('api-routes-runtime', () => {
         ['agent-pool', {
           command: process.execPath,
           args: [path.join(tempRoot, 'agent-pool-mcp', 'index.js')],
+        }],
+      ]),
+      inactiveServers: new Map([
+        ['context-x', {
+          command: 'node',
+          args: [path.join(tempRoot, 'context-x-mcp', 'src', 'mcp-server.js')],
         }],
       ]),
       monitors: new Set(['monitor-1']),
@@ -108,15 +115,17 @@ describe('api-routes-runtime', () => {
     assert.deepEqual(body.instances, [{ name: 'project-graph', pid: 2222, connected: true }]);
     assert.equal(body.devPlane.ok, true);
     assert.equal(body.devPlane.state, 'ready');
-    assert.equal(body.devPlane.summary.packageCount, 5);
-    assert.equal(body.devPlane.mcp.expectedServerCount, 3);
-    assert.equal(body.devPlane.mcp.configuredServerCount, 2);
+    assert.equal(body.devPlane.summary.packageCount, 6);
+    assert.equal(body.devPlane.mcp.expectedServerCount, 4);
+    assert.equal(body.devPlane.mcp.configuredServerCount, 3);
     assert.equal(body.devPlane.mcp.npmServerCount, 1);
     assert.equal(body.devPlane.mcp.localServerCount, 1);
+    assert.equal(body.devPlane.mcp.disabledServerCount, 1);
     assert.equal(body.devPlane.mcp.missingServerCount, 1);
     assert.deepEqual(body.devPlane.mcp.entries.map((entry) => [entry.serverName, entry.resolution]), [
       ['agent-pool', 'local'],
       ['browser-x', 'missing'],
+      ['context-x', 'disabled'],
       ['project-graph', 'npm'],
     ]);
     assert.equal(JSON.stringify(body.devPlane).includes(tempRoot), false);

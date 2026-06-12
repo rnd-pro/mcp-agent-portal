@@ -37,6 +37,7 @@ function emptyMcpSummary() {
     npmServerCount: 0,
     localServerCount: 0,
     customServerCount: 0,
+    disabledServerCount: 0,
     missingServerCount: 0,
     entries: [],
     issues: [],
@@ -100,7 +101,15 @@ function isLocalishValue(value) {
     || text.includes('\\');
 }
 
-function classifyServerResolution(settings, packageName) {
+function classifyServerResolution(settings, packageName, inactiveSettings) {
+  if (inactiveSettings && !settings) {
+    return {
+      configured: true,
+      resolution: 'disabled',
+      issueCode: 'dev-plane-mcp-server-disabled',
+    };
+  }
+
   if (!settings) {
     return {
       configured: false,
@@ -139,11 +148,18 @@ function countResolution(summary, resolution) {
   if (resolution === 'npm') summary.npmServerCount += 1;
   if (resolution === 'local') summary.localServerCount += 1;
   if (resolution === 'custom') summary.customServerCount += 1;
+  if (resolution === 'disabled') summary.disabledServerCount += 1;
   if (resolution === 'missing') summary.missingServerCount += 1;
 }
 
-function summarizeMcpSources(manifest = {}, mcpServers) {
+function issueSeverity(resolution) {
+  if (resolution === 'missing' || resolution === 'disabled') return 'info';
+  return 'warning';
+}
+
+function summarizeMcpSources(manifest = {}, mcpServers, inactiveMcpServers) {
   let serverEntries = new Map(readServerEntries(mcpServers));
+  let inactiveServerEntries = new Map(readServerEntries(inactiveMcpServers));
   let packages = Array.isArray(manifest.packages) ? manifest.packages : [];
   let entries = [];
   let issues = [];
@@ -153,7 +169,11 @@ function summarizeMcpSources(manifest = {}, mcpServers) {
     let serverName = inferServerName(pkg.packageName);
     if (!serverName) continue;
 
-    let classification = classifyServerResolution(serverEntries.get(serverName), pkg.packageName);
+    let classification = classifyServerResolution(
+      serverEntries.get(serverName),
+      pkg.packageName,
+      inactiveServerEntries.get(serverName),
+    );
     let entry = {
       serverName,
       packageId: String(pkg.id || serverName),
@@ -166,7 +186,7 @@ function summarizeMcpSources(manifest = {}, mcpServers) {
 
     if (classification.issueCode) {
       issues.push({
-        severity: classification.resolution === 'missing' ? 'info' : 'warning',
+        severity: issueSeverity(classification.resolution),
         code: classification.issueCode,
         serverName,
       });
@@ -215,7 +235,7 @@ export function resolveDevPlaneRoot(options = {}) {
 }
 
 /**
- * @param {{ projectRoot?: string, env?: NodeJS.ProcessEnv, config?: object, mcpServers?: Map<string, object>|object }} options
+ * @param {{ projectRoot?: string, env?: NodeJS.ProcessEnv, config?: object, mcpServers?: Map<string, object>|object, inactiveMcpServers?: Map<string, object>|object }} options
  * @returns {object}
  */
 export function createDevPlaneStatus(options = {}) {
@@ -313,7 +333,7 @@ export function createDevPlaneStatus(options = {}) {
       dirtyPolicy: manifest.localPolicy?.dirtyWorktree || null,
     },
     summary: summarizeManifest(manifest),
-    mcp: summarizeMcpSources(manifest, options.mcpServers),
+    mcp: summarizeMcpSources(manifest, options.mcpServers, options.inactiveMcpServers),
     issues: [],
   };
 }

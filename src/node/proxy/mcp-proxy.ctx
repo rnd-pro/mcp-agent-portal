@@ -1,8 +1,8 @@
 mcp-proxy.js — child MCP process lifecycle manager
 
 class MCPProxyManager
-  constructor()→void|init servers map, monitors set, pending requests
-  loadConfig()→void|read ~/.gemini/agent-portal.json, populate servers map
+  constructor()→void|init active/inactive server maps, monitors set, pending requests
+  loadConfig()→void|read ~/.gemini/agent-portal.json, populate active and inactive server maps
   startAllServers(callback)→void|spawn all configured child servers
   spawnServer(serverName)→void|fork child via spawn, wire stdio, track PID
   sendToChild(serverName,msg)→void|write JSON-RPC msg to child stdin
