@@ -46,7 +46,7 @@ rc-instance-item {
 .rtc-summary {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
   margin-bottom: 18px;
 }
 

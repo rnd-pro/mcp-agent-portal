@@ -411,6 +411,45 @@ describe('server demo mode', () => {
     assert.ok(marketplace.categories['rnd-pro'].every((item) => item.name && item.command));
   });
 
+  it('serves runtime control data in public demo mode without local dev-plane state', () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+
+    let runtimeRes = makeRes();
+    demo.routes['GET /api/runtime'](makeReq('GET', '/api/runtime'), runtimeRes);
+    let body = runtimeRes.json();
+
+    assert.equal(body.ok, true);
+    assert.equal(body.demoMode, true);
+    assert.equal(body.server.demoMode, true);
+    assert.equal(body.server.agents, 2);
+    assert.equal(Array.isArray(body.instances), true);
+    assert.deepEqual(body.runtimeStatuses, []);
+    assert.deepEqual(body.health, {});
+    assert.deepEqual(body.devPlane, {
+      ok: false,
+      state: 'missing',
+      configured: false,
+      root: { source: 'demo', name: 'symbiote-dev-plane' },
+      manifest: null,
+      summary: {
+        packageCount: 0,
+        alternateSourceCount: 0,
+        browserImportCount: 0,
+        groups: {},
+        packageIds: [],
+      },
+      issues: [{
+        level: 'info',
+        code: 'dev-plane-demo-mode',
+        message: 'Symbiote dev plane is disabled in public demo mode.',
+      }],
+    });
+    assert.equal(JSON.stringify(body).includes(process.cwd()), false);
+  });
+
   it('persists safe voice settings in public demo mode without storing secrets', async () => {
     let demo = createServerDemoMode({
       projectRoot: process.cwd(),

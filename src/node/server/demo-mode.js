@@ -286,6 +286,51 @@ function demoNetworkAccess() {
   };
 }
 
+function demoRuntimeServer() {
+  return {
+    uptime: 300,
+    agents: 2,
+    monitors: 0,
+    shutdownAt: null,
+    demoMode: true,
+  };
+}
+
+function demoDevPlaneStatus() {
+  return {
+    ok: false,
+    state: 'missing',
+    configured: false,
+    root: { source: 'demo', name: 'symbiote-dev-plane' },
+    manifest: null,
+    summary: {
+      packageCount: 0,
+      alternateSourceCount: 0,
+      browserImportCount: 0,
+      groups: {},
+      packageIds: [],
+    },
+    issues: [{
+      level: 'info',
+      code: 'dev-plane-demo-mode',
+      message: 'Symbiote dev plane is disabled in public demo mode.',
+    }],
+  };
+}
+
+function demoRuntimeSummary() {
+  return {
+    ok: true,
+    demoMode: true,
+    server: demoRuntimeServer(),
+    health: {},
+    runtimeStatuses: [],
+    statuses: [],
+    instances,
+    devPlane: demoDevPlaneStatus(),
+  };
+}
+
 function sanitizeDemoVoiceCommands(value) {
   if (!value || typeof value !== 'object') return {};
   let result = {};
@@ -1134,9 +1179,9 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
         networkAccess: demoNetworkAccess(),
       }),
       'GET /api/health': (_req, res) => json(res, { ok: true, demoMode: true, services: [] }),
-      'GET /api/runtime': (_req, res) => json(res, { ok: true, demoMode: true, statuses: [] }),
+      'GET /api/runtime': (_req, res) => json(res, demoRuntimeSummary()),
       'GET /api/runtime/health': (_req, res) => json(res, { ok: true, demoMode: true }),
-      'GET /api/server-status': (_req, res) => json(res, { uptime: 300, agents: 2, monitors: 0, shutdownAt: null, demoMode: true }),
+      'GET /api/server-status': (_req, res) => json(res, demoRuntimeServer()),
       'GET /api/xr-diagnostics/logs': (_req, res) => json(res, { logs: xrDiagnosticLogStore.list(), demoMode: true }),
       'GET /api/xr-diagnostics/summary': (_req, res) => json(res, { ...xrDiagnosticLogStore.summary(), demoMode: true }),
       'POST /api/xr-diagnostics/log': async (req, res) => {

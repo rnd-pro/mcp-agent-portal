@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import { tPortal } from '../../common/localization.js';
 import cssLocal from './RuntimeControl.css.js';
+import { createDevPlaneRuntimeSummary } from './dev-plane-summary.js';
 import template from './RuntimeControl.tpl.js';
 import './InstanceItem.js';
 
@@ -47,9 +48,10 @@ async function fetchJson(path) {
   return res.json();
 }
 
-function summaryCard(label, value, note = '') {
+function summaryCard(label, value, note = '', options = {}) {
   let card = document.createElement('sn-card');
   card.className = 'rtc-summary-card';
+  if (options.variant) card.dataset.variant = options.variant;
 
   let metric = document.createElement('sn-metric');
   metric.setAttribute('variant', 'stacked');
@@ -98,23 +100,22 @@ export class RuntimeControl extends Symbiote {
   async loadRuntime(options = {}) {
     if (!options.silent) this._setBanner('loading', tPortal('text.loadingRuntimeStatus'));
 
-    let [statusResult, instancesResult] = await Promise.allSettled([
-      fetchJson('/api/server-status'),
-      fetchJson('/api/instances'),
+    let [runtimeResult] = await Promise.allSettled([
+      fetchJson('/api/runtime'),
     ]);
 
-    let hasStatus = statusResult.status === 'fulfilled';
-    let hasInstances = instancesResult.status === 'fulfilled' && Array.isArray(instancesResult.value);
-    let status = hasStatus ? statusResult.value : null;
+    let hasRuntime = runtimeResult.status === 'fulfilled';
+    let runtime = hasRuntime ? runtimeResult.value : null;
+    let hasInstances = Array.isArray(runtime?.instances);
+    let status = runtime?.server || null;
     let instances = hasInstances
-      ? instancesResult.value
+      ? runtime.instances
       : [];
     let errors = [];
 
-    if (statusResult.status === 'rejected') errors.push(statusResult.reason.message);
-    if (instancesResult.status === 'rejected') errors.push(instancesResult.reason.message);
+    if (runtimeResult.status === 'rejected') errors.push(runtimeResult.reason.message);
 
-    this._renderSummary(status, instances, hasInstances);
+    this._renderSummary(status, instances, hasInstances, runtime?.devPlane);
     this._renderInstances(instances, hasInstances);
 
     if (errors.length) {
@@ -126,10 +127,11 @@ export class RuntimeControl extends Symbiote {
     this.ref.updatedAt.textContent = tPortal('text.updatedAt', { time: new Date().toLocaleTimeString() });
   }
 
-  _renderSummary(status, instances, hasInstances) {
+  _renderSummary(status, instances, hasInstances, devPlane) {
     let activeInstances = instances.filter(isActiveInstance);
     let agents = readCount(status?.agents);
     let monitors = readCount(status?.monitors);
+    let devPlaneSummary = createDevPlaneRuntimeSummary(devPlane, tPortal);
 
     this.ref.summaryGrid.replaceChildren(
       summaryCard(tPortal('text.uptime'), formatDuration(Number(status?.uptime)), status ? tPortal('text.portalProcess') : tPortal('text.statusUnavailable')),
@@ -140,6 +142,7 @@ export class RuntimeControl extends Symbiote {
         hasInstances ? formatNumber(activeInstances.length) : '-',
         hasInstances ? tPortal('text.registeredCount', { count: instances.length }) : tPortal('text.instancesUnavailable'),
       ),
+      summaryCard(devPlaneSummary.label, devPlaneSummary.value, devPlaneSummary.note, { variant: devPlaneSummary.variant }),
     );
   }
 
