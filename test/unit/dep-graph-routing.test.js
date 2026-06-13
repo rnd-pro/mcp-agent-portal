@@ -71,4 +71,16 @@ describe('dep-graph-routing', () => {
       /this\._canvas\.setReadonly\(true\);\s*this\._canvas\.setReadonlyNodeDragging\(true\);/,
     );
   });
+
+  it('embedded dep graph can lock flat mode without rewriting the chat route hash', () => {
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/dep-graph.js'), 'utf8');
+
+    assert.match(source, /_isEmbeddedGraphMode\(\) \{\s*return this\.hasAttribute\('embedded'\)/);
+    assert.match(source, /_isGraphModeLocked\(\) \{\s*return this\.hasAttribute\('locked-mode'\)/);
+    assert.match(source, /let attrMode = this\.getAttribute\('mode'\)/);
+    assert.match(source, /if \(this\._isGraphModeLocked\(\)\) return;/);
+    assert.match(source, /if \(this\._isEmbeddedGraphMode\(\)\) return;\s*updateHashParam\(key, value\);/);
+    assert.match(source, /return \{ path: '', params: new URLSearchParams\(\) \};/);
+    assert.match(source, /this\._pgCanvasGraph\.setPath\(this\._getGraphRoutePath\(\)\);/);
+  });
 });

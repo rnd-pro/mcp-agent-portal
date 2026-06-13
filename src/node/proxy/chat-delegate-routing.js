@@ -6,6 +6,7 @@ import {
 } from '../../iso/chat-goals.js';
 
 export const DEFAULT_CHAT_AGENT = 'orchestrator';
+const FOCUS_GRAPH_SYMBOL_LIMIT = 8;
 
 export function isDelegateTool(toolName = '') {
   return toolName === 'delegate_task'
@@ -17,6 +18,11 @@ export function isDelegateTool(toolName = '') {
 function normalizeFiles(files) {
   if (!Array.isArray(files)) return [];
   return [...new Set(files.map(file => String(file || '').trim()).filter(Boolean))];
+}
+
+function normalizeRelFile(cwd, file) {
+  let rel = path.isAbsolute(file) ? path.relative(cwd, file) : file;
+  return rel.replaceAll(path.sep, '/');
 }
 
 function chatTitleFromPrompt(prompt = '') {
@@ -83,6 +89,139 @@ function resolveGoalQueueMessages(goal, queueArgs = {}) {
     seen.add(key);
     return true;
   });
+}
+
+function parseToolJson(result) {
+  let text = result?.content?.find?.(item => item?.type === 'text')?.text
+    || result?.content?.[0]?.text
+    || null;
+  if (!text || typeof text !== 'string') return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function callProjectGraphTool(proxyManager, name, args = {}) {
+  if (typeof proxyManager?.requestFromChild !== 'function') return null;
+  let result = await proxyManager.requestFromChild('project-graph', 'tools/call', {
+    name,
+    arguments: args,
+  });
+  return parseToolJson(result);
+}
+
+function collectFocusSymbols(skeleton = {}, files = []) {
+  let focusFiles = new Set(files);
+  let symbols = [];
+  let seen = new Set();
+  for (let [id, node] of Object.entries(skeleton.n || {})) {
+    if (!focusFiles.has(node?.f)) continue;
+    seen.add(id);
+    symbols.push({
+      id,
+      name: skeleton.L?.[id] || id,
+      type: 'C',
+      file: node.f,
+      line: node.l || null,
+      methods: node.m || [],
+      properties: node.$ || 0,
+    });
+  }
+  for (let [id, web] of Object.entries(skeleton.W || {})) {
+    if (seen.has(id)) continue;
+    let webFiles = [web.file, web.template, web.style].filter(Boolean);
+    if (!webFiles.some(file => focusFiles.has(file))) continue;
+    let node = skeleton.n?.[id] || {};
+    seen.add(id);
+    symbols.push({
+      id,
+      name: skeleton.L?.[id] || id,
+      type: 'C',
+      file: node.f || web.file || null,
+      line: node.l || null,
+      methods: node.m || [],
+      properties: node.$ || 0,
+      web: true,
+    });
+  }
+  for (let [file, ids] of Object.entries(skeleton.X || {})) {
+    if (!focusFiles.has(file)) continue;
+    for (let id of ids || []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      symbols.push({
+        id,
+        name: skeleton.L?.[id] || id,
+        type: 'F',
+        file,
+      });
+    }
+  }
+  return symbols.slice(0, FOCUS_GRAPH_SYMBOL_LIMIT);
+}
+
+function collectFocusWeb(skeleton = {}, files = [], symbols = []) {
+  let focusFiles = new Set(files);
+  let symbolIds = new Set(symbols.map(symbol => symbol.id));
+  let web = [];
+  for (let [id, item] of Object.entries(skeleton.W || {})) {
+    let webFiles = [item.file, item.template, item.style].filter(Boolean);
+    if (!symbolIds.has(id) && !webFiles.some(file => focusFiles.has(file))) continue;
+    web.push({
+      symbol: id,
+      name: skeleton.L?.[id] || id,
+      ...item,
+    });
+  }
+  return web.slice(0, FOCUS_GRAPH_SYMBOL_LIMIT);
+}
+
+function collectFocusImports(skeleton = {}, files = []) {
+  let imports = skeleton.I || {};
+  return files
+    .filter(file => Array.isArray(imports[file]))
+    .map(file => ({
+      file,
+      sources: imports[file].map(item => item?.s || item).filter(Boolean),
+    }));
+}
+
+async function buildProjectGraphFocus(proxyManager, cwd, files = []) {
+  if (!files.length || !cwd) return null;
+  let skeleton = await callProjectGraphTool(proxyManager, 'get_skeleton', { path: cwd });
+  if (!skeleton || typeof skeleton !== 'object') return null;
+
+  let relFiles = files.map(file => normalizeRelFile(cwd, file));
+  let symbols = collectFocusSymbols(skeleton, relFiles);
+  let web = collectFocusWeb(skeleton, relFiles, symbols);
+  let dependencies = [];
+  for (let symbol of symbols) {
+    let deps = await callProjectGraphTool(proxyManager, 'navigate', {
+      action: 'deps',
+      symbol: symbol.id,
+      path: cwd,
+    });
+    if (!deps || deps.error) continue;
+    dependencies.push({
+      symbol: symbol.id,
+      imports: deps.imports || [],
+      usedBy: deps.usedBy || [],
+      calls: deps.calls || [],
+      files: deps.files || [],
+      elements: deps.elements || [],
+      web: deps.web || null,
+    });
+  }
+
+  return {
+    files: relFiles,
+    symbols,
+    imports: collectFocusImports(skeleton, relFiles),
+    web,
+    dependencies,
+  };
 }
 
 function promptWithChatGoal(prompt, chat, sg, chatId, queueArgs = {}) {
@@ -197,8 +336,19 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   }
 
   let files = normalizeFiles(next.files);
-  if (files.length) next.files = files;
-  else delete next.files;
+  if (files.length) {
+    next.files = files;
+    if (next.context_mode !== 'off' && !next.focus_graph && !next.focusGraph) {
+      try {
+        let focusGraph = await buildProjectGraphFocus(proxyManager, next.cwd, files);
+        if (focusGraph) next.focus_graph = focusGraph;
+      } catch {
+        delete next.focus_graph;
+      }
+    }
+  } else {
+    delete next.files;
+  }
 
   delete next.chatId;
   delete next.parentChatId;

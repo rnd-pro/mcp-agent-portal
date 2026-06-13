@@ -34,7 +34,17 @@ export const panelTypes = {
   'file-tree':    { title: tPortal('text.files'),         icon: 'folder',        component: 'pg-file-tree' },
   'code-viewer':  { title: tPortal('text.code'),          icon: 'code',          component: 'pg-code-viewer' },
   'ctx-panel':    { title: tPortal('text.documentation'), icon: 'description',   component: 'pg-ctx-panel' },
-  'dep-graph':    { title: tPortal('text.dependencies'),  icon: 'account_tree',  component: 'pg-dep-graph' },
+  'dep-graph': {
+    title: tPortal('text.dependencies'),
+    icon: 'account_tree',
+    component: 'pg-dep-graph',
+    attributes: { mode: false, embedded: false, 'locked-mode': false },
+  },
+  'agent-process-graph': {
+    title: tPortal('text.agentProcessGraph'),
+    icon: 'account_tree',
+    component: 'pg-agent-process-graph',
+  },
   'graph-flows':  { title: tPortal('text.flows'),         icon: 'movie',         component: 'pg-graph-flows' },
   'health':       { title: tPortal('text.health'),        icon: 'analytics',     component: 'pg-health-panel' },
   'monitor':      { title: tPortal('text.liveMonitor'),   icon: 'monitor_heart', component: 'pg-ops-panel' },
@@ -114,6 +124,15 @@ const panelBehavior = {
     responsiveMode: 'stack',
     responsiveBreakpoint: 760,
   },
+  agentProcessGraph: {
+    importance: 38,
+    minInlineSize: 320,
+    minBlockSize: 320,
+    collapse: 'manual',
+    overflow: 'scroll-block',
+    responsiveMode: 'stack',
+    responsiveBreakpoint: 760,
+  },
 };
 
 const splitBehavior = {
@@ -146,8 +165,12 @@ const splitBehavior = {
   },
 };
 
-function panel(panelType, behavior = 'primary') {
-  return LayoutTree.createPanel(panelType, {}, panelBehavior[behavior] || behavior);
+function panel(panelType, behavior = 'primary', options = {}) {
+  let node = LayoutTree.createPanel(panelType, {}, panelBehavior[behavior] || behavior);
+  if (Object.prototype.hasOwnProperty.call(options, 'collapsed')) {
+    node.collapsed = Boolean(options.collapsed);
+  }
+  return node;
 }
 
 function split(direction, first, second, ratio, behavior = 'workspace') {
@@ -298,6 +321,10 @@ registerSection('settings', {
 
 registerSection('agent-chat', {
   icon: 'smart_toy', label: tPortal('text.agentChat'), order: 20, scope: 'project',
-  // Do not wrap the standalone chat in withChat, as it IS the chat.
-  layout: () => panel('agent-chat', 'chat')
+  layout: () => split('horizontal',
+    panel('agent-chat', 'chat'),
+    panel('agent-process-graph', 'agentProcessGraph', { collapsed: true }),
+    0.72,
+    'chatDock'
+  )
 });

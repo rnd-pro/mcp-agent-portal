@@ -121,7 +121,7 @@ export class DepGraph extends Symbiote {
     });
     
     this._pgCanvasGraph.addEventListener('path-changed', (e) => {
-      if (this._viewMode === 'flat' && this._initialViewRestored) {
+      if (!this._isEmbeddedGraphMode() && this._viewMode === 'flat' && this._initialViewRestored) {
         const path = e.detail.path;
         if (path.startsWith('cluster:')) return;
         const { params } = parseGraphHash();
@@ -199,12 +199,14 @@ export class DepGraph extends Symbiote {
     });
 
     const urlParams = getGraphUrlParams();
-    this._viewMode = resolveInitialViewMode(urlParams);
+    this._viewMode = this._resolveInitialViewMode(urlParams);
     const viewModeBtn = this.querySelector('[data-action="view-mode"]');
     renderViewModeButton(viewModeBtn, this._viewMode);
+    if (this._isGraphModeLocked() && viewModeBtn) viewModeBtn.hidden = true;
     this._updateModeVisibility(this._viewMode);
     
     this._setMode = (newMode) => {
+      if (this._isGraphModeLocked()) return;
       if (this._viewMode === newMode) return;
       this._viewMode = newMode;
       renderViewModeButton(viewModeBtn, this._viewMode);
@@ -425,10 +427,11 @@ export class DepGraph extends Symbiote {
 
     // React to hash changes from file-tree, back/forward, or external URL paste
     this._onHashChange = () => {
+      if (this._isEmbeddedGraphMode()) return;
       const hash = window.location.hash;
       if (!hash.startsWith('#graph')) return;
 
-      const routeMode = resolveInitialViewMode(getGraphUrlParams());
+      const routeMode = this._resolveInitialViewMode(getGraphUrlParams());
       if (routeMode !== this._viewMode) {
         this._setMode(routeMode);
         return;
@@ -480,6 +483,31 @@ export class DepGraph extends Symbiote {
     }
   }
 
+  _isEmbeddedGraphMode() {
+    return this.hasAttribute('embedded') || this.hasAttribute('data-embedded');
+  }
+
+  _isGraphModeLocked() {
+    return this.hasAttribute('locked-mode');
+  }
+
+  _resolveInitialViewMode(urlParams = getGraphUrlParams()) {
+    let attrMode = this.getAttribute('mode') || this.getAttribute('view-mode') || '';
+    if (attrMode) return attrMode === 'flat' ? 'flat' : 'structured';
+    return resolveInitialViewMode(urlParams);
+  }
+
+  _getGraphRouteState() {
+    if (this._isEmbeddedGraphMode()) {
+      return { path: '', params: new URLSearchParams() };
+    }
+    return parseGraphHash();
+  }
+
+  _getGraphRoutePath() {
+    return this._getGraphRouteState().path || '';
+  }
+
   /**
    * Count total files in skeleton (quick, no graph construction)
    * @param {object} skeleton
@@ -501,7 +529,7 @@ export class DepGraph extends Symbiote {
    * Parses the hash, extracts path drill + focus param, and calls flyToNode.
    */
   _restoreFlatFocus() {
-    const { path: pathStr, params } = parseGraphHash();
+    const { path: pathStr, params } = this._getGraphRouteState();
     if (pathStr && this._pgCanvasGraph) {
       this._pgCanvasGraph.setPath(pathStr);
     }
@@ -628,25 +656,28 @@ export class DepGraph extends Symbiote {
   }
 
   _updateHashParam(key, value) {
+    if (this._isEmbeddedGraphMode()) return;
     updateHashParam(key, value);
   }
 
-  _getGraphLayoutStorageKey(groupId = parseGraphHash().path || '') {
+  _getGraphLayoutStorageKey(groupId) {
+    const targetGroupId = groupId ?? this._getGraphRoutePath();
     const params = getGraphUrlParams();
     const projectId = params.get('project') || state.activeProjectId || 'global';
     const mode = this._viewMode === 'flat' ? 'flat' : 'tree';
-    return `pg-graph-layout-v1-${projectId}-${mode}-${encodeURIComponent(groupId || 'root')}`;
+    return `pg-graph-layout-v1-${projectId}-${mode}-${encodeURIComponent(targetGroupId || 'root')}`;
   }
 
   _getGraphLayoutStatePath(storageKey) {
     return `ui/graphLayouts/${encodeURIComponent(storageKey)}`;
   }
 
-  _readGraphLayoutSnapshot(groupId = parseGraphHash().path || '') {
-    const storageKey = this._getGraphLayoutStorageKey(groupId);
+  _readGraphLayoutSnapshot(groupId) {
+    const targetGroupId = groupId ?? this._getGraphRoutePath();
+    const storageKey = this._getGraphLayoutStorageKey(targetGroupId);
     const snapshot = readUiValue(this._getGraphLayoutStatePath(storageKey), storageKey, null);
     if (!snapshot || typeof snapshot !== 'object') return null;
-    if ((snapshot.groupId || '') !== (groupId || '')) return null;
+    if ((snapshot.groupId || '') !== (targetGroupId || '')) return null;
     return snapshot;
   }
 
@@ -945,7 +976,7 @@ export class DepGraph extends Symbiote {
         this._pgCanvasGraph.setGraphModel(graphModel);
         
         // Restore path from URL
-        this._pgCanvasGraph.setPath(parseGraphHash().path);
+        this._pgCanvasGraph.setPath(this._getGraphRoutePath());
         if (this._pendingClusterId) {
           this._focusSemanticCluster(this._pendingClusterId);
           this._pendingClusterId = null;

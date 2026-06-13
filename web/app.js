@@ -11,6 +11,7 @@ import "./panels/FileTree/FileTree.js";
 import "./panels/CodeViewer/CodeViewer.js";
 import "./panels/CtxPanel/CtxPanel.js";
 import "./panels/dep-graph.js";
+import "./panels/AgentProcessGraph/AgentProcessGraph.js";
 import "./panels/GraphFlows/GraphFlows.js";
 import "./panels/HealthPanel/HealthPanel.js";
 import "./panels/OpsPanel/OpsPanel.js";

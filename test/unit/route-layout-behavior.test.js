@@ -5,6 +5,7 @@ const {
   getHomeSections,
   getProjectSections,
   getLayout,
+  panelTypes,
 } = await import('../../web/router-registry.js?route-layout-behavior-test');
 const {
   layoutMatchesSection,
@@ -58,15 +59,32 @@ describe('Agent Portal routed layout behavior metadata', () => {
     assert.ok(root.second.behavior.minInlineSize >= 360);
   });
 
-  it('keeps standalone chat routes as one chat panel without a second global chat', () => {
-    for (let sectionId of ['dashboard', 'agent-chat']) {
-      let root = getLayout(sectionId);
-      assert.equal(root.type, 'panel');
-      assert.equal(root.panelType, 'agent-chat');
-      assert.equal(root.behavior.collapse, 'manual');
-      assert.equal(root.behavior.responsiveMode, 'stack');
-      assert.equal(walkLayout(root).filter((node) => node.panelType === 'agent-chat').length, 1);
-    }
+  it('keeps the dashboard route as one chat panel without a second global chat', () => {
+    let root = getLayout('dashboard');
+    assert.equal(root.type, 'panel');
+    assert.equal(root.panelType, 'agent-chat');
+    assert.equal(root.behavior.collapse, 'manual');
+    assert.equal(root.behavior.responsiveMode, 'stack');
+    assert.equal(walkLayout(root).filter((node) => node.panelType === 'agent-chat').length, 1);
+  });
+
+  it('adds the project chat process graph as a collapsed right panel', () => {
+    let root = getLayout('agent-chat');
+    let nodes = walkLayout(root);
+
+    assert.equal(root.type, 'split');
+    assert.equal(root.direction, 'horizontal');
+    assert.equal(root.behavior.overflow, 'scroll-inline');
+    assert.equal(root.first.panelType, 'agent-chat');
+    assert.equal(root.second.panelType, 'agent-process-graph');
+    assert.equal(root.second.collapsed, true);
+    assert.equal(root.second.behavior.collapse, 'manual');
+    assert.equal(root.second.behavior.minInlineSize, 320);
+    assert.equal(nodes.filter((node) => node.panelType === 'agent-chat').length, 1);
+    assert.equal(nodes.filter((node) => node.panelType === 'agent-process-graph').length, 1);
+
+    assert.equal(panelTypes['agent-process-graph'].component, 'pg-agent-process-graph');
+    assert.equal(panelTypes['agent-process-graph'].attributes, undefined);
   });
 
   it('rejects saved route layouts that predate responsive behavior metadata', () => {
@@ -93,8 +111,10 @@ describe('Agent Portal routed layout behavior metadata', () => {
     };
 
     assert.equal(layoutMatchesSection('dashboard', oldStandaloneChat), false);
+    assert.equal(layoutMatchesSection('agent-chat', oldStandaloneChat), false);
     assert.equal(layoutMatchesSection('explorer', oldExplorer), false);
     assert.equal(layoutMatchesSection('dashboard', getLayout('dashboard')), true);
+    assert.equal(layoutMatchesSection('agent-chat', getLayout('agent-chat')), true);
     assert.equal(layoutMatchesSection('explorer', getLayout('explorer')), true);
   });
 });
