@@ -109,7 +109,8 @@ describe('agent process graph model', () => {
     assert.ok(nodeByKind(model, 'agent.process.file').some(node => node.params.path === 'web/services/agent-process-graph.js'));
     assert.ok(model.edges.some(edge => edge.kind === 'agent.process.delegate'));
     assert.ok(model.edges.some(edge => edge.kind === 'agent.process.file.read'));
-    assert.deepEqual(model.views.canvas.roots, ['agent:root-chat:orchestrator']);
+    assert.ok(model.views.canvas.roots.includes('agent:root-chat:orchestrator'));
+    assert.ok(model.views.canvas.roots.includes('file:web/services/agent-process-graph.js'));
   });
 
   it('returns a canvas graph model consumable by symbiote-ui canvas-graph', () => {
@@ -125,7 +126,8 @@ describe('agent process graph model', () => {
     assert.ok(Array.isArray(canvasModel.nodes));
     assert.ok(Array.isArray(canvasModel.edges));
     assert.ok(Array.isArray(canvasModel.rootNodes));
-    assert.deepEqual(canvasModel.rootNodes, ['agent:root:orchestrator']);
+    assert.ok(canvasModel.rootNodes.includes('agent:root:orchestrator'));
+    assert.ok(canvasModel.rootNodes.includes('file:web/app.js'));
     assert.ok(canvasModel.nodes.some(node => node.id === 'agent:root:orchestrator'));
     assert.equal(canvasModel.nodes.some(node => node.id === 'chat:root'), false);
     assert.ok(canvasModel.nodes.some(node => node.id === 'file:web/app.js'));
@@ -141,9 +143,13 @@ describe('agent process graph model', () => {
     assert.match(source, /import \{ persistLayout, readLayout \} from '\.\.\/\.\.\/common\/ui-state\.js';/);
     assert.match(source, /function processGraphLayoutKey\(chatId\)/);
     assert.match(source, /agent-process-graph:\$\{encodeURIComponent\(String\(chatId \|\| 'active'\)\)\}:layout/);
+    assert.match(source, /function isLayoutSnapshotUsable\(snapshot, canvasModel = \{\}\)/);
+    assert.match(source, /matchedPositions >= Math\.max\(2, Math\.ceil\(nodes\.length \* 0\.5\)\)/);
     assert.match(source, /addEventListener\('layout-snapshot', this\._onLayoutSnapshot\)/);
     assert.match(source, /setLayoutSnapshot\?\.\(layoutSnapshot \|\| null\)/);
     assert.match(source, /persistLayout\(this\._layoutKey, snapshot\)/);
+    assert.match(source, /if \(\(this\._nodeCount \|\| 0\) > 1\) \{\n\s+this\._fitAll\(\);/);
+    assert.match(source, /fitView\?\.\(48, false\)/);
     assert.match(source, /fitNodes\?\.\(\[this\._rootNodeId\]/);
   });
 });

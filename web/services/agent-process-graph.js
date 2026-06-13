@@ -436,29 +436,14 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     views: {
       canvas: {
         kind: 'canvas-graph',
-        roots: [rootAgentId],
+        roots: nodes.map(node => node.id),
       },
     },
   };
 }
 
 export function buildAgentProcessCanvasGraphModel(input = {}) {
-  let model = buildAgentProcessGraphModel(input);
-  let canvasModel = graphModelToCanvasGraphModel({
-    ...model,
-    views: {
-      ...model.views,
-      canvas: {
-        ...asObject(model.views?.canvas),
-        roots: [],
-      },
-    },
-  }, { view: 'canvas' });
-  let rootNodeId = model.metadata?.rootNodeId;
-  if (rootNodeId && canvasModel.nodes.some(node => node.id === rootNodeId)) {
-    canvasModel.rootNodes = [rootNodeId];
-  }
-  return canvasModel;
+  return graphModelToCanvasGraphModel(buildAgentProcessGraphModel(input), { view: 'canvas' });
 }
 
 export function summarizeAgentProcessGraphModel(model = {}) {

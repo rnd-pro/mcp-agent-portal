@@ -25,6 +25,18 @@ function normalizeLayoutSnapshot(snapshot) {
   return snapshot && typeof snapshot === 'object' ? snapshot : null;
 }
 
+function isLayoutSnapshotUsable(snapshot, canvasModel = {}) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  let nodes = Array.isArray(canvasModel.nodes) ? canvasModel.nodes : [];
+  if (nodes.length <= 1) return true;
+  let positions = snapshot.positions && typeof snapshot.positions === 'object'
+    ? snapshot.positions
+    : {};
+  let nodeIds = new Set(nodes.map(node => node.id));
+  let matchedPositions = Object.keys(positions).filter(id => nodeIds.has(id)).length;
+  return matchedPositions >= Math.max(2, Math.ceil(nodes.length * 0.5));
+}
+
 async function fetchJson(url, options = {}) {
   let res = await fetch(url, options);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -143,10 +155,12 @@ export class AgentProcessGraph extends Symbiote {
 
       let graphModel = buildAgentProcessGraphModel({ chat, chats, childChats });
       let canvasModel = buildAgentProcessCanvasGraphModel({ chat, chats, childChats });
-      let layoutSnapshot = normalizeLayoutSnapshot(readLayout(processGraphLayoutKey(chat.id)));
+      let savedSnapshot = normalizeLayoutSnapshot(readLayout(processGraphLayoutKey(chat.id)));
+      let layoutSnapshot = isLayoutSnapshotUsable(savedSnapshot, canvasModel) ? savedSnapshot : null;
       this._layoutKey = processGraphLayoutKey(chat.id);
       this._rootNodeId = graphModel.metadata.rootNodeId || canvasModel.rootNodes?.[0] || null;
       this._hasRestoredLayout = Boolean(layoutSnapshot);
+      this._nodeCount = canvasModel.nodes?.length || 0;
       this._lastModel = graphModel;
       this._canvasGraph?.setLayoutSnapshot?.(layoutSnapshot || null);
       this._canvasGraph?.setGraphModel(canvasModel);
@@ -184,6 +198,7 @@ export class AgentProcessGraph extends Symbiote {
     this._layoutKey = null;
     this._rootNodeId = null;
     this._hasRestoredLayout = false;
+    this._nodeCount = 0;
     this._canvasGraph?.setLayoutSnapshot?.(null);
     this._canvasGraph?.setGraphModel?.({ nodes: [], edges: [], rootNodes: [] });
   }
@@ -212,7 +227,7 @@ export class AgentProcessGraph extends Symbiote {
       this._layoutDoneHandler = null;
       clearTimeout(this._fitFallbackTimer);
       this._fitFallbackTimer = null;
-      this._fitRoot();
+      this._fitInitialGraph();
     };
 
     this._layoutTickHandler = () => {
@@ -223,6 +238,23 @@ export class AgentProcessGraph extends Symbiote {
     this._canvasGraph.addEventListener('layout-tick', this._layoutTickHandler);
     this._canvasGraph.addEventListener('layout-done', this._layoutDoneHandler);
     this._fitFallbackTimer = setTimeout(done, 1200);
+  }
+
+  _fitInitialGraph() {
+    if ((this._nodeCount || 0) > 1) {
+      this._fitAll();
+      return;
+    }
+    this._fitRoot();
+  }
+
+  _fitAll() {
+    let rect = this.getBoundingClientRect();
+    if (rect.width < 80 || rect.height < 120) return;
+    requestAnimationFrame(() => {
+      this._canvasGraph?.fitView?.(48, false);
+      this._persistCurrentLayoutSnapshot();
+    });
   }
 
   _fitRoot() {
