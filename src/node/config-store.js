@@ -1,5 +1,5 @@
 /**
- * Config store — reads/writes ~/.gemini/agent-portal.json.
+ * Config store — reads/writes ~/.agent-portal/agent-portal.json.
  *
  * Schema:
  * {
@@ -394,7 +394,7 @@ export function updateChat(chatId, updates) {
 }
 
 /**
- * Update session ID for a chat (for Gemini CLI session continuity).
+ * Update session ID for a chat (for CLI session continuity).
  * @param {string} chatId
  * @param {string} sessionId
  */

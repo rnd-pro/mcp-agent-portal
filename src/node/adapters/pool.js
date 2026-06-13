@@ -4,7 +4,7 @@ import { resolveAdapter } from './index.js';
 /** Pool of LLM adapters resolved by provider name. */
 export class AdapterPool {
   /**
-   * @param {object} config - parsed adapters config { gemini: {enabled: true}, ... }
+   * @param {object} config - parsed adapters config { antigravity: {enabled: true}, ... }
    */
   constructor(config = {}) {
     this.config = config;

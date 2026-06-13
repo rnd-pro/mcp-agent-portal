@@ -149,7 +149,9 @@ describe('agent process graph model', () => {
     assert.match(source, /setLayoutSnapshot\?\.\(layoutSnapshot \|\| null\)/);
     assert.match(source, /persistLayout\(this\._layoutKey, snapshot\)/);
     assert.match(source, /if \(\(this\._nodeCount \|\| 0\) > 1\) \{\n\s+this\._fitAll\(\);/);
-    assert.match(source, /fitView\?\.\(48, false\)/);
+    assert.match(source, /fitView\?\.\(\{ padding: 48, animate: true \}\)/);
     assert.match(source, /fitNodes\?\.\(\[this\._rootNodeId\]/);
+    assert.match(source, /animateNodeAppearance\?\.\(null, \{ durationMs: 520, staggerMs: 4 \}\)/);
+    assert.match(source, /_persistCurrentLayoutSnapshot\(didFit \? 700 : 0\)/);
   });
 });

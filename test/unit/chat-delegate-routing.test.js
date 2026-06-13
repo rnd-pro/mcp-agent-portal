@@ -35,7 +35,7 @@ describe('chat delegate routing', () => {
       name: 'Main',
       projectId: project.id,
       agent: 'orchestrator',
-      provider: 'gemini',
+      provider: 'antigravity',
       model: 'default',
       approval_mode: 'yolo',
       resource_group: 'reasoning-heavy',

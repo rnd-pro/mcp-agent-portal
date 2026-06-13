@@ -46,7 +46,7 @@ describe('Task State Cache — StateGraph integration', () => {
       value: {
         status: 'running',
         prompt: 'test task',
-        adapter: 'gemini',
+        adapter: 'antigravity',
         startedAt: Date.now(),
         parentTaskId: null,
       },
@@ -55,7 +55,7 @@ describe('Task State Cache — StateGraph integration', () => {
     let task = sg.get(`tasks/${taskId}`);
     assert.ok(task, 'Task should exist in state');
     assert.equal(task.status, 'running');
-    assert.equal(task.adapter, 'gemini');
+    assert.equal(task.adapter, 'antigravity');
   });
 
   it('pushes task events to the ring buffer', () => {

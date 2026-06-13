@@ -5,8 +5,8 @@ describe('adapters-registry', () => {
   it('resolveAdapter returns factory for known types', async () => {
     let { resolveAdapter } = await import('../../src/node/adapters/index.js');
     
-    let gemini = resolveAdapter('gemini');
-    assert.equal(typeof gemini, 'function', 'gemini should resolve to factory function');
+    let antigravity = resolveAdapter('antigravity');
+    assert.equal(typeof antigravity, 'function', 'antigravity should resolve to factory function');
     
     let claude = resolveAdapter('claude');
     assert.equal(typeof claude, 'function', 'claude should resolve to factory function');
@@ -22,7 +22,7 @@ describe('adapters-registry', () => {
       () => resolveAdapter('unknown-adapter'),
       (err) => {
         assert.ok(err.message.includes('Unknown adapter type'), 'should mention unknown type');
-        assert.ok(err.message.includes('gemini'), 'should list gemini as valid');
+        assert.ok(err.message.includes('antigravity'), 'should list antigravity as valid');
         assert.ok(err.message.includes('claude'), 'should list claude as valid');
         return true;
       }
@@ -34,7 +34,7 @@ describe('adapters-registry', () => {
     
     let { types, metadata } = listAdapterTypes();
     assert.ok(Array.isArray(types), 'should return array of types');
-    assert.ok(types.includes('gemini'), 'should include gemini');
+    assert.ok(types.includes('antigravity'), 'should include antigravity');
     assert.ok(types.includes('claude'), 'should include claude');
     assert.ok(types.includes('codex'), 'should include codex');
     assert.ok(types.includes('opencode'), 'should include opencode (metadata only)');

@@ -1,7 +1,7 @@
 // @ctx adapters-base.ctx
 /**
  * @typedef {object} AdapterInstance
- * @property {string} type - adapter type ('gemini', 'claude', etc.)
+ * @property {string} type - adapter type ('antigravity', 'claude', etc.)
  * @property {boolean} busy - is currently executing
  * @property {(opts: RunOpts) => Promise<RunResult>} run - execute a prompt
  * @property {() => void} destroy - cleanup resources

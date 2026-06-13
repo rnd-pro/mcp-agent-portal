@@ -4,7 +4,7 @@ import template from './GroupManager.tpl.js';
 import { buildHash, getRoute, parseQuery, sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import cssLocal from './GroupManager.css.js';
 
-const PROVIDERS = ['codex', 'claude', 'opencode', 'gemini'];
+const PROVIDERS = ['codex', 'claude', 'opencode', 'antigravity'];
 const DEFAULT_CHAT_AGENT = 'orchestrator';
 const APPROVAL_MODES = ['yolo', 'auto_edit', 'plan'];
 const DEFAULT_CODEX_MODELS = ['default', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'];
@@ -13,7 +13,7 @@ const DEFAULT_MODELS = {
   codex: DEFAULT_CODEX_MODELS,
   claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-sonnet-4-6'],
   opencode: ['default', 'openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
-  gemini: ['default', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+  antigravity: ['default', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)'],
 };
 
 function cloneGroup(group) {
@@ -340,8 +340,8 @@ export class GroupManager extends Symbiote {
       ? 'hub'
       : provider === 'opencode'
         ? 'route'
-        : provider === 'gemini'
-          ? 'auto_awesome'
+        : provider === 'antigravity'
+          ? 'rocket_launch'
           : 'terminal';
     let iconWrap = makeElement('div', 'gm-profile-icon');
     iconWrap.replaceChildren(makeIcon(iconName));

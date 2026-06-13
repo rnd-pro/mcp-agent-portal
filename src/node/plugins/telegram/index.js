@@ -16,7 +16,7 @@ export async function init(portalAPI, config) {
   
   bot = new Telegraf(config.token);
   alertChatId = config.alertChatId || null;
-  let targetAdapterType = config.adapterType || 'gemini';
+  let targetAdapterType = config.adapterType || 'antigravity';
 
   bot.on('text', async (ctx) => {
     let prompt = ctx.message.text;

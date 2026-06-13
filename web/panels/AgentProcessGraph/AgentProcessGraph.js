@@ -252,8 +252,9 @@ export class AgentProcessGraph extends Symbiote {
     let rect = this.getBoundingClientRect();
     if (rect.width < 80 || rect.height < 120) return;
     requestAnimationFrame(() => {
-      this._canvasGraph?.fitView?.(48, false);
-      this._persistCurrentLayoutSnapshot();
+      let didFit = this._canvasGraph?.fitView?.({ padding: 48, animate: true });
+      if (!didFit) this._canvasGraph?.resetView?.();
+      this._persistCurrentLayoutSnapshot(didFit ? 700 : 0);
     });
   }
 
@@ -264,10 +265,10 @@ export class AgentProcessGraph extends Symbiote {
       let didFit = this._canvasGraph?.fitNodes?.([this._rootNodeId], {
         padding: 96,
         maxZoom: 1.35,
-        animate: false,
+        animate: true,
       });
       if (!didFit) this._canvasGraph?.resetView?.();
-      this._persistCurrentLayoutSnapshot();
+      this._persistCurrentLayoutSnapshot(didFit ? 700 : 0);
     });
   }
 
@@ -275,20 +276,30 @@ export class AgentProcessGraph extends Symbiote {
     let rect = this.getBoundingClientRect();
     if (rect.width < 80 || rect.height < 120) return;
     requestAnimationFrame(() => {
-      if (soft) {
+      let didFit = false;
+      if ((this._nodeCount || 0) > 1) {
+        didFit = this._canvasGraph?.fitView?.({ padding: 48, animate: true });
+      } else if (this._rootNodeId) {
+        didFit = this._canvasGraph?.fitNodes?.([this._rootNodeId], {
+          padding: 96,
+          maxZoom: soft ? 1.2 : 1.35,
+          animate: true,
+        });
+      }
+      if (!didFit) {
         this._canvasGraph?.resetView?.();
       } else {
-        this._canvasGraph?.resetView?.();
+        this._canvasGraph?.animateNodeAppearance?.(null, { durationMs: 520, staggerMs: 4 });
       }
-      this._persistCurrentLayoutSnapshot();
+      this._persistCurrentLayoutSnapshot(didFit ? 700 : 0);
     });
   }
 
-  _persistCurrentLayoutSnapshot() {
+  _persistCurrentLayoutSnapshot(delay = 0) {
     setTimeout(() => {
       let snapshot = this._canvasGraph?.getLayoutSnapshot?.();
       this._persistLayoutSnapshot(snapshot);
-    }, 0);
+    }, delay);
   }
 
   _persistLayoutSnapshot(snapshot) {

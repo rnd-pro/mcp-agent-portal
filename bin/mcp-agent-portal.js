@@ -1237,7 +1237,7 @@ Commands:`);
 Options for 'run':
   --sync                 Wait for task completion (stream output)
   --model <name>         Model to use
-  --provider <name>      Provider to use (gemini, codex, opencode)
+  --provider <name>      Provider to use (antigravity, codex, opencode)
   --cwd <path>           Working directory (default: current)
 
 Options for 'gateway':

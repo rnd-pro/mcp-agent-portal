@@ -133,8 +133,8 @@ export const chats = [
     id: 'chat-1',
     name: 'What is Agent Portal?',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    provider: 'antigravity',
+    model: 'Gemini 3.1 Pro (High)',
     agent: 'orchestrator',
     createdAt: Date.now() - 7200_000,
     updatedAt: Date.now() - 1800_000,
@@ -172,7 +172,7 @@ export const chats = [
       { role: 'tool', name: 'consult_peer', input: { question: 'What message types does AgentChat support?', context: 'Reviewing the UI rendering pipeline' }, result: '6 message types:\n1. user — text input\n2. agent — markdown with streaming cursor\n3. tool — collapsible cards with input/result\n4. thinking — elapsed time + meta chips (mode, tokens, cost)\n5. board — delegation cards with live status polling\n6. system — status notifications' },
 
       // 10. Final comprehensive response
-      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (gemini-2.5-pro)\n  ├── delegate_task → Coder (gemini-2.5-flash-lite)\n  ├── delegate_task → Reviewer (deepseek/deepseek-v4-pro)\n  └── consult_peer → Research (deepseek/deepseek-v4-flash)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-ui](https://github.com/rnd-pro/symbiote-ui) layout framework and [symbiote-engine](https://github.com/rnd-pro/symbiote-engine) runtime. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
+      { role: 'agent', text: "## Multi-Agent Delegation Flow\n\nThe orchestrator delegates tasks to specialized sub-agents via `delegate_task`. Each sub-agent runs independently with its own CLI adapter:\n\n```\nOrchestrator (Gemini 3.1 Pro (High))\n  ├── delegate_task → Coder (Gemini 3.5 Flash (Low))\n  ├── delegate_task → Reviewer (deepseek/deepseek-v4-pro)\n  └── consult_peer → Research (deepseek/deepseek-v4-flash)\n```\n\nThe delegation board tracks each sub-task with live status updates. When all sub-agents complete, the orchestrator synthesizes their results.\n\n### Quick Start\n\nOne entry in your MCP config gives you access to every tool:\n\n```json\n{\n  \"mcpServers\": {\n    \"agent-portal\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"mcp-agent-portal\"]\n    }\n  }\n}\n```\n\n### Operating Modes\n\n| Mode | Description |\n|---|---|\n| **Standalone** | Spawns local child MCP servers, serves web UI, provides stdio MCP to IDE |\n| **Client** | Connects to a master via WebSocket, registers its local tools |\n| **Master** | Aggregates tools from local children AND remote client nodes |\n\n---\n\n*Built with [Symbiote.js](https://github.com/symbiotejs/symbiote.js) and the [symbiote-ui](https://github.com/rnd-pro/symbiote-ui) layout framework and [symbiote-engine](https://github.com/rnd-pro/symbiote-engine) runtime. MIT © [RND-PRO.com](https://rnd-pro.com)*" },
 
       // 11. System message
       { role: 'system', text: '⏱ Session completed in 42s · 2 sub-agents · 11 tool calls · $0.0738 total' },
@@ -184,8 +184,8 @@ export const chats = [
     id: 'chat-2',
     name: 'What is Agent Pool?',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-flash-lite',
+    provider: 'antigravity',
+    model: 'Gemini 3.5 Flash (Low)',
     agent: 'single',
     createdAt: Date.now() - 86400_000,
     updatedAt: Date.now() - 43200_000,
@@ -203,8 +203,8 @@ export const chats = [
     id: 'chat-3',
     name: 'What is Project Graph?',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    provider: 'antigravity',
+    model: 'Gemini 3.1 Pro (High)',
     agent: 'single',
     createdAt: Date.now() - 172800_000,
     updatedAt: Date.now() - 172800_000,
@@ -222,8 +222,8 @@ export const chats = [
     id: 'chat-4',
     name: 'What is Symbiote UI?',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    provider: 'antigravity',
+    model: 'Gemini 3.1 Pro (High)',
     agent: 'single',
     createdAt: Date.now() - 259200_000,
     updatedAt: Date.now() - 259200_000,
@@ -241,8 +241,8 @@ export const chats = [
     id: 'chat-7',
     name: 'What is Symbiote Engine?',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    provider: 'antigravity',
+    model: 'Gemini 3.1 Pro (High)',
     agent: 'single',
     createdAt: Date.now() - 302400_000,
     updatedAt: Date.now() - 302400_000,
@@ -260,8 +260,8 @@ export const chats = [
     id: 'chat-5',
     name: 'Setup CI pipeline',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-flash-lite',
+    provider: 'antigravity',
+    model: 'Gemini 3.5 Flash (Low)',
     agent: 'single',
     createdAt: Date.now() - 604800_000,
     updatedAt: Date.now() - 604800_000,
@@ -278,8 +278,8 @@ export const chats = [
     id: 'chat-6',
     name: 'Fix training data loader',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    provider: 'antigravity',
+    model: 'Gemini 3.1 Pro (High)',
     agent: 'single',
     createdAt: Date.now() - 432000_000,
     updatedAt: Date.now() - 432000_000,
@@ -298,8 +298,8 @@ export const chats = [
     id: 'task-arch-analysis',
     name: 'Analyze the delegation architecture',
     adapter: 'pool',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    provider: 'antigravity',
+    model: 'Gemini 3.1 Pro (High)',
     agent: 'researcher',
     createdAt: Date.now() - 7100_000,
     updatedAt: Date.now() - 7000_000,
@@ -482,8 +482,8 @@ export const skeleton = {
     "lC": "loadConfig",
     "gR": "getRunner",
     "rC1": "resetConfig",
-    "GS": "runGeminiStreaming",
-    "GS1": "listGeminiSessions",
+    "GS": "runAntigravityStreaming",
+    "GS1": "listAntigravitySessions",
     "HC": "runHistoryCleanup",
     "OS": "runOpencodeStreaming",
     "tC": "trackChild",
@@ -492,11 +492,9 @@ export const skeleton = {
     "kA": "killAll",
     "lC1": "listChildren",
     "SL": "getSystemLoad",
-    "GE": "createGeminiEnv",
+    "GE": "createAntigravityEnv",
     "OCE": "createOpenCodeEnv",
     "TC2": "cleanupTmpConfig",
-    "GC": "injectGeminiConfig",
-    "GC1": "cleanupGeminiConfig",
     "OCC": "injectOpenCodeConfig",
     "OCC1": "cleanupOpenCodeConfig",
     "SA": "escapeShellArg",
@@ -775,7 +773,7 @@ export const skeleton = {
     "aT": "applyTheme",
     "eT1": "extractTheme",
     "CA1": "createClaudeAdapter",
-    "GA": "createGeminiAdapter",
+    "GA": "createAntigravityAdapter",
     "rA1": "resolveAdapter",
     "OCM": "discoverOpenCodeModels",
     "CLI1": "getCLIModels",
@@ -1580,7 +1578,7 @@ export const skeleton = {
       "gR",
       "rC1"
     ],
-    "packages/agent-pool-mcp/src/runner/gemini-runner.js": [
+    "packages/agent-pool-mcp/src/runner/antigravity-runner.js": [
       "GS",
       "GS1"
     ],
@@ -2091,7 +2089,7 @@ export const skeleton = {
     "src/node/adapters/claude.js": [
       "CA1"
     ],
-    "src/node/adapters/gemini.js": [
+    "src/node/adapters/antigravity.js": [
       "GA"
     ],
     "src/node/adapters/index.js": [
@@ -2930,7 +2928,7 @@ export const skeleton = {
       "node:path",
       "node:os"
     ],
-    "packages/agent-pool-mcp/src/runner/gemini-runner.js": [
+    "packages/agent-pool-mcp/src/runner/antigravity-runner.js": [
       "node:child_process",
       "node:os",
       "node:path",
@@ -3017,7 +3015,7 @@ export const skeleton = {
       "@modelcontextprotocol/sdk/server/stdio.js",
       "@modelcontextprotocol/sdk/types.js",
       "node:crypto",
-      "./runner/gemini-runner.js",
+      "./runner/antigravity-runner.js",
       "./runner/opencode-runner.js",
       "./runner/config.js",
       "./runner/history-cleanup.js",
@@ -3052,7 +3050,7 @@ export const skeleton = {
     ],
     "packages/agent-pool-mcp/src/tools/consult.js": [
       "node:crypto",
-      "../runner/gemini-runner.js",
+      "../runner/antigravity-runner.js",
       "./results.js"
     ],
     "packages/agent-pool-mcp/src/tools/groups.js": [
@@ -3790,11 +3788,11 @@ export const skeleton = {
     "src/node/adapters/claude.js": [
       "node:child_process"
     ],
-    "src/node/adapters/gemini.js": [
+    "src/node/adapters/antigravity.js": [
       "node:child_process"
     ],
     "src/node/adapters/index.js": [
-      "./gemini.js",
+      "./antigravity.js",
       "./claude.js",
       "../state-graph.js",
       "node:child_process",
@@ -4258,17 +4256,17 @@ export const adapterTypes = {
         },
       ],
     },
-    gemini: {
-      label: 'Gemini CLI',
+    antigravity: {
+      label: 'Antigravity CLI',
       parameters: [
         {
           id: 'model',
           label: 'Model',
           type: 'select',
           options: [
-            { val: 'gemini-2.5-pro', text: 'Gemini 2.5 Pro' },
-            { val: 'gemini-2.5-flash', text: 'Gemini 2.5 Flash' },
-            { val: 'gemini-2.5-flash-lite', text: 'Gemini 2.5 Flash-Lite' },
+            { val: 'Gemini 3.1 Pro (High)', text: 'Gemini 3.1 Pro (High)' },
+            { val: 'Gemini 3.5 Flash (Medium)', text: 'Gemini 3.5 Flash (Medium)' },
+            { val: 'Gemini 3.5 Flash (Low)', text: 'Gemini 3.5 Flash (Low)' },
           ],
         },
       ],
@@ -4295,7 +4293,7 @@ export const adapterTypes = {
 export const cliConfig = {
   global: {
     defaultAdapter: 'pool',
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: 'default',
   },
 };
 
@@ -4397,8 +4395,8 @@ export const groups = [
     model: 'default',
     profiles: [
       { provider: 'codex', model: 'gpt-5.5', reasoningEffort: 'high', label: 'Codex 5.5' },
-      { provider: 'gemini', model: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-      { provider: 'gemini', model: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite' },
+      { provider: 'antigravity', model: 'Gemini 3.1 Pro (High)', label: 'Gemini 3.1 Pro (High)' },
+      { provider: 'antigravity', model: 'Gemini 3.5 Flash (Low)', label: 'Gemini 3.5 Flash (Low)' },
     ],
     rotation_mode: 'error_fallback',
     policy: 'read-write',
@@ -4438,7 +4436,7 @@ export const groups = [
     model: 'default',
     profiles: [
       { provider: 'codex', model: 'gpt-5.4-mini', reasoningEffort: 'medium', label: 'Codex mini' },
-      { provider: 'gemini', model: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+      { provider: 'antigravity', model: 'Gemini 3.5 Flash (Medium)', label: 'Gemini 3.5 Flash (Medium)' },
       { provider: 'claude', model: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
     ],
     rotation_mode: 'error_fallback',

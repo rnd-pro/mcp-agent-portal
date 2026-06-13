@@ -8,7 +8,7 @@
 
 ```
 ┌─────────────────────────────────┐
-│  IDE Agent                      │  ← Claude, GPT, Gemini, etc.
+│  IDE Agent                      │  ← Claude, GPT, Antigravity, etc.
 │  (Antigravity / Cursor / ...)   │
 └────────────┬────────────────────┘
              │ MCP (stdio)
@@ -51,7 +51,7 @@ IDE Window 3 (~/project-c) ──stdio──┘      │ (detached process)    �
 
 - **MCP Aggregation** — unified `tools/list`, `resources/list`, `prompts/list` from all child servers
 - **Web Dashboard** — extensible project and home sections for Agent Chat, Skills, Graph, Runtime, Settings, Marketplace, Topology, and workflow operations
-- **Agent Pool** — heterogeneous CLI adapters (Gemini, Claude, Codex, OpenCode) running in parallel
+- **Agent Pool** — heterogeneous CLI adapters (Antigravity, Claude, Codex, OpenCode) running in parallel
 - **Plugin System** — external integrations (Telegram, Slack, GitHub) with alert dispatch
 - **Distributed Mode** — master/client topology via WebSocket for multi-machine tool sharing
 - **Auto-Restart** — crashed child processes respawn with exponential backoff
@@ -85,8 +85,7 @@ That's it. On the next IDE restart the portal will download itself, spawn its ch
 
 | IDE | Config path |
 |-----|------------|
-| Antigravity | `~/.gemini/antigravity/mcp_config.json` |
-| Gemini CLI | `~/.gemini/settings.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` |
 | Cursor | `.cursor/mcp.json` |
 | Windsurf | `.windsurf/mcp.json` |
 | Claude Code | Run: `claude mcp add agent-portal npx -y mcp-agent-portal` |
@@ -104,7 +103,7 @@ npx mcp-agent-portal help             # All commands
 
 ### Configuration
 
-Optionally create `~/.gemini/agent-portal.json` to customize child servers and adapters:
+Optionally create `~/.agent-portal/agent-portal.json` to customize child servers and adapters:
 
 ```json
 {
@@ -120,7 +119,7 @@ Optionally create `~/.gemini/agent-portal.json` to customize child servers and a
     }
   },
   "adapters": {
-    "gemini": { "type": "gemini", "enabled": true, "maxInstances": 5 },
+    "antigravity": { "type": "antigravity", "enabled": true, "maxInstances": 5 },
     "claude": { "type": "claude-code", "enabled": false, "maxInstances": 2 }
   }
 }

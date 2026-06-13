@@ -2,13 +2,13 @@
 
 ## Purpose
 Provides a unified interface for spawning and interacting with
-different AI CLI tools (Gemini, Claude, OpenCode).
+different AI CLI tools (Antigravity, Claude, OpenCode).
 
 ## Files
 | File | Type | Transport |
 |------|------|-----------|
 | `base.js` | JSDoc typedefs | — |
-| `gemini.js` | `createGeminiAdapter(config)` | CLI spawn `gemini -p` |
+| `antigravity.js` | `createAntigravityAdapter(config)` | CLI spawn `agy -p` |
 | `claude.js` | `createClaudeAdapter(config)` | CLI spawn `claude -p` |
 | `codex.js` | `createCodexAdapter(config)` | CLI spawn `codex exec --json` |
 | `pool.js` | `AdapterPool` | acquire/release lifecycle |
@@ -26,7 +26,7 @@ different AI CLI tools (Gemini, Claude, OpenCode).
 
 ## Pool usage
 ```js
-let adapter = pool.acquire('gemini');
+let adapter = pool.acquire('antigravity');
 let result = await adapter.run({ prompt: '...', cwd: '/project' });
 pool.release(adapter);
 ```

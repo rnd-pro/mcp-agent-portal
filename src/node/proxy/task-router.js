@@ -241,7 +241,7 @@ export class TaskRouter {
           let lastIdx = msgs.length - 1;
           let last = lastIdx >= 0 ? msgs[lastIdx] : null;
           if (last && last.role === 'agent' && last.streaming) {
-            // Replace content (cumulative delivery from opencode/gemini)
+            // Replace content from cumulative CLI delivery.
             msgs[lastIdx] = { ...last, text };
           } else {
             msgs.push({ role: 'agent', text, streaming: true });

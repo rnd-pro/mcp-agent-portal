@@ -141,7 +141,7 @@ async function run() {
         prompt: 'test resource group routing',
         agent: 'orchestrator',
         resource_group: 'reasoning-heavy',
-        provider: 'gemini',
+        provider: 'antigravity',
         model: 'default',
       }
     }));
@@ -166,7 +166,7 @@ async function run() {
       projectId: project.id,
       agent: 'qa-engineer',
       resource_group: 'verification',
-      provider: 'gemini',
+      provider: 'antigravity',
       model: 'default',
     }, 'test');
     let originalRequest = proxyManager.requestFromChild;

@@ -61,10 +61,10 @@ export let META_TOOLS = [
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Name or title for the new chat.' },
-        adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "gemini"). Optional.' },
+        adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "antigravity"). Optional.' },
         agent: { type: 'string', description: 'Agent role slug for Agent Pool chats (e.g. "orchestrator", "backend-engineer"). Optional.' },
         agent_slug: { type: 'string', description: 'Alias for agent. Agent role slug for Agent Pool chats. Optional.' },
-        provider: { type: 'string', description: 'CLI provider for pool chats (e.g. "codex", "gemini", "opencode", "claude"). Optional.' },
+        provider: { type: 'string', description: 'CLI provider for pool chats (e.g. "codex", "antigravity", "opencode", "claude"). Optional.' },
         model: { type: 'string', description: 'Model to preselect for this chat. Optional.' },
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode: yolo, auto_edit, or plan. Optional.' },
         resource_group: { type: 'string', description: 'Resource group for pool orchestration. Optional.' },

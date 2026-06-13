@@ -31,7 +31,7 @@ describe('Chat params lifecycle', { skip: !process.env.PORTAL_PORT }, () => {
   test('2. GET /api/adapter/types returns providers with models', async () => {
     let { status, data } = await api('GET', '/api/adapter/types');
     assert.equal(status, 200);
-    assert.ok(data.metadata.gemini, 'gemini metadata exists');
+    assert.ok(data.metadata.antigravity, 'antigravity metadata exists');
     assert.ok(data.metadata.opencode, 'opencode metadata exists');
     assert.ok(data.metadata.pool, 'pool metadata exists');
 
@@ -70,10 +70,10 @@ describe('Chat params lifecycle', { skip: !process.env.PORTAL_PORT }, () => {
 
   test('7. cascade: switch provider resets model', async () => {
     await api('POST', '/api/chats/update', {
-      id: chatId, provider: 'gemini', model: null,
+      id: chatId, provider: 'antigravity', model: null,
     });
     let { data } = await api('POST', '/api/chats/get', { id: chatId });
-    assert.equal(data.provider, 'gemini');
+    assert.equal(data.provider, 'antigravity');
     assert.equal(data.model, null);
   });
 

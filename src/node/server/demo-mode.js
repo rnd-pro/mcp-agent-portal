@@ -465,7 +465,7 @@ function demoModels() {
   return {
     userModels: {
       opencode: ['openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
-      gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+      antigravity: ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)'],
       claude: ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash', 'claude-sonnet-4-6'],
       codex: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
     },
@@ -495,8 +495,8 @@ function demoModels() {
         created: 1764547200,
       },
       {
-        id: 'gemini/gemini-2.5-pro',
-        name: 'Gemini 2.5 Pro',
+        id: 'Gemini 3.1 Pro (High)',
+        name: 'Gemini 3.1 Pro (High)',
         context: 1000000,
         maxOutput: 65536,
         pricePrompt: '1.25',

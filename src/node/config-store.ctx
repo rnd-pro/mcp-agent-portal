@@ -1,7 +1,7 @@
 # config-store.js — DRY Config Utility
 
 ## Purpose
-Centralized read/write for `~/.gemini/agent-portal.json`.
+Centralized read/write for `~/.agent-portal/agent-portal.json`.
 Eliminates path duplication across mcp-proxy, api-routes, etc.
 
 ## Exports

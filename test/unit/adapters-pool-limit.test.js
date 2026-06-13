@@ -6,20 +6,20 @@ describe('adapters-pool limit validation', () => {
      let { AdapterPool } = await import('../../src/node/adapters/pool.js');
      
      // Mock out the config and resolveAdapter at a high level
-     let pool = new AdapterPool({ gemini: { enabled: true } });
+     let pool = new AdapterPool({ antigravity: { enabled: true } });
      
      // We will manually push raw objects into instances array to simulate busy adapters
-     pool.instances.set('gemini', [
+     pool.instances.set('antigravity', [
        { busy: true, busySince: Date.now() },
        { busy: true, busySince: Date.now() },
        { busy: true, busySince: Date.now() }
      ]);
      
-     let res = pool.acquire('gemini');
+     let res = pool.acquire('antigravity');
      assert.equal(res, null, 'Should return null when 3 instances are busy');
      
      // Eviction logic test
-     pool.instances.set('gemini', [
+     pool.instances.set('antigravity', [
        { busy: true, busySince: Date.now() - (11 * 60 * 1000), destroy: () => {} }, // 11 mins ago
        { busy: true, busySince: Date.now() }
      ]);
@@ -29,10 +29,10 @@ describe('adapters-pool limit validation', () => {
      // we just expect it to not throw an unexpected error.
      let err = null;
      try {
-       pool.acquire('gemini');
+       pool.acquire('antigravity');
      } catch (e) { err = e; }
      
-     let arr = pool.instances.get('gemini');
+     let arr = pool.instances.get('antigravity');
      assert.equal(arr.length, 2, 'Should have 2 elements (1 old evicted, 1 new wrapper pushed after eviction)');
      pool.destroy();
   });

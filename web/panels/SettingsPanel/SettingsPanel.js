@@ -600,7 +600,7 @@ export class SettingsPanel extends Symbiote {
   }
 
   _renderProviderTabs() {
-    let providers = ['opencode', 'gemini', 'claude', 'codex'];
+    let providers = ['opencode', 'antigravity', 'claude', 'codex'];
     if (!providers.includes(this._activeProvider)) this._activeProvider = providers[0];
 
     let buttons = providers.map(p => {

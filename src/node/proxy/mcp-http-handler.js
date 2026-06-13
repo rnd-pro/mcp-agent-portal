@@ -6,7 +6,7 @@
 // here instead of launching isolated stdio MCP processes.
 //
 // Architecture: "Group Chat" model
-// All agents (browser, Gemini CLI, OpenCode) connect to this single endpoint.
+// All agents (browser, Antigravity CLI, OpenCode) connect to this single endpoint.
 // Tool calls are routed to child MCP servers (agent-pool, project-graph, etc.)
 // via the same MCPProxyManager used by the stdio multiplexer.
 //
