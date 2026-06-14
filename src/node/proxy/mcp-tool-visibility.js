@@ -58,6 +58,16 @@ export function filterPublicMcpTools(tools = []) {
   return tools.filter(tool => !isInternalMcpToolName(tool?.name));
 }
 
+export function splitMcpHealthStatus(health = {}) {
+  let publicHealth = {};
+  let internalHealth = {};
+  for (let [name, status] of Object.entries(health || {})) {
+    if (isPublicMcpToolServer(name)) publicHealth[name] = status;
+    else internalHealth[name] = status;
+  }
+  return { publicHealth, internalHealth };
+}
+
 export function internalMcpToolBlockedResult(name = '') {
   return {
     content: [{

@@ -54,6 +54,8 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
         { name: 'test_add', description: 'Add two numbers', inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } } } },
         { name: 'call_tool', description: 'Proxy a tool', inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object' } } } },
         { name: 'delegate_task_readonly', description: 'Delegate readonly task', inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, parent_chat_id: { type: 'string' } } } },
+        { name: 'list_chats', description: 'List chats', inputSchema: { type: 'object', properties: { projectId: { type: 'string' } } } },
+        { name: 'cancel_chat_task', description: 'Cancel chat task', inputSchema: { type: 'object', properties: { chatId: { type: 'string' } } } },
         { name: 'create_goal', description: 'Create a goal', inputSchema: { type: 'object', properties: { title: { type: 'string' }, chatId: { type: 'string' } } } },
         { name: 'enqueue_goal_message', description: 'Queue a goal message', inputSchema: { type: 'object', properties: { goalId: { type: 'string' }, text: { type: 'string' }, chatId: { type: 'string' } } } },
       ],
@@ -62,6 +64,8 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
         if (name === 'test_add') return { content: [{ type: 'text', text: String((args.a || 0) + (args.b || 0)) }] };
         if (name === 'call_tool') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
         if (name === 'delegate_task_readonly') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
+        if (name === 'list_chats') return { content: [{ type: 'text', text: JSON.stringify({ chats: [], args }) }] };
+        if (name === 'cancel_chat_task') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
         if (name === 'create_goal') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
         if (name === 'enqueue_goal_message') return { content: [{ type: 'text', text: JSON.stringify(args) }] };
         throw new Error(`Unknown tool: ${name}`);
@@ -127,6 +131,8 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     let names = res.json.result.tools.map(t => t.name);
     assert.ok(names.includes('test_echo'), 'Should include test_echo');
     assert.ok(names.includes('test_add'), 'Should include test_add');
+    assert.ok(names.includes('list_chats'), 'Should include Agent Portal orchestrator controls');
+    assert.ok(names.includes('cancel_chat_task'), 'Should include Agent Portal task controls');
     assert.equal(names.includes('delegate_task_readonly'), false, 'Should not expose agent-pool delegate tools');
   });
 
@@ -246,6 +252,25 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     assert.equal(res.status, 200);
     assert.equal(res.json.result.isError, true);
     assert.match(res.json.result.content[0].text, /Agent Pool tool `delegate_task_readonly` is internal to Agent Portal/);
+  });
+
+  it('allows Agent Portal orchestrator controls with portal-owned names', async () => {
+    let initRes = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    });
+    let sessionId = initRes.headers['mcp-session-id'];
+
+    let res = await mcpRequest(port, {
+      jsonrpc: '2.0', id: 37, method: 'tools/call',
+      params: {
+        name: 'cancel_chat_task',
+        arguments: { chatId: 'chat-1' },
+      },
+    }, { headers: { 'mcp-session-id': sessionId } });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.json.result.content[0].text), { chatId: 'chat-1' });
   });
 
   it('tools/call with test_add returns sum', async () => {

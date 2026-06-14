@@ -7,6 +7,11 @@ import {
   isPortalGoalTool,
 } from './portal-goal-tools.js';
 import {
+  ORCHESTRATOR_META_TOOLS,
+  handlePortalOrchestratorTool,
+  isPortalOrchestratorTool,
+} from './portal-orchestrator-tools.js';
+import {
   isDelegateTool,
   prepareDelegateTaskCall,
   resolveChatCreationAgent,
@@ -14,6 +19,7 @@ import {
 import {
   internalMcpToolBlockedResult,
   isInternalMcpToolName,
+  splitMcpHealthStatus,
 } from './mcp-tool-visibility.js';
 
 /**
@@ -119,6 +125,7 @@ export let META_TOOLS = [
       required: ['chatId', 'prompt'],
     },
   },
+  ...ORCHESTRATOR_META_TOOLS,
   ...GOAL_META_TOOLS,
   {
     name: 'remember',
@@ -517,10 +524,13 @@ export class MCPMultiplexer {
 
       if (toolName === 'get_portal_status') {
         await this._ensureIndex();
+        let health = this.proxyManager.getHealthStatus();
+        let { publicHealth, internalHealth } = splitMcpHealthStatus(health);
         let status = {
           servers: this.toolIndex.getServers(),
-          health: this.proxyManager.getHealthStatus(),
-          totalTools: this.toolIndex.tools.size,
+          health: publicHealth,
+          internalHealth,
+          totalTools: this.toolIndex.getPublicToolCount(),
           tags: this.toolIndex.getAvailableTags(),
           mode: process.env.PORTAL_MODE || 'standalone',
         };
@@ -589,6 +599,16 @@ export class MCPMultiplexer {
 
       if (toolName === 'resume_chat') {
         let result = await resumeChatTool(this.proxyManager, args);
+        this.sendToIde({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result,
+        });
+        return;
+      }
+
+      if (isPortalOrchestratorTool(toolName)) {
+        let result = await handlePortalOrchestratorTool(this.proxyManager, toolName, args, 'mcp');
         this.sendToIde({
           jsonrpc: '2.0',
           id: msg.id,

@@ -85,6 +85,74 @@ test('portal goal meta-tools expose orchestrator lifecycle controls', () => {
   assert.deepEqual(markGoalMessageApplied.inputSchema.required, ['goalId', 'messageId']);
 });
 
+test('portal orchestrator meta-tools expose control without raw agent-pool tools', () => {
+  let toolNames = META_TOOLS.map(tool => tool.name);
+
+  for (let name of [
+    'list_chats',
+    'get_chat',
+    'get_chat_messages',
+    'update_chat',
+    'delete_chat',
+    'set_chat_session',
+    'cancel_chat_task',
+    'finish_chat_task',
+    'get_orchestrator_status',
+  ]) {
+    assert.ok(toolNames.includes(name), `missing ${name}`);
+  }
+
+  for (let rawName of [
+    'delegate_task',
+    'delegate_task_readonly',
+    'get_task_result',
+    'cancel_task',
+    'finish_task',
+    'list_tasks',
+  ]) {
+    assert.equal(toolNames.includes(rawName), false, `must not expose raw ${rawName}`);
+  }
+});
+
+test('get_portal_status separates public servers from internal runtime health', async () => {
+  let ideMessages = [];
+  let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
+  let proxyManager = {
+    servers: new Map(),
+    broadcastMonitor() {},
+    getHealthStatus: () => ({
+      'project-graph': { status: 'healthy' },
+      'agent-pool': { status: 'healthy' },
+    }),
+  };
+  let multiplexer = new MCPMultiplexer(proxyManager, ws);
+  multiplexer.toolIndex.tools.set('get_skeleton', {
+    server: 'project-graph',
+    tool: { name: 'get_skeleton', description: 'Get project skeleton' },
+  });
+  multiplexer.toolIndex.tools.set('delegate_task', {
+    server: 'agent-pool',
+    tool: { name: 'delegate_task', description: 'Delegate task' },
+  });
+  multiplexer.toolIndex._ready = true;
+
+  await multiplexer._handleToolCall({
+    jsonrpc: '2.0',
+    id: 41,
+    method: 'tools/call',
+    params: {
+      name: 'get_portal_status',
+      arguments: {},
+    },
+  });
+
+  let status = JSON.parse(ideMessages[0].result.content[0].text);
+  assert.deepEqual(status.servers, [{ name: 'project-graph', toolCount: 1 }]);
+  assert.deepEqual(status.health, { 'project-graph': { status: 'healthy' } });
+  assert.deepEqual(status.internalHealth, { 'agent-pool': { status: 'healthy' } });
+  assert.equal(status.totalTools, 1);
+});
+
 test('nested agent-pool delegate_task is blocked as an external MCP tool', async () => {
   let ideMessages = [];
   let childMessages = [];

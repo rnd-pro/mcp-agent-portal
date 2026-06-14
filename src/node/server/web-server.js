@@ -12,11 +12,16 @@ import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
 import { handlePortalGoalTool, isPortalGoalTool } from '../proxy/portal-goal-tools.js';
+import {
+  handlePortalOrchestratorTool,
+  isPortalOrchestratorTool,
+} from '../proxy/portal-orchestrator-tools.js';
 import { resolveChatCreationAgent } from '../proxy/chat-delegate-routing.js';
 import {
   internalMcpToolBlockedResult,
   isInternalMcpToolName,
   isPublicMcpToolServer,
+  splitMcpHealthStatus,
 } from '../proxy/mcp-tool-visibility.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
@@ -473,11 +478,13 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
 
   if (toolName === 'get_portal_status') {
     let tools = await _collectChildTools(proxyManager);
-    let servers = [...proxyManager.servers.keys()];
+    let servers = [...proxyManager.servers.keys()].filter(isPublicMcpToolServer);
+    let { publicHealth, internalHealth } = splitMcpHealthStatus(proxyManager.getHealthStatus());
     return {
       content: [{ type: 'text', text: JSON.stringify({
         servers: servers.map(name => ({ name })),
-        health: proxyManager.getHealthStatus(),
+        health: publicHealth,
+        internalHealth,
         totalTools: tools.length,
         mode: process.env.PORTAL_MODE || 'standalone',
       }, null, 2) }],
@@ -524,6 +531,10 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
 
   if (toolName === 'resume_chat') {
     return resumeChatTool(proxyManager, args);
+  }
+
+  if (isPortalOrchestratorTool(toolName)) {
+    return handlePortalOrchestratorTool(proxyManager, toolName, args, 'mcp-http');
   }
 
   if (isPortalGoalTool(toolName)) {

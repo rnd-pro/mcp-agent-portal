@@ -90,7 +90,7 @@ Agent Portal provides two interfaces to the same singleton backend:
 
 | Mode | Transport | What you see |
 |------|-----------|-------------|
-| **IDE** | stdio (JSON-RPC over stdin/stdout) | Unified `tools/list`, `resources/list` from all children |
+| **IDE** | stdio (JSON-RPC over stdin/stdout) | Agent Portal tools plus selected public child MCP tools |
 | **Web** | HTTP + WebSocket | Dashboard, Marketplace, AI Chat, live monitoring |
 
 ### IDE Mode (stdin/stdout)
@@ -121,10 +121,18 @@ The portal does **not** expose all child tools directly. Instead, it presents a 
 | `get_portal_status` | Health, server list, tool counts, available tags |
 | `create_chat` | Create an Agent Chat session in the web UI |
 | `send_chat_message` | Send a message to an existing chat session |
+| `resume_chat` | Continue a chat and start a portal-managed orchestration run |
+| `list_chats`, `get_chat`, `get_chat_messages` | Inspect portal-owned chat state |
+| `update_chat`, `delete_chat`, `set_chat_session` | Manage chat routing and session metadata |
+| `cancel_chat_task`, `finish_chat_task` | Control a chat's active task through Agent Portal |
+| `create_goal`, `list_goals`, `select_goal`, `complete_goal`, ... | Manage orchestrator goal lifecycle |
+| `get_orchestrator_status` | Orchestrator state, public MCP surface, and internal runtime health |
 | `remember` | Save key-value pair to persistent memory |
 | `recall` | Query persistent memory by key substring |
 
-When an IDE sends `tools/list`, it receives Agent Portal meta-tools with dynamic hints about available public child tools. The `call_tool` meta-tool routes only to public child servers using `ToolIndex`; `agent-pool-mcp` is not indexed for external MCP discovery or calls.
+When an IDE sends `tools/list`, it receives Agent Portal meta-tools with dynamic hints about available public child tools. The `call_tool` meta-tool routes only to public child servers using `ToolIndex`; `agent-pool-mcp` is filtered at the server boundary and is not indexed for external MCP discovery or calls. Agent Portal still owns orchestration controls for chats, goals, active tasks, and status through portal-named tools.
+
+`get_portal_status` reports public servers separately from internal runtime health. Internal execution servers are never presented as public MCP servers or public child tool owners.
 
 ### MCP Aggregation Flow
 
