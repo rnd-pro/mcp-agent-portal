@@ -152,6 +152,11 @@ canvas-graph {
   gap: 4px;
 }
 
+.apg-map-summary-subagents {
+  display: grid;
+  gap: 4px;
+}
+
 .apg-map-summary-row {
   overflow: hidden;
   padding: 5px 6px;
@@ -161,6 +166,34 @@ canvas-graph {
   font-family: var(--sn-font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.apg-map-summary-subagent {
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
+  overflow: hidden;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: var(--sn-surface-hover);
+}
+
+.apg-map-summary-subagent-title,
+.apg-map-summary-subagent-tool {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apg-map-summary-subagent-title {
+  color: var(--sn-text);
+  font-family: var(--sn-font-mono);
+}
+
+.apg-map-summary-subagent-tool {
+  color: var(--sn-text-dim);
+  font-family: var(--sn-font-mono);
+  font-size: 10px;
 }
 
 .apg-map-summary-hints {

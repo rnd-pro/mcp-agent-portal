@@ -71,6 +71,33 @@ function formatDurationMs(value) {
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function compactMapLabel(value = '', limit = 54) {
+  let text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
+function formatDevelopmentTool(tool = null) {
+  if (!tool) return '';
+  return [
+    tool.name || 'tool',
+    tool.detailLabel || tool.detail || '',
+    tool.status || 'unknown',
+    formatDurationMs(tool.usageMs ?? tool.elapsedMs ?? tool.durationMs),
+    tool.timingSource || '',
+  ].filter(Boolean).join(' · ');
+}
+
+function developmentMapSubagents(map = {}) {
+  let rootChatId = map.rootChatId || map.subagentMap?.rootChatId || null;
+  return asArray(map.activityMap?.subagents?.length ? map.activityMap.subagents : map.subagentMap?.nodes)
+    .filter(node => node?.chatId && (!rootChatId || node.chatId !== rootChatId))
+    .slice(0, 6);
+}
+
 function getNodeChatEventTarget(node = {}) {
   let params = node?.params || {};
   let chatId = params.chatId || params.sourceChatId || null;
@@ -365,6 +392,7 @@ export class AgentProcessGraph extends Symbiote {
     let latestTools = Array.isArray(activityMap.latestTools)
       ? activityMap.latestTools.slice(0, 4)
       : Array.isArray(map.latestTools) ? map.latestTools.slice(0, 4) : [];
+    let subagents = developmentMapSubagents(map);
     let hints = Array.isArray(activityMap.promptHints)
       ? activityMap.promptHints.slice(0, 3)
       : Array.isArray(map.promptHintMap?.hints) ? map.promptHintMap.hints.slice(0, 3) : [];
@@ -392,16 +420,36 @@ export class AgentProcessGraph extends Symbiote {
       for (let tool of latestTools) {
         let item = document.createElement('div');
         item.className = 'apg-map-summary-row';
-        item.textContent = [
-          tool.name || 'tool',
-          tool.detailLabel || tool.detail || '',
-          tool.status || 'unknown',
-          formatDurationMs(tool.usageMs ?? tool.elapsedMs ?? tool.durationMs),
-          tool.timingSource || '',
-        ].filter(Boolean).join(' · ');
+        item.textContent = formatDevelopmentTool(tool);
         tools.append(item);
       }
       this._developmentMapSummary.append(tools);
+    }
+
+    if (subagents.length) {
+      let agentList = document.createElement('div');
+      agentList.className = 'apg-map-summary-subagents';
+      for (let node of subagents) {
+        let item = document.createElement('div');
+        item.className = 'apg-map-summary-subagent';
+        let title = document.createElement('span');
+        title.className = 'apg-map-summary-subagent-title';
+        title.textContent = [
+          compactMapLabel(node.agent || node.name || 'agent'),
+          `${node.runningTaskCount || 0}/${node.totalTaskCount || 0} tasks`,
+          formatDurationMs(node.totalElapsedMs),
+        ].filter(Boolean).join(' · ');
+        item.append(title);
+        let toolText = formatDevelopmentTool(node.latestTool || asArray(node.latestTools)[0] || null);
+        if (toolText) {
+          let tool = document.createElement('span');
+          tool.className = 'apg-map-summary-subagent-tool';
+          tool.textContent = toolText;
+          item.append(tool);
+        }
+        agentList.append(item);
+      }
+      this._developmentMapSummary.append(agentList);
     }
 
     if (hints.length) {

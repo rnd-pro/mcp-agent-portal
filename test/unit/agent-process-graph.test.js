@@ -219,8 +219,21 @@ describe('agent process graph model', () => {
             runningTaskCount: 0,
             totalTaskCount: 1,
             taskIds: ['task-child'],
+            totalElapsedMs: 9000,
             toolCount: 1,
             toolUsageMs: 300,
+            latestTool: {
+              name: 'read_file',
+              status: 'success',
+              usageMs: 300,
+              timingSource: 'tool_result',
+            },
+            latestTools: [{
+              name: 'read_file',
+              status: 'success',
+              usageMs: 300,
+              timingSource: 'tool_result',
+            }],
           }],
           edges: [{ from: 'root-chat', to: 'child-chat', kind: 'agent.delegates' }],
         },
@@ -280,12 +293,22 @@ describe('agent process graph model', () => {
     let summary = summarizeAgentProcessGraphModel(model);
     let taskNode = nodeByKind(model, 'agent.process.task')[0];
     let latestToolNode = nodeByKind(model, 'agent.process.latestTool')[0];
+    let childAgentNode = nodeByKind(model, 'agent.process.childAgent')
+      .find(node => node.params.chatId === 'child-chat' && node.params.source === 'developmentMap');
     let hintNodes = nodeByKind(model, 'agent.process.promptHint');
     let hintNode = hintNodes.find(node => node.params.id === 'poll-current-task');
     let safeHintNode = hintNodes.find(node => node.params.id === 'continue-chat');
     let errorNode = nodeByKind(model, 'agent.process.stateError')[0];
 
-    assert.equal(nodeByKind(model, 'agent.process.childAgent').some(node => node.params.chatId === 'child-chat'), true);
+    assert.equal(Boolean(childAgentNode), true);
+    assert.equal(childAgentNode.params.totalElapsedMs, 9000);
+    assert.equal(childAgentNode.params.latestTool, 'read_file');
+    assert.deepEqual(childAgentNode.params.latestTools, [{
+      name: 'read_file',
+      status: 'success',
+      usageMs: 300,
+      timingSource: 'tool_result',
+    }]);
     assert.equal(taskNode.params.taskId, 'task-root');
     assert.equal(taskNode.params.toolUsageMs, 1500);
     assert.equal(latestToolNode.params.name, 'shell');
@@ -362,6 +385,9 @@ describe('agent process graph model', () => {
     assert.match(source, /buildAgentProcessGraphModel\(\{ chat, chats, childChats, agents, developmentMap \}\)/);
     assert.match(source, /buildAgentProcessCanvasGraphModel\(\{ chat, chats, childChats, agents, developmentMap \}\)/);
     assert.match(source, /_renderDevelopmentMapSummary\(developmentMap\)/);
+    assert.match(source, /developmentMapSubagents\(map\)/);
+    assert.match(source, /apg-map-summary-subagents/);
+    assert.match(source, /formatDevelopmentTool\(node\.latestTool/);
     assert.match(source, /let chatChanged = this\._currentChatId !== chat\.id;/);
     assert.match(source, /this\._currentChatId = chat\.id;/);
     assert.match(source, /function processGraphLayoutKey\(chatId\)/);

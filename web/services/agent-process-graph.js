@@ -492,6 +492,7 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     let childAgent = getChatAgentLabel(child, 'agent');
     let childNodeId = agentNodeId(child.id, childAgent);
     let childAgentIcon = resolveAgentIcon(child, agentIndex, 'smart_toy');
+    let developmentNode = child.developmentMapNode || null;
     addNode(makeNode({
       id: childNodeId,
       kind: 'agent.process.childAgent',
@@ -506,6 +507,24 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
         agent: child.agent || null,
         agentIcon: childAgentIcon,
         resource_group: child.resource_group || null,
+        ...(developmentNode ? {
+          taskIds: asArray(developmentNode.taskIds),
+          runningTaskCount: developmentNode.runningTaskCount || 0,
+          totalTaskCount: developmentNode.totalTaskCount || 0,
+          totalElapsedMs: developmentNode.totalElapsedMs || 0,
+          toolCount: developmentNode.toolCount || 0,
+          toolUsageMs: developmentNode.toolUsageMs || 0,
+          latestTool: developmentNode.latestTool?.name || null,
+          latestTools: asArray(developmentNode.latestTools)
+            .map(tool => ({
+              name: tool?.name || null,
+              status: tool?.status || null,
+              usageMs: tool?.usageMs ?? tool?.elapsedMs ?? tool?.durationMs ?? null,
+              timingSource: tool?.timingSource || null,
+            }))
+            .filter(tool => tool.name),
+          source: 'developmentMap',
+        } : {}),
       },
     }));
     addEdge(makeEdge({
@@ -537,8 +556,20 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
           agent: node.agent || null,
           resource_group: node.resourceGroup || null,
           taskIds: asArray(node.taskIds),
+          runningTaskCount: node.runningTaskCount || 0,
+          totalTaskCount: node.totalTaskCount || 0,
+          totalElapsedMs: node.totalElapsedMs || 0,
           toolCount: node.toolCount || 0,
           toolUsageMs: node.toolUsageMs || 0,
+          latestTool: node.latestTool?.name || null,
+          latestTools: asArray(node.latestTools)
+            .map(tool => ({
+              name: tool?.name || null,
+              status: tool?.status || null,
+              usageMs: tool?.usageMs ?? tool?.elapsedMs ?? tool?.durationMs ?? null,
+              timingSource: tool?.timingSource || null,
+            }))
+            .filter(tool => tool.name),
           source: 'developmentMap',
         },
       }));
