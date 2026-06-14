@@ -98,7 +98,7 @@ export async function ensureBackend(rootPath, { force } = {}) {
     // ONLY restart on explicit force or real version mismatch (npm update).
     // NEVER restart on source changes — this is a shared singleton backend
     // serving multiple IDE instances. Killing it disconnects ALL of them.
-    // Use `npx agent-portal --restart` for manual restarts after code changes.
+    // Use `npx mcp-agent-portal restart` for manual restarts after code changes.
     const needRestart = force || (existing.version && existing.version !== currentVersion && currentVersion !== '0.0.0');
     
     if (needRestart) {
