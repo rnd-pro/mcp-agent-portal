@@ -228,13 +228,16 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.equal(status.developmentMap.taskMap.schemaVersion, 1);
   assert.equal(status.developmentMap.toolMap.schemaVersion, 1);
   assert.equal(Array.isArray(status.developmentMap.latestTools), true);
-	  assert.equal(status.developmentMap.usage.runningTasks, 0);
-	  assert.equal(status.developmentMap.usage.toolUses, 0);
-	  assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
-	  assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
-	  assert.equal(JSON.stringify(status.staleProcesses).includes('23456'), false);
-	  assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
-	});
+  assert.equal(status.developmentMap.usage.runningTasks, 0);
+  assert.equal(status.developmentMap.usage.toolUses, 0);
+  assert.equal(status.developmentMap.usage.liveness.state, 'idle');
+  assert.equal(status.developmentMap.usage.liveness.warningTaskCount, 0);
+  assert.equal(status.developmentMap.activityMap.summary.liveness.state, 'idle');
+  assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
+  assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
+  assert.equal(JSON.stringify(status.staleProcesses).includes('23456'), false);
+  assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
+});
 
 test('get_portal_status surfaces internal task-state read failures', async () => {
   let ideMessages = [];

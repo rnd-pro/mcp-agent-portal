@@ -63,7 +63,7 @@ export let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the mcp-agent-portal: connected MCP servers, their health, total tool count, available tags for discover_tools filtering, and the current developmentMap.',
+    description: 'Get the status of the mcp-agent-portal: connected MCP servers, their health, total tool count, available tags for discover_tools filtering, and the current developmentMap with task liveness classification.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -71,7 +71,7 @@ export let META_TOOLS = [
   },
   {
     name: 'create_chat',
-    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with subagentMap/taskMap/toolMap timing telemetry, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with subagentMap/taskMap/toolMap timing telemetry, task liveness classification, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +94,7 @@ export let META_TOOLS = [
   },
   {
     name: 'send_chat_message',
-    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map with subagentMap/taskMap/toolMap timing telemetry.',
+    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map with subagentMap/taskMap/toolMap timing telemetry and task liveness classification.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,7 +107,7 @@ export let META_TOOLS = [
   },
   {
     name: 'resume_chat',
-    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns bounded delegateSummary, task routing metadata, and a development map with subagentMap nodes/tree/edges, taskMap, toolMap, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns bounded delegateSummary, task routing metadata, and a development map with subagentMap nodes/tree/edges, taskMap, toolMap, task liveness classification, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {

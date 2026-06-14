@@ -91,6 +91,17 @@ function formatDevelopmentTool(tool = null) {
   ].filter(Boolean).join(' · ');
 }
 
+function formatDevelopmentLiveness(liveness = null) {
+  if (!liveness) return '';
+  let state = liveness.state || '';
+  let details = [];
+  if (liveness.warningTaskCount) details.push(`${liveness.warningTaskCount} warning`);
+  if (liveness.noEventTaskCount) details.push(`${liveness.noEventTaskCount} no events`);
+  if (liveness.quietTaskCount) details.push(`${liveness.quietTaskCount} quiet`);
+  if (liveness.coldStartTaskCount) details.push(`${liveness.coldStartTaskCount} cold`);
+  return [state, details.join(', ')].filter(Boolean).join(' · ');
+}
+
 function developmentMapSubagents(map = {}) {
   let rootChatId = map.rootChatId || map.subagentMap?.rootChatId || null;
   return asArray(map.activityMap?.subagents?.length ? map.activityMap.subagents : map.subagentMap?.nodes)
@@ -404,6 +415,7 @@ export class AgentProcessGraph extends Symbiote {
       this._summaryMetric('Agents', usage.subagents || 0),
       this._summaryMetric('Tools', usage.toolUses || 0),
       this._summaryMetric('Time', formatDurationMs(usage.toolUsageMs) || '0ms'),
+      this._summaryMetric('Live', formatDevelopmentLiveness(usage.liveness) || 'idle'),
     );
     this._developmentMapSummary.append(header);
 
@@ -438,6 +450,7 @@ export class AgentProcessGraph extends Symbiote {
           compactMapLabel(node.agent || node.name || 'agent'),
           `${node.runningTaskCount || 0}/${node.totalTaskCount || 0} tasks`,
           formatDurationMs(node.totalElapsedMs),
+          formatDevelopmentLiveness(node.liveness),
         ].filter(Boolean).join(' · ');
         item.append(title);
         let toolText = formatDevelopmentTool(node.latestTool || asArray(node.latestTools)[0] || null);

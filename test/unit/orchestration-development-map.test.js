@@ -218,6 +218,9 @@ describe('orchestration development map', () => {
     assert.equal(map.usage.toolUsageMs >= 2000, true);
     assert.equal(map.usage.totalTaskElapsedMs, 9000);
     assert.equal(map.usage.tokens, 123);
+    assert.equal(map.usage.liveness.zeroEventTaskCount, 1);
+    assert.equal(map.taskMap.byId['task-root'].liveness.eventCount, 3);
+    assert.equal(map.taskMap.byId['task-child'].liveness.state, 'cold_start');
     assert.equal(map.activityMap.schemaVersion, 1);
     assert.equal(map.activityMap.rootChatId, root.id);
     assert.equal(map.activityMap.primaryTaskId, 'task-root');
@@ -227,6 +230,7 @@ describe('orchestration development map', () => {
     assert.equal(map.activityMap.summary.runningTasks, 2);
     assert.equal(map.activityMap.summary.totalTaskElapsedMs, 9000);
     assert.equal(map.activityMap.summary.toolUsageMs >= 2000, true);
+    assert.equal(map.activityMap.summary.liveness.coldStartTaskCount, 1);
     assert.equal(map.activityMap.latestTools[0].name, 'mcp_project_graph_get_skeleton');
     assert.equal(map.activityMap.latestTools[0].usageMs, 2000);
     assert.equal(map.activityMap.latestTools[0].detailKind, 'query');
@@ -242,6 +246,7 @@ describe('orchestration development map', () => {
     assert.equal(childActivity.agent, 'backend-engineer');
     assert.equal(childActivity.status, 'running');
     assert.equal(childActivity.totalElapsedMs, 4000);
+    assert.equal(childActivity.liveness.state, 'cold_start');
     assert.equal(
       map.activityMap.promptHints.some((hint) => hint.tool === 'get_chat_task_result'),
       true,
@@ -309,6 +314,67 @@ describe('orchestration development map', () => {
       tasks: [],
       staleProcesses: [],
     });
+  });
+
+  it('classifies running task liveness for cold, no-event, and quiet tasks', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    let child = sg.createChat({ name: 'Quiet chain', parentChatId: root.id, agent: 'backend-engineer' }, 'test');
+    let now = Date.now();
+
+    sg.set('tasks/task-cold', {
+      status: 'running',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      startedAt: now - 5000,
+      elapsedMs: 5000,
+      events: [],
+    }, 'test');
+    sg.set('tasks/task-no-events', {
+      status: 'running',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      startedAt: now - 70000,
+      elapsedMs: 70000,
+      events: [],
+    }, 'test');
+    sg.set('tasks/task-quiet', {
+      status: 'running',
+      chatId: child.id,
+      parentId: 'task-cold',
+      agentSlug: 'backend-engineer',
+      startedAt: now - 120000,
+      lastEventAt: now - 90000,
+      elapsedMs: 120000,
+      eventCount: 2,
+      events: [{
+        type: 'tool_use',
+        name: 'read_file',
+        arguments: { path: 'src/node/proxy/orchestration-development-map.js' },
+        ts: now - 90000,
+      }],
+    }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-cold' });
+
+    assert.equal(map.taskMap.byId['task-cold'].liveness.state, 'cold_start');
+    assert.equal(map.taskMap.byId['task-cold'].liveness.severity, 'info');
+    assert.equal(map.taskMap.byId['task-cold'].liveness.thresholdMs, 15000);
+    assert.equal(map.taskMap.byId['task-no-events'].liveness.state, 'no_events');
+    assert.equal(map.taskMap.byId['task-no-events'].liveness.severity, 'warning');
+    assert.equal(map.taskMap.byId['task-no-events'].liveness.thresholdMs, 15000);
+    assert.equal(map.taskMap.byId['task-quiet'].liveness.state, 'quiet');
+    assert.equal(map.taskMap.byId['task-quiet'].liveness.severity, 'warning');
+    assert.equal(map.taskMap.byId['task-quiet'].liveness.thresholdMs, 60000);
+    assert.equal(map.usage.liveness.warningTaskCount, 2);
+    assert.equal(map.usage.liveness.zeroEventTaskCount, 2);
+    assert.equal(map.usage.liveness.noEventTaskCount, 1);
+    assert.equal(map.usage.liveness.coldStartTaskCount, 1);
+    assert.equal(map.usage.liveness.quietTaskCount, 1);
+    assert.equal(map.activityMap.summary.liveness.warningTaskCount, 2);
+    assert.equal(map.activityMap.summary.liveness.quietTaskCount, 1);
+    assert.equal(map.activityMap.nodes.find((node) => node.chatId === root.id).liveness.warningTaskCount, 1);
+    assert.equal(map.activityMap.subagents[0].liveness.state, 'quiet');
+    assert.equal(map.activityMap.subagents[0].latestTask.liveness.state, 'quiet');
   });
 
   it('uses task state timing for runtime-only terminal tool events', () => {

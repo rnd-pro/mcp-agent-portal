@@ -104,7 +104,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_chat_task_result',
-    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe chat-scoped or task-inferred finalAgentMessage projection when available, a safe runtime summary, and a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe chat-scoped or task-inferred finalAgentMessage projection when available, a safe runtime summary, and a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, liveness classification, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -146,7 +146,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_orchestrator_status',
-    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, and structured promptHintMap suggestions.',
+    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, task liveness classification, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},

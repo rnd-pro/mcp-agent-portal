@@ -4,6 +4,8 @@ const TOOL_BUCKET_LIMIT = 5;
 const TASK_LIMIT = 40;
 const SUBAGENT_LIMIT = 40;
 const PROMPT_HINT_LIMIT = 8;
+const COLD_START_GRACE_MS = 15000;
+const QUIET_TASK_MS = 60000;
 
 function parseJson(value) {
   if (!value || typeof value !== 'string') return null;
@@ -195,6 +197,22 @@ function mergeTaskSnapshots(sg, taskState = null) {
   return [...tasks.values()];
 }
 
+function applyRuntimeEventCounters(tasks = [], runtimeEvents = [], taskId = null) {
+  if (!taskId || !runtimeEvents.length) return tasks;
+  let lastEventAt = runtimeEvents
+    .map(eventTimestamp)
+    .filter(Boolean)
+    .sort((a, b) => b - a)[0] || null;
+  return tasks.map((task) => {
+    if (task?.id !== taskId) return task;
+    return {
+      ...task,
+      eventCount: Math.max(Number(task.eventCount) || 0, runtimeEvents.length),
+      lastEventAt: task.lastEventAt || lastEventAt,
+    };
+  });
+}
+
 function descendantChatIds(chats, rootChatId) {
   if (!rootChatId) return new Set(chats.map((chat) => chat.id).filter(Boolean));
   let ids = new Set([rootChatId]);
@@ -260,9 +278,79 @@ function summarizeTask(task = {}, now = Date.now()) {
     elapsedMs,
     eventCount: task.eventCount ?? events.length,
     lastEventAt: task.lastEventAt || lastEvent?.ts || lastEvent?.timestamp || null,
+    liveness: summarizeTaskLiveness({
+      status: task.status || task.type || 'unknown',
+      startedAt,
+      completedAt,
+      elapsedMs,
+      eventCount: task.eventCount ?? events.length,
+      lastEventAt: task.lastEventAt || lastEvent?.ts || lastEvent?.timestamp || null,
+    }, now),
     trackedChildCount: Array.isArray(task.trackedChildren) ? task.trackedChildren.length : 0,
     hasError: Boolean(task.error),
     errorKind: safeErrorKind(task.error),
+  };
+}
+
+function summarizeTaskLiveness(task = {}, now = Date.now()) {
+  let status = task.status || 'unknown';
+  let terminal = TASK_TERMINAL_STATUSES.has(status);
+  let eventCount = Number.isFinite(Number(task.eventCount)) ? Number(task.eventCount) : 0;
+  let startedAt = normalizeTimestamp(task.startedAt);
+  let lastEventAt = normalizeTimestamp(task.lastEventAt);
+  let elapsedMs = Number.isFinite(Number(task.elapsedMs))
+    ? Number(task.elapsedMs)
+    : startedAt ? Math.max(0, now - startedAt) : null;
+  let quietSince = lastEventAt || startedAt || null;
+  let quietMs = quietSince ? Math.max(0, now - quietSince) : null;
+
+  if (terminal) {
+    return {
+      state: 'terminal',
+      severity: 'normal',
+      reason: null,
+      eventCount,
+      quietMs,
+      thresholdMs: null,
+      lastEventAt: task.lastEventAt || null,
+    };
+  }
+
+  if (eventCount === 0) {
+    let coldStart = Number.isFinite(quietMs) && quietMs <= COLD_START_GRACE_MS;
+    return {
+      state: coldStart ? 'cold_start' : 'no_events',
+      severity: coldStart ? 'info' : 'warning',
+      reason: coldStart
+        ? 'Running task has not emitted events yet.'
+        : 'Running task has no recorded events after the cold-start grace period.',
+      eventCount,
+      quietMs,
+      thresholdMs: COLD_START_GRACE_MS,
+      lastEventAt: null,
+    };
+  }
+
+  if (Number.isFinite(quietMs) && quietMs > QUIET_TASK_MS) {
+    return {
+      state: 'quiet',
+      severity: 'warning',
+      reason: 'Running task has been quiet longer than the safe liveness threshold.',
+      eventCount,
+      quietMs,
+      thresholdMs: QUIET_TASK_MS,
+      lastEventAt: task.lastEventAt || null,
+    };
+  }
+
+  return {
+    state: 'active',
+    severity: 'normal',
+    reason: null,
+    eventCount,
+    quietMs,
+    thresholdMs: QUIET_TASK_MS,
+    lastEventAt: task.lastEventAt || null,
   };
 }
 
@@ -758,9 +846,28 @@ function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
     toolUsageMs: sumFinite(tools, 'usageMs'),
     latestTool,
     latestTools: summarizeTools(tools),
+    liveness: summarizeNodeLiveness(tasks),
     lastActivityAt: activityTimes.length ? Math.max(...activityTimes) : null,
     updatedAt: chat.updatedAt || null,
     generatedAt: now,
+  };
+}
+
+function summarizeNodeLiveness(tasks = []) {
+  let liveTasks = tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || ''));
+  let warningTasks = liveTasks.filter((task) => task.liveness?.severity === 'warning');
+  let zeroEventTasks = liveTasks.filter((task) => {
+    return task.liveness?.state === 'no_events' || task.liveness?.state === 'cold_start';
+  });
+  let quietTasks = liveTasks.filter((task) => task.liveness?.state === 'quiet');
+  let highest = warningTasks[0]?.liveness || zeroEventTasks[0]?.liveness || liveTasks[0]?.liveness || null;
+  return {
+    state: highest?.state || (tasks.length ? 'terminal' : 'idle'),
+    severity: highest?.severity || 'normal',
+    warningTaskCount: warningTasks.length,
+    zeroEventTaskCount: zeroEventTasks.length,
+    quietTaskCount: quietTasks.length,
+    runningTaskCount: liveTasks.length,
   };
 }
 
@@ -830,6 +937,9 @@ function buildTaskMap({ tasks, toolUses, now }) {
       startedAt: task.startedAt || null,
       completedAt: task.completedAt || null,
       elapsedMs: task.elapsedMs ?? null,
+      eventCount: task.eventCount ?? 0,
+      lastEventAt: task.lastEventAt || null,
+      liveness: task.liveness || null,
       toolCount: tools.length,
       runningToolCount: countRunningTools(tools),
       toolDurationMs: sumFinite(tools, 'durationMs'),
@@ -934,6 +1044,7 @@ function summarizeActivityTask(task = null) {
     runningToolCount: task.runningToolCount || 0,
     latestTool: task.latestTool || null,
     lastActivityAt: task.lastActivityAt || null,
+    liveness: task.liveness || null,
   };
 }
 
@@ -974,6 +1085,7 @@ function summarizeActivityNode(node = {}, taskMap = {}) {
     latestTool: node.latestTool || null,
     latestTools: node.latestTools || [],
     latestTask: summarizeActivityTask(latestTask),
+    liveness: node.liveness || null,
     lastActivityAt: node.lastActivityAt || null,
   };
 }
@@ -1023,6 +1135,7 @@ function buildActivityMap({
       toolUsageMs: usage.toolUsageMs || 0,
       longestElapsedMs: usage.longestElapsedMs ?? null,
       latestActivityAt: usage.latestActivityAt || null,
+      liveness: usage.liveness || null,
       tokens: usage.tokens ?? null,
       cost: usage.cost ?? null,
     },
@@ -1066,9 +1179,27 @@ function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 
       .map(taskActivityTime)
       .filter(Boolean)
       .sort((a, b) => b - a)[0] || null,
+    liveness: summarizeUsageLiveness(running),
     tokens: stats?.total_tokens ?? stats?.tokens?.total ?? null,
     cost: stats?.cost ?? null,
     generatedAt: now,
+  };
+}
+
+function summarizeUsageLiveness(runningTasks = []) {
+  let warnings = runningTasks.filter((task) => task.liveness?.severity === 'warning');
+  let noEvents = runningTasks.filter((task) => task.liveness?.state === 'no_events');
+  let coldStarts = runningTasks.filter((task) => task.liveness?.state === 'cold_start');
+  let quiet = runningTasks.filter((task) => task.liveness?.state === 'quiet');
+  let highest = warnings[0]?.liveness || coldStarts[0]?.liveness || runningTasks[0]?.liveness || null;
+  return {
+    state: highest?.state || (runningTasks.length ? 'active' : 'idle'),
+    severity: highest?.severity || 'normal',
+    warningTaskCount: warnings.length,
+    zeroEventTaskCount: noEvents.length + coldStarts.length,
+    noEventTaskCount: noEvents.length,
+    coldStartTaskCount: coldStarts.length,
+    quietTaskCount: quiet.length,
   };
 }
 
@@ -1108,7 +1239,7 @@ export function buildDevelopmentMap({
   let chats = sg?.listChats?.() || [];
   let scopedChatIds = descendantChatIds(chats, chatId);
   let runtime = extractRuntimeResult(taskResult || {});
-  let allTasks = mergeTaskSnapshots(sg, taskState);
+  let allTasks = applyRuntimeEventCounters(mergeTaskSnapshots(sg, taskState), runtime.events, taskId);
   let taskDescendants = collectTaskDescendants(allTasks, taskId);
 
   let rawScopedTasks = allTasks

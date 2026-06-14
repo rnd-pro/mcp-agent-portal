@@ -261,9 +261,13 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.activityMap.nodes.length, 2);
     assert.equal(payload.developmentMap.activityMap.summary.runningTasks, 2);
     assert.equal(payload.developmentMap.activityMap.summary.totalTaskElapsedMs, 150);
+    assert.equal(payload.developmentMap.activityMap.summary.liveness.coldStartTaskCount, 1);
+    assert.equal(payload.developmentMap.activityMap.summary.liveness.warningTaskCount, 0);
     assert.equal(payload.developmentMap.activityMap.subagents[0].chatId, child.id);
     assert.equal(payload.developmentMap.activityMap.subagents[0].parentChatId, chat.id);
     assert.equal(payload.developmentMap.taskMap.byId['task-result'].toolCount, 1);
+    assert.equal(payload.developmentMap.taskMap.byId['task-result'].liveness.state, 'active');
+    assert.equal(payload.developmentMap.taskMap.byId['task-child'].liveness.state, 'cold_start');
     assert.equal(payload.developmentMap.toolMap.byTaskId['task-result'].latestTool.name, 'read_file');
     assert.equal(payload.developmentMap.activityMap.latestTools[0].name, 'read_file');
     assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
