@@ -145,6 +145,31 @@ describe('chat delegate routing', () => {
     assert.equal(prepared.args.model, undefined);
   });
 
+  it('does not reuse saved chat sessions when routing is overridden', async () => {
+    let chat = sg.createChat({
+      name: 'Main',
+      agent: 'orchestrator',
+      provider: 'claude',
+      model: 'deepseek/deepseek-v4-pro',
+      resource_group: 'implementation',
+    }, 'test');
+    sg.updateChatSession(chat.id, 'claude-session');
+
+    let inherited = await prepareDelegateTaskCall(proxyManager, 'delegate_task', {
+      chat_id: chat.id,
+      prompt: 'Continue same route',
+    }, { stateGraph: sg, source: 'test' });
+    assert.equal(inherited.args.session_id, 'claude-session');
+
+    let switched = await prepareDelegateTaskCall(proxyManager, 'delegate_task', {
+      chat_id: chat.id,
+      prompt: 'Switch to Codex read-only',
+      resource_group: 'orchestration-readonly',
+    }, { stateGraph: sg, source: 'test' });
+    assert.equal(switched.args.session_id, undefined);
+    assert.equal(switched.args.resource_group, 'orchestration-readonly');
+  });
+
   it('adds compact project graph focus context from files hints', async () => {
     let projectPath = path.join(tmpDir, 'project');
     let project = sg.addProject({ path: projectPath, name: 'Project' });

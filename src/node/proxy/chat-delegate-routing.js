@@ -319,9 +319,12 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   next.agent_slug = resolveChatDelegationAgent({ explicitAgent, contextChat });
   delete next.agent;
 
+  let hasRoutingOverride = Boolean(next.provider || next.model || next.resource_group || next.resourceGroup);
   if (!next.approval_mode && contextChat?.approval_mode) next.approval_mode = contextChat.approval_mode;
   if (!next.resource_group && contextChat?.resource_group) next.resource_group = contextChat.resource_group;
-  if (!next.session_id && !next.sessionId && contextChat?.sessionId) next.session_id = contextChat.sessionId;
+  if (!next.session_id && !next.sessionId && contextChat?.sessionId && !hasRoutingOverride) {
+    next.session_id = contextChat.sessionId;
+  }
   if (!next.cwd) {
     next.cwd = projectPathFromChat(sg, contextChat)
       || (proxyManager?.projectRoot && proxyManager.projectRoot !== '/' ? proxyManager.projectRoot : process.env.HOME);
