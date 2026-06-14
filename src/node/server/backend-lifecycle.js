@@ -1,7 +1,7 @@
 // @ctx backend-lifecycle.ctx
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ const LOCAL_GATEWAY_DIR = join(process.env.HOME || process.env.USERPROFILE || '/
 
 function _getVersion() {
   try {
-    return JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')).version;
+    return JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'package.json'), 'utf8')).version;
   } catch {
     return '0.0.0';
   }
@@ -43,6 +43,7 @@ function readPortFile(rootPath) {
 export function writePortFile(rootPath, port, networkAccess = {}) {
   mkdirSync(LOCAL_GATEWAY_DIR, { recursive: true });
   const absPath = resolve(rootPath);
+  const projectName = basename(absPath) || 'root';
   const localUrl = networkAccess.localUrl || `http://127.0.0.1:${port}/`;
   const mcpDirect = `${localUrl.replace(/\/$/, '')}/mcp`;
   const data = {
@@ -53,7 +54,8 @@ export function writePortFile(rootPath, port, networkAccess = {}) {
     lanUrls: networkAccess.lanUrls || [],
     pid: process.pid,
     project: absPath,
-    name: 'mcp-agent-portal',
+    name: projectName,
+    projectName,
     version: _getVersion(),
     startedAt: Date.now(),
     mcpUrl: `http://portal.local/mcp`,
