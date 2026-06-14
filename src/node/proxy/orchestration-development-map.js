@@ -1,5 +1,6 @@
 const TASK_TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'lost']);
 const TOOL_EVENT_LIMIT = 8;
+const TOOL_BUCKET_LIMIT = 5;
 const TASK_LIMIT = 40;
 const SUBAGENT_LIMIT = 40;
 const PROMPT_HINT_LIMIT = 8;
@@ -199,7 +200,7 @@ function summarizeTask(task = {}, now = Date.now()) {
     provider: task.provider || null,
     model: task.model || null,
     approvalMode: task.approvalMode || null,
-    sessionId: task.sessionId || null,
+    hasSession: Boolean(task.sessionId),
     prompt: compactPrompt(task.prompt),
     pid: task.pid || null,
     startedAt: task.startedAt || null,
@@ -484,6 +485,36 @@ function summarizeLatestTool(tool = null) {
   };
 }
 
+function sortToolsByActivity(toolUses = []) {
+  return [...toolUses].sort((a, b) => (toolUseTime(b) || 0) - (toolUseTime(a) || 0));
+}
+
+function summarizeTools(toolUses = [], limit = TOOL_BUCKET_LIMIT) {
+  return sortToolsByActivity(toolUses)
+    .slice(0, limit)
+    .map(summarizeLatestTool);
+}
+
+function latestToolFrom(toolUses = []) {
+  return summarizeLatestTool(sortToolsByActivity(toolUses)[0] || null);
+}
+
+function sumFinite(items = [], field) {
+  return items
+    .map((item) => Number(item?.[field]))
+    .filter(Number.isFinite)
+    .reduce((sum, value) => sum + value, 0);
+}
+
+function lastToolUseAt(toolUses = []) {
+  let latest = sortToolsByActivity(toolUses)[0] || null;
+  return latest?.usedAt || latest?.startedAt || null;
+}
+
+function countRunningTools(toolUses = []) {
+  return toolUses.filter((tool) => tool?.status === 'running').length;
+}
+
 function mapByChat(items = [], field = 'chatId') {
   let map = new Map();
   for (let item of items) {
@@ -496,25 +527,14 @@ function mapByChat(items = [], field = 'chatId') {
   return map;
 }
 
-function latestToolByChat(toolUses = []) {
-  let latest = new Map();
-  for (let tool of toolUses) {
-    if (!tool.chatId) continue;
-    let current = latest.get(tool.chatId);
-    if (!current || (toolUseTime(tool) || 0) >= (toolUseTime(current) || 0)) {
-      latest.set(tool.chatId, tool);
-    }
-  }
-  return latest;
-}
-
 function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
   let tasks = tasksByChat.get(chat.id) || [];
-  let latestTool = toolsByChat.get(chat.id) || null;
+  let tools = toolsByChat.get(chat.id) || [];
+  let latestTool = latestToolFrom(tools);
   let activityTimes = [
     normalizeTimestamp(chat.updatedAt),
     ...tasks.map(taskActivityTime),
-    toolUseTime(latestTool),
+    normalizeTimestamp(latestTool?.usedAt),
   ].filter(Boolean);
   let elapsedValues = tasks
     .map((task) => Number(task.elapsedMs))
@@ -530,12 +550,16 @@ function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
     approvalMode: chat.approval_mode || null,
     pendingTaskId: chat.pendingTaskId || null,
     activeGoalId: chat.activeGoalId || null,
-    sessionId: chat.sessionId || null,
+    hasSession: Boolean(chat.sessionId),
     taskIds: tasks.map((task) => task.id).filter(Boolean),
     runningTaskCount: tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length,
     totalTaskCount: tasks.length,
     totalElapsedMs: elapsedValues.reduce((sum, value) => sum + value, 0),
-    latestTool: summarizeLatestTool(latestTool),
+    toolCount: tools.length,
+    runningToolCount: countRunningTools(tools),
+    toolUsageMs: sumFinite(tools, 'durationMs'),
+    latestTool,
+    latestTools: summarizeTools(tools),
     lastActivityAt: activityTimes.length ? Math.max(...activityTimes) : null,
     updatedAt: chat.updatedAt || null,
     generatedAt: now,
@@ -555,7 +579,7 @@ function buildTree(nodes) {
 
 function buildSubagentMap({ chats, scopedChatIds, rootChatId, tasks, toolUses, now }) {
   let tasksByChat = mapByChat(tasks);
-  let toolsByChat = latestToolByChat(toolUses);
+  let toolsByChat = mapByChat(toolUses);
   let nodes = chats
     .filter((chat) => chat?.id && scopedChatIds.has(chat.id))
     .map((chat) => summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now))
@@ -575,6 +599,7 @@ function buildSubagentMap({ chats, scopedChatIds, rootChatId, tasks, toolUses, n
     }));
 
   return {
+    schemaVersion: 1,
     rootChatId,
     nodes,
     edges,
@@ -584,6 +609,114 @@ function buildSubagentMap({ chats, scopedChatIds, rootChatId, tasks, toolUses, n
       nodes: SUBAGENT_LIMIT,
       tasks: TASK_LIMIT,
       latestTools: TOOL_EVENT_LIMIT,
+      toolsPerNode: TOOL_BUCKET_LIMIT,
+    },
+  };
+}
+
+function buildTaskMap({ tasks, toolUses, now }) {
+  let toolsByTask = mapByChat(toolUses, 'taskId');
+  let byId = {};
+  for (let task of tasks) {
+    if (!task?.id) continue;
+    let tools = toolsByTask.get(task.id) || [];
+    byId[task.id] = {
+      id: task.id,
+      chatId: task.chatId || null,
+      parentTaskId: task.parentTaskId || null,
+      status: task.status || 'unknown',
+      agentSlug: task.agentSlug || null,
+      resourceGroup: task.resourceGroup || null,
+      provider: task.provider || null,
+      model: task.model || null,
+      startedAt: task.startedAt || null,
+      completedAt: task.completedAt || null,
+      elapsedMs: task.elapsedMs ?? null,
+      toolCount: tools.length,
+      runningToolCount: countRunningTools(tools),
+      toolUsageMs: sumFinite(tools, 'durationMs'),
+      latestTool: latestToolFrom(tools),
+      lastToolUsedAt: lastToolUseAt(tools),
+      lastActivityAt: taskActivityTime(task),
+    };
+  }
+  return {
+    schemaVersion: 1,
+    byId,
+    runningIds: tasks
+      .filter((task) => task?.id && !TASK_TERMINAL_STATUSES.has(task.status || ''))
+      .map((task) => task.id),
+    terminalIds: tasks
+      .filter((task) => task?.id && TASK_TERMINAL_STATUSES.has(task.status || ''))
+      .map((task) => task.id),
+    edges: tasks
+      .filter((task) => task?.id && task.parentTaskId && byId[task.parentTaskId])
+      .map((task) => ({
+        from: task.parentTaskId,
+        to: task.id,
+        kind: 'task.delegates',
+      })),
+    generatedAt: now,
+    limits: {
+      tasks: TASK_LIMIT,
+      toolsPerTask: TOOL_BUCKET_LIMIT,
+    },
+  };
+}
+
+function buildToolBucket({ id, fieldName, tools }) {
+  return {
+    [fieldName]: id,
+    toolCount: tools.length,
+    runningToolCount: countRunningTools(tools),
+    totalDurationMs: sumFinite(tools, 'durationMs'),
+    totalElapsedMs: sumFinite(tools, 'elapsedMs'),
+    latestTool: latestToolFrom(tools),
+    lastUsedAt: lastToolUseAt(tools),
+    tools: summarizeTools(tools),
+  };
+}
+
+function buildToolMap({ tasks, subagentMap, toolUses, latestTools, now }) {
+  let toolsByTask = mapByChat(toolUses, 'taskId');
+  let toolsByChat = mapByChat(toolUses, 'chatId');
+  let byTaskId = {};
+  for (let task of tasks) {
+    if (!task?.id) continue;
+    let tools = toolsByTask.get(task.id) || [];
+    byTaskId[task.id] = {
+      ...buildToolBucket({ id: task.id, fieldName: 'taskId', tools }),
+      chatId: task.chatId || null,
+      agentSlug: task.agentSlug || null,
+      resourceGroup: task.resourceGroup || null,
+      status: task.status || 'unknown',
+    };
+  }
+
+  let byChatId = {};
+  for (let node of subagentMap.nodes || []) {
+    if (!node?.chatId) continue;
+    let tools = toolsByChat.get(node.chatId) || [];
+    byChatId[node.chatId] = {
+      ...buildToolBucket({ id: node.chatId, fieldName: 'chatId', tools }),
+      name: node.name || '',
+      agent: node.agent || null,
+      taskIds: node.taskIds || [],
+    };
+  }
+
+  return {
+    schemaVersion: 1,
+    recent: latestTools.map(summarizeLatestTool),
+    byTaskId,
+    byChatId,
+    generatedAt: now,
+    limits: {
+      recent: TOOL_EVENT_LIMIT,
+      tasks: TASK_LIMIT,
+      chats: SUBAGENT_LIMIT,
+      toolsPerTask: TOOL_BUCKET_LIMIT,
+      toolsPerChat: TOOL_BUCKET_LIMIT,
     },
   };
 }
@@ -662,7 +795,7 @@ export function buildDevelopmentMap({
     .slice(0, TASK_LIMIT);
 
   let toolUses = collectToolUses(rawScopedTasks, runtime.events, { taskId, chatId }, now);
-  let latestTools = toolUses.slice(-TOOL_EVENT_LIMIT).reverse();
+  let latestTools = sortToolsByActivity(toolUses).slice(0, TOOL_EVENT_LIMIT);
   let subagentMap = buildSubagentMap({
     chats,
     scopedChatIds,
@@ -674,14 +807,25 @@ export function buildDevelopmentMap({
   let subagents = subagentMap.nodes
     .filter((node) => !chatId || node.chatId !== chatId);
   let runningCount = scopedTasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length;
+  let taskMap = buildTaskMap({ tasks: scopedTasks, toolUses, now });
+  let toolMap = buildToolMap({
+    tasks: scopedTasks,
+    subagentMap,
+    toolUses,
+    latestTools,
+    now,
+  });
 
   return {
+    schemaVersion: 1,
     rootChatId: chatId,
     primaryTaskId: taskId,
     subagents,
     subagentMap,
     tasks: scopedTasks,
+    taskMap,
     latestTools,
+    toolMap,
     usage: summarizeUsage(scopedTasks, runtime, now, subagents.length, toolUses),
     promptHintMap: buildPromptHintMap({
       chatId,

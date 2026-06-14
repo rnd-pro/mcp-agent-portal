@@ -7,6 +7,7 @@ import {
   MCPMultiplexer,
   META_TOOLS,
   extractTaskIdFromDelegateResult,
+  summarizeDelegateArgs,
 } from '../../src/node/proxy/mcp-multiplexer.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
@@ -35,6 +36,35 @@ test('resume_chat extracts full UUID task IDs from delegate_task results', () =>
   assert.equal(extractTaskIdFromDelegateResult(result), taskId);
 });
 
+test('resume_chat delegate summary is bounded and hides raw session data', () => {
+  let summary = summarizeDelegateArgs({
+    prompt: `${'Investigate '.repeat(40)}secret-session-id`,
+    timeout: 600,
+    cwd: '/tmp/private-project',
+    chat_id: 'chat-1',
+    agent_slug: 'orchestrator',
+    resource_group: 'orchestration-readonly',
+    approval_mode: 'plan',
+    provider: 'codex',
+    model: 'gpt-test',
+    context_mode: 'auto',
+    session_id: 'secret-session-id',
+    files: ['a.js', 'b.js', 'c.js', 'd.js', 'e.js', 'f.js'],
+    goalQueueMessages: [{ id: 'msg-1' }],
+  });
+
+  assert.equal(summary.chatId, 'chat-1');
+  assert.equal(summary.hasSession, true);
+  assert.equal(summary.hasCwd, true);
+  assert.equal(summary.fileCount, 6);
+  assert.deepEqual(summary.filesPreview, ['a.js', 'b.js', 'c.js', 'd.js', 'e.js']);
+  assert.equal(summary.goalQueueMessageCount, 1);
+  assert.equal(summary.promptPreview.length <= 180, true);
+  assert.equal(JSON.stringify(summary).includes('secret-session-id'), false);
+  assert.equal('cwd' in summary, false);
+  assert.equal('session_id' in summary, false);
+});
+
 test('resume_chat injects the active chat goal into delegated prompts only', () => {
   let source = fs.readFileSync(path.join(ROOT, 'src/node/proxy/mcp-multiplexer.js'), 'utf8');
 
@@ -43,6 +73,8 @@ test('resume_chat injects the active chat goal into delegated prompts only', () 
   assert.match(source, /sg\.updateChatGoalQueueMessage\(activeGoalId, messageId, \{ status: 'applied' \}, 'mcp'\)/);
   assert.match(source, /if \(goalQueueMessages\.length\) delegateArgs\.goalQueueMessages = goalQueueMessages;/);
   assert.match(source, /prepareDelegateTaskCall\(proxyManager, 'delegate_task', delegateArgs/);
+  assert.match(source, /delegateSummary: summarizeDelegateArgs\(delegateArgs\)/);
+  assert.doesNotMatch(source, /\nsession_id: delegateArgs\.session_id/);
 });
 
 test('portal chat meta-tools default pool chats to orchestrator', () => {

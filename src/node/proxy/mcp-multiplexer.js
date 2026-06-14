@@ -71,7 +71,7 @@ export let META_TOOLS = [
   },
   {
     name: 'create_chat',
-    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with legacy promptHints and structured promptHintMap suggestions.',
+    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with subagentMap/taskMap/toolMap telemetry, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +94,7 @@ export let META_TOOLS = [
   },
   {
     name: 'send_chat_message',
-    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map.',
+    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map with subagentMap/taskMap/toolMap telemetry.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,7 +107,7 @@ export let META_TOOLS = [
   },
   {
     name: 'resume_chat',
-    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns task routing metadata, runtime content, and a development map with subagentMap nodes/tree/edges, tasks, latest tool usage, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns bounded delegateSummary, task routing metadata, runtime content, and a development map with subagentMap nodes/tree/edges, taskMap, toolMap, latest tool usage, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -173,6 +173,39 @@ function normalizeIdList(value) {
   if (!value) return [];
   let list = Array.isArray(value) ? value : [value];
   return [...new Set(list.map(id => String(id || '').trim()).filter(Boolean))];
+}
+
+function compactText(text = '', limit = 180) {
+  let value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+export function summarizeDelegateArgs(args = {}) {
+  let files = Array.isArray(args.files)
+    ? args.files.map(file => String(file || '').trim()).filter(Boolean)
+    : [];
+  return {
+    timeout: args.timeout || null,
+    chatId: args.chat_id || args.chatId || null,
+    agentSlug: args.agent_slug || null,
+    resourceGroup: args.resource_group || null,
+    approvalMode: args.approval_mode || null,
+    provider: args.provider || null,
+    model: args.model || null,
+    contextMode: args.context_mode || null,
+    hasSession: Boolean(args.session_id || args.sessionId),
+    hasCwd: Boolean(args.cwd),
+    fileCount: files.length,
+    filesPreview: files.slice(0, 5),
+    promptPreview: compactText(args.prompt),
+    goalQueueMessageCount: Array.isArray(args.goalQueueMessages)
+      ? args.goalQueueMessages.length
+      : 0,
+    limits: {
+      filesPreview: 5,
+      promptPreview: 180,
+    },
+  };
 }
 
 function broadcastGoalUpdate(proxyManager, goal) {
@@ -283,7 +316,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
       chatId,
       taskId: null,
       error: result?.content?.[0]?.text || 'Delegation failed.',
-      delegateArgs,
+      delegateSummary: summarizeDelegateArgs(delegateArgs),
       routing: {
         chatId: prepared.chatId || chatId,
         parentChatId: prepared.parentChatId || null,
@@ -310,8 +343,8 @@ export async function resumeChatTool(proxyManager, args = {}) {
     model: delegateArgs.model || null,
     resource_group: delegateArgs.resource_group || null,
     approval_mode: delegateArgs.approval_mode || null,
-    session_id: delegateArgs.session_id || null,
-    delegateArgs,
+    has_session: Boolean(delegateArgs.session_id),
+    delegateSummary: summarizeDelegateArgs(delegateArgs),
     routing: {
       chatId: prepared.chatId || chatId,
       parentChatId: prepared.parentChatId || null,

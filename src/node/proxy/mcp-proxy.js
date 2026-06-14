@@ -24,7 +24,7 @@ try {
 }
 const SERVER_VERSION = `${pkgJson.version}+${Date.now()}`;
 
-const CONFIG_PATH = path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
+const CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
 
 const MAX_CRASHES = 10;
 const DISABLED_MCP_SERVERS = new Set(['context-x']);
@@ -598,6 +598,7 @@ export class MCPProxyManager {
           ...(s.env ? { env: s.env } : {}),
         };
       }
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
     } catch (err) {
       console.error('[Marketplace] Failed to persist config:', err.message);

@@ -33,6 +33,36 @@ describe('Task State Cache — StateGraph integration', () => {
     return graph;
   }
 
+  it('uses environment paths for default storage locations', async () => {
+    let envDir = path.join(tmpDir, 'env-defaults');
+    let previous = {
+      PORTAL_STATE_DIR: process.env.PORTAL_STATE_DIR,
+      PORTAL_STATE_PATH: process.env.PORTAL_STATE_PATH,
+      PORTAL_WAL_PATH: process.env.PORTAL_WAL_PATH,
+      PORTAL_CONFIG_PATH: process.env.PORTAL_CONFIG_PATH,
+      PORTAL_CHATS_DIR: process.env.PORTAL_CHATS_DIR,
+    };
+    process.env.PORTAL_STATE_DIR = envDir;
+    process.env.PORTAL_STATE_PATH = path.join(envDir, 'state.json');
+    process.env.PORTAL_WAL_PATH = path.join(envDir, 'state.wal');
+    process.env.PORTAL_CONFIG_PATH = path.join(envDir, 'agent-portal.json');
+    process.env.PORTAL_CHATS_DIR = path.join(envDir, 'chats');
+    try {
+      let mod = await import(`../../src/node/state-graph.js?env=${Date.now()}-${Math.random()}`);
+      let graph = new mod.StateGraph();
+      graphs.push(graph);
+
+      assert.equal(graph._snapshotPath, process.env.PORTAL_STATE_PATH);
+      assert.equal(graph._walPath, process.env.PORTAL_WAL_PATH);
+      assert.equal(graph._chatsDir, process.env.PORTAL_CHATS_DIR);
+    } finally {
+      for (let [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it('stores full task metadata in StateGraph', () => {
     let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 't1-snap.json'),

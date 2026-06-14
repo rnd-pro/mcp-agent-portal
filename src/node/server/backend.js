@@ -11,7 +11,9 @@ const projectRoot = resolve(process.argv[2] || '.');
 function cleanup() {
   try {
     const __dir = dirname(fileURLToPath(import.meta.url));
-    const gwDir = join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway', 'backends');
+    const gwRoot = process.env.PORTAL_LOCAL_GATEWAY_DIR
+      || join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway');
+    const gwDir = join(gwRoot, 'backends');
     const hash = createHash('md5').update(resolve(projectRoot)).digest('hex').slice(0, 8);
     const portFile = join(gwDir, `portal-${hash}.json`);
     if (existsSync(portFile)) {

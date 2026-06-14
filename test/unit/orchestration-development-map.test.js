@@ -38,6 +38,7 @@ describe('orchestration development map', () => {
       resource_group: 'implementation',
       approval_mode: 'auto_edit',
     }, 'test');
+    sg.updateChatSession(root.id, 'secret-session-id');
     sg.updateChatTask(root.id, 'task-root');
     sg.updateChatTask(child.id, 'task-child');
 
@@ -46,13 +47,14 @@ describe('orchestration development map', () => {
       status: 'running',
       chatId: root.id,
       agentSlug: 'orchestrator',
+      sessionId: 'secret-session-id',
       startedAt: now - 5000,
       prompt: 'Coordinate feature work',
       events: [{
         type: 'tool_use',
         name: 'read_file',
         arguments: { file_path: '/tmp/project/src/runtime/dispatch.js' },
-        ts: now - 3000,
+        ts: '2026-06-14T09:59:00.000Z',
       }],
     }, 'test');
     sg.set('tasks/task-child', {
@@ -87,6 +89,12 @@ describe('orchestration development map', () => {
               status: 'success',
               output: 'ok',
               timestamp: '2026-06-14T10:00:02.000Z',
+            },
+            {
+              type: 'tool_use',
+              tool_id: 'tool-old',
+              tool_name: 'old_runtime_tool',
+              timestamp: '2026-06-14T09:00:00.000Z',
             },
           ])}`,
         },
@@ -126,13 +134,16 @@ describe('orchestration development map', () => {
     });
 
     assert.equal(map.rootChatId, root.id);
+    assert.equal(map.schemaVersion, 1);
     assert.equal(map.primaryTaskId, 'task-root');
+    assert.equal(JSON.stringify(map).includes('secret-session-id'), false);
     assert.deepEqual(map.subagents.map((item) => item.chatId), [child.id]);
     assert.equal(map.subagents[0].parentChatId, root.id);
     assert.deepEqual(map.subagents[0].taskIds, ['task-child']);
     assert.equal(map.subagents[0].runningTaskCount, 1);
     assert.equal(map.subagents[0].latestTool, null);
     assert.equal(map.subagentMap.rootChatId, root.id);
+    assert.equal(map.subagentMap.schemaVersion, 1);
     assert.deepEqual(
       map.subagentMap.nodes.map((node) => node.chatId).sort(),
       [child.id, root.id].sort(),
@@ -147,6 +158,7 @@ describe('orchestration development map', () => {
     assert.equal(map.subagentMap.tree[0].children[0].chatId, child.id);
     assert.deepEqual(map.tasks.map((item) => item.id).sort(), ['task-child', 'task-root']);
     assert.equal(map.latestTools[0].name, 'mcp_project_graph_get_skeleton');
+    assert.equal(map.latestTools.at(-1).name, 'old_runtime_tool');
     assert.equal(map.latestTools[0].usedAt, '2026-06-14T10:00:00.000Z');
     assert.equal(map.latestTools[0].completedAt, '2026-06-14T10:00:02.000Z');
     assert.equal(map.latestTools[0].durationMs, 2000);
@@ -156,14 +168,32 @@ describe('orchestration development map', () => {
       map.latestTools.find((tool) => tool.name === 'read_file').status,
       'running',
     );
+    assert.equal(map.taskMap.schemaVersion, 1);
+    assert.deepEqual(map.taskMap.runningIds.sort(), ['task-child', 'task-root']);
+    assert.equal(map.taskMap.byId['task-root'].latestTool.name, 'mcp_project_graph_get_skeleton');
+    assert.equal(map.taskMap.byId['task-root'].toolCount, 3);
+    assert.deepEqual(map.taskMap.edges, [{
+      from: 'task-root',
+      to: 'task-child',
+      kind: 'task.delegates',
+    }]);
+    assert.equal(map.toolMap.schemaVersion, 1);
+    assert.equal(map.toolMap.byTaskId['task-root'].latestTool.name, 'mcp_project_graph_get_skeleton');
+    assert.equal(map.toolMap.byTaskId['task-root'].tools.length, 3);
+    assert.equal(map.toolMap.byTaskId['task-root'].totalDurationMs, 2000);
+    assert.equal(map.toolMap.byChatId[root.id].latestTool.name, 'mcp_project_graph_get_skeleton');
+    assert.equal(map.toolMap.byChatId[root.id].tools.length, 3);
+    assert.equal(map.toolMap.byChatId[child.id].toolCount, 0);
+    assert.equal(map.subagentMap.nodes[0].latestTool.name, 'mcp_project_graph_get_skeleton');
+    assert.equal(map.subagentMap.nodes[0].toolCount, 3);
     assert.equal(map.usage.runningTasks, 2);
     assert.equal(map.usage.totalTasks, 2);
     assert.equal(map.usage.subagents, 1);
-    assert.equal(map.usage.toolUses, 2);
+    assert.equal(map.usage.toolUses, 3);
     assert.equal(map.usage.toolUsageMs, 2000);
     assert.equal(map.usage.totalTaskElapsedMs, 9000);
     assert.equal(map.usage.tokens, 123);
-    assert.equal(map.runtime.eventCount, 2);
+    assert.equal(map.runtime.eventCount, 3);
     assert.equal(map.runtime.contentCount, 3);
     assert.equal('content' in map.runtime, false);
     assert.equal('parsedResult' in map.runtime, false);

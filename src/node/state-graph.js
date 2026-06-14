@@ -29,11 +29,11 @@ import {
 import { resolveChatCreationAgent } from '../iso/chat-orchestration.js';
 
 // ── Paths ────────────────────────────────────────────────
-const STATE_DIR = path.join(os.homedir(), '.agent-portal');
-const SNAPSHOT_PATH = path.join(STATE_DIR, 'agent-portal-state.json');
-const WAL_PATH = path.join(STATE_DIR, 'agent-portal.wal');
-const OLD_CONFIG_PATH = path.join(STATE_DIR, 'agent-portal.json');
-const CHATS_DIR = path.join(STATE_DIR, 'agent-portal-chats');
+const STATE_DIR = process.env.PORTAL_STATE_DIR || path.join(os.homedir(), '.agent-portal');
+const SNAPSHOT_PATH = process.env.PORTAL_STATE_PATH || path.join(STATE_DIR, 'agent-portal-state.json');
+const WAL_PATH = process.env.PORTAL_WAL_PATH || path.join(STATE_DIR, 'agent-portal.wal');
+const OLD_CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(STATE_DIR, 'agent-portal.json');
+const CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(STATE_DIR, 'agent-portal-chats');
 
 
 // ── Tuning ───────────────────────────────────────────────
@@ -480,6 +480,8 @@ export class StateGraph extends EventEmitter {
     let v = this._version;
 
     try {
+      let dir = path.dirname(this._snapshotPath);
+      await fsp.mkdir(dir, { recursive: true }).catch(() => {});
       // Flush pending WAL first
       if (this._walQueue.length > 0) {
         let batch = this._walQueue.splice(0);
@@ -503,6 +505,8 @@ export class StateGraph extends EventEmitter {
   // Synchronous snapshot write (for process exit).
   _writeSnapshotSync() {
     try {
+      fs.mkdirSync(path.dirname(this._snapshotPath), { recursive: true });
+      fs.mkdirSync(path.dirname(this._walPath), { recursive: true });
       // Flush pending WAL synchronously
       if (this._walQueue.length > 0) {
         fs.appendFileSync(this._walPath, this._walQueue.join('\n') + '\n');

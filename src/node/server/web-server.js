@@ -192,7 +192,9 @@ function proxyToBackend(req, res, url, proxyManager) {
 
   if (!backendPort && serverName === 'project-graph') {
     try {
-      let bgDir = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway', 'backends');
+      let gwRoot = process.env.PORTAL_LOCAL_GATEWAY_DIR
+        || path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway');
+      let bgDir = path.join(gwRoot, 'backends');
       if (fs.existsSync(bgDir)) {
         let files = fs.readdirSync(bgDir).filter((f) => f.endsWith('.json'));
         for (let f of files) {

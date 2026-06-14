@@ -162,13 +162,20 @@ describe('portal orchestrator MCP tools', () => {
   it('reads pending chat task results through the internal runtime', async () => {
     let chat = sg.createChat({ name: 'Result chat' }, 'test');
     let child = sg.createChat({ name: 'Child result chat', parentChatId: chat.id }, 'test');
+    sg.updateChatSession(chat.id, 'secret-session-id');
     sg.updateChatTask(chat.id, 'task-result');
     sg.set('tasks/task-result', {
       status: 'running',
       chatId: chat.id,
+      sessionId: 'secret-session-id',
       startedAt: Date.now() - 100,
       elapsedMs: 100,
-      events: [],
+      events: [{
+        type: 'tool_use',
+        name: 'read_file',
+        arguments: { path: 'src/node/proxy/orchestration-development-map.js' },
+        ts: Date.now() - 90,
+      }],
     }, 'test');
     sg.set('tasks/task-child', {
       status: 'running',
@@ -211,18 +218,25 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.chatId, chat.id);
     assert.equal(payload.taskId, 'task-result');
     assert.equal(payload.developmentMap.primaryTaskId, 'task-result');
+    assert.equal(payload.developmentMap.schemaVersion, 1);
+    assert.equal(payload.developmentMap.subagentMap.schemaVersion, 1);
     assert.equal(Array.isArray(payload.developmentMap.subagentMap.nodes), true);
     assert.equal(payload.developmentMap.subagentMap.nodes.length, 2);
     assert.equal(payload.developmentMap.subagentMap.edges[0].from, chat.id);
     assert.equal(payload.developmentMap.subagentMap.edges[0].to, child.id);
     assert.equal(payload.developmentMap.usage.subagents, 1);
     assert.equal(payload.developmentMap.usage.totalTaskElapsedMs, 150);
+    assert.equal(payload.developmentMap.taskMap.byId['task-result'].toolCount, 1);
+    assert.equal(payload.developmentMap.toolMap.byTaskId['task-result'].latestTool.name, 'read_file');
     assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
     assert.equal(Array.isArray(payload.developmentMap.promptHintMap.hints), true);
     assert.equal(
       payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'get_chat_task_result'),
       true,
     );
+    assert.equal('taskResult' in payload, false);
+    assert.equal('content' in payload, false);
+    assert.equal(JSON.stringify(payload.developmentMap).includes('secret-session-id'), false);
   });
 
   it('reports public MCP health separately from internal runtime health', async () => {

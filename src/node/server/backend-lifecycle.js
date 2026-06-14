@@ -7,7 +7,9 @@ import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOCAL_GATEWAY_DIR = join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway', 'backends');
+const LOCAL_GATEWAY_ROOT = process.env.PORTAL_LOCAL_GATEWAY_DIR
+  || join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway');
+const LOCAL_GATEWAY_DIR = join(LOCAL_GATEWAY_ROOT, 'backends');
 
 function _getVersion() {
   try {

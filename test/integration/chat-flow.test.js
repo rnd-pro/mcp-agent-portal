@@ -8,16 +8,42 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 
 let server;
 let port;
 let proxyManager;
 let passed = 0;
 let failed = 0;
+let stateDir;
+let projectRoot;
+let originalEnv;
+let stateGraphModule;
+
+const TEST_ENV_KEYS = [
+  'PORTAL_LOCAL_GATEWAY_DIR',
+  'PORTAL_CONFIG_PATH',
+  'PORTAL_CHATS_DIR',
+  'PORTAL_STATE_DIR',
+  'PORTAL_STATE_PATH',
+  'PORTAL_WAL_PATH',
+];
 
 async function setup() {
+  stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-chat-flow-'));
+  originalEnv = Object.fromEntries(TEST_ENV_KEYS.map((key) => [key, process.env[key]]));
+  process.env.PORTAL_LOCAL_GATEWAY_DIR = path.join(stateDir, 'local-gateway');
+  process.env.PORTAL_CONFIG_PATH = path.join(stateDir, 'agent-portal.json');
+  process.env.PORTAL_CHATS_DIR = path.join(stateDir, 'agent-portal-chats');
+  process.env.PORTAL_STATE_DIR = stateDir;
+  process.env.PORTAL_STATE_PATH = path.join(stateDir, 'agent-portal-state.json');
+  process.env.PORTAL_WAL_PATH = path.join(stateDir, 'agent-portal.wal');
+  projectRoot = path.join(process.cwd(), 'tmp');
+  fs.mkdirSync(projectRoot, { recursive: true });
+
   let { startWebServer } = await import('../../src/node/server/web-server.js');
-  let result = startWebServer(path.join(process.cwd(), 'tmp'));
+  stateGraphModule = await import('../../src/node/state-graph.js');
+  let result = startWebServer(projectRoot);
   server = result.server;
   proxyManager = result.proxyManager;
   proxyManager.startAllServers();
@@ -45,8 +71,22 @@ function connectChatClient() {
 }
 
 async function teardown() {
-  proxyManager.stopAll();
-  server.close();
+  proxyManager?.stopAll();
+  if (server?.listening) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+  if (stateGraphModule) {
+    let sg = stateGraphModule.getStateGraph();
+    await sg.flushChatWrites();
+    sg.flush();
+  }
+  if (originalEnv) {
+    for (let key of TEST_ENV_KEYS) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+  if (stateDir) fs.rmSync(stateDir, { recursive: true, force: true });
 }
 
 async function test(name, fn) {
@@ -68,6 +108,15 @@ async function run() {
   // Give child MCP servers time to spin up
   console.log('  Waiting 3s for agent-pool child process to start...');
   await new Promise(r => setTimeout(r, 3000));
+
+  await test('uses isolated state and config paths', async () => {
+    let sg = stateGraphModule.getStateGraph();
+    assert.ok(sg._snapshotPath.startsWith(stateDir), 'snapshot path should be under the test state dir');
+    assert.ok(sg._walPath.startsWith(stateDir), 'wal path should be under the test state dir');
+    assert.ok(sg._chatsDir.startsWith(stateDir), 'chat path should be under the test state dir');
+    assert.ok(process.env.PORTAL_CONFIG_PATH.startsWith(stateDir), 'config path should be under the test state dir');
+    assert.ok(process.env.PORTAL_LOCAL_GATEWAY_DIR.startsWith(stateDir), 'local-gateway path should be under the test state dir');
+  });
 
   // Test 1: Error propagation
   await test('synchronous error triggers chat.error instead of hanging', async () => {
@@ -257,34 +306,57 @@ async function run() {
     }
   });
 
-  // Test 2: Success workflow propagation (streaming)
-  await test('valid workflow triggers chat.delegated, streams metadata, and completes with chat.done', async () => {
+  // Test 2: Success task propagation (streaming)
+  await test('valid delegated task triggers chat.delegated, streams metadata, and completes with chat.done', async () => {
     let ws = await connectChatClient();
-    
-    // Create a dummy workflow that runs very quickly
-    const testDir = path.join(process.cwd(), '.agent-portal', 'workflows');
-    const testFile = path.join(testDir, 'test-integration-workflow.md');
-    fs.mkdirSync(testDir, { recursive: true });
-    fs.writeFileSync(testFile, `---
-name: test-integration-workflow
-description: Fast workflow for integration testing
-tags: [integration-test]
-entryPoint: test-step-1
----
-# Step 1
-This is a test.
-\`\`\`bash
-echo "Integration Test Success"
-\`\`\`
-`);
+    let originalRequest = proxyManager.requestFromChild;
+    let taskId = '11111111-2222-4333-8444-555555555555';
 
     try {
+      proxyManager.requestFromChild = async (_server, _method, payload) => {
+        if (payload?.arguments?.name === 'delegate_task' || payload?.name === 'delegate_task') {
+          return { content: [{ type: 'text', text: `Delegated task: ${taskId}` }] };
+        }
+        if (payload?.arguments?.name === 'get_task_result' || payload?.name === 'get_task_result') {
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                '## Agent Response',
+                'Integration Test Success',
+              ].join('\n'),
+            }],
+          };
+        }
+        return originalRequest.call(proxyManager, _server, _method, payload);
+      };
+
       let events = [];
       let receivedDone = new Promise((resolve, reject) => {
-        let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.done')), 15000);
+        let timer = setTimeout(() => reject(new Error(`Timeout waiting for chat.done; events: ${events.join(', ')}`)), 15000);
         ws.on('message', (data) => {
           let msg = JSON.parse(data.toString());
           events.push(msg.method);
+          if (msg.method === 'chat.delegated') {
+            proxyManager.taskRouter.route({
+              params: {
+                taskId,
+                type: 'event',
+                data: {
+                  type: 'message',
+                  role: 'assistant',
+                  content: 'Integration Test Success',
+                },
+              },
+            });
+            proxyManager.taskRouter.route({
+              params: {
+                taskId,
+                type: 'done',
+                data: { meta: { startedAt: Date.now(), chatId: msg.params.chatId } },
+              },
+            });
+          }
           if (msg.method === 'chat.done') {
             clearTimeout(timer);
             resolve(msg);
@@ -295,9 +367,8 @@ echo "Integration Test Success"
       ws.send(JSON.stringify({
         method: 'chat.send',
         params: {
-          chatId: 'test-chat-2',
-          prompt: '/test-integration-workflow ',
-          provider: 'mock'
+          prompt: 'stream integration task',
+          provider: 'mock',
         }
       }));
 
@@ -308,7 +379,7 @@ echo "Integration Test Success"
       assert.ok(events.includes('chat.done'), 'Should complete with chat.done');
       assert.ok(doneMsg.params.taskId, 'Done message should include taskId');
     } finally {
-      if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+      proxyManager.requestFromChild = originalRequest;
       ws.close();
     }
   });
@@ -407,7 +478,12 @@ echo "Integration Test Success"
   process.exit(failed > 0 ? 1 : 0);
 }
 
-run().catch(err => {
+run().catch(async (err) => {
   console.error('Fatal:', err);
+  try {
+    await teardown();
+  } catch (teardownError) {
+    console.error('Teardown failed:', teardownError);
+  }
   process.exit(1);
 });
