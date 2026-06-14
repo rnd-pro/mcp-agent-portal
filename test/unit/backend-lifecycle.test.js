@@ -42,7 +42,7 @@ function closeFrame() {
   return Buffer.from([0x88, 0x00]);
 }
 
-function createProxyHarness(mod) {
+function createProxyHarness(mod, options = {}) {
   let stdin = new FakeStream();
   let stdout = new FakeStream();
   let sockets = [];
@@ -69,6 +69,7 @@ function createProxyHarness(mod) {
     logger: { error() {}, warn() {} },
     retryBaseMs: 1,
     retryMaxMs: 1,
+    ...options,
   });
   return { stdin, stdout, sockets, timers, exits, proxy };
 }
@@ -142,6 +143,46 @@ describe('backend lifecycle', () => {
     harness.proxy.stop();
   });
 
+  it('exits after max retries before the first websocket handshake', async () => {
+    let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-startup-retries`);
+    let harness = createProxyHarness(mod, { maxRetries: 2 });
+
+    await Promise.resolve();
+    harness.sockets[0].emit('close');
+    assert.equal(harness.timers.length, 1);
+
+    harness.timers.shift()();
+    await Promise.resolve();
+    harness.sockets[1].emit('close');
+    assert.equal(harness.timers.length, 1);
+
+    harness.timers.shift()();
+    await Promise.resolve();
+    harness.sockets[2].emit('close');
+
+    assert.deepEqual(harness.exits, [1]);
+  });
+
+  it('keeps retrying after max retries once a websocket handshake previously succeeded', async () => {
+    let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-post-connect-retries`);
+    let harness = createProxyHarness(mod, { maxRetries: 2 });
+
+    await Promise.resolve();
+    harness.sockets[0].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+
+    for (let i = 0; i < 5; i++) {
+      harness.sockets.at(-1).emit('close');
+      assert.equal(harness.timers.length, 1);
+      harness.timers.shift()();
+      await Promise.resolve();
+    }
+
+    assert.equal(harness.sockets.length, 6);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
   it('queues stdin messages while disconnected and flushes after reconnect', async () => {
     let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-queue`);
     let harness = createProxyHarness(mod);
@@ -157,6 +198,28 @@ describe('backend lifecycle', () => {
     harness.sockets[1].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
 
     assert.equal(harness.sockets[1].writes.length, 2);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
+  it('preserves queued framed stdin messages across post-connect reconnect storms', async () => {
+    let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-framed-queue`);
+    let harness = createProxyHarness(mod, { maxRetries: 1 });
+
+    await Promise.resolve();
+    harness.sockets[0].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+    harness.sockets[0].emit('close');
+    harness.stdin.emit('data', Buffer.from('Content-Length: 39\r\n\r\n{"jsonrpc":"2.0","method":"tools/list"}'));
+
+    harness.timers.shift()();
+    await Promise.resolve();
+    harness.sockets[1].emit('close');
+    harness.timers.shift()();
+    await Promise.resolve();
+    harness.sockets[2].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+
+    assert.equal(harness.sockets[2].writes.length, 2);
     assert.deepEqual(harness.exits, []);
 
     harness.proxy.stop();

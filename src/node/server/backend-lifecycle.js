@@ -413,7 +413,7 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   function scheduleRetry(reason = 'connection-lost') {
     if (shuttingDown) return;
     retries++;
-    if (retries > MAX_RETRIES) {
+    if (!everConnected && retries > MAX_RETRIES) {
       logger.error(`[portal] Proxy failed after ${MAX_RETRIES} retries — giving up`);
       shutdown(1);
       return;
