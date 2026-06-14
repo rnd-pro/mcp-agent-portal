@@ -1,4 +1,8 @@
 import { isPublicMcpToolServer } from './mcp-tool-visibility.js';
+import {
+  buildDevelopmentMap,
+  parseTaskStateResult,
+} from './orchestration-development-map.js';
 
 export const ORCHESTRATOR_META_TOOLS = [
   {
@@ -95,7 +99,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_chat_task_result',
-    description: 'Get the result for a chat task through Agent Portal orchestration control.',
+    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns runtime content plus a development map with subagents, task timings, latest tools, usage, and prompt hints.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -137,7 +141,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_orchestrator_status',
-    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, and active chat counts.',
+    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, and the current development map.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -154,7 +158,8 @@ export function isPortalOrchestratorTool(toolName = '') {
 }
 
 function textResult(value) {
-  let text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  let payload = typeof value === 'string' ? { ok: false, error: value } : value;
+  let text = JSON.stringify(payload, null, 2);
   return { content: [{ type: 'text', text }] };
 }
 
@@ -220,6 +225,15 @@ async function callInternalTaskTool(proxyManager, name, args) {
     name,
     arguments: args,
   }, 600_000);
+}
+
+async function readInternalTaskState(proxyManager) {
+  try {
+    let result = await callInternalTaskTool(proxyManager, 'list_tasks', {});
+    return parseTaskStateResult(result);
+  } catch (error) {
+    return { tasks: [], staleProcesses: [], error: error.message };
+  }
 }
 
 async function stopTask(proxyManager, sg, chatId, taskId, action, args = {}) {
@@ -330,7 +344,20 @@ export async function handlePortalOrchestratorTool(
     let chat = chatId ? sg.getChat(chatId) : null;
     let taskId = getTaskId(args, chat);
     if (!taskId) return errorResult('Missing taskId and no pending task is attached to the chat.');
-    return callInternalTaskTool(proxyManager, 'get_task_result', { task_id: taskId });
+    let taskResult = await callInternalTaskTool(proxyManager, 'get_task_result', { task_id: taskId });
+    let taskState = await readInternalTaskState(proxyManager);
+    return textResult({
+      ok: !taskResult?.isError,
+      chatId,
+      taskId,
+      developmentMap: buildDevelopmentMap({
+        sg,
+        chatId,
+        taskId,
+        taskResult,
+        taskState,
+      }),
+    });
   }
 
   if (toolName === 'cancel_chat_task' || toolName === 'finish_chat_task') {
@@ -354,6 +381,7 @@ export async function handlePortalOrchestratorTool(
     let goals = sg.listChatGoals();
     let tasks = Object.entries(sg.get('tasks') || {}).map(([id, task]) => ({ id, ...task }));
     let { publicServers, internalServers } = summarizeHealth(proxyManager);
+    let taskState = await readInternalTaskState(proxyManager);
     return textResult({
       mode: process.env.PORTAL_MODE || 'standalone',
       publicServers,
@@ -371,6 +399,8 @@ export async function handlePortalOrchestratorTool(
         total: tasks.length,
         active: tasks.filter(task => !['done', 'error', 'cancelled', 'lost'].includes(task.status)).length,
       },
+      developmentMap: buildDevelopmentMap({ sg, taskState }),
+      staleProcesses: taskState.staleProcesses || [],
     });
   }
 

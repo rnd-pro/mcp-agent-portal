@@ -137,6 +137,11 @@ test('get_portal_status separates public servers from internal runtime health', 
   let proxyManager = {
     servers: new Map(),
     broadcastMonitor() {},
+    stateGraph: {
+      listChats: () => [],
+      listChatGoals: () => [],
+      get: () => ({}),
+    },
     getHealthStatus: () => ({
       'project-graph': { status: 'healthy' },
       'agent-pool': { status: 'healthy' },

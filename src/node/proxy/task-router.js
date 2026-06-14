@@ -6,6 +6,7 @@ import {
 } from '../project-transactions.js';
 
 const TERMINAL_TYPES = new Set(['done', 'error', 'cancelled']);
+const TASK_EVENT_CACHE_LIMIT = 200;
 
 export function isTerminalTaskNotificationType(type) {
   return TERMINAL_TYPES.has(type);
@@ -73,17 +74,31 @@ export class TaskRouter {
     // Cache ALL events in StateGraph for delta sync and recovery
     if (type === 'event' && data) {
       try {
-        // Compact event summary for ring buffer (but keep enough for UI rendering)
+        // Compact event summary for a bounded task event tail.
         let summary = {
           type: data.type ?? 'unknown',
           ts: Date.now(),
         };
         if (data.role) summary.role = data.role;
-        if (data.name) summary.name = data.name;
+        let name = data.name
+          ?? data.tool_name
+          ?? data.toolCall?.name
+          ?? data.tool_call?.name
+          ?? data.function?.name
+          ?? data.part?.name
+          ?? data.part?.tool;
+        if (name) summary.name = name;
         if (data.content && typeof data.content === 'string') {
           summary.content = data.content;
         }
-        if (data.arguments) summary.arguments = data.arguments;
+        let args = data.arguments
+          ?? data.parameters
+          ?? data.input
+          ?? data.toolCall?.arguments
+          ?? data.tool_call?.arguments
+          ?? data.part?.parameters
+          ?? data.part?.state?.input;
+        if (args) summary.arguments = args;
         if (data.output) summary.output = data.output;
         if (data.status) summary.status = data.status;
         if (data.type === 'provider_fallback') {
@@ -95,17 +110,14 @@ export class TaskRouter {
           if (data.total) summary.total = data.total;
         }
 
-        // Initialize events array if needed
         let task = sg.get(`tasks/${taskId}`);
-        if (task && !task.events) {
-          sg.merge(`tasks/${taskId}`, { events: [] }, 'task-init');
-        }
-
-        sg.commit([{
-          op: 'push',
-          path: `tasks/${taskId}/events`,
-          value: summary,
-        }], 'task-event');
+        let events = Array.isArray(task?.events) ? task.events : [];
+        let eventCount = Number.isFinite(task?.eventCount) ? task.eventCount + 1 : events.length + 1;
+        sg.merge(`tasks/${taskId}`, {
+          events: [...events, summary].slice(-TASK_EVENT_CACHE_LIMIT),
+          eventCount,
+          lastEventAt: summary.ts,
+        }, 'task-event');
       } catch (err) {
         // Non-critical: event caching failure shouldn't break routing
         console.warn(`[TaskNotify] Event cache failed for ${taskId}:`, err.message);

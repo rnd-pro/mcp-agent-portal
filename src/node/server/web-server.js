@@ -23,6 +23,10 @@ import {
   isPublicMcpToolServer,
   splitMcpHealthStatus,
 } from '../proxy/mcp-tool-visibility.js';
+import {
+  buildDevelopmentMap,
+  parseTaskStateResult,
+} from '../proxy/orchestration-development-map.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
 import { createNetworkAuthController } from './network-auth.js';
@@ -34,6 +38,26 @@ let WEB_DIR = path.join(ROOT_DIR, 'web');
 let DIST_WEB_DIR = path.join(ROOT_DIR, 'dist', 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
 let NODE_MODULE_PACKAGE_NAMES = new Set(['symbiote-ui', 'symbiote-engine']);
+
+function jsonTextResult(value, extra = {}) {
+  return {
+    ...extra,
+    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+  };
+}
+
+async function readInternalTaskState(proxyManager) {
+  if (!proxyManager?.requestFromChild) return { tasks: [], staleProcesses: [] };
+  try {
+    let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
+      name: 'list_tasks',
+      arguments: {},
+    }, 600_000);
+    return parseTaskStateResult(result);
+  } catch (error) {
+    return { tasks: [], staleProcesses: [], error: error.message };
+  }
+}
 
 /** @type {Record<string, string>} */
 let MIME_TYPES = {
@@ -480,15 +504,21 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
     let tools = await _collectChildTools(proxyManager);
     let servers = [...proxyManager.servers.keys()].filter(isPublicMcpToolServer);
     let { publicHealth, internalHealth } = splitMcpHealthStatus(proxyManager.getHealthStatus());
-    return {
-      content: [{ type: 'text', text: JSON.stringify({
-        servers: servers.map(name => ({ name })),
-        health: publicHealth,
-        internalHealth,
-        totalTools: tools.length,
-        mode: process.env.PORTAL_MODE || 'standalone',
-      }, null, 2) }],
-    };
+    let sg = proxyManager.stateGraph;
+    if (!sg) {
+      let { getStateGraph } = await import('../state-graph.js');
+      sg = getStateGraph();
+    }
+    let taskState = await readInternalTaskState(proxyManager);
+    return jsonTextResult({
+      servers: servers.map(name => ({ name })),
+      health: publicHealth,
+      internalHealth,
+      totalTools: tools.length,
+      mode: process.env.PORTAL_MODE || 'standalone',
+      developmentMap: buildDevelopmentMap({ sg, taskState }),
+      staleProcesses: taskState.staleProcesses || [],
+    });
   }
 
   if (toolName === 'create_chat') {
@@ -515,7 +545,13 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
       agentColor: args.agentColor || null,
     }, 'mcp');
     proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
-    return { content: [{ type: 'text', text: `Chat created. ID: ${chat.id}` }] };
+    let fullChat = sg.getChat(chat.id) || { id: chat.id };
+    return jsonTextResult({
+      ok: true,
+      chatId: chat.id,
+      chat: fullChat,
+      developmentMap: buildDevelopmentMap({ sg, chatId: chat.id }),
+    });
   }
 
   if (toolName === 'send_chat_message') {
@@ -525,8 +561,15 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
       role: args.role || 'agent',
       text: args.text,
     });
+    let chat = sg.getChat(args.chatId) || { id: args.chatId };
     proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: args.chatId } });
-    return { content: [{ type: 'text', text: 'Message sent successfully.' }] };
+    return jsonTextResult({
+      ok: true,
+      chatId: args.chatId,
+      messageCount: Array.isArray(chat.messages) ? chat.messages.length : chat.messageCount || null,
+      chat,
+      developmentMap: buildDevelopmentMap({ sg, chatId: args.chatId }),
+    });
   }
 
   if (toolName === 'resume_chat') {

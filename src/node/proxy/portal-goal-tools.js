@@ -194,7 +194,8 @@ export function isPortalGoalTool(toolName) {
 }
 
 function textResult(value) {
-  let text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  let payload = typeof value === 'string' ? { ok: false, error: value } : value;
+  let text = JSON.stringify(payload, null, 2);
   return { content: [{ type: 'text', text }] };
 }
 

@@ -21,6 +21,10 @@ import {
   isInternalMcpToolName,
   splitMcpHealthStatus,
 } from './mcp-tool-visibility.js';
+import {
+  buildDevelopmentMap,
+  parseTaskStateResult,
+} from './orchestration-development-map.js';
 
 /**
  * Smart Tool Gateway — exposes portal-level meta-tools instead of proxying all child tools.
@@ -66,7 +70,7 @@ export let META_TOOLS = [
   },
   {
     name: 'create_chat',
-    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns the newly created chat ID.',
+    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with orchestration prompt hints.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -89,7 +93,7 @@ export let META_TOOLS = [
   },
   {
     name: 'send_chat_message',
-    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI.',
+    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -102,7 +106,7 @@ export let META_TOOLS = [
   },
   {
     name: 'resume_chat',
-    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available.',
+    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns task routing metadata, runtime content, and a development map with subagents, tasks, latest tools, usage, and prompt hints.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -157,6 +161,13 @@ export function extractTaskIdFromDelegateResult(result) {
   return text.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] || null;
 }
 
+function jsonTextResult(value, extra = {}) {
+  return {
+    ...extra,
+    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+  };
+}
+
 function normalizeIdList(value) {
   if (!value) return [];
   let list = Array.isArray(value) ? value : [value];
@@ -179,6 +190,19 @@ function broadcastGoalUpdate(proxyManager, goal) {
   }
 }
 
+async function readInternalTaskState(proxyManager) {
+  if (!proxyManager?.requestFromChild) return { tasks: [], staleProcesses: [] };
+  try {
+    let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
+      name: 'list_tasks',
+      arguments: {},
+    }, 600_000);
+    return parseTaskStateResult(result);
+  } catch (error) {
+    return { tasks: [], staleProcesses: [], error: error.message };
+  }
+}
+
 /**
  * Continue an existing Agent Chat by appending a user prompt and launching
  * a delegated task that is bound back to the same chat.
@@ -191,14 +215,14 @@ export async function resumeChatTool(proxyManager, args = {}) {
   let chatId = args.chatId || args.chat_id;
   let prompt = args.prompt || args.text;
   if (!chatId || !prompt) {
-    return { content: [{ type: 'text', text: 'Missing required chatId or prompt.' }], isError: true };
+    return jsonTextResult({ ok: false, error: 'Missing required chatId or prompt.' }, { isError: true });
   }
 
   let { getStateGraph } = await import('../state-graph.js');
   let sg = getStateGraph();
   let chat = sg.getChat(chatId);
   if (!chat) {
-    return { content: [{ type: 'text', text: `Chat not found: ${chatId}` }], isError: true };
+    return jsonTextResult({ ok: false, chatId, error: `Chat not found: ${chatId}` }, { isError: true });
   }
 
   let cwd = args.cwd;
@@ -251,7 +275,22 @@ export async function resumeChatTool(proxyManager, args = {}) {
     name: 'delegate_task',
     arguments: delegateArgs,
   }, 600_000);
-  if (result?.isError) return result;
+  if (result?.isError) {
+    let taskState = await readInternalTaskState(proxyManager);
+    return jsonTextResult({
+      ok: false,
+      chatId,
+      taskId: null,
+      error: result?.content?.[0]?.text || 'Delegation failed.',
+      delegateArgs,
+      routing: {
+        chatId: prepared.chatId || chatId,
+        parentChatId: prepared.parentChatId || null,
+        createdChat: prepared.createdChat || null,
+      },
+      developmentMap: buildDevelopmentMap({ sg, chatId, taskResult: result, taskState }),
+    }, { isError: true });
+  }
 
   let taskId = extractTaskIdFromDelegateResult(result);
   if (taskId) {
@@ -261,22 +300,30 @@ export async function resumeChatTool(proxyManager, args = {}) {
     }
   }
 
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        ok: true,
-        chatId,
-        taskId,
-        provider: delegateArgs.provider || null,
-        model: delegateArgs.model || null,
-        resource_group: delegateArgs.resource_group || null,
-        approval_mode: delegateArgs.approval_mode || null,
-        session_id: delegateArgs.session_id || null,
-        delegate: result?.content?.[0]?.text || '',
-      }, null, 2),
-    }],
-  };
+  let taskState = await readInternalTaskState(proxyManager);
+  return jsonTextResult({
+    ok: Boolean(taskId),
+    chatId,
+    taskId,
+    provider: delegateArgs.provider || null,
+    model: delegateArgs.model || null,
+    resource_group: delegateArgs.resource_group || null,
+    approval_mode: delegateArgs.approval_mode || null,
+    session_id: delegateArgs.session_id || null,
+    delegateArgs,
+    routing: {
+      chatId: prepared.chatId || chatId,
+      parentChatId: prepared.parentChatId || null,
+      createdChat: prepared.createdChat || null,
+    },
+    developmentMap: buildDevelopmentMap({
+      sg,
+      chatId,
+      taskId,
+      taskResult: result,
+      taskState,
+    }),
+  }, taskId ? {} : { isError: true });
 }
 
 /** Multiplexes IDE WebSocket connections to multiple child MCP servers. */
@@ -526,6 +573,12 @@ export class MCPMultiplexer {
         await this._ensureIndex();
         let health = this.proxyManager.getHealthStatus();
         let { publicHealth, internalHealth } = splitMcpHealthStatus(health);
+        let sg = this.proxyManager.stateGraph;
+        if (!sg) {
+          let { getStateGraph } = await import('../state-graph.js');
+          sg = getStateGraph();
+        }
+        let taskState = await readInternalTaskState(this.proxyManager);
         let status = {
           servers: this.toolIndex.getServers(),
           health: publicHealth,
@@ -533,6 +586,8 @@ export class MCPMultiplexer {
           totalTools: this.toolIndex.getPublicToolCount(),
           tags: this.toolIndex.getAvailableTags(),
           mode: process.env.PORTAL_MODE || 'standalone',
+          developmentMap: buildDevelopmentMap({ sg, taskState }),
+          staleProcesses: taskState.staleProcesses || [],
         };
         this.sendToIde({
           jsonrpc: '2.0',
@@ -572,10 +627,16 @@ export class MCPMultiplexer {
         }, 'mcp');
         // Broadcast event so UI reactive tabs open automatically
         this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: chat } });
+        let fullChat = sg.getChat(chat.id) || { id: chat.id };
         this.sendToIde({
           jsonrpc: '2.0',
           id: msg.id,
-          result: { content: [{ type: 'text', text: `Chat created. ID: ${chat.id}` }] }
+          result: jsonTextResult({
+            ok: true,
+            chatId: chat.id,
+            chat: fullChat,
+            developmentMap: buildDevelopmentMap({ sg, chatId: chat.id }),
+          }),
         });
         return;
       }
@@ -587,12 +648,19 @@ export class MCPMultiplexer {
           role: args.role || 'agent',
           text: args.text
         });
+        let chat = sg.getChat(args.chatId) || { id: args.chatId };
         // Broadcast event for UI reactive updates
         this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: args.chatId } });
         this.sendToIde({
           jsonrpc: '2.0',
           id: msg.id,
-          result: { content: [{ type: 'text', text: 'Message sent successfully.' }] }
+          result: jsonTextResult({
+            ok: true,
+            chatId: args.chatId,
+            messageCount: Array.isArray(chat.messages) ? chat.messages.length : chat.messageCount || null,
+            chat,
+            developmentMap: buildDevelopmentMap({ sg, chatId: args.chatId }),
+          }),
         });
         return;
       }

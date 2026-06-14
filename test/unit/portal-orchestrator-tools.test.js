@@ -42,6 +42,9 @@ describe('portal orchestrator MCP tools', () => {
       },
       requestFromChild: async (serverName, method, params) => {
         internalCalls.push({ serverName, method, params });
+        if (params.name === 'list_tasks') {
+          return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+        }
         return { content: [{ type: 'text', text: `${params.name}:ok` }] };
       },
     };
@@ -169,14 +172,30 @@ describe('portal orchestrator MCP tools', () => {
     );
 
     assert.equal(result.isError, undefined);
-    assert.deepEqual(internalCalls, [{
-      serverName: 'agent-pool',
-      method: 'tools/call',
-      params: {
-        name: 'get_task_result',
-        arguments: { task_id: 'task-result' },
+    assert.deepEqual(internalCalls, [
+      {
+        serverName: 'agent-pool',
+        method: 'tools/call',
+        params: {
+          name: 'get_task_result',
+          arguments: { task_id: 'task-result' },
+        },
       },
-    }]);
+      {
+        serverName: 'agent-pool',
+        method: 'tools/call',
+        params: {
+          name: 'list_tasks',
+          arguments: {},
+        },
+      },
+    ]);
+    let payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.chatId, chat.id);
+    assert.equal(payload.taskId, 'task-result');
+    assert.equal(payload.developmentMap.primaryTaskId, 'task-result');
+    assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
   });
 
   it('reports public MCP health separately from internal runtime health', async () => {
