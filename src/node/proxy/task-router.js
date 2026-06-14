@@ -264,9 +264,9 @@ export class TaskRouter {
           let last = lastIdx >= 0 ? msgs[lastIdx] : null;
           if (last && last.role === 'agent' && last.streaming) {
             // Replace content from cumulative CLI delivery.
-            msgs[lastIdx] = { ...last, text };
+            msgs[lastIdx] = { ...last, text, taskId };
           } else {
-            msgs.push({ role: 'agent', text, streaming: true });
+            msgs.push({ role: 'agent', text, taskId, streaming: true });
           }
           changed = true;
         }
@@ -282,6 +282,7 @@ export class TaskRouter {
 
         msgs.push({
           role: 'tool',
+          taskId,
           name: toolName,
           input,
           result: null,
@@ -439,6 +440,7 @@ export class TaskRouter {
         let tRes = parsedResult.toolResults?.[i];
         toolMessages.push({
           role: 'tool',
+          taskId,
           name: call.name,
           input: call.args,
           result: tRes ? (tRes.output ?? tRes.status) : null,
@@ -458,9 +460,10 @@ export class TaskRouter {
       let body = extractFinalAgentResponse(text);
       let lastAgent = [...msgs].reverse().find(m => m.role === 'agent');
       if (!lastAgent || !lastAgent.streaming) {
-        msgs.push({ role: 'agent', text: body, streaming: false });
+        msgs.push({ role: 'agent', text: body, taskId, streaming: false });
       } else {
         lastAgent.text = body || lastAgent.text;
+        lastAgent.taskId = taskId;
         lastAgent.streaming = false;
       }
 
@@ -488,6 +491,7 @@ export class TaskRouter {
     let elapsedSec = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
     msgs.push({
       role: 'thinking',
+      taskId,
       elapsed: elapsedSec,
       done: true,
       meta: Object.keys(meta).length > 0 ? meta : null

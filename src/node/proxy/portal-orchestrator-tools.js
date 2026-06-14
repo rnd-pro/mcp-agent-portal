@@ -4,6 +4,11 @@ import {
   parseTaskStateResult,
 } from './orchestration-development-map.js';
 
+const FINAL_AGENT_MESSAGE_TEXT_LIMIT = 4000;
+const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
+const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
+
 export const ORCHESTRATOR_META_TOOLS = [
   {
     name: 'list_chats',
@@ -99,7 +104,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_chat_task_result',
-    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe runtime summary plus a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe chat-scoped or task-inferred finalAgentMessage projection when available, a safe runtime summary, and a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -173,6 +178,67 @@ function getChatId(args = {}) {
 
 function getTaskId(args = {}, chat = null) {
   return args.taskId || args.task_id || chat?.pendingTaskId || null;
+}
+
+function getTaskChatId(sg, taskId = null) {
+  if (!taskId) return null;
+  let task = sg?.get?.(`tasks/${taskId}`);
+  return task?.chatId || null;
+}
+
+function sanitizeFinalAgentText(text = '') {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(LOCAL_PATH_RE, '[local-path]')
+    .replace(BEARER_RE, 'Bearer [redacted]')
+    .replace(SECRET_FIELD_RE, '$1: [redacted]')
+    .trim();
+}
+
+function clipFinalAgentText(text = '') {
+  let safe = sanitizeFinalAgentText(text);
+  if (safe.length <= FINAL_AGENT_MESSAGE_TEXT_LIMIT) {
+    return { text: safe, truncated: false };
+  }
+  return {
+    text: safe.slice(0, FINAL_AGENT_MESSAGE_TEXT_LIMIT - 3).trimEnd() + '...',
+    truncated: true,
+  };
+}
+
+function findFinalAgentMessage(chat = null, taskId = null) {
+  let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  let fallback = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    let message = messages[i];
+    if (message?.role !== 'agent') continue;
+    let text = String(message.text || '').trim();
+    if (!text) continue;
+    if (taskId && message.taskId === taskId) {
+      return { message, index: i, match: 'taskId' };
+    }
+    if (!fallback) fallback = { message, index: i, match: 'latest-agent' };
+  }
+  return fallback;
+}
+
+function summarizeFinalAgentMessage(chat = null, taskId = null) {
+  let found = chat?.id && taskId ? findFinalAgentMessage(chat, taskId) : null;
+  let clipped = clipFinalAgentText(found?.message?.text || '');
+  return {
+    hasText: Boolean(clipped.text),
+    text: clipped.text,
+    chatId: chat?.id || null,
+    taskId: found?.message?.taskId || taskId || null,
+    messageIndex: Number.isInteger(found?.index) ? found.index : null,
+    ts: found?.message?.ts || null,
+    source: found ? 'chat' : null,
+    match: found?.match || null,
+    truncated: clipped.truncated,
+    limits: {
+      text: FINAL_AGENT_MESSAGE_TEXT_LIMIT,
+    },
+  };
 }
 
 function broadcastChat(proxyManager, chatId) {
@@ -352,6 +418,10 @@ export async function handlePortalOrchestratorTool(
     let chat = chatId ? sg.getChat(chatId) : null;
     let taskId = getTaskId(args, chat);
     if (!taskId) return errorResult('Missing taskId and no pending task is attached to the chat.');
+    if (!chatId) {
+      chatId = getTaskChatId(sg, taskId);
+      chat = chatId ? sg.getChat(chatId) : null;
+    }
     let taskResult = await callInternalTaskTool(proxyManager, 'get_task_result', { task_id: taskId });
     let taskState = await readInternalTaskState(proxyManager);
     let developmentMap = buildDevelopmentMap({
@@ -361,10 +431,12 @@ export async function handlePortalOrchestratorTool(
       taskResult,
       taskState,
     });
+    let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId);
     return textResult({
-      ok: !taskResult?.isError,
+      ok: !taskResult?.isError || finalAgentMessage.hasText,
       chatId,
       taskId,
+      finalAgentMessage,
       runtime: developmentMap.runtime,
       developmentMap,
     });

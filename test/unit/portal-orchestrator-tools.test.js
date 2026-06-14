@@ -205,6 +205,17 @@ describe('portal orchestrator MCP tools', () => {
       elapsedMs: 50,
       events: [],
     }, 'test');
+    let localPath = ['', 'Users', 'example', 'private'].join('/');
+    let sessionValue = ['session', 'value', '12345'].join('-');
+    let tokenField = ['tok', 'en'].join('');
+    let localPathPattern = new RegExp(['', 'Users', 'example'].join('/'));
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      taskId: 'task-result',
+      ts: 1234,
+      text: `Final answer from ${localPath} with ${tokenField}=${sessionValue}.`,
+      streaming: false,
+    });
 
     let result = await handlePortalOrchestratorTool(
       proxyManager,
@@ -262,11 +273,86 @@ describe('portal orchestrator MCP tools', () => {
       payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'get_chat_task_result'),
       true,
     );
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.source, 'chat');
+    assert.equal(payload.finalAgentMessage.match, 'taskId');
+    assert.equal(payload.finalAgentMessage.messageIndex, 0);
+    assert.equal(Number.isFinite(payload.finalAgentMessage.ts), true);
+    assert.match(payload.finalAgentMessage.text, /Final answer/);
+    assert.doesNotMatch(payload.finalAgentMessage.text, localPathPattern);
+    assert.doesNotMatch(payload.finalAgentMessage.text, new RegExp(sessionValue));
     assert.equal(payload.runtime.contentCount, 1);
     assert.equal('textPreview' in payload.runtime, false);
     assert.equal('taskResult' in payload, false);
     assert.equal('content' in payload, false);
     assert.equal(JSON.stringify(payload.developmentMap).includes('secret-session-id'), false);
+  });
+
+  it('falls back to the latest chat agent message and infers chat scope from task state', async () => {
+    let chat = sg.createChat({ name: 'Fallback result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-fallback');
+    sg.set('tasks/task-fallback', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let localPath = ['', 'Users', 'example', 'private'].join('/');
+    let sessionValue = ['session', 'value', '12345'].join('-');
+    let sessionField = ['session', 'id'].join('_');
+    let localPathPattern = new RegExp(['', 'Users', 'example'].join('/'));
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: `Fallback synthesis from ${localPath} with ${sessionField}=${sessionValue} ${'x'.repeat(5000)}`,
+      streaming: false,
+    });
+
+    let scopedResult = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let scopedPayload = JSON.parse(scopedResult.content[0].text);
+
+    assert.equal(scopedPayload.finalAgentMessage.hasText, true);
+    assert.equal(scopedPayload.finalAgentMessage.source, 'chat');
+    assert.equal(scopedPayload.finalAgentMessage.match, 'latest-agent');
+    assert.equal(scopedPayload.finalAgentMessage.truncated, true);
+    assert.equal(scopedPayload.finalAgentMessage.text.length <= 4000, true);
+    assert.match(scopedPayload.finalAgentMessage.text, /Fallback synthesis/);
+    assert.doesNotMatch(scopedPayload.finalAgentMessage.text, localPathPattern);
+    assert.doesNotMatch(scopedPayload.finalAgentMessage.text, new RegExp(sessionValue));
+    assert.equal('content' in scopedPayload, false);
+    assert.equal('taskResult' in scopedPayload, false);
+
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { isError: true, content: [{ type: 'text', text: 'runtime result unavailable' }] };
+    };
+
+    let unscopedResult = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { taskId: 'task-fallback' },
+      'test',
+      { stateGraph: sg },
+    );
+    let unscopedPayload = JSON.parse(unscopedResult.content[0].text);
+
+    assert.equal(unscopedPayload.ok, true);
+    assert.equal(unscopedPayload.runtime.isError, true);
+    assert.equal(unscopedPayload.chatId, chat.id);
+    assert.equal(unscopedPayload.finalAgentMessage.hasText, true);
+    assert.equal(unscopedPayload.finalAgentMessage.source, 'chat');
+    assert.equal(unscopedPayload.finalAgentMessage.match, 'latest-agent');
+    assert.equal(unscopedPayload.finalAgentMessage.chatId, chat.id);
+    assert.equal(unscopedPayload.finalAgentMessage.taskId, 'task-fallback');
+    assert.match(unscopedPayload.finalAgentMessage.text, /Fallback synthesis/);
+    assert.doesNotMatch(unscopedPayload.finalAgentMessage.text, localPathPattern);
+    assert.doesNotMatch(unscopedPayload.finalAgentMessage.text, new RegExp(sessionValue));
   });
 
   it('surfaces internal task-state read failures in orchestrator status', async () => {

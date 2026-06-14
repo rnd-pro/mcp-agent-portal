@@ -118,7 +118,18 @@ describe('TaskRouter terminal lifecycle handling', () => {
 
     assert.match(source, /let body = extractFinalAgentResponse\(text\);/);
     assert.match(source, /lastAgent\.text = body \|\| lastAgent\.text;/);
+    assert.match(source, /lastAgent\.taskId = taskId;/);
     assert.match(source, /lastAgent\.streaming = false;/);
+  });
+
+  it('tags persisted agent, tool, and completion messages with task id', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+
+    assert.match(source, /msgs\[lastIdx\] = \{ \.\.\.last, text, taskId \};/);
+    assert.match(source, /msgs\.push\(\{ role: 'agent', text, taskId, streaming: true \}\);/);
+    assert.match(source, /msgs\.push\(\{ role: 'agent', text: body, taskId, streaming: false \}\);/);
+    assert.match(source, /role: 'tool',\n\s+taskId,/);
+    assert.match(source, /role: 'thinking',\n\s+taskId,/);
   });
 
   it('broadcasts live terminal events after final result persistence', () => {
