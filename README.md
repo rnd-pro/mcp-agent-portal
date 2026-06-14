@@ -25,6 +25,21 @@
 > [!TIP]
 > Add one entry to your MCP config and use Agent Portal as the orchestration gateway. Public child tools are discoverable through the gateway; Agent Pool is reserved for Agent Portal's own chat/task execution path.
 
+## Current MCP Surface
+
+Agent Portal is the public orchestration entrypoint. External MCP clients use
+portal tools such as `create_chat`, `resume_chat`, `get_chat_task_result`,
+`get_orchestrator_status`, and `get_development_map`; raw Agent Pool tools stay
+internal to the portal runtime and are blocked from public discovery and
+`call_tool`.
+
+`get_development_map` returns the safe orchestration map used by the UI and
+MCP responses: `subagentMap`, `activityMap`, `taskMap`, `toolMap`,
+`latestTools`, usage totals, liveness, task-state errors, compatibility
+`promptHints` strings, and structured `promptHintMap` suggestions. The latest
+live MCP smoke for the symbiote-workspace backend exposed 51 public tools with
+`get_development_map` present and raw Agent Pool tools absent.
+
 ### Singleton Architecture
 
 Agent Portal runs as a **detached singleton backend** to prevent resource exhaustion when opening multiple IDE windows.

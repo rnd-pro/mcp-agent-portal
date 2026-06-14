@@ -104,7 +104,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_chat_task_result',
-    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe chat-scoped or task-inferred finalAgentMessage projection when available, a safe runtime summary, and a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, liveness classification, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe chat-scoped or task-inferred finalAgentMessage projection when available, a safe runtime summary, and a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, liveness classification, latest tool usage with durationMs/usageMs/timingSource, usage totals, compatibility promptHints strings, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -117,7 +117,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_development_map',
-    description: 'Get the Agent Portal development map for orchestrator control. Returns subagentMap nodes/tree/edges, activityMap, taskMap, toolMap, latest tool usage with durationMs/usageMs/timingSource, usage totals, liveness, legacy promptHints, and structured promptHintMap suggestions. Agent Pool remains internal and is not exposed as public MCP tools.',
+    description: 'Get the Agent Portal development map for orchestrator control. Returns subagentMap nodes/tree/edges, activityMap, taskMap, toolMap, latest tool usage with durationMs/usageMs/timingSource, usage totals, liveness, compatibility promptHints strings, and structured promptHintMap suggestions. Agent Pool remains internal and is not exposed as public MCP tools.',
     inputSchema: {
       type: 'object',
       properties: {
