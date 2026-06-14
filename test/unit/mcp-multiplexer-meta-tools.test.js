@@ -178,6 +178,20 @@ test('get_portal_status separates public servers from internal runtime health', 
       'project-graph': { status: 'healthy' },
       'agent-pool': { status: 'healthy' },
     }),
+    requestFromChild: async (_serverName, _method, params) => {
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [],
+              staleProcesses: [{ pid: 23456, taskId: 'task-stale', command: 'secret command' }],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    },
   };
   let multiplexer = new MCPMultiplexer(proxyManager, ws);
   multiplexer.toolIndex.tools.set('get_skeleton', {
@@ -206,15 +220,21 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.deepEqual(status.internalHealth, { 'agent-pool': { status: 'healthy' } });
   assert.equal(status.totalTools, 1);
   assert.equal(status.developmentMap.schemaVersion, 1);
+  assert.equal(status.developmentMap.activityMap.schemaVersion, 1);
+  assert.deepEqual(status.developmentMap.activityMap.nodes, []);
+  assert.deepEqual(status.developmentMap.activityMap.latestTools, []);
   assert.equal(status.developmentMap.subagentMap.schemaVersion, 1);
   assert.deepEqual(status.developmentMap.subagentMap.nodes, []);
   assert.equal(status.developmentMap.taskMap.schemaVersion, 1);
   assert.equal(status.developmentMap.toolMap.schemaVersion, 1);
   assert.equal(Array.isArray(status.developmentMap.latestTools), true);
-  assert.equal(status.developmentMap.usage.runningTasks, 0);
-  assert.equal(status.developmentMap.usage.toolUses, 0);
-  assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
-});
+	  assert.equal(status.developmentMap.usage.runningTasks, 0);
+	  assert.equal(status.developmentMap.usage.toolUses, 0);
+	  assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
+	  assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
+	  assert.equal(JSON.stringify(status.staleProcesses).includes('23456'), false);
+	  assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
+	});
 
 test('get_portal_status surfaces internal task-state read failures', async () => {
   let ideMessages = [];

@@ -107,6 +107,26 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal('messages' in loaded, false);
   });
 
+  it('sets chat sessions without echoing the session value to MCP callers', async () => {
+    let chat = sg.createChat({ name: 'Session chat' }, 'test');
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'set_chat_session',
+      { chatId: chat.id, sessionId: 'secret-session-id' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.ok, true);
+    assert.equal(payload.chatId, chat.id);
+    assert.equal(payload.hasSession, true);
+    assert.equal('sessionId' in payload, false);
+    assert.equal(JSON.stringify(payload).includes('secret-session-id'), false);
+    assert.equal(sg.getChat(chat.id).sessionId, 'secret-session-id');
+  });
+
   it('cancels pending chat tasks through the internal runtime without exposing child tools', async () => {
     let chat = sg.createChat({ name: 'Task chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-123');
@@ -226,16 +246,24 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.subagentMap.edges[0].to, child.id);
     assert.equal(payload.developmentMap.usage.subagents, 1);
     assert.equal(payload.developmentMap.usage.totalTaskElapsedMs, 150);
+    assert.equal(payload.developmentMap.activityMap.schemaVersion, 1);
+    assert.equal(payload.developmentMap.activityMap.nodes.length, 2);
+    assert.equal(payload.developmentMap.activityMap.summary.runningTasks, 2);
+    assert.equal(payload.developmentMap.activityMap.summary.totalTaskElapsedMs, 150);
+    assert.equal(payload.developmentMap.activityMap.subagents[0].chatId, child.id);
+    assert.equal(payload.developmentMap.activityMap.subagents[0].parentChatId, chat.id);
     assert.equal(payload.developmentMap.taskMap.byId['task-result'].toolCount, 1);
     assert.equal(payload.developmentMap.toolMap.byTaskId['task-result'].latestTool.name, 'read_file');
+    assert.equal(payload.developmentMap.activityMap.latestTools[0].name, 'read_file');
     assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
     assert.equal(Array.isArray(payload.developmentMap.promptHintMap.hints), true);
+    assert.equal(Array.isArray(payload.developmentMap.activityMap.promptHints), true);
     assert.equal(
       payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'get_chat_task_result'),
       true,
     );
     assert.equal(payload.runtime.contentCount, 1);
-    assert.equal(typeof payload.runtime.textPreview, 'string');
+    assert.equal('textPreview' in payload.runtime, false);
     assert.equal('taskResult' in payload, false);
     assert.equal('content' in payload, false);
     assert.equal(JSON.stringify(payload.developmentMap).includes('secret-session-id'), false);
@@ -258,6 +286,38 @@ describe('portal orchestrator MCP tools', () => {
     let status = JSON.parse(result.content[0].text);
 
     assert.equal(status.developmentMap.stateError, 'list_tasks unavailable');
+    assert.deepEqual(status.staleProcesses, { count: 0, taskIds: [] });
+  });
+
+  it('summarizes stale processes without exposing raw process metadata', async () => {
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [],
+              staleProcesses: [{ pid: 12345, taskId: 'task-stale', command: 'secret command' }],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_orchestrator_status',
+      {},
+      'test',
+      { stateGraph: sg },
+    );
+    let status = JSON.parse(result.content[0].text);
+
+    assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
+    assert.equal(JSON.stringify(status.staleProcesses).includes('12345'), false);
+    assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
   });
 
   it('reports public MCP health separately from internal runtime health', async () => {

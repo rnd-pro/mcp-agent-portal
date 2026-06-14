@@ -59,6 +59,14 @@ async function readInternalTaskState(proxyManager) {
   }
 }
 
+function summarizeStaleProcesses(staleProcesses = []) {
+  let items = Array.isArray(staleProcesses) ? staleProcesses : [];
+  return {
+    count: items.length,
+    taskIds: items.map((item) => item?.taskId).filter(Boolean).slice(0, 20),
+  };
+}
+
 /** @type {Record<string, string>} */
 let MIME_TYPES = {
   '.html': 'text/html',
@@ -519,7 +527,7 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
       totalTools: tools.length,
       mode: process.env.PORTAL_MODE || 'standalone',
       developmentMap: buildDevelopmentMap({ sg, taskState }),
-      staleProcesses: taskState.staleProcesses || [],
+      staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });
   }
 

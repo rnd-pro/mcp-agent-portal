@@ -4,7 +4,6 @@ const TOOL_BUCKET_LIMIT = 5;
 const TASK_LIMIT = 40;
 const SUBAGENT_LIMIT = 40;
 const PROMPT_HINT_LIMIT = 8;
-const RUNTIME_TEXT_LIMIT = 1200;
 
 function parseJson(value) {
   if (!value || typeof value !== 'string') return null;
@@ -134,20 +133,48 @@ function resultToolResults(result = null) {
   return Array.isArray(result?.toolResults) ? result.toolResults : [];
 }
 
-function compactDetail(args = {}) {
-  let detail = args.file_path ?? args.path ?? args.file ?? args.query ?? args.symbol ?? args.command ?? args.url ?? '';
-  if (typeof detail !== 'string' || !detail) return '';
-  if (detail.startsWith('/') && detail.length > 48) return `...${detail.slice(-45)}`;
-  return detail.length > 96 ? `${detail.slice(0, 93)}...` : detail;
-}
-
 function compactPrompt(prompt = '', limit = 160) {
   let text = String(prompt || '').replace(/\s+/g, ' ').trim();
   return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
 }
 
-function compactRuntimeText(text = '', limit = RUNTIME_TEXT_LIMIT) {
-  return compactPrompt(text, limit);
+function basenameLabel(value = '') {
+  let parts = String(value || '').split(/[\\/]/).filter(Boolean);
+  return compactPrompt(parts.at(-1) || '', 96);
+}
+
+function urlHostLabel(value = '') {
+  try {
+    return compactPrompt(new URL(String(value)).hostname, 96);
+  } catch {
+    return '[url]';
+  }
+}
+
+function summarizeToolDetail(args = {}) {
+  let filePath = args.file_path ?? args.path ?? args.file;
+  if (typeof filePath === 'string' && filePath) {
+    return { kind: 'path', label: basenameLabel(filePath) };
+  }
+  if (typeof args.url === 'string' && args.url) {
+    return { kind: 'url', label: urlHostLabel(args.url) };
+  }
+  if (typeof args.symbol === 'string' && args.symbol) {
+    return { kind: 'symbol', label: compactPrompt(args.symbol, 96) };
+  }
+  if (typeof args.query === 'string' && args.query) {
+    return { kind: 'query', label: '[query]' };
+  }
+  if (typeof args.command === 'string' && args.command) {
+    return { kind: 'command', label: '[command]' };
+  }
+  return { kind: null, label: '' };
+}
+
+function safeErrorKind(error) {
+  if (!error) return null;
+  if (typeof error === 'object') return error.code || error.name || error.type || 'error';
+  return 'error';
 }
 
 function mergeTaskSnapshots(sg, taskState = null) {
@@ -227,15 +254,15 @@ function summarizeTask(task = {}, now = Date.now()) {
     model: task.model || null,
     approvalMode: task.approvalMode || null,
     hasSession: Boolean(task.sessionId),
-    prompt: compactPrompt(task.prompt),
-    pid: task.pid || null,
+    hasPrompt: Boolean(task.prompt),
     startedAt: task.startedAt || null,
     completedAt: task.completedAt || null,
     elapsedMs,
     eventCount: task.eventCount ?? events.length,
     lastEventAt: task.lastEventAt || lastEvent?.ts || lastEvent?.timestamp || null,
-    trackedChildren: task.trackedChildren || [],
-    error: task.error || null,
+    trackedChildCount: Array.isArray(task.trackedChildren) ? task.trackedChildren.length : 0,
+    hasError: Boolean(task.error),
+    errorKind: safeErrorKind(task.error),
   };
 }
 
@@ -293,6 +320,7 @@ function collectToolUses(
     if (event.type !== 'tool_use' && event.type !== 'tool_call') continue;
     let name = toolName(event);
     let args = toolArguments(event);
+    let detail = summarizeToolDetail(args);
     let result = findToolResult(event, resultsById, unkeyedResults, usedUnkeyedResults);
     let startedAt = eventTimestamp(event);
     let completedAt = result ? eventTimestamp(result) : null;
@@ -320,7 +348,9 @@ function collectToolUses(
       taskId: event.taskId || null,
       chatId: event.chatId || null,
       name,
-      detail: compactDetail(args),
+      detail: detail.label,
+      detailKind: detail.kind,
+      detailLabel: detail.label,
       status: result?.status || (result ? 'done' : taskTerminal ? event.taskStatus : 'running'),
       startedAt: usedAt,
       usedAt,
@@ -368,12 +398,12 @@ function addRuntimeResultTools(toolUses, runtimeResult, runtimeContext) {
     let name = runtimeToolName(call);
     if (!name) continue;
     let args = runtimeToolArguments(call);
-    let detail = compactDetail(args);
+    let detail = summarizeToolDetail(args);
     let duplicate = toolUses.some((tool) => {
       return tool.name === name
         && tool.taskId === (runtimeContext.taskId || null)
         && tool.chatId === (runtimeContext.chatId || null)
-        && (!detail || tool.detail === detail);
+        && (!detail.label || tool.detail === detail.label);
     });
     if (duplicate) continue;
     let result = results[index] || {};
@@ -381,7 +411,9 @@ function addRuntimeResultTools(toolUses, runtimeResult, runtimeContext) {
       taskId: runtimeContext.taskId || null,
       chatId: runtimeContext.chatId || null,
       name,
-      detail,
+      detail: detail.label,
+      detailKind: detail.kind,
+      detailLabel: detail.label,
       status: result.status || call.status || 'done',
       startedAt: null,
       usedAt: null,
@@ -561,7 +593,7 @@ function buildStructuredPromptHints({
       id: 'review-latest-tool',
       category: 'tooling',
       label: 'Review latest tool activity',
-      prompt: `Inspect the latest tool activity (${latestTool.name}${latestTool.detail ? `: ${latestTool.detail}` : ''}) before deciding the next orchestration step.`,
+      prompt: `Inspect the latest tool activity (${latestTool.name}${latestTool.detailLabel ? `: ${latestTool.detailLabel}` : ''}) before deciding the next orchestration step.`,
       reason: 'Latest tool timing and status show what the active agent is doing now.',
       chatId: latestTool.chatId || chatId,
       taskId: latestTool.taskId || taskId,
@@ -620,10 +652,6 @@ function buildPromptHintMap(args) {
   };
 }
 
-function buildPromptHints(args) {
-  return buildStructuredPromptHints(args).map(formatPromptHint).slice(0, 6);
-}
-
 function taskActivityTime(task = {}) {
   return normalizeTimestamp(task.lastEventAt || task.completedAt || task.startedAt);
 }
@@ -640,6 +668,8 @@ function summarizeLatestTool(tool = null) {
     taskId: tool.taskId || null,
     chatId: tool.chatId || null,
     detail: tool.detail || '',
+    detailKind: tool.detailKind || null,
+    detailLabel: tool.detailLabel || tool.detail || '',
     status: tool.status || 'unknown',
     usedAt: tool.usedAt || null,
     completedAt: tool.completedAt || null,
@@ -891,6 +921,125 @@ function buildToolMap({ tasks, subagentMap, toolUses, latestTools, now }) {
   };
 }
 
+function summarizeActivityTask(task = null) {
+  if (!task) return null;
+  return {
+    id: task.id,
+    chatId: task.chatId || null,
+    status: task.status || 'unknown',
+    agentSlug: task.agentSlug || null,
+    resourceGroup: task.resourceGroup || null,
+    elapsedMs: task.elapsedMs ?? null,
+    toolCount: task.toolCount || 0,
+    runningToolCount: task.runningToolCount || 0,
+    latestTool: task.latestTool || null,
+    lastActivityAt: task.lastActivityAt || null,
+  };
+}
+
+function latestTaskForNode(node = {}, taskMap = {}) {
+  let tasks = (node.taskIds || [])
+    .map((id) => taskMap.byId?.[id])
+    .filter(Boolean)
+    .sort((a, b) => (normalizeTimestamp(b.lastActivityAt) || 0) - (normalizeTimestamp(a.lastActivityAt) || 0));
+  return tasks[0] || null;
+}
+
+function activityStatus(node = {}) {
+  if (node.runningTaskCount > 0 || node.runningToolCount > 0) return 'running';
+  if (node.totalTaskCount > 0) return 'idle';
+  return 'ready';
+}
+
+function summarizeActivityNode(node = {}, taskMap = {}) {
+  let latestTask = latestTaskForNode(node, taskMap);
+  return {
+    chatId: node.chatId,
+    parentChatId: node.parentChatId || null,
+    root: Boolean(node.root),
+    name: node.name || '',
+    agent: node.agent || null,
+    resourceGroup: node.resourceGroup || null,
+    approvalMode: node.approvalMode || null,
+    status: activityStatus(node),
+    pendingTaskId: node.pendingTaskId || null,
+    taskIds: node.taskIds || [],
+    runningTaskCount: node.runningTaskCount || 0,
+    totalTaskCount: node.totalTaskCount || 0,
+    totalElapsedMs: node.totalElapsedMs || 0,
+    toolCount: node.toolCount || 0,
+    runningToolCount: node.runningToolCount || 0,
+    toolDurationMs: node.toolDurationMs || 0,
+    toolUsageMs: node.toolUsageMs || 0,
+    latestTool: node.latestTool || null,
+    latestTools: node.latestTools || [],
+    latestTask: summarizeActivityTask(latestTask),
+    lastActivityAt: node.lastActivityAt || null,
+  };
+}
+
+function summarizeActivityHint(hint = {}) {
+  return {
+    id: hint.id,
+    category: hint.category || 'orchestration',
+    label: hint.label || hint.id,
+    prompt: hint.prompt || '',
+    tool: hint.tool || null,
+    arguments: hint.arguments || null,
+    reason: hint.reason || '',
+    chatId: hint.chatId || null,
+    taskId: hint.taskId || null,
+    priority: hint.priority || 'normal',
+    source: hint.source || 'agent-portal',
+  };
+}
+
+function buildActivityMap({
+  rootChatId,
+  primaryTaskId,
+  subagentMap,
+  taskMap,
+  latestTools,
+  usage,
+  promptHintMap,
+  stateError,
+  now,
+}) {
+  let nodes = (subagentMap.nodes || []).map((node) => summarizeActivityNode(node, taskMap));
+  return {
+    schemaVersion: 1,
+    rootChatId,
+    primaryTaskId,
+    generatedAt: now,
+    stateError: stateError || null,
+    summary: {
+      runningTasks: usage.runningTasks || 0,
+      totalTasks: usage.totalTasks || 0,
+      completedTasks: usage.completedTasks || 0,
+      subagents: usage.subagents || 0,
+      toolUses: usage.toolUses || 0,
+      totalTaskElapsedMs: usage.totalTaskElapsedMs || 0,
+      toolDurationMs: usage.toolDurationMs || 0,
+      toolUsageMs: usage.toolUsageMs || 0,
+      longestElapsedMs: usage.longestElapsedMs ?? null,
+      latestActivityAt: usage.latestActivityAt || null,
+      tokens: usage.tokens ?? null,
+      cost: usage.cost ?? null,
+    },
+    nodes,
+    subagents: nodes.filter((node) => !rootChatId || node.chatId !== rootChatId),
+    edges: subagentMap.edges || [],
+    latestTools: latestTools.map(summarizeLatestTool),
+    promptHints: (promptHintMap.hints || []).map(summarizeActivityHint),
+    limits: {
+      nodes: SUBAGENT_LIMIT,
+      latestTools: TOOL_EVENT_LIMIT,
+      promptHints: PROMPT_HINT_LIMIT,
+      toolsPerNode: TOOL_BUCKET_LIMIT,
+    },
+  };
+}
+
 function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 0, toolUses = []) {
   let running = tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || ''));
   let elapsedMs = tasks
@@ -928,7 +1077,6 @@ function summarizeParsedRuntimeResult(result = null) {
   let stats = result.stats || null;
   return {
     exitCode: result.exitCode ?? null,
-    responsePreview: compactRuntimeText(result.response || ''),
     toolCallCount: Array.isArray(result.toolCalls) ? result.toolCalls.length : 0,
     toolResultCount: Array.isArray(result.toolResults) ? result.toolResults.length : 0,
     tokens: stats?.total_tokens ?? stats?.tokens?.total ?? null,
@@ -939,11 +1087,14 @@ function summarizeParsedRuntimeResult(result = null) {
 function summarizeRuntime(runtime) {
   return {
     isError: runtime.isError,
-    textPreview: compactRuntimeText(runtime.text),
     contentCount: runtime.content.length,
     parsedResultSummary: summarizeParsedRuntimeResult(runtime.result),
     eventCount: runtime.events.length,
   };
+}
+
+function promptHintTexts(promptHintMap = {}) {
+  return (promptHintMap.hints || []).map(formatPromptHint).slice(0, 6);
 }
 
 export function buildDevelopmentMap({
@@ -998,10 +1149,34 @@ export function buildDevelopmentMap({
     latestTools,
     now,
   });
+  let usage = summarizeUsage(scopedTasks, runtime, now, subagents.length, toolUses);
+  let promptHintArgs = {
+    chatId,
+    taskId,
+    runtimeText: runtime.text,
+    runningCount,
+    latestTools,
+    subagents,
+    tasks: scopedTasks,
+    now,
+  };
+  let promptHintMap = buildPromptHintMap(promptHintArgs);
+  let stateError = taskState?.error || null;
+  let activityMap = buildActivityMap({
+    rootChatId: chatId,
+    primaryTaskId: taskId,
+    subagentMap,
+    taskMap,
+    latestTools,
+    usage,
+    promptHintMap,
+    stateError,
+    now,
+  });
 
   return {
     schemaVersion: 1,
-    stateError: taskState?.error || null,
+    stateError,
     rootChatId: chatId,
     primaryTaskId: taskId,
     subagents,
@@ -1010,26 +1185,10 @@ export function buildDevelopmentMap({
     taskMap,
     latestTools,
     toolMap,
-    usage: summarizeUsage(scopedTasks, runtime, now, subagents.length, toolUses),
-    promptHintMap: buildPromptHintMap({
-      chatId,
-      taskId,
-      runtimeText: runtime.text,
-      runningCount,
-      latestTools,
-      subagents,
-      tasks: scopedTasks,
-      now,
-    }),
-    promptHints: buildPromptHints({
-      chatId,
-      taskId,
-      runtimeText: runtime.text,
-      runningCount,
-      latestTools,
-      subagents,
-      tasks: scopedTasks,
-    }),
+    usage,
+    activityMap,
+    promptHintMap,
+    promptHints: promptHintTexts(promptHintMap),
     runtime: summarizeRuntime(runtime),
   };
 }

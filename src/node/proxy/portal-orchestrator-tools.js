@@ -99,7 +99,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_chat_task_result',
-    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe runtime summary plus a development map with subagentMap nodes/tree/edges, taskMap, toolMap, task timings, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
+    description: 'Get the result for a chat task through Agent Portal orchestration control. Returns a safe runtime summary plus a development map with activityMap, subagentMap nodes/tree/edges, taskMap, toolMap, task timings, latest tool usage with durationMs/usageMs/timingSource, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -141,7 +141,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_orchestrator_status',
-    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, and the current development map with subagentMap, taskMap, toolMap timing telemetry, and structured promptHintMap suggestions.',
+    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -215,6 +215,14 @@ function summarizeHealth(proxyManager) {
     else internalServers.push(item);
   }
   return { publicServers, internalServers };
+}
+
+function summarizeStaleProcesses(staleProcesses = []) {
+  let items = Array.isArray(staleProcesses) ? staleProcesses : [];
+  return {
+    count: items.length,
+    taskIds: items.map((item) => item?.taskId).filter(Boolean).slice(0, 20),
+  };
 }
 
 async function callInternalTaskTool(proxyManager, name, args) {
@@ -336,7 +344,7 @@ export async function handlePortalOrchestratorTool(
     if (!chatId || !sessionId) return errorResult('Missing chatId or sessionId.');
     sg.updateChatSession(chatId, sessionId);
     broadcastChat(proxyManager, chatId);
-    return textResult({ ok: true, chatId, sessionId });
+    return textResult({ ok: true, chatId, hasSession: true });
   }
 
   if (toolName === 'get_chat_task_result') {
@@ -402,7 +410,7 @@ export async function handlePortalOrchestratorTool(
         active: tasks.filter(task => !['done', 'error', 'cancelled', 'lost'].includes(task.status)).length,
       },
       developmentMap: buildDevelopmentMap({ sg, taskState }),
-      staleProcesses: taskState.staleProcesses || [],
+      staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });
   }
 

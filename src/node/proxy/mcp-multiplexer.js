@@ -237,6 +237,14 @@ async function readInternalTaskState(proxyManager) {
   }
 }
 
+function summarizeStaleProcesses(staleProcesses = []) {
+  let items = Array.isArray(staleProcesses) ? staleProcesses : [];
+  return {
+    count: items.length,
+    taskIds: items.map((item) => item?.taskId).filter(Boolean).slice(0, 20),
+  };
+}
+
 /**
  * Continue an existing Agent Chat by appending a user prompt and launching
  * a delegated task that is bound back to the same chat.
@@ -621,7 +629,7 @@ export class MCPMultiplexer {
           tags: this.toolIndex.getAvailableTags(),
           mode: process.env.PORTAL_MODE || 'standalone',
           developmentMap: buildDevelopmentMap({ sg, taskState }),
-          staleProcesses: taskState.staleProcesses || [],
+          staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
         };
         this.sendToIde({
           jsonrpc: '2.0',

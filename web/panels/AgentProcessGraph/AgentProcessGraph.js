@@ -359,9 +359,14 @@ export class AgentProcessGraph extends Symbiote {
       return;
     }
 
-    let usage = map.usage || {};
-    let latestTools = Array.isArray(map.latestTools) ? map.latestTools.slice(0, 4) : [];
-    let hints = Array.isArray(map.promptHintMap?.hints) ? map.promptHintMap.hints.slice(0, 3) : [];
+    let activityMap = map.activityMap || {};
+    let usage = activityMap.summary || map.usage || {};
+    let latestTools = Array.isArray(activityMap.latestTools)
+      ? activityMap.latestTools.slice(0, 4)
+      : Array.isArray(map.latestTools) ? map.latestTools.slice(0, 4) : [];
+    let hints = Array.isArray(activityMap.promptHints)
+      ? activityMap.promptHints.slice(0, 3)
+      : Array.isArray(map.promptHintMap?.hints) ? map.promptHintMap.hints.slice(0, 3) : [];
 
     let header = document.createElement('div');
     header.className = 'apg-map-summary-head';
@@ -373,10 +378,10 @@ export class AgentProcessGraph extends Symbiote {
     );
     this._developmentMapSummary.append(header);
 
-    if (map.stateError) {
+    if (activityMap.stateError || map.stateError) {
       let error = document.createElement('div');
       error.className = 'apg-map-summary-error';
-      error.textContent = map.stateError;
+      error.textContent = activityMap.stateError || map.stateError;
       this._developmentMapSummary.append(error);
     }
 
@@ -388,6 +393,7 @@ export class AgentProcessGraph extends Symbiote {
         item.className = 'apg-map-summary-row';
         item.textContent = [
           tool.name || 'tool',
+          tool.detailLabel || tool.detail || '',
           tool.status || 'unknown',
           formatDurationMs(tool.usageMs ?? tool.elapsedMs ?? tool.durationMs),
           tool.timingSource || '',

@@ -164,6 +164,9 @@ describe('api-routes', () => {
       assert.equal(body.developmentMap.schemaVersion, 1);
       assert.equal(body.developmentMap.rootChatId, root.id);
       assert.equal(body.developmentMap.primaryTaskId, 'task-root');
+      assert.equal(body.developmentMap.activityMap.schemaVersion, 1);
+      assert.equal(body.developmentMap.activityMap.summary.runningTasks, 1);
+      assert.equal(body.developmentMap.activityMap.latestTools[0].name, 'shell');
       assert.equal(body.developmentMap.latestTools[0].name, 'shell');
       assert.equal(body.developmentMap.latestTools[0].usageMs, 250);
       assert.equal(body.developmentMap.latestTools[0].timingSource, 'tool_result');
