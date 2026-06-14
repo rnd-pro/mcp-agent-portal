@@ -28,6 +28,7 @@ export default `
       <span class="material-symbols-outlined">account_tree</span>
       <span ref="emptyText"></span>
     </div>
+    <div slot="overlay" class="apg-map-summary" ref="developmentMapSummary" data-development-map-summary hidden></div>
     <div slot="stats" class="graph-explorer-stats apg-stats" ref="stats"></div>
   </graph-explorer-shell>
 `;

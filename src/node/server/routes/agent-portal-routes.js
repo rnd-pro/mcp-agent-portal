@@ -1,6 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getAgentPortalConfig } from '../../config-store.js';
+import {
+  buildDevelopmentMap,
+  parseTaskStateResult,
+} from '../../proxy/orchestration-development-map.js';
 import { getStateGraph } from '../../state-graph.js';
 import { json, parseBody } from './http.js';
 
@@ -242,14 +246,50 @@ async function assertSafeWriteTarget(root, targetPath) {
   }
 }
 
+async function readDevelopmentMapTaskState(proxyManager) {
+  if (!proxyManager?.requestFromChild) return { tasks: [], staleProcesses: [] };
+  try {
+    let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
+      name: 'list_tasks',
+      arguments: {},
+    }, 30_000);
+    return parseTaskStateResult(result);
+  } catch (error) {
+    return { tasks: [], staleProcesses: [], error: error.message };
+  }
+}
+
 /**
- * @param {{ projectRoot: string }} ctx
+ * @param {{ projectRoot: string, proxyManager?: any, stateGraph?: any }} ctx
  * @returns {Record<string, (req: any, res: any) => Promise<void>>}
  */
 export function createAgentPortalRoutes(ctx) {
-  let { projectRoot } = ctx;
+  let { projectRoot, proxyManager = null, stateGraph = null } = ctx;
+  let getGraph = () => stateGraph || proxyManager?.stateGraph || getStateGraph();
 
   return {
+    'GET /api/agent-portal/development-map': async (req, res) => {
+      try {
+        let url = new URL(req.url, 'http://localhost');
+        let chatId = url.searchParams.get('chatId') || url.searchParams.get('chat') || null;
+        let taskId = url.searchParams.get('taskId') || null;
+        let taskState = await readDevelopmentMapTaskState(proxyManager);
+        json(res, {
+          ok: true,
+          chatId,
+          taskId,
+          developmentMap: buildDevelopmentMap({
+            sg: getGraph(),
+            chatId,
+            taskId,
+            taskState,
+          }),
+        });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
     'GET /api/agent-portal/tree': async (req, res) => {
       try {
         let activeProjectRoot = resolveRequestProjectRoot(req, projectRoot);

@@ -8,10 +8,16 @@ const NODE_COLORS = {
   merge: '#26A69A',
   prompt: '#5C6BC0',
   response: '#26A69A',
+  task: '#EC407A',
   tool: '#F9A825',
+  hint: '#8E8D3A',
   file: '#8EA4B8',
+  error: '#D64545',
   fallback: '#EF6C00',
 };
+const DEVELOPMENT_TASK_LIMIT = 24;
+const DEVELOPMENT_TOOL_LIMIT = 12;
+const DEVELOPMENT_HINT_LIMIT = 6;
 
 const FILE_EXT_RE = /\.(?:[cm]?js|jsx|ts|tsx|css|scss|html|json|md|mdx|ya?ml|toml|txt|csv|py|sh|go|rs|java|kt|swift|rb|php|sql|svg|png|jpe?g|gif|webp)(?::\d+)?$/i;
 const FILE_FIELD_RE = /(?:^|_)(?:file|files|path|paths|filepath|filepaths|target|targets)(?:_|$)/i;
@@ -84,6 +90,17 @@ function compactLabel(value, fallback = '') {
   if (!text) return fallback;
   if (text.length <= 44) return text;
   return `${text.slice(0, 18)}...${text.slice(-20)}`;
+}
+
+function formatDurationMs(value) {
+  let ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  let seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`;
+  let minutes = Math.floor(seconds / 60);
+  let rest = Math.round(seconds % 60);
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
 function formatProfile(profile = {}) {
@@ -318,6 +335,39 @@ function getChatAgentLabel(chat = {}, fallback = 'orchestrator') {
   return chat.agent || chat.agent_slug || chat.name || fallback;
 }
 
+function agentNodeId(chatId, agent = 'agent') {
+  return `agent:${normalizeId(chatId)}:${normalizeId(agent, 'agent')}`;
+}
+
+function normalizeDevelopmentMap(map = null) {
+  return map && typeof map === 'object' && !Array.isArray(map) && map.schemaVersion === 1
+    ? map
+    : null;
+}
+
+function developmentMapAgentLabel(node = {}, fallback = 'agent') {
+  return node.agent || node.name || fallback;
+}
+
+function developmentMapChats(rootChat = {}, developmentMap = null) {
+  let map = normalizeDevelopmentMap(developmentMap);
+  if (!map) return [];
+  let rootId = rootChat.id || map.rootChatId || '';
+  return asArray(map.subagentMap?.nodes)
+    .filter(node => node?.chatId && node.chatId !== rootId)
+    .map((node) => ({
+      id: node.chatId,
+      parentChatId: node.parentChatId || rootId || null,
+      name: node.name || developmentMapAgentLabel(node, 'Agent'),
+      agent: node.agent || node.name || null,
+      resource_group: node.resourceGroup || null,
+      pendingTaskId: node.pendingTaskId || null,
+      lastTaskStatus: node.runningTaskCount > 0 ? 'running' : (node.totalTaskCount > 0 ? 'done' : 'ready'),
+      updatedAt: node.updatedAt || node.lastActivityAt || null,
+      developmentMapNode: node,
+    }));
+}
+
 function buildChildChats(rootChat = {}, chats = [], childChats = []) {
   let rootId = rootChat?.id || '';
   let byId = new Map();
@@ -330,19 +380,36 @@ function buildChildChats(rootChat = {}, chats = [], childChats = []) {
     .sort((a, b) => (a.createdAt || a.updatedAt || 0) - (b.createdAt || b.updatedAt || 0));
 }
 
-export function buildAgentProcessGraphModel({ chat = null, chats = [], childChats = [], agents = [] } = {}) {
+function toolTimingSummary(tool = {}) {
+  let duration = formatDurationMs(tool.usageMs ?? tool.elapsedMs ?? tool.durationMs);
+  return [tool.status, duration, tool.timingSource].filter(Boolean).join(' / ');
+}
+
+export function buildAgentProcessGraphModel({ chat = null, chats = [], childChats = [], agents = [], developmentMap = null } = {}) {
   let nodes = [];
   let edges = [];
   let seenNodes = new Set();
   let seenEdges = new Set();
+  let map = normalizeDevelopmentMap(developmentMap);
   let rootChat = asObject(chat);
+  if (!rootChat.id && map?.rootChatId) rootChat = { id: map.rootChatId, ...rootChat };
   let agentIndex = buildAgentIndex(agents);
   let rootChatId = normalizeId(rootChat.id, 'active');
-  let rootAgentId = `agent:${rootChatId}:${normalizeId(getChatAgentLabel(rootChat), 'orchestrator')}`;
+  let rootAgentId = agentNodeId(rootChatId, getChatAgentLabel(rootChat, 'orchestrator'));
   let rootAgentIcon = resolveAgentIcon(rootChat, agentIndex, 'hub');
+  let mapChats = developmentMapChats(rootChat, map);
+  let mapNodeByChatId = new Map(asArray(map?.subagentMap?.nodes).map(node => [node.chatId, node]));
 
   const addNode = (node) => addUnique(nodes, node, seenNodes, node.id);
   const addEdge = (edge) => addUnique(edges, edge, seenEdges, edge.id);
+  const agentIdForChat = (chatId, fallback = 'agent') => {
+    if (!chatId) return rootAgentId;
+    let mapNode = mapNodeByChatId.get(chatId);
+    if (mapNode) return agentNodeId(chatId, developmentMapAgentLabel(mapNode, fallback));
+    let knownChat = [rootChat, ...asArray(chats), ...asArray(childChats), ...mapChats]
+      .find(item => item?.id === chatId);
+    return agentNodeId(chatId, getChatAgentLabel(knownChat || {}, fallback));
+  };
 
   addNode(makeNode({
     id: rootAgentId,
@@ -351,7 +418,7 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     type: 'agent',
     color: resolveAgentColor(rootChat, agentIndex, NODE_COLORS.agent),
     icon: rootAgentIcon,
-    state: { status: rootChat.pendingTaskId ? 'running' : 'ready' },
+    state: { status: rootChat.pendingTaskId || map?.usage?.runningTasks ? 'running' : 'ready' },
     params: {
       chatId: rootChat.id || null,
       agent: rootChat.agent || null,
@@ -379,7 +446,7 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     addEdge(makeEdge({ from: rootAgentId, to: goalNodeId, kind: 'agent.process.goal', label: 'goal' }));
   }
 
-  let childList = buildChildChats(rootChat, chats, childChats);
+  let childList = buildChildChats(rootChat, [...asArray(chats), ...mapChats], [...asArray(childChats), ...mapChats]);
   let parallelNodeId = null;
   let mergeNodeId = null;
   if (childList.length > 1) {
@@ -414,7 +481,7 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
   }
   for (let child of childList) {
     let childAgent = getChatAgentLabel(child, 'agent');
-    let childNodeId = `agent:${normalizeId(child.id)}:${normalizeId(childAgent, 'agent')}`;
+    let childNodeId = agentNodeId(child.id, childAgent);
     let childAgentIcon = resolveAgentIcon(child, agentIndex, 'smart_toy');
     addNode(makeNode({
       id: childNodeId,
@@ -443,9 +510,44 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     }
   }
 
+  if (map) {
+    for (let node of asArray(map.subagentMap?.nodes)) {
+      if (!node?.chatId || node.chatId === rootChat.id) continue;
+      let nodeId = agentIdForChat(node.chatId, 'agent');
+      addNode(makeNode({
+        id: nodeId,
+        kind: 'agent.process.childAgent',
+        label: compactLabel(developmentMapAgentLabel(node, 'Agent'), node.name || 'Agent'),
+        type: 'child-agent',
+        color: NODE_COLORS.childAgent,
+        icon: 'smart_toy',
+        state: { status: node.runningTaskCount > 0 ? 'running' : 'ready' },
+        params: {
+          chatId: node.chatId,
+          parentChatId: node.parentChatId || null,
+          agent: node.agent || null,
+          resource_group: node.resourceGroup || null,
+          taskIds: asArray(node.taskIds),
+          toolCount: node.toolCount || 0,
+          toolUsageMs: node.toolUsageMs || 0,
+          source: 'developmentMap',
+        },
+      }));
+    }
+    for (let edge of asArray(map.subagentMap?.edges)) {
+      if (!edge?.from || !edge.to) continue;
+      addEdge(makeEdge({
+        from: agentIdForChat(edge.from, 'orchestrator'),
+        to: agentIdForChat(edge.to, 'agent'),
+        kind: 'agent.process.developmentMapDelegate',
+        label: 'delegate',
+      }));
+    }
+  }
+
   let allEvents = [
     ...collectChatProcessEvents(rootChat, rootAgentId, rootChatId),
-    ...childList.flatMap((child) => collectChatProcessEvents(child, `agent:${normalizeId(child.id)}:${normalizeId(getChatAgentLabel(child, 'agent'))}`, normalizeId(child.id))),
+    ...childList.flatMap((child) => collectChatProcessEvents(child, agentNodeId(child.id, getChatAgentLabel(child, 'agent')), normalizeId(child.id))),
   ];
 
   let fileNodeIds = new Map();
@@ -557,6 +659,137 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     }
   }
 
+  if (map) {
+    let taskNodeIds = new Map();
+    for (let task of Object.values(asObject(map.taskMap?.byId)).slice(0, DEVELOPMENT_TASK_LIMIT)) {
+      if (!task?.id) continue;
+      let taskNodeId = `task:${normalizeId(task.id)}`;
+      taskNodeIds.set(task.id, taskNodeId);
+      let elapsed = formatDurationMs(task.elapsedMs);
+      let toolUsage = formatDurationMs(task.toolUsageMs);
+      addNode(makeNode({
+        id: taskNodeId,
+        kind: 'agent.process.task',
+        label: compactLabel(`${String(task.id).slice(0, 8)} ${task.status || ''}`, 'task'),
+        type: 'task',
+        color: NODE_COLORS.task,
+        icon: 'timer',
+        width: 156,
+        height: 38,
+        state: { status: task.status || 'unknown' },
+        params: {
+          taskId: task.id,
+          chatId: task.chatId || null,
+          status: task.status || 'unknown',
+          elapsedMs: task.elapsedMs ?? null,
+          toolCount: task.toolCount || 0,
+          toolUsageMs: task.toolUsageMs || 0,
+          latestTool: task.latestTool?.name || null,
+          source: 'developmentMap',
+        },
+        metadata: { description: [elapsed, toolUsage ? `${toolUsage} tools` : ''].filter(Boolean).join(' / ') },
+      }));
+      addEdge(makeEdge({
+        from: agentIdForChat(task.chatId, 'orchestrator'),
+        to: taskNodeId,
+        kind: 'agent.process.task',
+        label: task.status || 'task',
+      }));
+    }
+
+    for (let [index, tool] of asArray(map.latestTools).slice(0, DEVELOPMENT_TOOL_LIMIT).entries()) {
+      if (!tool?.name) continue;
+      let toolNodeId = `latest-tool:${normalizeId(tool.taskId || tool.chatId || 'development')}:${index}:${normalizeId(tool.name, 'tool')}`;
+      let ownerNodeId = taskNodeIds.get(tool.taskId) || agentIdForChat(tool.chatId, 'orchestrator');
+      addNode(makeNode({
+        id: toolNodeId,
+        kind: 'agent.process.latestTool',
+        label: compactLabel(tool.name, 'tool'),
+        type: 'tool',
+        color: NODE_COLORS.tool,
+        icon: resolveToolIcon(tool.name),
+        width: 156,
+        height: 38,
+        state: { status: tool.status || 'unknown' },
+        params: {
+          name: tool.name,
+          detail: tool.detail || '',
+          status: tool.status || 'unknown',
+          chatId: tool.chatId || null,
+          taskId: tool.taskId || null,
+          durationMs: tool.durationMs ?? null,
+          elapsedMs: tool.elapsedMs ?? null,
+          usageMs: tool.usageMs ?? null,
+          timingSource: tool.timingSource || 'unknown',
+          timingEstimated: Boolean(tool.timingEstimated),
+          source: 'developmentMap',
+        },
+        metadata: { description: toolTimingSummary(tool) },
+      }));
+      addEdge(makeEdge({
+        from: ownerNodeId,
+        to: toolNodeId,
+        kind: 'agent.process.latestTool',
+        label: toolTimingSummary(tool) || 'tool',
+      }));
+    }
+
+    for (let hint of asArray(map.promptHintMap?.hints).slice(0, DEVELOPMENT_HINT_LIMIT)) {
+      if (!hint?.id) continue;
+      let hintNodeId = `prompt-hint:${normalizeId(hint.id)}`;
+      addNode(makeNode({
+        id: hintNodeId,
+        kind: 'agent.process.promptHint',
+        label: compactLabel(hint.label || hint.id, 'hint'),
+        type: 'hint',
+        color: NODE_COLORS.hint,
+        icon: 'tips_and_updates',
+        width: 162,
+        height: 38,
+        state: { status: hint.priority || 'normal' },
+        params: {
+          id: hint.id,
+          category: hint.category || null,
+          tool: hint.tool || null,
+          priority: hint.priority || 'normal',
+          chatId: hint.chatId || null,
+          taskId: hint.taskId || null,
+          source: 'developmentMap',
+        },
+        metadata: { description: hint.reason || '' },
+      }));
+      addEdge(makeEdge({
+        from: agentIdForChat(hint.chatId, 'orchestrator'),
+        to: hintNodeId,
+        kind: 'agent.process.promptHint',
+        label: hint.tool || hint.category || 'hint',
+      }));
+    }
+
+    if (map.stateError) {
+      let errorNodeId = `development-map-error:${normalizeId(map.stateError, 'state-error')}`;
+      addNode(makeNode({
+        id: errorNodeId,
+        kind: 'agent.process.stateError',
+        label: compactLabel(map.stateError, 'state error'),
+        type: 'fallback',
+        color: NODE_COLORS.error,
+        icon: 'report_problem',
+        width: 174,
+        height: 40,
+        state: { status: 'error' },
+        params: { source: 'developmentMap' },
+        metadata: { description: map.stateError },
+      }));
+      addEdge(makeEdge({
+        from: rootAgentId,
+        to: errorNodeId,
+        kind: 'agent.process.stateError',
+        label: 'state error',
+      }));
+    }
+  }
+
   return {
     version: 'graph-model-v1',
     metadata: {
@@ -567,6 +800,16 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
       messageCount: allEvents.filter(event => event.type === 'message').length,
       toolCount: allEvents.filter(event => event.type === 'tool').length,
       fileCount: fileNodeIds.size,
+      developmentMap: map ? {
+        runningTasks: map.usage?.runningTasks || 0,
+        totalTasks: map.usage?.totalTasks || 0,
+        subagents: map.usage?.subagents || 0,
+        toolUses: map.usage?.toolUses || 0,
+        toolUsageMs: map.usage?.toolUsageMs || 0,
+        latestToolCount: asArray(map.latestTools).length,
+        promptHintCount: asArray(map.promptHintMap?.hints).length,
+        stateError: map.stateError || null,
+      } : null,
     },
     nodes,
     edges,

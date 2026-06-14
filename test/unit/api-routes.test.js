@@ -101,6 +101,81 @@ describe('api-routes', () => {
     assert.equal(res.json().networkAccess.lanUrls[0], 'http://192.168.1.10:57580/');
   });
 
+  it('GET /api/agent-portal/development-map returns a safe portal-owned map', async () => {
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-portal-development-map-route-'));
+    let { StateGraph } = await import('../../src/node/state-graph.js');
+    let { createAgentPortalRoutes } = await import('../../src/node/server/routes/agent-portal-routes.js');
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-root');
+    let requestCount = 0;
+    let proxyManager = {
+      stateGraph: sg,
+      requestFromChild: async (serverName, method, params) => {
+        requestCount += 1;
+        assert.equal(serverName, 'agent-pool');
+        assert.equal(method, 'tools/call');
+        assert.equal(params.name, 'list_tasks');
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{
+                id: 'task-root',
+                chatId: root.id,
+                status: 'running',
+                elapsedMs: 1200,
+                events: [{
+                  type: 'tool_use',
+                  name: 'shell',
+                  arguments: { command: 'node --test', token: 'secret-session-id' },
+                  ts: 1000,
+                }, {
+                  type: 'tool_result',
+                  status: 'success',
+                  output: 'ok secret-session-id',
+                  ts: 1250,
+                }],
+              }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      },
+    };
+
+    try {
+      let routes = createAgentPortalRoutes({ projectRoot: tmpDir, proxyManager, stateGraph: sg });
+      let res = makeRes();
+      await routes['GET /api/agent-portal/development-map'](
+        makeReq('GET', `/api/agent-portal/development-map?chatId=${root.id}&taskId=task-root`),
+        res,
+      );
+      let body = res.json();
+
+      assert.equal(res.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.chatId, root.id);
+      assert.equal(body.taskId, 'task-root');
+      assert.equal(body.developmentMap.schemaVersion, 1);
+      assert.equal(body.developmentMap.rootChatId, root.id);
+      assert.equal(body.developmentMap.primaryTaskId, 'task-root');
+      assert.equal(body.developmentMap.latestTools[0].name, 'shell');
+      assert.equal(body.developmentMap.latestTools[0].usageMs, 250);
+      assert.equal(body.developmentMap.latestTools[0].timingSource, 'tool_result');
+      assert.equal(JSON.stringify(body).includes('secret-session-id'), false);
+      assert.equal(requestCount, 1);
+    } finally {
+      await sg.flushChatWrites();
+      sg.flush();
+      await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+    }
+  });
+
   it('updates agent resource group frontmatter and refreshes the agent catalog', async () => {
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-resource-group-route-'));
     let agentsDir = path.join(tmpDir, '.agent-portal', 'agents');

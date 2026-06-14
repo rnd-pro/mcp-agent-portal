@@ -8,6 +8,7 @@ import {
   buildAgentProcessGraphModel,
   summarizeAgentProcessGraphModel,
 } from '../../services/agent-process-graph.js';
+import { fetchDevelopmentMap } from '../../services/orchestration-development-map.js';
 import template from './AgentProcessGraph.tpl.js';
 import css from './AgentProcessGraph.css.js';
 
@@ -56,6 +57,17 @@ function findGraphNode(model = {}, nodeId = '') {
 function normalizeMessageIndex(value) {
   let index = Number(value);
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function formatDurationMs(value) {
+  let ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  let seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`;
+  let minutes = Math.floor(seconds / 60);
+  let rest = Math.round(seconds % 60);
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
 function getNodeChatEventTarget(node = {}) {
@@ -181,6 +193,7 @@ export class AgentProcessGraph extends Symbiote {
     this._empty = this.querySelector('[data-empty]');
     this._stats = this.ref.stats || this.querySelector('.apg-stats');
     this._emptyText = this.ref.emptyText || this.querySelector('[ref="emptyText"]');
+    this._developmentMapSummary = this.ref.developmentMapSummary || this.querySelector('[data-development-map-summary]');
     this._layoutAlgorithmSelect = this.ref.layoutAlgorithm || this.querySelector('[data-field="layout-algorithm"]');
     this._emptyText.textContent = tPortal('text.noChatsNew');
     this._onLayoutSnapshot = (event) => this._persistLayoutSnapshot(event.detail);
@@ -283,9 +296,13 @@ export class AgentProcessGraph extends Symbiote {
       this._childChatIds = new Set(childMetas.map(child => child.id));
       let childChats = (await Promise.all(childMetas.map(child => fetchChat(child.id).catch(() => child))))
         .filter(Boolean);
+      let developmentMap = await fetchDevelopmentMap({
+        chatId: chat.id,
+        taskId: chat.pendingTaskId || '',
+      }).catch(() => null);
 
-      let graphModel = buildAgentProcessGraphModel({ chat, chats, childChats, agents });
-      let canvasModel = buildAgentProcessCanvasGraphModel({ chat, chats, childChats, agents });
+      let graphModel = buildAgentProcessGraphModel({ chat, chats, childChats, agents, developmentMap });
+      let canvasModel = buildAgentProcessCanvasGraphModel({ chat, chats, childChats, agents, developmentMap });
       let savedSnapshot = normalizeLayoutSnapshot(readLayout(processGraphLayoutKey(chat.id)));
       let layoutSnapshot = isLayoutSnapshotUsable(savedSnapshot, canvasModel) ? savedSnapshot : null;
       this._layoutKey = processGraphLayoutKey(chat.id);
@@ -298,6 +315,7 @@ export class AgentProcessGraph extends Symbiote {
       this._canvasGraph?.setLayoutSnapshot?.(layoutSnapshot || null);
       this._canvasGraph?.setGraphModel(canvasModel);
       this._renderStats(graphModel);
+      this._renderDevelopmentMapSummary(developmentMap);
       this._setEmpty(false);
       this._fitAfterLayout({ restoreLayout: Boolean(layoutSnapshot) && !chatChanged });
     } catch (err) {
@@ -307,20 +325,101 @@ export class AgentProcessGraph extends Symbiote {
 
   _renderStats(model) {
     let summary = summarizeAgentProcessGraphModel(model);
+    let developmentMap = summary.metadata.developmentMap || null;
     if (!this._stats) return;
-    this._stats.replaceChildren(
+    let stats = [
       this._stat('nodes', summary.nodes),
       this._stat('edges', summary.edges),
       this._stat('tools', summary.metadata.toolCount || 0),
       this._stat('files', summary.metadata.fileCount || 0),
       this._stat('agents', summary.metadata.childChatCount || 0),
-    );
+    ];
+    if (developmentMap) {
+      stats.push(
+        this._stat('tasks', `${developmentMap.runningTasks}/${developmentMap.totalTasks}`),
+        this._stat('live tools', developmentMap.latestToolCount || 0),
+        this._stat('tool time', formatDurationMs(developmentMap.toolUsageMs) || '0ms'),
+      );
+    }
+    this._stats.replaceChildren(...stats);
   }
 
   _stat(label, value) {
     let item = document.createElement('span');
     item.className = 'graph-explorer-stat';
     item.innerHTML = `<span class="graph-explorer-stat-val">${String(value)}</span> ${label}`;
+    return item;
+  }
+
+  _renderDevelopmentMapSummary(map) {
+    if (!this._developmentMapSummary) return;
+    this._developmentMapSummary.replaceChildren();
+    if (!map) {
+      this._developmentMapSummary.hidden = true;
+      return;
+    }
+
+    let usage = map.usage || {};
+    let latestTools = Array.isArray(map.latestTools) ? map.latestTools.slice(0, 4) : [];
+    let hints = Array.isArray(map.promptHintMap?.hints) ? map.promptHintMap.hints.slice(0, 3) : [];
+
+    let header = document.createElement('div');
+    header.className = 'apg-map-summary-head';
+    header.append(
+      this._summaryMetric('Tasks', `${usage.runningTasks || 0}/${usage.totalTasks || 0}`),
+      this._summaryMetric('Agents', usage.subagents || 0),
+      this._summaryMetric('Tools', usage.toolUses || 0),
+      this._summaryMetric('Time', formatDurationMs(usage.toolUsageMs) || '0ms'),
+    );
+    this._developmentMapSummary.append(header);
+
+    if (map.stateError) {
+      let error = document.createElement('div');
+      error.className = 'apg-map-summary-error';
+      error.textContent = map.stateError;
+      this._developmentMapSummary.append(error);
+    }
+
+    if (latestTools.length) {
+      let tools = document.createElement('div');
+      tools.className = 'apg-map-summary-list';
+      for (let tool of latestTools) {
+        let item = document.createElement('div');
+        item.className = 'apg-map-summary-row';
+        item.textContent = [
+          tool.name || 'tool',
+          tool.status || 'unknown',
+          formatDurationMs(tool.usageMs ?? tool.elapsedMs ?? tool.durationMs),
+          tool.timingSource || '',
+        ].filter(Boolean).join(' · ');
+        tools.append(item);
+      }
+      this._developmentMapSummary.append(tools);
+    }
+
+    if (hints.length) {
+      let hintList = document.createElement('div');
+      hintList.className = 'apg-map-summary-hints';
+      for (let hint of hints) {
+        let item = document.createElement('span');
+        item.className = 'apg-map-summary-hint';
+        item.textContent = [hint.label || hint.id, hint.tool].filter(Boolean).join(' · ');
+        hintList.append(item);
+      }
+      this._developmentMapSummary.append(hintList);
+    }
+
+    this._developmentMapSummary.hidden = false;
+  }
+
+  _summaryMetric(label, value) {
+    let item = document.createElement('span');
+    item.className = 'apg-map-summary-metric';
+    let valueEl = document.createElement('strong');
+    valueEl.textContent = String(value ?? 0);
+    let labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    item.append(valueEl, labelEl);
     return item;
   }
 
@@ -334,6 +433,7 @@ export class AgentProcessGraph extends Symbiote {
     this._nodeCount = 0;
     this._currentChatId = null;
     this._lastCanvasModel = null;
+    this._renderDevelopmentMapSummary(null);
     this._canvasGraph?.setLayoutSnapshot?.(null);
     this._canvasGraph?.setGraphModel?.({ nodes: [], edges: [], rootNodes: [] });
   }

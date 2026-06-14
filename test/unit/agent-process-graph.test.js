@@ -191,6 +191,108 @@ describe('agent process graph model', () => {
     assert.equal(model.nodes.some(node => node.id === 'tool:windowed-chat:tool:41'), true);
   });
 
+  it('adds development map tasks, latest tools, prompt hints, and state errors without raw internals', () => {
+    let model = buildAgentProcessGraphModel({
+      chat: {
+        id: 'root-chat',
+        agent: 'orchestrator',
+      },
+      developmentMap: {
+        schemaVersion: 1,
+        stateError: 'list_tasks unavailable',
+        rootChatId: 'root-chat',
+        primaryTaskId: 'task-root',
+        subagentMap: {
+          nodes: [{
+            chatId: 'root-chat',
+            name: 'Root',
+            agent: 'orchestrator',
+            runningTaskCount: 1,
+            totalTaskCount: 1,
+            toolCount: 1,
+            toolUsageMs: 1500,
+          }, {
+            chatId: 'child-chat',
+            parentChatId: 'root-chat',
+            name: 'Implementation',
+            agent: 'frontend-engineer',
+            runningTaskCount: 0,
+            totalTaskCount: 1,
+            taskIds: ['task-child'],
+            toolCount: 1,
+            toolUsageMs: 300,
+          }],
+          edges: [{ from: 'root-chat', to: 'child-chat', kind: 'agent.delegates' }],
+        },
+        taskMap: {
+          byId: {
+            'task-root': {
+              id: 'task-root',
+              chatId: 'root-chat',
+              status: 'running',
+              elapsedMs: 5000,
+              toolCount: 1,
+              toolUsageMs: 1500,
+              latestTool: { name: 'shell' },
+            },
+          },
+        },
+        latestTools: [{
+          name: 'shell',
+          detail: 'node --test',
+          status: 'success',
+          chatId: 'root-chat',
+          taskId: 'task-root',
+          usageMs: 1500,
+          timingSource: 'tool_result',
+          rawInput: 'raw-session-token',
+        }],
+        promptHintMap: {
+          hints: [{
+            id: 'poll-current-task',
+            label: 'Poll current task',
+            tool: 'get_chat_task_result',
+            priority: 'high',
+            chatId: 'root-chat',
+            taskId: 'task-root',
+            prompt: 'raw-session-token',
+            reason: 'Refresh without raw Agent Pool tools.',
+          }],
+        },
+        usage: {
+          runningTasks: 1,
+          totalTasks: 2,
+          subagents: 1,
+          toolUses: 2,
+          toolUsageMs: 1800,
+        },
+      },
+    });
+    let summary = summarizeAgentProcessGraphModel(model);
+    let taskNode = nodeByKind(model, 'agent.process.task')[0];
+    let latestToolNode = nodeByKind(model, 'agent.process.latestTool')[0];
+    let hintNode = nodeByKind(model, 'agent.process.promptHint')[0];
+    let errorNode = nodeByKind(model, 'agent.process.stateError')[0];
+
+    assert.equal(nodeByKind(model, 'agent.process.childAgent').some(node => node.params.chatId === 'child-chat'), true);
+    assert.equal(taskNode.params.taskId, 'task-root');
+    assert.equal(taskNode.params.toolUsageMs, 1500);
+    assert.equal(latestToolNode.params.name, 'shell');
+    assert.equal(latestToolNode.params.usageMs, 1500);
+    assert.equal(latestToolNode.params.timingSource, 'tool_result');
+    assert.equal('input' in latestToolNode.params, false);
+    assert.equal('result' in latestToolNode.params, false);
+    assert.equal(hintNode.params.tool, 'get_chat_task_result');
+    assert.equal('prompt' in hintNode.params, false);
+    assert.equal(errorNode.params.source, 'developmentMap');
+    assert.equal(summary.metadata.developmentMap.runningTasks, 1);
+    assert.equal(summary.metadata.developmentMap.latestToolCount, 1);
+    assert.equal(summary.metadata.developmentMap.promptHintCount, 1);
+    assert.equal(JSON.stringify(model).includes('raw-session-token'), false);
+    assert.equal(model.edges.some(edge => edge.kind === 'agent.process.latestTool'), true);
+    assert.equal(model.edges.some(edge => edge.kind === 'agent.process.promptHint'), true);
+  });
+
   it('returns a canvas graph model consumable by symbiote-ui canvas-graph', () => {
     let canvasModel = buildAgentProcessCanvasGraphModel({
       chat: {
@@ -240,10 +342,13 @@ describe('agent process graph model', () => {
     assert.match(source, /const LAYOUT_ALGORITHMS = new Set\(\['organic', 'oil-cloud', 'spring'\]\);/);
     assert.match(source, /const LAYOUT_ALGORITHM_PATH = 'ui\/preferences\/agentProcessGraph\/layoutAlgorithm';/);
     assert.match(source, /function normalizeLayoutAlgorithm\(value\)/);
+    assert.match(source, /import \{ fetchDevelopmentMap \} from '\.\.\/\.\.\/services\/orchestration-development-map\.js';/);
     assert.match(source, /async function fetchAgents\(\)/);
     assert.match(source, /fetchJson\(`\/api\/agents\?ts=\$\{Date\.now\(\)\}`\)/);
-    assert.match(source, /buildAgentProcessGraphModel\(\{ chat, chats, childChats, agents \}\)/);
-    assert.match(source, /buildAgentProcessCanvasGraphModel\(\{ chat, chats, childChats, agents \}\)/);
+    assert.match(source, /fetchDevelopmentMap\(\{\n\s+chatId: chat\.id,/);
+    assert.match(source, /buildAgentProcessGraphModel\(\{ chat, chats, childChats, agents, developmentMap \}\)/);
+    assert.match(source, /buildAgentProcessCanvasGraphModel\(\{ chat, chats, childChats, agents, developmentMap \}\)/);
+    assert.match(source, /_renderDevelopmentMapSummary\(developmentMap\)/);
     assert.match(source, /let chatChanged = this\._currentChatId !== chat\.id;/);
     assert.match(source, /this\._currentChatId = chat\.id;/);
     assert.match(source, /function processGraphLayoutKey\(chatId\)/);
@@ -285,10 +390,12 @@ describe('agent process graph model', () => {
     assert.match(source, /animateNodeAppearance\?\.\(null, \{ durationMs: 520, staggerMs: 4 \}\)/);
     assert.match(source, /_persistCurrentLayoutSnapshot\(didFit \? 700 : 0\)/);
     assert.match(template, /data-field="layout-algorithm"/);
+    assert.match(template, /data-development-map-summary/);
     assert.match(template, /<option value="organic">/);
     assert.match(template, /<option value="oil-cloud">/);
     assert.match(template, /<option value="spring">/);
     assert.match(css, /\.apg-layout-picker select/);
+    assert.match(css, /\.apg-map-summary/);
     assert.match(globalCss, /chat-message-item\[data-process-sync-active\]/);
     assert.match(globalCss, /process-sync-message-pulse/);
   });
