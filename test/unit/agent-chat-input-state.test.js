@@ -100,10 +100,42 @@ describe('agent chat input state', () => {
     assert.match(source, /clearTimeout\(this\._externalChatUpdateTimer\);/);
     assert.match(source, /this\._refreshExternalChat\(chatId\);/);
     assert.match(source, /async _refreshExternalChat\(chatId\)/);
-    assert.match(source, /this\._cleanLoadedMessages\(chat\.messages \|\| \[\]\)/);
+    assert.match(source, /let chat = await this\._fetchChatMeta\(chatId\);/);
+    assert.match(source, /let page = await this\._fetchMessagePage\(chatId\);/);
     assert.match(source, /_setLoadedChatParams\(chat\)/);
     assert.match(source, /this\._loadingChatState = true;/);
     assert.match(source, /if \(chatId && !this\._loadingChatState\) \{/);
+  });
+
+  it('loads large chats through message windows instead of full transcript pulls', () => {
+    let agentChat = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.js'), 'utf8');
+    let wsClient = fs.readFileSync(path.join(ROOT, 'web/services/chat-ws-client.js'), 'utf8');
+
+    assert.match(agentChat, /const CHAT_MESSAGE_PAGE_LIMIT = 100;/);
+    assert.match(agentChat, /messageWindow: null/);
+    assert.match(agentChat, /pullMessages: \(chatId, detail\) => this\._pullVisibleMessageWindow\(chatId, detail\),/);
+    assert.match(agentChat, /chat-workspace-load-older/);
+    assert.match(agentChat, /body: JSON\.stringify\(\{ id: chatId, includeMessages: false \}\)/);
+    assert.match(agentChat, /fetch\('\/api\/chats\/messages\/page'/);
+    assert.match(agentChat, /workspace\.replaceMessageWindow\(items, messageWindow\)/);
+    assert.match(agentChat, /workspace\.prependMessages\(items, nextWindow\)/);
+    assert.match(agentChat, /'messageCount'/);
+    assert.match(agentChat, /let fullChat = await this\._fetchFullChat\(chatId\);/);
+    assert.match(agentChat, /messagesToPersist = this\._applyAgentGeneratedChatTitle\(chatId, \[\.\.\.fullMessages, \.\.\.generatedMessages\]\);/);
+    assert.match(wsClient, /pullMessages: \(chatId, \{ final \}\) => Promise<void>/);
+    assert.match(wsClient, /if \(this\.opts\.pullMessages\) \{[\s\S]*await this\.opts\.pullMessages\(chatId, detail\);[\s\S]*return;[\s\S]*\}/);
+    assert.match(wsClient, /dashEmit\("chat-live-updated", \{[\s\S]*source: "pull"/);
+  });
+
+  it('cleans chat websocket timers and listeners on terminal events', () => {
+    let wsClient = fs.readFileSync(path.join(ROOT, 'web/services/chat-ws-client.js'), 'utf8');
+
+    assert.match(wsClient, /let timeout = null;/);
+    assert.match(wsClient, /let cleanup = \(\) => \{[\s\S]*clearTimeout\(timeout\);[\s\S]*ws\.removeEventListener\('message', onMessage\);[\s\S]*ws\.removeEventListener\('close', onClose\);/);
+    assert.match(wsClient, /case 'chat\.done': \{[\s\S]*cleanup\(\);[\s\S]*this\.opts\.onBackgroundToggle\(false\);/);
+    assert.match(wsClient, /case 'chat\.error': \{[\s\S]*cleanup\(\);[\s\S]*this\.opts\.onBackgroundToggle\(false\);/);
+    assert.match(wsClient, /timeout = setTimeout\(\(\) => \{[\s\S]*cleanup\(\);[\s\S]*this\.opts\.onBackgroundToggle\(false\);/);
+    assert.match(wsClient, /resume\(chatId, taskId\) \{[\s\S]*ws\.addEventListener\('message', onMessage\);[\s\S]*if \(ws\.readyState === WebSocket\.OPEN\) \{/);
   });
 
   it('keeps quick-start chat routing and protected send payload fields intact', () => {
@@ -136,6 +168,7 @@ describe('agent chat input state', () => {
     assert.match(agentChat, /if \(hasResourceGroup && \(key === 'provider' \|\| key === 'model'\)\) continue;/);
     assert.match(agentChat, /result\.provider = null;[\s\S]*result\.model = null;/);
     assert.match(wsClient, /let params = \{ \.\.\.chatParams, chatId, prompt \};/);
+    assert.match(wsClient, /dashEmit\("chat-live-updated", \{[\s\S]*source: "meta"/);
     assert.match(wsClient, /case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId, \{ final: true \}\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*if \(this\.opts\.onDone\) this\.opts\.onDone\(msg\.params \|\| \{\}\);[\s\S]*resolve\(''\);/);
     assert.match(wsClient, /resume\(chatId, taskId\) \{[\s\S]*case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId, \{ final: true \}\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*this\.opts\.onDone\(msg\.params \|\| \{\}\);/);
   });
@@ -393,7 +426,7 @@ describe('agent chat input state', () => {
     assert.match(source, /onError: \(_errText, detail = \{\}\) => \{[\s\S]*this\._setSending\(false, \{ speak: false \}\);/);
     assert.doesNotMatch(source, /sub\('messages'[\s\S]{0,240}_speakPendingAgentResponse\(\)/);
     assert.match(source, /_snapshotVoiceResponseBaseline\(\)/);
-    assert.match(source, /this\._snapshotVoiceResponseBaseline\(\);\s+this\.\$\.messages = \[\.\.\.this\.\$\.messages, \{ role: 'user', text: prompt \}\];/);
+    assert.match(source, /this\._snapshotVoiceResponseBaseline\(\);\s+this\._appendVisibleMessages\(\[\{ role: 'user', text: prompt \}\], \{ persisted: true \}\);/);
     assert.match(source, /function sameChatMessages\(next = \[\], current = \[\]\)/);
     assert.match(source, /JSON\.stringify\(message\) === JSON\.stringify\(current\[index\]\)/);
     assert.doesNotMatch(source, /m\.text === cur\[i\]\?\.text && m\.role === cur\[i\]\?\.role/);

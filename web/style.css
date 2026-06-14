@@ -124,6 +124,35 @@ html, body {
   color: var(--sn-text-dim);
 }
 
+chat-message-item[data-process-sync-active] {
+  display: block;
+  position: relative;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--sn-node-selected) 14%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--sn-node-selected) 90%, var(--sn-bg) 10%),
+    0 0 0 7px color-mix(in srgb, var(--sn-node-selected) 18%, transparent),
+    0 12px 34px color-mix(in srgb, var(--sn-node-selected) 24%, transparent);
+  scroll-margin-block: 35vh;
+  animation: process-sync-message-pulse 1.2s ease-out;
+}
+
+@keyframes process-sync-message-pulse {
+  0% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--sn-node-selected) 90%, var(--sn-bg) 10%),
+      0 0 0 0 color-mix(in srgb, var(--sn-node-selected) 32%, transparent),
+      0 12px 34px color-mix(in srgb, var(--sn-node-selected) 24%, transparent);
+  }
+
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--sn-node-selected) 90%, var(--sn-bg) 10%),
+      0 0 0 7px color-mix(in srgb, var(--sn-node-selected) 18%, transparent),
+      0 12px 34px color-mix(in srgb, var(--sn-node-selected) 24%, transparent);
+  }
+}
+
 .topbar-right {
   display: flex;
   align-items: center;

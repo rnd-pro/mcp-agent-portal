@@ -156,7 +156,7 @@ async function run() {
     ws.close();
   });
 
-  await test('chat.send uses persisted chat agent when agent param is omitted', async () => {
+  await test('chat.send routes root chats through orchestrator even with stale specialist metadata', async () => {
     let ws = await connectChatClient();
     let { getStateGraph } = await import('../../src/node/state-graph.js');
     let sg = getStateGraph();
@@ -201,7 +201,7 @@ async function run() {
 
       await receivedDelegated;
 
-      assert.equal(capturedArgs.agent_slug, 'qa-engineer');
+      assert.equal(capturedArgs.agent_slug, 'orchestrator');
       assert.equal(capturedArgs.resource_group, 'verification');
       assert.equal(capturedArgs.provider, undefined);
       assert.equal(capturedArgs.model, undefined);

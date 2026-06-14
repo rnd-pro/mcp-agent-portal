@@ -129,6 +129,45 @@ describe('server demo mode', () => {
     assert.equal(chat.messages.filter((message) => message.role === 'agent').length, 1);
   });
 
+  it('serves public demo chat metadata and bounded message pages', async () => {
+    let demo = createServerDemoMode({
+      projectRoot: process.cwd(),
+      env: { AGENT_PORTAL_DEMO_MODE: '1' },
+    });
+    let createRes = makeRes();
+    await demo.routes['POST /api/chats'](makeReq('POST', '/api/chats', {}), createRes);
+    let { id } = createRes.json();
+
+    await demo.routes['POST /api/chats/message'](
+      makeReq('POST', '/api/chats/message', { chatId: id, role: 'user', text: 'First message' }),
+      makeRes(),
+    );
+    await demo.routes['POST /api/chats/message'](
+      makeReq('POST', '/api/chats/message', { chatId: id, role: 'user', text: 'Second message' }),
+      makeRes(),
+    );
+
+    let metaRes = makeRes();
+    await demo.routes['POST /api/chats/get'](
+      makeReq('POST', '/api/chats/get', { id, includeMessages: false }),
+      metaRes,
+    );
+    assert.equal(metaRes.status, 200);
+    assert.equal('messages' in metaRes.json(), false);
+    assert.equal(metaRes.json().messageCount >= 3, true);
+
+    let pageRes = makeRes();
+    await demo.routes['POST /api/chats/messages/page'](
+      makeReq('POST', '/api/chats/messages/page', { chatId: id, limit: 2 }),
+      pageRes,
+    );
+    assert.equal(pageRes.status, 200);
+    assert.equal(pageRes.json().messages.length, 2);
+    assert.equal(pageRes.json().messages.at(-1).text, 'Second message');
+    assert.equal(pageRes.json().hasBefore, true);
+    assert.equal(pageRes.json().hasAfter, false);
+  });
+
   it('adds exactly one websocket demo reply after the persisted user message', async () => {
     let demo = createServerDemoMode({
       projectRoot: process.cwd(),

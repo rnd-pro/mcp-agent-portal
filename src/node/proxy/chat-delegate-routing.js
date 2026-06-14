@@ -4,8 +4,13 @@ import {
   formatChatGoalPromptBlock,
   formatChatGoalQueuePromptBlock,
 } from '../../iso/chat-goals.js';
+import {
+  DEFAULT_CHAT_AGENT,
+  resolveChatCreationAgent,
+  resolveChatDelegationAgent,
+} from '../../iso/chat-orchestration.js';
 
-export const DEFAULT_CHAT_AGENT = 'orchestrator';
+export { DEFAULT_CHAT_AGENT, resolveChatCreationAgent };
 const FOCUS_GRAPH_SYMBOL_LIMIT = 8;
 
 export function isDelegateTool(toolName = '') {
@@ -311,9 +316,8 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
     contextChatId = parentChatId;
   }
 
-  if (!next.agent_slug && !next.agent) {
-    next.agent_slug = contextChat?.agent || DEFAULT_CHAT_AGENT;
-  }
+  next.agent_slug = resolveChatDelegationAgent({ explicitAgent, contextChat });
+  delete next.agent;
 
   if (!next.approval_mode && contextChat?.approval_mode) next.approval_mode = contextChat.approval_mode;
   if (!next.resource_group && contextChat?.resource_group) next.resource_group = contextChat.resource_group;
@@ -359,4 +363,5 @@ export default {
   DEFAULT_CHAT_AGENT,
   isDelegateTool,
   prepareDelegateTaskCall,
+  resolveChatCreationAgent,
 };

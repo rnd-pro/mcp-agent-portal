@@ -34,13 +34,23 @@ function json(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+function parseOptionalInteger(value, name, { min = 0 } = {}) {
+  if (value === undefined || value === null) return { value: undefined };
+  let num = Number(value);
+  if (!Number.isInteger(num) || num < min) {
+    return { error: `${name} must be an integer >= ${min}` };
+  }
+  return { value: num };
+}
+
 /**
  * Build project/chat/CLI route map.
- * @param {{ proxyManager?: { broadcastMonitor?: Function } }} [deps]
+ * @param {{ proxyManager?: { broadcastMonitor?: Function }, stateGraph?: any }} [deps]
  * @returns {Record<string, Function>}
  */
 export function createProjectRoutes(deps = {}) {
-  let { proxyManager = null } = deps;
+  let { proxyManager = null, stateGraph = null } = deps;
+  let getGraph = () => stateGraph || getStateGraph();
   let broadcastChatUpdate = (chatId) => {
     proxyManager?.broadcastMonitor?.({
       jsonrpc: '2.0',
@@ -67,7 +77,7 @@ export function createProjectRoutes(deps = {}) {
   return {
     // ── Project History ───────────────────────────────────
     'GET /api/projects/history': (req, res) => {
-      let sg = getStateGraph();
+      let sg = getGraph();
       json(res, {
         projects: sg.getProjectHistory(),
         activeIds: sg.getActiveProjectIds(),
@@ -78,7 +88,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { name, path, color, cli } = await parseBody(req);
         if (!path) return json(res, { error: 'Missing path' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let result = sg.addProject({ name, path, color, cli }, 'http');
 
         // Also mark as open tab
@@ -93,7 +103,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { id } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.setProjectOpen(id, false, 'http');
         json(res, { ok: true });
       } catch (err) {
@@ -105,7 +115,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { id } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.removeProject(id, 'http');
         json(res, { ok: true });
       } catch (err) {
@@ -117,7 +127,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { id, ...updates } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.updateProject(id, updates, 'http');
         json(res, { ok: true });
       } catch (err) {
@@ -127,7 +137,7 @@ export function createProjectRoutes(deps = {}) {
 
     // ── CLI Config ────────────────────────────────────────
     'GET /api/cli/config': (req, res) => {
-      let sg = getStateGraph();
+      let sg = getGraph();
       let projects = sg.getProjectHistory();
       let projectCli = {};
       for (let p of projects) {
@@ -142,7 +152,7 @@ export function createProjectRoutes(deps = {}) {
     'POST /api/cli/config': async (req, res) => {
       try {
         let { global: globalCli, projectId, cli } = await parseBody(req);
-        let sg = getStateGraph();
+        let sg = getGraph();
         if (globalCli) sg.setGlobalCli(globalCli, 'http');
         if (projectId && cli) sg.updateProject(projectId, { cli }, 'http');
         json(res, { ok: true });
@@ -153,13 +163,13 @@ export function createProjectRoutes(deps = {}) {
 
     // ── Chats ─────────────────────────────────────────────
     'GET /api/chats': (req, res) => {
-      let sg = getStateGraph();
+      let sg = getGraph();
       json(res, { chats: sg.listChats() });
     },
 
     'GET /api/goals': (req, res) => {
       let url = new URL(req.url, 'http://localhost');
-      let sg = getStateGraph();
+      let sg = getGraph();
       json(res, {
         goals: sg.listChatGoals({
           chatId: url.searchParams.get('chatId') || null,
@@ -173,7 +183,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let body = await parseBody(req);
         if (!body.title) return json(res, { error: 'Missing title' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.createChatGoal(body, 'http');
         broadcastGoalUpdate(goal);
         json(res, { ok: true, goal });
@@ -185,7 +195,7 @@ export function createProjectRoutes(deps = {}) {
     'POST /api/goals/get': async (req, res) => {
       try {
         let { goalId, id } = await parseBody(req);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.getChatGoal(goalId || id);
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         json(res, { ok: true, goal });
@@ -198,7 +208,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { chatId, goalId } = await parseBody(req);
         if (!chatId) return json(res, { error: 'Missing chatId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.selectChatGoal(chatId, goalId || null, 'http');
         if (goal) broadcastGoalUpdate(goal);
         else broadcastChatUpdate(chatId);
@@ -212,7 +222,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, reason } = await parseBody(req);
         if (!(goalId || id) || !reason) return json(res, { error: 'Missing goalId or reason' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.updateChatGoal(goalId || id, { status: 'blocked', reason }, 'http');
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(goal);
@@ -226,7 +236,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, reason } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.updateChatGoal(goalId || id, { status: 'paused', reason: reason || 'Paused by user' }, 'http');
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(goal);
@@ -240,7 +250,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.updateChatGoal(goalId || id, { status: 'active' }, 'http');
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(goal);
@@ -254,7 +264,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, reason } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.updateChatGoal(goalId || id, { status: 'completed', reason: reason || 'Stopped by user' }, 'http');
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(goal);
@@ -268,7 +278,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, reason } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.updateChatGoal(goalId || id, { status: 'completed', reason }, 'http');
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(goal);
@@ -282,7 +292,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let goal = sg.deleteChatGoal(goalId || id, 'http');
         if (!goal) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(goal);
@@ -296,7 +306,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, text, delivery, status } = await parseBody(req);
         if (!(goalId || id) || !text) return json(res, { error: 'Missing goalId or text' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let result = sg.enqueueChatGoalMessage(goalId || id, {
           text,
           delivery: delivery || 'after',
@@ -315,7 +325,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, delivery, status } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let messages = sg.listChatGoalQueue(goalId || id, {
           delivery: delivery || null,
           status: status || 'queued',
@@ -333,7 +343,7 @@ export function createProjectRoutes(deps = {}) {
         if (!(goalId || id) || !(messageId || message_id)) {
           return json(res, { error: 'Missing goalId or messageId' }, 400);
         }
-        let sg = getStateGraph();
+        let sg = getGraph();
         let result = sg.updateChatGoalQueueMessage(
           goalId || id,
           messageId || message_id,
@@ -352,7 +362,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { goalId, id, status } = await parseBody(req);
         if (!(goalId || id)) return json(res, { error: 'Missing goalId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let result = sg.clearChatGoalQueue(goalId || id, { status: status || 'queued' }, 'http');
         if (!result) return json(res, { error: 'Goal not found' }, 404);
         broadcastGoalUpdate(result.goal);
@@ -365,7 +375,7 @@ export function createProjectRoutes(deps = {}) {
     'POST /api/chats': async (req, res) => {
       try {
         let opts = await parseBody(req);
-        let sg = getStateGraph();
+        let sg = getGraph();
         let result = sg.createChat(opts, 'http');
         let chat = sg.getChat(result.id);
         if (chat) broadcastChatCreated(chat);
@@ -377,12 +387,40 @@ export function createProjectRoutes(deps = {}) {
 
     'POST /api/chats/get': async (req, res) => {
       try {
-        let { id } = await parseBody(req);
-        let sg = getStateGraph();
+        let { id, includeMessages = true } = await parseBody(req);
+        let sg = getGraph();
         let chat = sg.getChat(id);
         if (!chat) return json(res, { error: 'Chat not found' }, 404);
         if (chat.activeGoalId) chat.activeGoal = sg.getChatGoal(chat.activeGoalId);
+        if (includeMessages === false) {
+          let { messages = [], ...meta } = chat;
+          return json(res, { ...meta, messageCount: messages.length });
+        }
         json(res, chat);
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
+    'POST /api/chats/messages/page': async (req, res) => {
+      try {
+        let { chatId, id, offset, before, limit } = await parseBody(req);
+        let targetChatId = chatId || id;
+        if (!targetChatId) return json(res, { error: 'Missing chatId' }, 400);
+        let parsedOffset = parseOptionalInteger(offset, 'offset');
+        if (parsedOffset.error) return json(res, { error: parsedOffset.error }, 400);
+        let parsedBefore = parseOptionalInteger(before, 'before');
+        if (parsedBefore.error) return json(res, { error: parsedBefore.error }, 400);
+        let parsedLimit = parseOptionalInteger(limit, 'limit', { min: 1 });
+        if (parsedLimit.error) return json(res, { error: parsedLimit.error }, 400);
+        let sg = getGraph();
+        let page = sg.getChatMessagePage(targetChatId, {
+          offset: parsedOffset.value,
+          before: parsedBefore.value,
+          limit: parsedLimit.value,
+        });
+        if (!page) return json(res, { error: 'Chat not found' }, 404);
+        json(res, { ok: true, ...page });
       } catch (err) {
         json(res, { error: err.message }, 400);
       }
@@ -392,7 +430,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { chatId, role, text } = await parseBody(req);
         if (!chatId || !role || !text) return json(res, { error: 'Missing chatId, role, or text' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.appendChatMessage(chatId, { role, text });
         broadcastChatUpdate(chatId);
         json(res, { ok: true });
@@ -411,7 +449,7 @@ export function createProjectRoutes(deps = {}) {
           let t = m.text || '';
           return !t.startsWith('⏳') && !t.startsWith('✅') && !t.startsWith('⚠️') && t !== 'Processing...';
         });
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.replaceChatMessages(chatId, cleaned);
         broadcastChatUpdate(chatId);
         json(res, { ok: true });
@@ -424,7 +462,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { id, ...updates } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.updateChat(id, updates, 'http');
         broadcastChatUpdate(id);
         json(res, { ok: true });
@@ -437,7 +475,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { id } = await parseBody(req);
         if (!id) return json(res, { error: 'Missing id' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.deleteChat(id, 'http');
         json(res, { ok: true });
       } catch (err) {
@@ -449,7 +487,7 @@ export function createProjectRoutes(deps = {}) {
       try {
         let { chatId, sessionId } = await parseBody(req);
         if (!chatId || !sessionId) return json(res, { error: 'Missing chatId or sessionId' }, 400);
-        let sg = getStateGraph();
+        let sg = getGraph();
         sg.updateChatSession(chatId, sessionId);
         json(res, { ok: true });
       } catch (err) {

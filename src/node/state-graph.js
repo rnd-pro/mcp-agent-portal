@@ -26,6 +26,7 @@ import {
   normalizeChatGoalQueueStatus,
   normalizeChatGoalStatus,
 } from '../iso/chat-goals.js';
+import { resolveChatCreationAgent } from '../iso/chat-orchestration.js';
 
 // ── Paths ────────────────────────────────────────────────
 const STATE_DIR = path.join(os.homedir(), '.agent-portal');
@@ -40,6 +41,9 @@ const RING_BUFFER_SIZE = 2000;        // patches kept in memory for delta sync
 const SNAPSHOT_INTERVAL = 5000;       // compact WAL every N commits
 const GROUP_COMMIT_MS = 50;           // async WAL flush interval (ms)
 const MAX_WS_QUEUE = 500;             // backpressure: disconnect slow clients
+const CHAT_CACHE_LIMIT = 50;          // full chat files kept hot in memory
+const CHAT_MESSAGE_PAGE_LIMIT = 100;
+const CHAT_MESSAGE_PAGE_LIMIT_MAX = 500;
 
 /**
  * Default state shape — guaranteed on first boot.
@@ -164,6 +168,7 @@ export class StateGraph extends EventEmitter {
    * @param {string} [opts.snapshotPath]
    * @param {string} [opts.walPath]
    * @param {string} [opts.chatsDir]
+   * @param {number} [opts.chatCacheLimit]
    */
   constructor(opts = {}) {
     super();
@@ -185,9 +190,11 @@ export class StateGraph extends EventEmitter {
     this._walTimer = null;
     this._walFlushing = false;
     this._chatCache = new Map();
+    this._chatCacheLimit = Number.isFinite(opts.chatCacheLimit) ? Math.max(0, Math.floor(opts.chatCacheLimit)) : CHAT_CACHE_LIMIT;
     this._chatFileQueue = Promise.resolve();
     this._dirtyChats = new Set();
     this._deletedChats = new Set();
+    this._chatWriteSeq = new Map();
 
     // ── Snapshot compaction tracking ──
     this._commitsSinceSnapshot = 0;
@@ -607,16 +614,41 @@ export class StateGraph extends EventEmitter {
     return JSON.parse(JSON.stringify(chat));
   }
 
+  _rememberChat(chatId, chat) {
+    if (this._chatCache.has(chatId)) this._chatCache.delete(chatId);
+    this._chatCache.set(chatId, this._cloneChat(chat));
+    this._trimChatCache();
+  }
+
+  _trimChatCache() {
+    while (this._chatCache.size > this._chatCacheLimit) {
+      let evicted = false;
+      for (let chatId of this._chatCache.keys()) {
+        if (this._dirtyChats.has(chatId)) continue;
+        this._chatCache.delete(chatId);
+        evicted = true;
+        break;
+      }
+      if (!evicted) break;
+    }
+  }
+
   _queueChatWrite(chatId, chat) {
     this._deletedChats.delete(chatId);
     this._dirtyChats.add(chatId);
-    this._chatCache.set(chatId, this._cloneChat(chat));
+    let writeSeq = (this._chatWriteSeq.get(chatId) || 0) + 1;
+    this._chatWriteSeq.set(chatId, writeSeq);
+    this._rememberChat(chatId, chat);
     this._chatFileQueue = this._chatFileQueue.then(async () => {
       await fsp.mkdir(this._chatsDir, { recursive: true });
       let filePath = path.join(this._chatsDir, `${chatId}.json`);
       let tmpPath = path.join(this._chatsDir, `.${chatId}.${process.pid}.${Date.now()}.tmp`);
       await fsp.writeFile(tmpPath, JSON.stringify(chat, null, 2));
       await fsp.rename(tmpPath, filePath);
+      if (this._chatWriteSeq.get(chatId) === writeSeq) {
+        this._dirtyChats.delete(chatId);
+        this._trimChatCache();
+      }
     }).catch((err) => {
       console.warn(`[StateGraph] Failed to write chat file ${chatId}:`, err.message);
     });
@@ -646,6 +678,8 @@ export class StateGraph extends EventEmitter {
         if (fs.existsSync(file)) fs.unlinkSync(file);
       }
       this._dirtyChats.clear();
+      this._chatWriteSeq.clear();
+      this._trimChatCache();
       this._deletedChats.clear();
     } catch (err) {
       console.warn('[StateGraph] Failed to flush chat files:', err.message);
@@ -734,6 +768,7 @@ export class StateGraph extends EventEmitter {
     let id = crypto.randomUUID().slice(0, 12);
     let now = Date.now();
     let origin = normalizeChatOrigin(opts.origin || source);
+    let agent = resolveChatCreationAgent(opts);
 
     // Metadata in graph
     this.commit([{ op: 'set', path: `chats/${id}`, value: {
@@ -741,7 +776,7 @@ export class StateGraph extends EventEmitter {
       projectId: opts.projectId || null,
       parentChatId: opts.parentChatId || null,
       adapter: opts.adapter || 'pool',
-      agent: opts.agent || opts.agent_slug || null,
+      agent,
       provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'antigravity' ? 'default' : opts.adapter === 'opencode' ? 'openrouter/deepseek/deepseek-v4-pro' : null),
       approval_mode: opts.approval_mode || null,
@@ -767,7 +802,7 @@ export class StateGraph extends EventEmitter {
       parentChatId: opts.parentChatId || null,
       name: opts.name || 'New Chat',
       adapter: opts.adapter || 'pool',
-      agent: opts.agent || opts.agent_slug || null,
+      agent,
       provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'antigravity' ? 'default' : opts.adapter === 'opencode' ? 'openrouter/deepseek/deepseek-v4-pro' : null),
       approval_mode: opts.approval_mode || null,
@@ -791,15 +826,63 @@ export class StateGraph extends EventEmitter {
   // Get full chat data (with messages) from file.
   getChat(chatId) {
     if (this._deletedChats.has(chatId)) return null;
-    if (this._chatCache.has(chatId)) return this._cloneChat(this._chatCache.get(chatId));
+    if (this._chatCache.has(chatId)) {
+      let chat = this._chatCache.get(chatId);
+      this._chatCache.delete(chatId);
+      this._chatCache.set(chatId, chat);
+      return this._cloneChat(chat);
+    }
     let file = path.join(this._chatsDir, `${chatId}.json`);
     if (!fs.existsSync(file)) return null;
     try {
       let chat = JSON.parse(fs.readFileSync(file, 'utf8'));
-      this._chatCache.set(chatId, this._cloneChat(chat));
-      return chat;
+      this._rememberChat(chatId, chat);
+      return this._cloneChat(chat);
     }
     catch { return null; }
+  }
+
+  getChatMessagePage(chatId, opts = {}) {
+    if (this._deletedChats.has(chatId)) return null;
+    let chat = this._chatCache.get(chatId);
+    if (!chat) {
+      let file = path.join(this._chatsDir, `${chatId}.json`);
+      if (!fs.existsSync(file)) return null;
+      try {
+        chat = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        return null;
+      }
+    }
+    let messages = Array.isArray(chat.messages) ? chat.messages : [];
+    let total = messages.length;
+    let rawLimit = Number(opts.limit);
+    let limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(CHAT_MESSAGE_PAGE_LIMIT_MAX, Math.floor(rawLimit))
+      : CHAT_MESSAGE_PAGE_LIMIT;
+    let start = Math.max(0, total - limit);
+    let end = total;
+
+    let before = Number(opts.before);
+    let offset = Number(opts.offset);
+    if (Number.isFinite(before)) {
+      end = Math.max(0, Math.min(total, Math.floor(before)));
+      start = Math.max(0, end - limit);
+    } else if (Number.isFinite(offset)) {
+      start = Math.max(0, Math.min(total, Math.floor(offset)));
+      end = Math.max(start, Math.min(total, start + limit));
+    }
+
+    return {
+      chatId,
+      total,
+      start,
+      end,
+      limit,
+      hasBefore: start > 0,
+      hasAfter: end < total,
+      messages: JSON.parse(JSON.stringify(messages.slice(start, end))),
+    };
   }
 
   // Append message + update metadata.
@@ -1114,10 +1197,18 @@ export class StateGraph extends EventEmitter {
   updateChat(chatId, updates, source = 'system') {
     let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin', 'lastTaskStatus', 'activeGoalId', 'goalIntentActive', 'goalQueueMode']);
     let filtered = {};
+    let current = this.get(`chats/${chatId}`) || {};
     for (let [k, v] of Object.entries(updates)) {
       if (!allowed.has(k)) continue;
       if (typeof v === 'string' && v.includes('{{')) continue;
       filtered[k] = k === 'origin' ? normalizeChatOrigin(v) : v;
+    }
+    if ('agent' in filtered || 'adapter' in filtered || 'parentChatId' in filtered) {
+      filtered.agent = resolveChatCreationAgent({
+        adapter: filtered.adapter ?? current.adapter ?? 'pool',
+        parentChatId: filtered.parentChatId ?? current.parentChatId ?? null,
+        agent: filtered.agent ?? current.agent ?? null,
+      });
     }
     if (Object.keys(filtered).length === 0) return;
     filtered.updatedAt = Date.now();

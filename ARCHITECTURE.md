@@ -351,7 +351,8 @@ Agent Portal aggregates the RND-PRO MCP ecosystem. The core workspace owns `proj
 | `/api/projects/update` | POST | Update project metadata |
 | `/api/chats` | GET | List all chat sessions |
 | `/api/chats` | POST | Create a new chat session |
-| `/api/chats/get` | POST | Get a specific chat with messages |
+| `/api/chats/get` | POST | Get a specific chat; pass `includeMessages:false` for metadata with `messageCount` only |
+| `/api/chats/messages/page` | POST | Get a bounded chat message page with `offset`, `before`, and `limit` |
 | `/api/chats/message` | POST | Append a message to a chat |
 | `/api/chats/update` | POST | Update chat metadata |
 | `/api/chats/delete` | POST | Delete a chat session |

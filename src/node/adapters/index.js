@@ -2,11 +2,11 @@ import { createAntigravityAdapter } from './antigravity.js';
 import { createClaudeAdapter } from './claude.js';
 import { createCodexAdapter } from './codex.js';
 import { getStateGraph } from '../state-graph.js';
+import { listGroups } from '../../../packages/agent-pool-mcp/src/tools/groups.js';
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
 import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
 
 let ADAPTERS = {
@@ -237,11 +237,10 @@ export function invalidateAgentList() {
 function loadResourceGroupPreferences() {
   let result = { byProvider: {}, defaultModel: null, groups: [] };
   try {
-    let rgPath = join(homedir(), '.agent-portal', 'resource-groups.json');
-    if (!existsSync(rgPath)) return result;
-    let groups = JSON.parse(readFileSync(rgPath, 'utf8'));
+    let groups = listGroups(resolveAgentRoot());
     let seen = new Set();
-    for (let [name, config] of Object.entries(groups)) {
+    for (let group of groups) {
+      let { name, ...config } = group;
       let provider = config.provider || 'codex';
       // Full group entry for frontend
       result.groups.push({
@@ -283,8 +282,6 @@ function buildAdapterMetadata() {
     let name = a.slug.split('-').map(w => acronyms.has(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).join(' ');
     return { val: a.slug, text: name, resourceGroup: a.resourceGroup || null };
   });
-  agentOptions.unshift({ val: 'none', text: 'Direct (no agent)', resourceGroup: null });
-
   let rgPrefs = loadResourceGroupPreferences();
 
   // Build resource_group selector options

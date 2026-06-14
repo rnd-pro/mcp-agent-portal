@@ -157,6 +157,115 @@ Body
     }
   });
 
+  it('POST /api/chats/messages/page returns bounded chat message pages', async () => {
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-chat-page-route-'));
+    let { StateGraph } = await import('../../src/node/state-graph.js');
+    let { createProjectRoutes } = await import('../../src/node/server/api-routes-projects.js');
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+      chatCacheLimit: 1,
+    });
+
+    try {
+      let routes = createProjectRoutes({ ...makeRoutes(tmpDir), stateGraph: sg });
+      let { id } = sg.createChat({ name: 'Paged route chat' }, 'test');
+      for (let i = 0; i < 6; i++) {
+        sg.appendChatMessage(id, { role: i % 2 ? 'assistant' : 'user', text: `route-message-${i}` });
+      }
+
+      let res = makeRes();
+      await routes['POST /api/chats/messages/page'](
+        makeReq('POST', '/api/chats/messages/page', { chatId: id, limit: 2 }),
+        res,
+      );
+
+      assert.equal(res.status, 200);
+      assert.deepEqual(res.json().messages.map((msg) => msg.text), ['route-message-4', 'route-message-5']);
+      assert.equal(res.json().total, 6);
+      assert.equal(res.json().start, 4);
+      assert.equal(res.json().end, 6);
+      assert.equal(res.json().hasBefore, true);
+      assert.equal(res.json().hasAfter, false);
+
+      let olderRes = makeRes();
+      await routes['POST /api/chats/messages/page'](
+        makeReq('POST', '/api/chats/messages/page', { id, before: 4, limit: 3 }),
+        olderRes,
+      );
+
+      assert.equal(olderRes.status, 200);
+      assert.deepEqual(olderRes.json().messages.map((msg) => msg.text), [
+        'route-message-1',
+        'route-message-2',
+        'route-message-3',
+      ]);
+
+      let missingRes = makeRes();
+      await routes['POST /api/chats/messages/page'](
+        makeReq('POST', '/api/chats/messages/page', { chatId: 'missing-chat', limit: 2 }),
+        missingRes,
+      );
+      assert.equal(missingRes.status, 404);
+
+      let invalidRes = makeRes();
+      await routes['POST /api/chats/messages/page'](
+        makeReq('POST', '/api/chats/messages/page', { chatId: id, offset: -1, limit: 2 }),
+        invalidRes,
+      );
+      assert.equal(invalidRes.status, 400);
+      assert.match(invalidRes.json().error, /offset/);
+    } finally {
+      await sg.flushChatWrites();
+      sg.flush();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('POST /api/chats/get can return chat metadata without messages', async () => {
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-chat-meta-route-'));
+    let { StateGraph } = await import('../../src/node/state-graph.js');
+    let { createProjectRoutes } = await import('../../src/node/server/api-routes-projects.js');
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+      chatCacheLimit: 1,
+    });
+
+    try {
+      let routes = createProjectRoutes({ ...makeRoutes(tmpDir), stateGraph: sg });
+      let { id } = sg.createChat({ name: 'Metadata chat', adapter: 'pool' }, 'test');
+      sg.appendChatMessage(id, { role: 'user', text: 'first' });
+      sg.appendChatMessage(id, { role: 'agent', text: 'second' });
+
+      let metaRes = makeRes();
+      await routes['POST /api/chats/get'](
+        makeReq('POST', '/api/chats/get', { id, includeMessages: false }),
+        metaRes,
+      );
+
+      assert.equal(metaRes.status, 200);
+      assert.equal(metaRes.json().id, id);
+      assert.equal(metaRes.json().messageCount, 2);
+      assert.equal('messages' in metaRes.json(), false);
+
+      let fullRes = makeRes();
+      await routes['POST /api/chats/get'](
+        makeReq('POST', '/api/chats/get', { id }),
+        fullRes,
+      );
+
+      assert.equal(fullRes.status, 200);
+      assert.deepEqual(fullRes.json().messages.map((msg) => msg.text), ['first', 'second']);
+    } finally {
+      await sg.flushChatWrites();
+      sg.flush();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('records XR diagnostics posted by browser clients', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let routes = createRoutes(makeRoutes('/tmp/project'));

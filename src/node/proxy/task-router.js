@@ -13,6 +13,16 @@ export function isTerminalTaskNotificationType(type) {
 
 export function extractFinalAgentResponse(text = '') {
   let body = text || '';
+  let failureIdx = body.search(/## (?:\[ERR\]|⚠️)?\s*Agent Failed/i);
+  if (failureIdx >= 0) {
+    body = body.substring(failureIdx).trim();
+    let statsIdx = body.search(/\n+(?:---\n+)?## Stats/i);
+    if (statsIdx > 0) {
+      body = body.substring(0, statsIdx).trim();
+    }
+    return body.replace(/\n+---\n+/g, '\n\n').trim();
+  }
+
   let startIdx = body.indexOf('## Agent Response');
   if (startIdx >= 0) {
     body = body.substring(startIdx + '## Agent Response'.length).trim();
@@ -459,8 +469,8 @@ export class TaskRouter {
       if (costMatch) meta.cost = parseFloat(costMatch[1]);
       let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
       if (errorsMatch) meta.errors = errorsMatch[1].trim();
-      let failMatch = text.match(/## \[ERR\] Agent Failed[\s\S]*?(?=\n+##|$)/i);
-      if (failMatch) meta.errors = failMatch[0].trim();
+      let failureBody = extractFinalAgentResponse(text);
+      if (/^## (?:\[ERR\]|⚠️)?\s*Agent Failed/i.test(failureBody)) meta.errors = failureBody;
     }
 
     let elapsedSec = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;

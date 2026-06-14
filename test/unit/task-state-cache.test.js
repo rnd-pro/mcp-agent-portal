@@ -176,7 +176,7 @@ describe('Task State Cache — StateGraph integration', () => {
     assert.ok(events.length === 250, `Should have 250 events, got ${events.length}`);
   });
 
-  it('preserves agent, resource group, and approval mode in chat metadata updates', () => {
+  it('keeps root chat delegation on orchestrator while preserving resource group and approval mode', () => {
     let sg = createStateGraph({
       snapshotPath: path.join(tmpDir, 'chat-meta-snap.json'),
       walPath: path.join(tmpDir, 'chat-meta-wal.log'),
@@ -202,7 +202,7 @@ describe('Task State Cache — StateGraph integration', () => {
     }, 'test');
 
     let chat = sg.get('chats/chat-001');
-    assert.equal(chat.agent, 'code-reviewer');
+    assert.equal(chat.agent, 'orchestrator');
     assert.equal(chat.resource_group, 'review');
     assert.equal(chat.approval_mode, 'plan');
     assert.equal(chat.unknown, undefined);
@@ -254,6 +254,62 @@ describe('Task State Cache — StateGraph integration', () => {
     sg.deleteChat(id, 'test');
     assert.equal(sg.getChat(id), null);
     await sg.flushChatWrites();
+  });
+
+  it('returns bounded chat message pages for tail, before, and offset reads', async () => {
+    let chatDir = path.join(tmpDir, 'chat-page-files');
+    let sg = createStateGraph({
+      snapshotPath: path.join(tmpDir, 'chat-page-snap.json'),
+      walPath: path.join(tmpDir, 'chat-page-wal.log'),
+      chatsDir: chatDir,
+    });
+
+    let { id } = sg.createChat({ name: 'Paged chat' }, 'test');
+    for (let i = 0; i < 7; i++) {
+      sg.appendChatMessage(id, { role: i % 2 ? 'assistant' : 'user', text: `message-${i}` });
+    }
+
+    let tail = sg.getChatMessagePage(id, { limit: 3 });
+    assert.deepEqual(tail.messages.map((msg) => msg.text), ['message-4', 'message-5', 'message-6']);
+    assert.equal(tail.total, 7);
+    assert.equal(tail.start, 4);
+    assert.equal(tail.end, 7);
+    assert.equal(tail.hasBefore, true);
+    assert.equal(tail.hasAfter, false);
+
+    let older = sg.getChatMessagePage(id, { before: tail.start, limit: 2 });
+    assert.deepEqual(older.messages.map((msg) => msg.text), ['message-2', 'message-3']);
+    assert.equal(older.hasBefore, true);
+    assert.equal(older.hasAfter, true);
+
+    let middle = sg.getChatMessagePage(id, { offset: 1, limit: 3 });
+    assert.deepEqual(middle.messages.map((msg) => msg.text), ['message-1', 'message-2', 'message-3']);
+    assert.equal(middle.hasBefore, true);
+    assert.equal(middle.hasAfter, true);
+  });
+
+  it('evicts clean full-chat cache entries without dropping pending chat writes', async () => {
+    let chatDir = path.join(tmpDir, 'chat-cache-limit-files');
+    let sg = createStateGraph({
+      snapshotPath: path.join(tmpDir, 'chat-cache-limit-snap.json'),
+      walPath: path.join(tmpDir, 'chat-cache-limit-wal.log'),
+      chatsDir: chatDir,
+      chatCacheLimit: 2,
+    });
+
+    let chatIds = [];
+    for (let i = 0; i < 4; i++) {
+      let { id } = sg.createChat({ name: `Cache ${i}` }, 'test');
+      chatIds.push(id);
+      sg.appendChatMessage(id, { role: 'user', text: `message-${i}` });
+    }
+
+    assert.ok(sg._chatCache.size >= 4, 'pending writes stay cached until persisted');
+    await sg.flushChatWrites();
+
+    assert.ok(sg._chatCache.size <= 2, `cache should be bounded after writes flush, got ${sg._chatCache.size}`);
+    assert.equal(sg.getChat(chatIds[0]).messages[0].text, 'message-0');
+    assert.ok(sg._chatCache.size <= 2, 'reading an evicted chat must keep the cache bounded');
   });
 
   it('creates, binds, pauses, resumes, blocks, completes, and deletes chat goals', async () => {

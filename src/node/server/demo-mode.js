@@ -1166,7 +1166,36 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
           chats.unshift(chat);
         }
         if (chat && !chat.parentChatId) registerChatWithSubagents(chat);
-        json(res, chat ? withSubChatSummaries(chat, chatMap) : { error: 'Chat not found' }, chat ? 200 : 404);
+        if (!chat) return json(res, { error: 'Chat not found' }, 404);
+        let result = withSubChatSummaries(chat, chatMap);
+        if (body.includeMessages === false) {
+          let { messages = [], ...meta } = result;
+          return json(res, { ...meta, messageCount: messages.length });
+        }
+        json(res, result);
+      },
+      'POST /api/chats/messages/page': async (req, res) => {
+        let body = await parseBody(req);
+        let chatId = body.chatId || body.id;
+        let chat = chatMap.get(chatId) || getChatById(chatId);
+        if (!chat) return json(res, { error: 'Chat not found' }, 404);
+        let messages = chat.messages || [];
+        let limit = Math.max(1, Math.min(Number.parseInt(body.limit ?? 100, 10) || 100, 500));
+        let before = body.before == null ? messages.length : Math.max(0, Number.parseInt(body.before, 10) || 0);
+        let offset = body.offset == null ? Math.max(0, before - limit) : Math.max(0, Number.parseInt(body.offset, 10) || 0);
+        let start = Math.min(offset, messages.length);
+        let end = Math.min(messages.length, body.offset == null ? before : start + limit);
+        json(res, {
+          ok: true,
+          chatId,
+          total: messages.length,
+          start,
+          end,
+          limit,
+          hasBefore: start > 0,
+          hasAfter: end < messages.length,
+          messages: messages.slice(start, end),
+        });
       },
       'POST /api/chats/message': async (req, res) => {
         let body = await parseBody(req);

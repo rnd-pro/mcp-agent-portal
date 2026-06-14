@@ -7,9 +7,9 @@ import {
   isPortalGoalTool,
 } from './portal-goal-tools.js';
 import {
-  DEFAULT_CHAT_AGENT,
   isDelegateTool,
   prepareDelegateTaskCall,
+  resolveChatCreationAgent,
 } from './chat-delegate-routing.js';
 
 /**
@@ -62,8 +62,8 @@ export let META_TOOLS = [
       properties: {
         name: { type: 'string', description: 'Name or title for the new chat.' },
         adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "antigravity"). Optional.' },
-        agent: { type: 'string', description: 'Agent role slug for Agent Pool chats (e.g. "orchestrator", "backend-engineer"). Optional.' },
-        agent_slug: { type: 'string', description: 'Alias for agent. Agent role slug for Agent Pool chats. Optional.' },
+        agent: { type: 'string', description: 'Agent role slug. Root Agent Pool chats use orchestrator; specialist slugs apply only to child chats with parentChatId.' },
+        agent_slug: { type: 'string', description: 'Alias for agent. Root Agent Pool chats use orchestrator; specialist slugs apply only to child chats with parentChatId.' },
         provider: { type: 'string', description: 'CLI provider for pool chats (e.g. "codex", "antigravity", "opencode", "claude"). Optional.' },
         model: { type: 'string', description: 'Model to preselect for this chat. Optional.' },
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode: yolo, auto_edit, or plan. Optional.' },
@@ -103,8 +103,8 @@ export let META_TOOLS = [
         resource_group: { type: 'string', description: 'Override resource group for this turn. Defaults to saved chat resource group.' },
         session_id: { type: 'string', description: 'Override provider session/thread ID. Defaults to saved chat sessionId.' },
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Override access mode. Defaults to saved chat approval mode.' },
-        agent: { type: 'string', description: 'Override agent role slug. Alias for agent_slug.' },
-        agent_slug: { type: 'string', description: 'Override agent role slug.' },
+        agent: { type: 'string', description: 'Override agent role slug for child/subagent chats. Root chats route through orchestrator.' },
+        agent_slug: { type: 'string', description: 'Override agent role slug for child/subagent chats. Root chats route through orchestrator.' },
         cwd: { type: 'string', description: 'Override working directory. Defaults to the chat project path or portal project root.' },
         context_mode: { type: 'string', enum: ['auto', 'off'], description: 'Context package mode passed to delegate_task. Default: auto.' },
         files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths passed to delegate_task as structured context hints.' },
@@ -545,7 +545,7 @@ export class MCPMultiplexer {
         let chat = sg.createChat({
           name: args.name,
           adapter: args.adapter || 'pool',
-          agent: args.agent || args.agent_slug || ((args.adapter || 'pool') === 'pool' ? DEFAULT_CHAT_AGENT : null),
+          agent: resolveChatCreationAgent(args),
           provider: resourceGroup && resourceGroup !== 'none' ? null : (args.provider || null),
           model: resourceGroup && resourceGroup !== 'none' ? null : (args.model || null),
           approval_mode: args.approval_mode || null,

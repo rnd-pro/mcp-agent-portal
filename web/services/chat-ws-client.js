@@ -32,6 +32,7 @@ export class ChatWsClient {
       onError: (errText) => void
       onMeta: ({ phase, messageCount, lastToolName, thinkingStatus }) => void
       onProjectTransaction: ({ chatId, projectId, transaction }) => void
+      pullMessages: (chatId, { final }) => Promise<void>
       onPulledChat: (chat, { final }) => Array|Promise<Array>
       buildSessionMetaHtml: (text) => string
     */
@@ -61,6 +62,17 @@ export class ChatWsClient {
    */
   async _pullMessages(chatId, detail = {}) {
     try {
+      if (this.opts.pullMessages) {
+        await this.opts.pullMessages(chatId, detail);
+        dashEmit("chat-live-updated", {
+          id: chatId,
+          chatId,
+          final: detail.final === true,
+          source: "pull",
+          messageCount: this._lastMessageCount,
+        });
+        return;
+      }
       let res = await fetch('/api/chats/get', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,6 +85,13 @@ export class ChatWsClient {
           ? await this.opts.onPulledChat(chat, detail)
           : chat.messages;
         this.opts.setMessages(messages || chat.messages);
+        dashEmit("chat-live-updated", {
+          id: chatId,
+          chatId,
+          final: detail.final === true,
+          source: "pull",
+          messageCount: chat.messageCount ?? chat.messages.length,
+        });
         if (chat.sessionId && this.opts.onSessionId) {
           this.opts.onSessionId(chat.sessionId);
         }
@@ -104,6 +123,20 @@ export class ChatWsClient {
       let startTime = Date.now();
       let activeTaskId = '';
       let ignoredTaskId = options.cancelTaskId || options.taskId || '';
+      let timeout = null;
+      let openErrorHandler = null;
+      let onMessage = null;
+      let onClose = null;
+      let cleanup = () => {
+        this._stopPull();
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        if (onMessage) ws.removeEventListener('message', onMessage);
+        if (onClose) ws.removeEventListener('close', onClose);
+        if (openErrorHandler) ws.removeEventListener('error', openErrorHandler);
+      };
       
       // Show initial thinking indicator via onMeta
       if (this.opts.onMeta) {
@@ -120,11 +153,10 @@ export class ChatWsClient {
 
       let isFinished = false;
 
-      let onClose = () => {
+      onClose = () => {
         if (isFinished) return;
         isFinished = true;
-        this._stopPull();
-        ws.removeEventListener('message', onMessage);
+        cleanup();
         
         this.opts.onBackgroundToggle(false);
         if (this.opts.onMeta) this.opts.onMeta(null);
@@ -140,7 +172,7 @@ export class ChatWsClient {
       };
       ws.addEventListener('close', onClose);
 
-      let onMessage = (e) => {
+      onMessage = (e) => {
         try {
           let msg = JSON.parse(e.data);
           let evChatId = msg.params?.chatId;
@@ -162,6 +194,15 @@ export class ChatWsClient {
               // Lightweight status update — no message content
               let { phase, messageCount, lastToolName, thinkingStatus } = msg.params;
               this._lastMessageCount = messageCount;
+              dashEmit("chat-live-updated", {
+                id: chatId,
+                chatId,
+                taskId: eventTaskId || activeTaskId || msg.params?.taskId || null,
+                phase,
+                messageCount,
+                lastToolName,
+                source: "meta",
+              });
               if (this.opts.onMeta) {
                 this.opts.onMeta({ phase, messageCount, lastToolName, thinkingStatus });
               }
@@ -175,9 +216,7 @@ export class ChatWsClient {
 
             case 'chat.done': {
               isFinished = true;
-              this._stopPull();
-              ws.removeEventListener('message', onMessage);
-              ws.removeEventListener('close', onClose);
+              cleanup();
               
               this.opts.onBackgroundToggle(false);
               if (this.opts.onMeta) this.opts.onMeta(null);
@@ -199,9 +238,7 @@ export class ChatWsClient {
 
             case 'chat.error': {
               isFinished = true;
-              this._stopPull();
-              ws.removeEventListener('message', onMessage);
-              ws.removeEventListener('close', onClose);
+              cleanup();
               
               this.opts.onBackgroundToggle(false);
               if (this.opts.onMeta) this.opts.onMeta(null);
@@ -232,9 +269,12 @@ export class ChatWsClient {
 
       ws.addEventListener('message', onMessage);
 
-      let timeout = setTimeout(() => {
-        this._stopPull();
-        ws.removeEventListener('message', onMessage);
+      timeout = setTimeout(() => {
+        if (isFinished) return;
+        isFinished = true;
+        cleanup();
+        this.opts.onBackgroundToggle(false);
+        if (this.opts.onMeta) this.opts.onMeta(null);
         resolve('');
       }, 600_000);
 
@@ -242,11 +282,12 @@ export class ChatWsClient {
         sendMsg();
       } else {
         ws.addEventListener('open', () => sendMsg(), { once: true });
-        ws.addEventListener('error', () => {
-          this._stopPull();
-          ws.removeEventListener('message', onMessage);
+        openErrorHandler = () => {
+          isFinished = true;
+          cleanup();
           reject(new Error('WebSocket connection failed'));
-        }, { once: true });
+        };
+        ws.addEventListener('error', openErrorHandler, { once: true });
       }
     });
   }
@@ -278,18 +319,38 @@ export class ChatWsClient {
     this.opts.onBackgroundToggle(true);
 
     let ws = this._ensureChatWs();
+    let timeout = null;
+    let onMessage = null;
+    let onClose = null;
+    let cleanup = () => {
+      this._stopPull();
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      if (onMessage) ws.removeEventListener('message', onMessage);
+      if (onClose) ws.removeEventListener('close', onClose);
+    };
 
     let sendMsg = () => {
       ws.send(JSON.stringify({ method: 'chat.resume', params: { chatId, taskId } }));
     };
 
-    if (ws.readyState === WebSocket.OPEN) {
-      sendMsg();
-    } else {
-      ws.addEventListener('open', sendMsg, { once: true });
-    }
+    onClose = () => {
+      cleanup();
+      this.opts.onBackgroundToggle(false);
+      if (this.opts.onMeta) this.opts.onMeta(null);
+    };
+    ws.addEventListener('close', onClose);
 
-    let onMessage = (e) => {
+    timeout = setTimeout(() => {
+      cleanup();
+      this.opts.onBackgroundToggle(false);
+      if (this.opts.onMeta) this.opts.onMeta(null);
+      this.opts.onError?.('Task resume timed out.');
+    }, 600_000);
+
+    onMessage = (e) => {
       try {
         let msg = JSON.parse(e.data);
         let evChatId = msg.params?.chatId;
@@ -308,6 +369,15 @@ export class ChatWsClient {
           case 'chat.meta': {
             let { phase, messageCount, lastToolName, thinkingStatus } = msg.params;
             this._lastMessageCount = messageCount;
+            dashEmit("chat-live-updated", {
+              id: chatId,
+              chatId,
+              taskId: msg.params?.taskId || taskId || null,
+              phase,
+              messageCount,
+              lastToolName,
+              source: "meta",
+            });
             if (this.opts.onMeta) {
               this.opts.onMeta({ phase, messageCount, lastToolName, thinkingStatus });
             }
@@ -320,8 +390,7 @@ export class ChatWsClient {
           }
 
           case 'chat.done': {
-            ws.removeEventListener('message', onMessage);
-            this._stopPull();
+            cleanup();
             this.opts.onBackgroundToggle(false);
             if (this.opts.onMeta) this.opts.onMeta(null);
 
@@ -337,8 +406,7 @@ export class ChatWsClient {
           }
 
           case 'chat.error': {
-            ws.removeEventListener('message', onMessage);
-            this._stopPull();
+            cleanup();
             this.opts.onBackgroundToggle(false);
             if (this.opts.onMeta) this.opts.onMeta(null);
             
@@ -353,5 +421,11 @@ export class ChatWsClient {
       } catch (e) { console.error('[ChatWsClient] WS message parse error:', e); }
     };
     ws.addEventListener('message', onMessage);
+
+    if (ws.readyState === WebSocket.OPEN) {
+      sendMsg();
+    } else {
+      ws.addEventListener('open', sendMsg, { once: true });
+    }
   }
 }

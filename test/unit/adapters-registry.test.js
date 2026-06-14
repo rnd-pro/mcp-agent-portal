@@ -1,5 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 describe('adapters-registry', () => {
   it('resolveAdapter returns factory for known types', async () => {
@@ -70,5 +73,42 @@ describe('adapters-registry', () => {
     assert.equal('approvalMode' in reviewer, false);
     assert.equal('approvalMode' in backend, false);
     assert.equal('approvalMode' in orchestrator, false);
+  });
+
+  it('builds resource group metadata from the agent-pool config directory', async () => {
+    let oldConfigDir = process.env.AGENT_PORTAL_CONFIG_DIR;
+    let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adapter-groups-'));
+    fs.writeFileSync(path.join(tmpDir, 'resource-groups.json'), JSON.stringify({
+      'isolated-review': {
+        provider: 'codex',
+        model: 'gpt-test',
+        profiles: [{ provider: 'codex', model: 'gpt-test' }],
+        policy: 'read-only',
+        approval_mode: 'plan',
+        max_agents: 2,
+        timeout: 120,
+        rotation_mode: 'round_robin',
+      },
+    }, null, 2));
+
+    try {
+      process.env.AGENT_PORTAL_CONFIG_DIR = tmpDir;
+      let { setPortalRoot, listAdapterTypes } = await import('../../src/node/adapters/index.js');
+      setPortalRoot(process.cwd());
+
+      let { metadata } = listAdapterTypes();
+      let group = metadata._resourceGroupDefaults.groups.find(item => item.name === 'isolated-review');
+
+      assert.equal(group.provider, 'codex');
+      assert.equal(group.model, 'gpt-test');
+      assert.equal(group.approval_mode, 'plan');
+      assert.equal(group.max_agents, 2);
+      assert.equal(group.timeout, 120);
+      assert.deepEqual(metadata._resourceGroupDefaults.byProvider.codex, ['gpt-test']);
+    } finally {
+      if (oldConfigDir == null) delete process.env.AGENT_PORTAL_CONFIG_DIR;
+      else process.env.AGENT_PORTAL_CONFIG_DIR = oldConfigDir;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

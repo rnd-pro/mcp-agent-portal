@@ -66,6 +66,38 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.equal(extractFinalAgentResponse(text), 'pong');
   });
 
+  it('keeps agent failure diagnostics before the terminal stats section', () => {
+    let text = [
+      '## [ERR] Agent Failed (exit code 1)',
+      '',
+      'The agent process terminated without producing a response.',
+      '',
+      '---',
+      '',
+      '### Errors',
+      '',
+      'Error loading config.toml: url is not supported for stdio',
+      '',
+      '---',
+      '',
+      '### Recovery',
+      '',
+      'Retry after fixing MCP configuration.',
+      '',
+      '---',
+      '',
+      '## Stats',
+      '',
+      '- Exit code: 1',
+    ].join('\n');
+
+    let body = extractFinalAgentResponse(text);
+    assert.match(body, /Agent Failed/);
+    assert.match(body, /url is not supported for stdio/);
+    assert.match(body, /Retry after fixing MCP configuration/);
+    assert.doesNotMatch(body, /## Stats/);
+  });
+
   it('formats provider fallback events as persistent chat messages', () => {
     assert.equal(
       formatProviderFallbackMessage({

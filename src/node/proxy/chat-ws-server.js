@@ -2,9 +2,7 @@ import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
-import { prepareDelegateTaskCall } from './chat-delegate-routing.js';
-
-const DEFAULT_CHAT_AGENT = 'orchestrator';
+import { prepareDelegateTaskCall, resolveChatCreationAgent } from './chat-delegate-routing.js';
 
 /** WebSocket server for chat-based agent interactions. */
 export class ChatWsServer {
@@ -60,7 +58,7 @@ export class ChatWsServer {
     if (!chatId || !sg.getChat(chatId)) {
       let cwd = params.cwd || this.mcpProxy.projectRoot;
       let proj = sg.addProject({ path: cwd, name: path.basename(cwd) });
-      agentSlug = agentSlug || DEFAULT_CHAT_AGENT;
+      agentSlug = resolveChatCreationAgent({ adapter: 'pool', agent: agentSlug });
 
       let chat = sg.createChat({
         name: prompt.substring(0, 40) + (prompt.length > 40 ? '...' : ''),
@@ -98,7 +96,12 @@ export class ChatWsServer {
       }
     }
 
-    if (!agentSlug) agentSlug = DEFAULT_CHAT_AGENT;
+    let chatData = sg.getChat(chatId);
+    if (chatData?.parentChatId) {
+      agentSlug = agentSlug && agentSlug !== 'none' ? agentSlug : chatData.agent;
+    } else {
+      agentSlug = resolveChatCreationAgent({ adapter: 'pool', agent: agentSlug });
+    }
 
     if (resource_group && resource_group !== 'none') {
       provider = null;

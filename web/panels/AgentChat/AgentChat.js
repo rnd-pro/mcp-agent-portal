@@ -58,6 +58,7 @@ import {
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 const DEFAULT_POOL_AGENT = 'orchestrator';
+const CHAT_MESSAGE_PAGE_LIMIT = 100;
 
 function sameChatMessages(next = [], current = []) {
   if (next === current) return true;
@@ -118,6 +119,7 @@ export class AgentChat extends Symbiote {
   init$ = {
     messages: [],
     messageItems: [],
+    messageWindow: null,
     inputVal: '',
     chatName: tPortal('text.selectChat'),
     chatAdapter: '',
@@ -203,6 +205,7 @@ export class AgentChat extends Symbiote {
       onMetaHtml: (html) => { this.$.sessionMetaHtml = html; },
       onMeta: (meta) => this._renderLiveStatus(meta),
       onProjectTransaction: (detail) => this._applyProjectTransactionEvent(detail),
+      pullMessages: (chatId, detail) => this._pullVisibleMessageWindow(chatId, detail),
       onPulledChat: (chat, detail) => this._handlePulledChat(chat, detail),
       onTaskStarted: (detail = {}) => {
         this._activeTaskId = detail.taskId || this._activeTaskId || '';
@@ -243,6 +246,7 @@ export class AgentChat extends Symbiote {
 
     // Re-render messages when they change
     this.sub('messages', (_msgs) => {
+      if (this._suppressMessageRender) return;
       this._renderMessages();
       this._applyProjectTransactions(_msgs);
       this._updateEmptyState();
@@ -375,6 +379,7 @@ export class AgentChat extends Symbiote {
     workspace.addEventListener('chat-workspace-leading-intent', (event) => this._handleWorkspaceLeadingIntent(event.detail || {}));
     workspace.addEventListener('chat-workspace-footer-intent', (event) => this._handleWorkspaceFooterIntent(event.detail || {}));
     workspace.addEventListener('chat-workspace-context-intent', (event) => this._handleWorkspaceContextIntent(event.detail || {}));
+    workspace.addEventListener('chat-workspace-load-older', () => this._loadOlderMessageWindow());
 
     this._syncComposerComponent();
     this._setupVoiceControls();
@@ -1899,7 +1904,9 @@ export class AgentChat extends Symbiote {
 
   _normalizePoolChatParams(params = {}) {
     let next = { ...params };
-    if (!next.agent || next.agent === 'none') {
+    if (!this.$.isSubagentChat) {
+      next.agent = DEFAULT_POOL_AGENT;
+    } else if (!next.agent || next.agent === 'none') {
       next.agent = this._getDefaultPoolAgentSlug();
     }
     if (next.agent && next.agent !== 'none') {
@@ -1942,12 +1949,18 @@ export class AgentChat extends Symbiote {
     if (!transcript) return;
     let isAtBottom = transcript.isAtBottom?.(10) ?? true;
 
-    let messages = this._toTranscriptMessages(this.$.messages || []);
-    let hasActiveStream = this._hasActiveChatTask();
-    let { items, streamingBoards } = buildChatMessageItems(messages, { hasActiveStream });
+    let { items, streamingBoards } = this._buildTranscriptItems(this.$.messages || []);
 
     this.$.messageItems = items;
-    transcript.setMessageItems?.(items);
+    let workspace = this._getWorkspace();
+    let messageWindow = this.$.messageWindow || null;
+    if (messageWindow && workspace?.replaceMessageWindow) {
+      workspace.replaceMessageWindow(items, messageWindow);
+    } else if (messageWindow && transcript.replaceMessageWindow) {
+      transcript.replaceMessageWindow(items, messageWindow);
+    } else {
+      transcript.setMessageItems?.(items);
+    }
 
     requestAnimationFrame(() => {
       for (let taskIds of streamingBoards) {
@@ -1959,6 +1972,173 @@ export class AgentChat extends Symbiote {
       }
       transcript.updateScrollBottomButton?.();
     });
+  }
+
+  _buildTranscriptItems(messages = []) {
+    let transcriptMessages = this._toTranscriptMessages(messages);
+    let hasActiveStream = this._hasActiveChatTask();
+    return buildChatMessageItems(transcriptMessages, { hasActiveStream });
+  }
+
+  _setMessagesWithoutRender(messages = []) {
+    this._suppressMessageRender = true;
+    try {
+      this.$.messages = messages;
+    } finally {
+      this._suppressMessageRender = false;
+    }
+  }
+
+  _extendMessageWindow(count = 0) {
+    let windowState = this.$.messageWindow || null;
+    if (!windowState || count <= 0) return;
+    let end = Number.isFinite(windowState.end)
+      ? windowState.end
+      : (windowState.startIndex || 0) + (windowState.count || 0);
+    let total = Number.isFinite(windowState.totalItems) ? windowState.totalItems : end;
+    this.$.messageWindow = {
+      ...windowState,
+      count: (windowState.count || 0) + count,
+      totalItems: total + count,
+      end: end + count,
+      hasNewer: false,
+    };
+  }
+
+  _appendVisibleMessages(messages = [], { persisted = false } = {}) {
+    let nextMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
+    if (!nextMessages.length) return;
+    if (persisted) this._extendMessageWindow(nextMessages.length);
+    this.$.messages = [...(this.$.messages || []), ...nextMessages];
+  }
+
+  _messageWindowFromPage(page = {}) {
+    let start = Number.isFinite(page.start) ? page.start : 0;
+    let end = Number.isFinite(page.end) ? page.end : start + (Array.isArray(page.messages) ? page.messages.length : 0);
+    let total = Number.isFinite(page.total) ? page.total : end;
+    return {
+      startIndex: start,
+      count: Math.max(0, end - start),
+      totalItems: total,
+      hasOlder: Boolean(page.hasBefore),
+      hasNewer: Boolean(page.hasAfter),
+      start,
+      end,
+    };
+  }
+
+  async _fetchMessagePage(chatId, opts = {}) {
+    let res = await fetch('/api/chats/messages/page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId, limit: CHAT_MESSAGE_PAGE_LIMIT, ...opts }),
+    });
+    if (!res.ok) throw new Error(`Message page error: ${res.status}`);
+    let page = await res.json();
+    if (page.error) throw new Error(page.error);
+    return page;
+  }
+
+  async _fetchChatMeta(chatId) {
+    let res = await fetch('/api/chats/get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId, includeMessages: false }),
+    });
+    if (!res.ok) throw new Error(`Chat metadata error: ${res.status}`);
+    let chat = await res.json();
+    if (chat.error) throw new Error(chat.error);
+    return chat;
+  }
+
+  async _fetchFullChat(chatId) {
+    let res = await fetch('/api/chats/get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId }),
+    });
+    if (!res.ok) throw new Error(`Chat load error: ${res.status}`);
+    let chat = await res.json();
+    if (chat.error) throw new Error(chat.error);
+    return chat;
+  }
+
+  _applyLoadedChatMeta(chat = {}) {
+    this.$.chatName = chat.name || this.$.chatName || 'Chat';
+    this.$.chatAdapter = chat.adapter || this.$.chatAdapter || 'pool';
+    this.$.isSubagentChat = Boolean(chat.parentChatId);
+    this.$.activeGoal = chat.activeGoal || null;
+    this._applyProjectTransactionEvent({
+      projectId: chat.projectId || null,
+      transactions: chat.projectTransactions || [],
+    });
+    this._sessionId = chat.sessionId || null;
+    this._activeTaskId = chat.pendingTaskId || '';
+    this._setLoadedChatParams(chat);
+  }
+
+  _replaceVisibleMessageWindow(page = {}) {
+    let messages = this._cleanLoadedMessages(page.messages || []);
+    this.$.messageWindow = this._messageWindowFromPage({ ...page, messages });
+    this.$.messages = messages;
+  }
+
+  _prependVisibleMessageWindow(page = {}) {
+    let messages = this._cleanLoadedMessages(page.messages || []);
+    if (!messages.length) return;
+    let nextWindow = this._messageWindowFromPage({ ...page, messages });
+    let nextMessages = [...messages, ...(this.$.messages || [])];
+    this.$.messageWindow = nextWindow;
+    this._setMessagesWithoutRender(nextMessages);
+    this._applyProjectTransactions(messages);
+    this._updateEmptyState();
+
+    let { items, streamingBoards } = this._buildTranscriptItems(messages);
+    this.$.messageItems = [...items, ...(this.$.messageItems || [])];
+    let workspace = this._getWorkspace();
+    if (workspace?.prependMessages) {
+      workspace.prependMessages(items, nextWindow);
+    } else {
+      this._renderMessages();
+    }
+
+    requestAnimationFrame(() => {
+      let transcript = this._getTranscript();
+      if (!transcript) return;
+      for (let taskIds of streamingBoards) {
+        let board = transcript.findStatusBoard?.(taskIds);
+        if (board) this._startDelegationPolling(taskIds, board);
+      }
+      transcript.updateScrollBottomButton?.();
+    });
+  }
+
+  async _pullVisibleMessageWindow(chatId, detail = {}) {
+    if (!chatId || chatId !== (this._loadedChatId || dashState.activeChatId)) return;
+    let chat = await this._fetchChatMeta(chatId);
+    if (chat.id && chat.id !== (this._loadedChatId || dashState.activeChatId)) return;
+    this._applyLoadedChatMeta(chat);
+    let page = await this._fetchMessagePage(chatId);
+    if (detail.final) {
+      page.messages = this._applyAgentGeneratedChatTitle(chatId, page.messages || []);
+    }
+    this._replaceVisibleMessageWindow(page);
+  }
+
+  async _loadOlderMessageWindow() {
+    let chatId = this._loadedChatId || dashState.activeChatId;
+    let windowState = this.$.messageWindow || null;
+    if (!chatId || !windowState?.hasOlder || this._loadingOlderMessages) return;
+    this._loadingOlderMessages = true;
+    try {
+      let before = Number.isFinite(windowState.startIndex) ? windowState.startIndex : windowState.start;
+      let page = await this._fetchMessagePage(chatId, { before });
+      this._prependVisibleMessageWindow(page);
+    } catch (err) {
+      console.warn('[AgentChat] older message load failed:', err.message);
+    } finally {
+      this._loadingOlderMessages = false;
+    }
   }
 
   _toTranscriptMessages(messages) {
@@ -2112,7 +2292,7 @@ export class AgentChat extends Symbiote {
     this._sendRunId = sendRunId;
 
     this._snapshotVoiceResponseBaseline();
-    this.$.messages = [...this.$.messages, { role: 'user', text: prompt }];
+    this._appendVisibleMessages([{ role: 'user', text: prompt }], { persisted: true });
     if (!overridePrompt) {
       this.$.inputVal = '';
       this.$.attachedContext = []; // Clear context after send
@@ -2142,7 +2322,7 @@ export class AgentChat extends Symbiote {
 
         // _sendViaWs handles thinking block, final messages, and persistence
       } else {
-        this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.processing') }];
+        this._appendVisibleMessages([{ role: 'system', text: tPortal('text.processing') }]);
         this._setBackgroundActive(true);
 
         let payload = { ...sendParams, type: adapter, prompt: agentPrompt };
@@ -2165,24 +2345,32 @@ export class AgentChat extends Symbiote {
       }
 
       // If we got structured events from HTTP adapter, render them
+      let messagesToPersist = this.$.messages;
       if (adapter !== 'pool') {
+        let generatedMessages = [];
         if (structuredEvents?.length) {
-          let newMessages = [];
           for (let block of structuredEvents) {
             if (block.type === 'tool_use') {
-              newMessages.push({ role: 'tool', name: block.name, input: block.input, result: block.result });
+              generatedMessages.push({ role: 'tool', name: block.name, input: block.input, result: block.result });
             }
           }
           let textBlocks = structuredEvents.filter(b => b.type === 'text').map(b => b.text).join('\n');
           let finalText = textBlocks || reply;
           if (finalText) {
-            newMessages.push({ role: 'agent', text: finalText });
+            generatedMessages.push({ role: 'agent', text: finalText });
           }
-          this.$.messages = [...this.$.messages, ...newMessages];
         } else {
-          this.$.messages = [...this.$.messages, { role: 'agent', text: reply }];
+          generatedMessages.push({ role: 'agent', text: reply });
         }
-        this.$.messages = this._applyAgentGeneratedChatTitle(chatId, this.$.messages);
+        this._appendVisibleMessages(generatedMessages, { persisted: true });
+        if (this.$.messageWindow?.hasOlder) {
+          let fullChat = await this._fetchFullChat(chatId);
+          let fullMessages = this._cleanLoadedMessages(fullChat.messages || []);
+          messagesToPersist = this._applyAgentGeneratedChatTitle(chatId, [...fullMessages, ...generatedMessages]);
+        } else {
+          messagesToPersist = this._applyAgentGeneratedChatTitle(chatId, this.$.messages);
+          this.$.messages = messagesToPersist;
+        }
       } else {
         // Pool adapter: Handler in _sendViaWs already merged the final result
         // into the last streamed agent message. Nothing to do here.
@@ -2193,12 +2381,12 @@ export class AgentChat extends Symbiote {
         await fetch('/api/chats/messages', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chatId, messages: this.$.messages }),
+          body: JSON.stringify({ chatId, messages: messagesToPersist }),
         });
         dashEmit('chats-updated');
       }
     } catch (err) {
-      this.$.messages = [...this.$.messages, { role: 'system', text: tPortal('text.errorWithMessage', { message: err.message }) }];
+      this._appendVisibleMessages([{ role: 'system', text: tPortal('text.errorWithMessage', { message: err.message }) }]);
     }
     if (this._sendRunId === sendRunId) {
       this._setSending(false);
@@ -2318,27 +2506,15 @@ export class AgentChat extends Symbiote {
   async _refreshExternalChat(chatId) {
     if (!chatId || chatId !== (this._loadedChatId || dashState.activeChatId)) return;
     try {
-      let res = await fetch('/api/chats/get', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: chatId }),
-      });
-      if (!res.ok) return;
-      let chat = await res.json();
+      let chat = await this._fetchChatMeta(chatId);
       if (!chat || chat.error || chat.id !== (this._loadedChatId || dashState.activeChatId)) return;
 
-      this.$.chatName = chat.name || this.$.chatName || 'Chat';
-      this.$.chatAdapter = chat.adapter || this.$.chatAdapter || 'pool';
-      this.$.isSubagentChat = Boolean(chat.parentChatId);
-      this.$.activeGoal = chat.activeGoal || null;
-      let msgs = this._cleanLoadedMessages(chat.messages || []);
-      if (!sameChatMessages(msgs, this.$.messages)) this.$.messages = msgs;
-      this._applyProjectTransactionEvent({
-        projectId: chat.projectId || null,
-        transactions: chat.projectTransactions || [],
-      });
-      this._sessionId = chat.sessionId || this._sessionId || null;
-      this._setLoadedChatParams(chat);
+      this._applyLoadedChatMeta(chat);
+      let page = await this._fetchMessagePage(chatId);
+      let msgs = this._cleanLoadedMessages(page.messages || []);
+      if (!sameChatMessages(msgs, this.$.messages)) {
+        this._replaceVisibleMessageWindow({ ...page, messages: msgs });
+      }
     } catch (err) {
       console.error('[AgentChat] external chat refresh error:', err);
     }
@@ -2365,6 +2541,7 @@ export class AgentChat extends Symbiote {
       'adapter',
       'origin',
       'messages',
+      'messageCount',
       'projectTransactions',
       'sessionId',
       'pendingTaskId',
@@ -2401,6 +2578,7 @@ export class AgentChat extends Symbiote {
     // The correct state will be restored below if the chat has a pendingTaskId.
     this._setSending(false, { speak: false });
     if (!chatId) {
+      this.$.messageWindow = null;
       this.$.messages = [];
       this.$.chatName = tPortal('text.newChat');
       this.$.chatAdapter = 'pool';
@@ -2416,37 +2594,10 @@ export class AgentChat extends Symbiote {
     }
 
     try {
-      let res = await fetch('/api/chats/get', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: chatId }),
-      });
-      if (!res.ok) {
-        console.error('[AgentChat] Server error:', res.status);
-        this.$.messages = [{ role: 'system', text: `Server error: ${res.status}` }];
-        return;
-      }
-      let chat = await res.json();
-      if (chat.error) {
-        console.error('[AgentChat] API error:', chat.error);
-        this.$.messages = [{ role: 'system', text: chat.error }];
-        return;
-      }
-
-      this.$.chatName = chat.name || 'Chat';
-      this.$.chatAdapter = chat.adapter || 'pool';
-      this.$.isSubagentChat = Boolean(chat.parentChatId);
-      this.$.activeGoal = chat.activeGoal || null;
-      let msgs = this._cleanLoadedMessages(chat.messages || []);
-      this.$.messages = msgs;
-      this._applyProjectTransactionEvent({
-        projectId: chat.projectId || null,
-        transactions: chat.projectTransactions || [],
-      });
-      this._sessionId = chat.sessionId || null;
-      this._activeTaskId = chat.pendingTaskId || '';
-      
-      this._setLoadedChatParams(chat);
+      let chat = await this._fetchChatMeta(chatId);
+      this._applyLoadedChatMeta(chat);
+      let page = await this._fetchMessagePage(chatId);
+      this._replaceVisibleMessageWindow(page);
       
       // Resume pending task if exists (e.g. browser was reloaded mid-chat)
       if (chat.pendingTaskId) {
@@ -2458,6 +2609,7 @@ export class AgentChat extends Symbiote {
       
     } catch (err) {
       console.error('[AgentChat] Catch error:', err);
+      this.$.messageWindow = null;
       this.$.messages = [{ role: 'system', text: `Load error: ${err.message}` }];
     }
   }

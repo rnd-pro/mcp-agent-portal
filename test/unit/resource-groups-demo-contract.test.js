@@ -163,6 +163,8 @@ describe('resource groups demo contract', () => {
     assert.ok(toolDefinitionsSource.includes('approval_mode'), 'agent-pool group schema must publish group-owned approval mode');
     assert.ok(serverSource.includes('resourceGroupApprovalMode(resourceGroup)'), 'delegate_task must resolve approval mode from resource groups');
     assert.ok(serverSource.includes('resourceGroup?.timeout'), 'delegate_task must resolve timeout from resource groups');
+    assert.match(serverSource, /Resource group \\`\$\{resourceGroupName\}\\` not found/, 'missing resource groups must fail instead of falling back silently');
+    assert.match(serverSource, /if \(resourceGroupName && !resourceGroup\) \{[\s\S]*isError: true,[\s\S]*\}/, 'missing resource groups must return an MCP error result');
     assert.equal(serverSource.includes('agentDef?.approvalMode'), false, 'delegate_task must not use agent frontmatter approval mode');
     assert.equal(serverSource.includes('agentDef?.policy'), false, 'delegate_task must not use agent frontmatter policy');
   });

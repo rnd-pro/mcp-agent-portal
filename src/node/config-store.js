@@ -16,6 +16,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { resolveChatCreationAgent } from '../iso/chat-orchestration.js';
 
 let CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.agent-portal', 'agent-portal.json');
 let CHATS_DIR = process.env.PORTAL_CHATS_DIR || path.join(os.homedir(), '.agent-portal', 'agent-portal-chats');
@@ -310,13 +311,14 @@ export function getChat(chatId) {
 export function createChat(opts = {}) {
   ensureChatsDir();
   let id = crypto.randomUUID().slice(0, 12);
+  let agent = resolveChatCreationAgent(opts);
   let chat = {
     id,
     projectId: opts.projectId || null,
     parentChatId: opts.parentChatId || null,
     name: opts.name || 'New Chat',
     adapter: opts.adapter || 'pool',
-    agent: opts.agent || opts.agent_slug || null,
+    agent,
     provider: opts.provider || null,
     model: opts.model || null,
     approval_mode: opts.approval_mode || null,
@@ -387,6 +389,14 @@ export function updateChat(chatId, updates) {
     if (typeof val === 'string' && val.includes('{{')) continue;
     if (key === 'origin') val = normalizeChatOrigin(val);
     chat[key] = val;
+  }
+
+  if ('agent' in updates || 'adapter' in updates || 'parentChatId' in updates) {
+    chat.agent = resolveChatCreationAgent({
+      adapter: chat.adapter || 'pool',
+      parentChatId: chat.parentChatId || null,
+      agent: chat.agent || null,
+    });
   }
 
   chat.updatedAt = Date.now();

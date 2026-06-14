@@ -155,13 +155,13 @@ describe('config-store', () => {
     });
 
     assert.equal(getChat(id).resource_group, 'implementation');
-    assert.equal(getChat(id).agent, 'backend-engineer');
+    assert.equal(getChat(id).agent, 'orchestrator');
     assert.equal(getChat(id).provider, 'claude');
 
     await flushChatWrites();
     let raw = await fsp.readFile(path.join(process.env.PORTAL_CHATS_DIR, `${id}.json`), 'utf8');
     let chat = JSON.parse(raw);
     assert.equal(chat.resource_group, 'implementation');
-    assert.equal(chat.agent, 'backend-engineer');
+    assert.equal(chat.agent, 'orchestrator');
   });
 });

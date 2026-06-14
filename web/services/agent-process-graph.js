@@ -4,6 +4,8 @@ const NODE_COLORS = {
   goal: '#7E57C2',
   agent: '#20A4F3',
   childAgent: '#1AA187',
+  parallel: '#00ACC1',
+  merge: '#26A69A',
   prompt: '#5C6BC0',
   response: '#26A69A',
   tool: '#F9A825',
@@ -30,6 +32,51 @@ function normalizeText(value) {
 function normalizeId(value, fallback = 'item') {
   let text = normalizeText(value) || fallback;
   return text.replace(/\s+/g, ' ').slice(0, 180);
+}
+
+function normalizeAgentSlug(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function safeHexColor(value) {
+  let text = normalizeText(value);
+  return /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(text) ? text : '';
+}
+
+function buildAgentIndex(agents = []) {
+  let index = new Map();
+  for (let agent of asArray(agents)) {
+    let key = normalizeAgentSlug(agent.slug || agent.name || agent.agent);
+    if (key) index.set(key, agent);
+  }
+  return index;
+}
+
+function resolveAgentMeta(chat = {}, agentIndex = new Map()) {
+  let key = normalizeAgentSlug(chat.agent || chat.agent_slug || chat.agentSlug || chat.name);
+  return key ? agentIndex.get(key) || null : null;
+}
+
+function resolveAgentColor(chat = {}, agentIndex, fallback) {
+  let meta = resolveAgentMeta(chat, agentIndex);
+  return safeHexColor(chat.agentColor || chat.agent_color)
+    || safeHexColor(meta?.color)
+    || fallback;
+}
+
+function resolveAgentIcon(chat = {}, agentIndex, fallback = 'hub') {
+  let meta = resolveAgentMeta(chat, agentIndex);
+  return normalizeText(chat.agentIcon || chat.agent_icon || meta?.icon) || fallback;
+}
+
+function resolveToolIcon(toolName = '') {
+  let name = normalizeText(toolName).toLowerCase();
+  if (/(shell|terminal|exec|command|zsh|bash|sh\b)/.test(name)) return 'terminal';
+  if (/(test|verify|check|audit|lint)/.test(name)) return 'checklist';
+  if (/(delegate|resume|goal|mcp)/.test(name)) return 'sync';
+  if (/(skeleton|graph|dependency|context|search|find|rg|grep|read|open|get|list)/.test(name)) return 'account_tree';
+  if (/(apply_patch|write|edit|save|create|delete|update|build)/.test(name)) return 'build';
+  return 'build';
 }
 
 function compactLabel(value, fallback = '') {
@@ -113,7 +160,7 @@ function addUnique(list, item, seen, key) {
   list.push(item);
 }
 
-function makeNode({ id, kind, label, type, color, width = 156, height = 42, state = {}, params = {}, metadata = {} }) {
+function makeNode({ id, kind, label, type, color, icon = '', width = 156, height = 42, state = {}, params = {}, metadata = {} }) {
   return {
     id,
     kind,
@@ -128,8 +175,10 @@ function makeNode({ id, kind, label, type, color, width = 156, height = 42, stat
       width,
       height,
       color,
+      ...(icon ? { icon } : {}),
       canvas: {
         description: metadata.description,
+        ...(icon ? { icon } : {}),
       },
     },
   };
@@ -177,6 +226,11 @@ function normalizeMessageRole(role) {
   return '';
 }
 
+function messageWindowStart(chat = {}) {
+  let value = chat?.messageWindow?.startIndex ?? chat?.messageWindow?.start ?? chat?.messageStart ?? 0;
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
 function collectMessageTools(message = {}, index = 0) {
   let tools = [];
   if (message.role === 'tool') {
@@ -208,7 +262,10 @@ function collectMessageTools(message = {}, index = 0) {
 function collectChatProcessEvents(chat = {}, ownerNodeId, scopeKey = 'root') {
   let events = [];
   let messages = asArray(chat.messages);
+  let chatId = chat?.id || null;
+  let startIndex = messageWindowStart(chat);
   for (let index = 0; index < messages.length; index += 1) {
+    let messageIndex = startIndex + index;
     let message = messages[index] || {};
     let role = normalizeMessageRole(message.role);
     let text = messageText(message);
@@ -216,24 +273,28 @@ function collectChatProcessEvents(chat = {}, ownerNodeId, scopeKey = 'root') {
     if (role && text) {
       events.push({
         type: 'message',
-        id: `${scopeKey}:message:${index}:${role}`,
+        id: `${scopeKey}:message:${messageIndex}:${role}`,
         ownerNodeId,
+        chatId,
         role,
         text,
-        index,
+        index: messageIndex,
+        windowIndex: index,
       });
     }
 
-    for (let tool of collectMessageTools(message, index)) {
+    for (let tool of collectMessageTools(message, messageIndex)) {
       events.push({
         type: 'tool',
         id: `${scopeKey}:${tool.key}`,
         ownerNodeId,
+        chatId,
         name: tool.name,
         input: tool.input,
         result: tool.result,
         streaming: tool.streaming,
-        index,
+        index: messageIndex,
+        windowIndex: index,
       });
     }
 
@@ -241,8 +302,11 @@ function collectChatProcessEvents(chat = {}, ownerNodeId, scopeKey = 'root') {
     if (fallback) {
       events.push({
         type: 'fallback',
-        id: `${scopeKey}:fallback:${index}`,
+        id: `${scopeKey}:fallback:${messageIndex}`,
         ownerNodeId,
+        chatId,
+        index: messageIndex,
+        windowIndex: index,
         ...fallback,
       });
     }
@@ -266,14 +330,16 @@ function buildChildChats(rootChat = {}, chats = [], childChats = []) {
     .sort((a, b) => (a.createdAt || a.updatedAt || 0) - (b.createdAt || b.updatedAt || 0));
 }
 
-export function buildAgentProcessGraphModel({ chat = null, chats = [], childChats = [] } = {}) {
+export function buildAgentProcessGraphModel({ chat = null, chats = [], childChats = [], agents = [] } = {}) {
   let nodes = [];
   let edges = [];
   let seenNodes = new Set();
   let seenEdges = new Set();
   let rootChat = asObject(chat);
+  let agentIndex = buildAgentIndex(agents);
   let rootChatId = normalizeId(rootChat.id, 'active');
   let rootAgentId = `agent:${rootChatId}:${normalizeId(getChatAgentLabel(rootChat), 'orchestrator')}`;
+  let rootAgentIcon = resolveAgentIcon(rootChat, agentIndex, 'hub');
 
   const addNode = (node) => addUnique(nodes, node, seenNodes, node.id);
   const addEdge = (edge) => addUnique(edges, edge, seenEdges, edge.id);
@@ -283,11 +349,13 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     kind: 'agent.process.agent',
     label: compactLabel(getChatAgentLabel(rootChat), 'orchestrator'),
     type: 'agent',
-    color: rootChat.agentColor || NODE_COLORS.agent,
+    color: resolveAgentColor(rootChat, agentIndex, NODE_COLORS.agent),
+    icon: rootAgentIcon,
     state: { status: rootChat.pendingTaskId ? 'running' : 'ready' },
     params: {
       chatId: rootChat.id || null,
       agent: rootChat.agent || null,
+      agentIcon: rootAgentIcon,
       resource_group: rootChat.resource_group || null,
       provider: rootChat.provider || null,
       model: rootChat.model || null,
@@ -304,6 +372,7 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
       label: compactLabel(goal.title || goalId, 'Goal'),
       type: 'goal',
       color: NODE_COLORS.goal,
+      icon: 'track_changes',
       state: { status: goal.status || 'active' },
       params: { goalId },
     }));
@@ -311,24 +380,67 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
   }
 
   let childList = buildChildChats(rootChat, chats, childChats);
+  let parallelNodeId = null;
+  let mergeNodeId = null;
+  if (childList.length > 1) {
+    parallelNodeId = `parallel:${rootChatId}:subagents`;
+    mergeNodeId = `merge:${rootChatId}:subagents`;
+    addNode(makeNode({
+      id: parallelNodeId,
+      kind: 'agent.process.parallelBatch',
+      label: `${childList.length} parallel agents`,
+      type: 'parallel',
+      color: NODE_COLORS.parallel,
+      icon: 'sync',
+      width: 164,
+      height: 40,
+      state: { status: childList.some(child => child.pendingTaskId) ? 'running' : 'active' },
+      params: { childChatCount: childList.length },
+    }));
+    addNode(makeNode({
+      id: mergeNodeId,
+      kind: 'agent.process.merge',
+      label: 'Merge sub-agent results',
+      type: 'merge',
+      color: NODE_COLORS.merge,
+      icon: 'merge',
+      width: 164,
+      height: 40,
+      state: { status: childList.every(child => child.lastTaskStatus === 'done') ? 'done' : 'waiting' },
+      params: { childChatCount: childList.length },
+    }));
+    addEdge(makeEdge({ from: rootAgentId, to: parallelNodeId, kind: 'agent.process.parallelStart', label: 'parallel' }));
+    addEdge(makeEdge({ from: mergeNodeId, to: rootAgentId, kind: 'agent.process.parallelMerge', label: 'merge' }));
+  }
   for (let child of childList) {
     let childAgent = getChatAgentLabel(child, 'agent');
     let childNodeId = `agent:${normalizeId(child.id)}:${normalizeId(childAgent, 'agent')}`;
+    let childAgentIcon = resolveAgentIcon(child, agentIndex, 'smart_toy');
     addNode(makeNode({
       id: childNodeId,
       kind: 'agent.process.childAgent',
       label: compactLabel(childAgent, child.name || 'Agent'),
       type: 'child-agent',
-      color: child.agentColor || NODE_COLORS.childAgent,
+      color: resolveAgentColor(child, agentIndex, NODE_COLORS.childAgent),
+      icon: childAgentIcon,
       state: { status: child.pendingTaskId ? 'running' : child.lastTaskStatus || 'delegated' },
       params: {
         chatId: child.id,
         parentChatId: child.parentChatId,
         agent: child.agent || null,
+        agentIcon: childAgentIcon,
         resource_group: child.resource_group || null,
       },
     }));
-    addEdge(makeEdge({ from: rootAgentId, to: childNodeId, kind: 'agent.process.delegate', label: 'delegate' }));
+    addEdge(makeEdge({
+      from: parallelNodeId || rootAgentId,
+      to: childNodeId,
+      kind: 'agent.process.delegate',
+      label: parallelNodeId ? 'parallel delegate' : 'delegate',
+    }));
+    if (mergeNodeId) {
+      addEdge(makeEdge({ from: childNodeId, to: mergeNodeId, kind: 'agent.process.parallelResult', label: child.lastTaskStatus || 'result' }));
+    }
   }
 
   let allEvents = [
@@ -337,7 +449,7 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
   ];
 
   let fileNodeIds = new Map();
-  const ensureFileNode = (file) => {
+  const ensureFileNode = (file, sourceEvent = null) => {
     let path = normalizeFilePath(file);
     if (!path) return '';
     if (fileNodeIds.has(path)) return fileNodeIds.get(path);
@@ -349,9 +461,15 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
       label: compactLabel(path.split('/').pop() || path, path),
       type: 'file',
       color: NODE_COLORS.file,
+      icon: 'description',
       width: 150,
       height: 36,
-      params: { path },
+      params: {
+        path,
+        sourceChatId: sourceEvent?.chatId || null,
+        sourceMessageIndex: sourceEvent?.index ?? null,
+        sourceEventType: sourceEvent?.type || null,
+      },
       metadata: { description: path },
     }));
     return nodeId;
@@ -368,10 +486,17 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
         label: compactLabel(preview, isPrompt ? 'prompt' : 'response'),
         type: isPrompt ? 'prompt' : 'response',
         color: isPrompt ? NODE_COLORS.prompt : NODE_COLORS.response,
+        icon: 'chat',
         width: 168,
         height: 38,
         state: { status: isPrompt ? 'prompt' : 'response' },
-        params: { role: event.role, preview },
+        params: {
+          role: event.role,
+          preview,
+          chatId: event.chatId || null,
+          messageIndex: event.index,
+          eventType: event.type,
+        },
         metadata: { description: preview },
       }));
       addEdge(makeEdge({
@@ -389,18 +514,22 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
         label: compactLabel(event.name, 'tool'),
         type: 'tool',
         color: NODE_COLORS.tool,
+        icon: resolveToolIcon(event.name),
         state: { status },
         params: {
           name: event.name,
           input: event.input,
           result: event.result,
+          chatId: event.chatId || null,
+          messageIndex: event.index,
+          eventType: event.type,
         },
       }));
       addEdge(makeEdge({ from: event.ownerNodeId, to: toolId, kind: 'agent.process.toolCall', label: event.name }));
 
       let access = classifyFileAccess(event.name, event.input);
       for (let file of collectFileRefs({ input: event.input, result: event.result })) {
-        let fileNodeId = ensureFileNode(file);
+        let fileNodeId = ensureFileNode(file, event);
         if (!fileNodeId) continue;
         addEdge(makeEdge({ from: toolId, to: fileNodeId, kind: `agent.process.file.${access}`, label: access }));
       }
@@ -412,8 +541,16 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
         label: compactLabel(`${event.from} -> ${event.to}`, 'fallback'),
         type: 'fallback',
         color: NODE_COLORS.fallback,
+        icon: 'sync_problem',
         state: { status: 'fallback' },
-        params: { from: event.from, to: event.to, reason: event.reason },
+        params: {
+          from: event.from,
+          to: event.to,
+          reason: event.reason,
+          chatId: event.chatId || null,
+          messageIndex: event.index,
+          eventType: event.type,
+        },
         metadata: { description: event.reason },
       }));
       addEdge(makeEdge({ from: event.ownerNodeId, to: fallbackId, kind: 'agent.process.providerFallback', label: 'fallback' }));

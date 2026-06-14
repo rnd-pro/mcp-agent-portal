@@ -12,7 +12,7 @@ import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
 import { handlePortalGoalTool, isPortalGoalTool } from '../proxy/portal-goal-tools.js';
-import { isDelegateTool, prepareDelegateTaskCall } from '../proxy/chat-delegate-routing.js';
+import { isDelegateTool, prepareDelegateTaskCall, resolveChatCreationAgent } from '../proxy/chat-delegate-routing.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
 import { createNetworkAuthController } from './network-auth.js';
@@ -24,7 +24,6 @@ let WEB_DIR = path.join(ROOT_DIR, 'web');
 let DIST_WEB_DIR = path.join(ROOT_DIR, 'dist', 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
 let NODE_MODULE_PACKAGE_NAMES = new Set(['symbiote-ui', 'symbiote-engine']);
-const DEFAULT_CHAT_AGENT = 'orchestrator';
 
 /** @type {Record<string, string>} */
 let MIME_TYPES = {
@@ -496,7 +495,7 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
     let chat = sg.createChat({
       name: args.name,
       adapter: args.adapter || 'pool',
-      agent: args.agent || args.agent_slug || ((args.adapter || 'pool') === 'pool' ? DEFAULT_CHAT_AGENT : null),
+      agent: resolveChatCreationAgent(args),
       provider: resourceGroup && resourceGroup !== 'none' ? null : (args.provider || null),
       model: resourceGroup && resourceGroup !== 'none' ? null : (args.model || null),
       approval_mode: args.approval_mode || null,

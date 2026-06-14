@@ -223,6 +223,7 @@ describe('chat delegate routing', () => {
       files: [path.join(projectPath, 'src/demo.js')],
     }, { stateGraph: sg, source: 'test' });
 
+    assert.equal(prepared.args.agent_slug, 'orchestrator');
     assert.deepEqual(prepared.args.files, [path.join(projectPath, 'src/demo.js')]);
     assert.deepEqual(prepared.args.focus_graph.files, ['src/demo.js']);
     assert.deepEqual(prepared.args.focus_graph.imports, [{
@@ -272,6 +273,7 @@ describe('chat delegate routing', () => {
     }, { stateGraph: sg, source: 'test' });
 
     assert.deepEqual(prepared.args.files, ['src/demo.js']);
+    assert.equal(prepared.args.agent_slug, 'orchestrator');
     assert.equal(prepared.args.focus_graph, undefined);
     assert.equal(calls.length, 0);
   });

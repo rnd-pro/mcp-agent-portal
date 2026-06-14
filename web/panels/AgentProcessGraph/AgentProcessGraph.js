@@ -1,7 +1,7 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { getRoute, parseQuery, sharedUiStyles } from 'symbiote-ui/ui';
 import { tPortal } from '../../common/localization.js';
-import { persistLayout, readLayout } from '../../common/ui-state.js';
+import { persistLayout, persistUiValue, readLayout, readUiValue } from '../../common/ui-state.js';
 import { state as dashState, events as dashEvents } from '../../dashboard-state.js';
 import {
   buildAgentProcessCanvasGraphModel,
@@ -10,6 +10,12 @@ import {
 } from '../../services/agent-process-graph.js';
 import template from './AgentProcessGraph.tpl.js';
 import css from './AgentProcessGraph.css.js';
+
+const DEFAULT_LAYOUT_ALGORITHM = 'organic';
+const PROCESS_GRAPH_MESSAGE_LIMIT = 160;
+const LAYOUT_ALGORITHMS = new Set(['organic', 'oil-cloud', 'spring']);
+const LAYOUT_ALGORITHM_PATH = 'ui/preferences/agentProcessGraph/layoutAlgorithm';
+const LAYOUT_ALGORITHM_KEY = 'agent-process-graph:layout-algorithm';
 
 function activeRouteChatId() {
   let route = getRoute();
@@ -25,6 +31,11 @@ function normalizeLayoutSnapshot(snapshot) {
   return snapshot && typeof snapshot === 'object' ? snapshot : null;
 }
 
+function normalizeLayoutAlgorithm(value) {
+  let normalized = String(value || '').trim();
+  return LAYOUT_ALGORITHMS.has(normalized) ? normalized : DEFAULT_LAYOUT_ALGORITHM;
+}
+
 function isLayoutSnapshotUsable(snapshot, canvasModel = {}) {
   if (!snapshot || typeof snapshot !== 'object') return false;
   let nodes = Array.isArray(canvasModel.nodes) ? canvasModel.nodes : [];
@@ -37,6 +48,71 @@ function isLayoutSnapshotUsable(snapshot, canvasModel = {}) {
   return matchedPositions >= Math.max(2, Math.ceil(nodes.length * 0.5));
 }
 
+function findGraphNode(model = {}, nodeId = '') {
+  let nodes = Array.isArray(model.nodes) ? model.nodes : [];
+  return nodes.find(node => node?.id === nodeId) || null;
+}
+
+function normalizeMessageIndex(value) {
+  let index = Number(value);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function getNodeChatEventTarget(node = {}) {
+  let params = node?.params || {};
+  let chatId = params.chatId || params.sourceChatId || null;
+  let messageIndex = normalizeMessageIndex(params.messageIndex);
+  if (messageIndex == null) messageIndex = normalizeMessageIndex(params.sourceMessageIndex);
+  if (!chatId || messageIndex == null) return null;
+  return {
+    nodeId: node.id,
+    chatId,
+    messageIndex,
+  };
+}
+
+function setRouteChatId(chatId) {
+  if (!chatId || !globalThis.location) return;
+  let hash = globalThis.location.hash || '#agent-chat';
+  let body = hash.startsWith('#') ? hash.slice(1) : hash;
+  let separatorIndex = body.indexOf('?');
+  let routeName = separatorIndex >= 0 ? body.slice(0, separatorIndex) : body;
+  let query = separatorIndex >= 0 ? body.slice(separatorIndex + 1) : '';
+  let params = new URLSearchParams(query);
+  params.set('chat', chatId);
+  globalThis.location.hash = `${routeName || 'agent-chat'}?${params.toString()}`;
+}
+
+function findChatMessageTarget(messageIndex) {
+  let transcript = document.querySelector('pg-agent-chat chat-transcript')
+    || document.querySelector('chat-workspace chat-transcript')
+    || document.querySelector('chat-transcript');
+  let container = transcript?.getScrollContainer?.() || transcript?.querySelector?.('.chat-messages') || null;
+  let items = container?.querySelectorAll('chat-message-item') || transcript?.querySelectorAll('chat-message-item') || [];
+  let windowState = transcript?.getMessageWindow?.() || {};
+  let startIndex = Number.isFinite(windowState.startIndex) ? windowState.startIndex : 0;
+  let localIndex = messageIndex - startIndex;
+  let item = localIndex >= 0 ? items[localIndex] || null : null;
+  return { transcript, container, item };
+}
+
+function scrollChatMessageTargetIntoView({ transcript, container, item } = {}) {
+  if (!container || !item) {
+    item?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    return;
+  }
+
+  let maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  let targetTop = item.offsetTop - Math.max(0, (container.clientHeight - item.offsetHeight) / 2);
+  targetTop = Math.min(maxScrollTop, Math.max(0, targetTop));
+  if (typeof container.scrollTo === 'function') {
+    container.scrollTo({ top: targetTop, behavior: 'smooth' });
+  } else {
+    container.scrollTop = targetTop;
+  }
+  transcript?.updateScrollBottomButton?.();
+}
+
 async function fetchJson(url, options = {}) {
   let res = await fetch(url, options);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -45,12 +121,38 @@ async function fetchJson(url, options = {}) {
 
 async function fetchChat(chatId) {
   if (!chatId) return null;
-  let chat = await fetchJson('/api/chats/get', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: chatId }),
-  });
-  return chat?.error ? null : chat;
+  let [chat, page] = await Promise.all([
+    fetchJson('/api/chats/get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: chatId, includeMessages: false }),
+    }),
+    fetchJson('/api/chats/messages/page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId, limit: PROCESS_GRAPH_MESSAGE_LIMIT }),
+    }),
+  ]);
+  if (chat?.error || page?.error) return null;
+  return {
+    ...chat,
+    messages: Array.isArray(page.messages) ? page.messages : [],
+    messageCount: page.total,
+    messageWindow: {
+      startIndex: page.start,
+      count: Math.max(0, page.end - page.start),
+      totalItems: page.total,
+      hasOlder: Boolean(page.hasBefore),
+      hasNewer: Boolean(page.hasAfter),
+      start: page.start,
+      end: page.end,
+    },
+  };
+}
+
+async function fetchAgents() {
+  let result = await fetchJson(`/api/agents?ts=${Date.now()}`).catch(() => ({ agents: [] }));
+  return Array.isArray(result.agents) ? result.agents : [];
 }
 
 function collectDescendantMetas(chats = [], rootChatId, limit = 24) {
@@ -79,21 +181,33 @@ export class AgentProcessGraph extends Symbiote {
     this._empty = this.querySelector('[data-empty]');
     this._stats = this.ref.stats || this.querySelector('.apg-stats');
     this._emptyText = this.ref.emptyText || this.querySelector('[ref="emptyText"]');
+    this._layoutAlgorithmSelect = this.ref.layoutAlgorithm || this.querySelector('[data-field="layout-algorithm"]');
     this._emptyText.textContent = tPortal('text.noChatsNew');
     this._onLayoutSnapshot = (event) => this._persistLayoutSnapshot(event.detail);
     this._canvasGraph?.addEventListener('layout-snapshot', this._onLayoutSnapshot);
+    this._onGraphNodeSelected = (event) => this._handleGraphNodeSelected(event.detail || {});
+    this._canvasGraph?.addEventListener('file-selected', this._onGraphNodeSelected);
 
     this.querySelector('[data-action="fit"]')?.addEventListener('click', () => this._fit());
     this.querySelector('[data-action="refresh"]')?.addEventListener('click', () => this._scheduleRefresh(0));
+    this._layoutAlgorithm = normalizeLayoutAlgorithm(
+      readUiValue(LAYOUT_ALGORITHM_PATH, LAYOUT_ALGORITHM_KEY, DEFAULT_LAYOUT_ALGORITHM),
+    );
+    this._syncLayoutAlgorithmControl();
+    this._applyLayoutAlgorithm({ restart: false });
+    this._onLayoutAlgorithmChange = () => this._handleLayoutAlgorithmChange();
+    this._layoutAlgorithmSelect?.addEventListener('change', this._onLayoutAlgorithmChange);
 
     this._onRoute = () => this._scheduleRefresh(0);
     this._onChatUpdate = (event) => this._handleChatUpdate(event.detail || {});
     this._onChatsUpdate = () => this._scheduleRefresh(120);
+    this._onChatLiveUpdate = (event) => this._handleChatLiveUpdate(event.detail || {});
 
     window.addEventListener('hashchange', this._onRoute);
     dashEvents.addEventListener('active-chat-changed', this._onRoute);
     dashEvents.addEventListener('chat-updated', this._onChatUpdate);
     dashEvents.addEventListener('chats-updated', this._onChatsUpdate);
+    dashEvents.addEventListener('chat-live-updated', this._onChatLiveUpdate);
 
     this._resizeObserver = new ResizeObserver(() => {
       if (!this._hasRestoredLayout) this._fit({ soft: true });
@@ -108,6 +222,8 @@ export class AgentProcessGraph extends Symbiote {
     dashEvents.removeEventListener('active-chat-changed', this._onRoute);
     dashEvents.removeEventListener('chat-updated', this._onChatUpdate);
     dashEvents.removeEventListener('chats-updated', this._onChatsUpdate);
+    dashEvents.removeEventListener('chat-live-updated', this._onChatLiveUpdate);
+    this._layoutAlgorithmSelect?.removeEventListener('change', this._onLayoutAlgorithmChange);
     this._resizeObserver?.disconnect();
     clearTimeout(this._refreshTimer);
     clearTimeout(this._fitFallbackTimer);
@@ -116,12 +232,24 @@ export class AgentProcessGraph extends Symbiote {
       this._canvasGraph.removeEventListener('layout-done', this._layoutDoneHandler);
     }
     this._canvasGraph?.removeEventListener('layout-snapshot', this._onLayoutSnapshot);
+    this._canvasGraph?.removeEventListener('file-selected', this._onGraphNodeSelected);
+    clearTimeout(this._chatSyncTimer);
+    this._clearChatSyncHighlight();
   }
 
   _handleChatUpdate(detail = {}) {
     let chatId = activeRouteChatId();
     if (!chatId || !detail.id || detail.id === chatId || this._childChatIds?.has(detail.id)) {
       this._scheduleRefresh(120);
+    }
+  }
+
+  _handleChatLiveUpdate(detail = {}) {
+    let eventChatId = detail.id || detail.chatId || null;
+    let chatId = activeRouteChatId();
+    if (!chatId || !eventChatId) return;
+    if (eventChatId === chatId || this._childChatIds?.has(eventChatId)) {
+      this._scheduleRefresh(detail.source === 'pull' ? 0 : 35);
     }
   }
 
@@ -138,14 +266,17 @@ export class AgentProcessGraph extends Symbiote {
     }
 
     try {
-      let [chat, chatListResult] = await Promise.all([
+      let [chat, chatListResult, agents] = await Promise.all([
         fetchChat(chatId),
         fetchJson('/api/chats').catch(() => ({ chats: dashState.chats || [] })),
+        fetchAgents(),
       ]);
       if (!chat) {
         this._renderEmpty(tPortal('text.selectChat'));
         return;
       }
+      let chatChanged = this._currentChatId !== chat.id;
+      this._currentChatId = chat.id;
 
       let chats = chatListResult.chats || dashState.chats || [];
       let childMetas = collectDescendantMetas(chats, chat.id);
@@ -153,8 +284,8 @@ export class AgentProcessGraph extends Symbiote {
       let childChats = (await Promise.all(childMetas.map(child => fetchChat(child.id).catch(() => child))))
         .filter(Boolean);
 
-      let graphModel = buildAgentProcessGraphModel({ chat, chats, childChats });
-      let canvasModel = buildAgentProcessCanvasGraphModel({ chat, chats, childChats });
+      let graphModel = buildAgentProcessGraphModel({ chat, chats, childChats, agents });
+      let canvasModel = buildAgentProcessCanvasGraphModel({ chat, chats, childChats, agents });
       let savedSnapshot = normalizeLayoutSnapshot(readLayout(processGraphLayoutKey(chat.id)));
       let layoutSnapshot = isLayoutSnapshotUsable(savedSnapshot, canvasModel) ? savedSnapshot : null;
       this._layoutKey = processGraphLayoutKey(chat.id);
@@ -162,11 +293,13 @@ export class AgentProcessGraph extends Symbiote {
       this._hasRestoredLayout = Boolean(layoutSnapshot);
       this._nodeCount = canvasModel.nodes?.length || 0;
       this._lastModel = graphModel;
+      this._lastCanvasModel = canvasModel;
+      this._applyLayoutAlgorithm({ restart: false });
       this._canvasGraph?.setLayoutSnapshot?.(layoutSnapshot || null);
       this._canvasGraph?.setGraphModel(canvasModel);
       this._renderStats(graphModel);
       this._setEmpty(false);
-      this._fitAfterLayout({ restoreLayout: Boolean(layoutSnapshot) });
+      this._fitAfterLayout({ restoreLayout: Boolean(layoutSnapshot) && !chatChanged });
     } catch (err) {
       this._renderEmpty(`${tPortal('text.error')}: ${err.message}`);
     }
@@ -199,6 +332,8 @@ export class AgentProcessGraph extends Symbiote {
     this._rootNodeId = null;
     this._hasRestoredLayout = false;
     this._nodeCount = 0;
+    this._currentChatId = null;
+    this._lastCanvasModel = null;
     this._canvasGraph?.setLayoutSnapshot?.(null);
     this._canvasGraph?.setGraphModel?.({ nodes: [], edges: [], rootNodes: [] });
   }
@@ -293,6 +428,77 @@ export class AgentProcessGraph extends Symbiote {
       }
       this._persistCurrentLayoutSnapshot(didFit ? 700 : 0);
     });
+  }
+
+  _handleLayoutAlgorithmChange() {
+    let nextAlgorithm = normalizeLayoutAlgorithm(this._layoutAlgorithmSelect?.value);
+    if (nextAlgorithm === this._layoutAlgorithm) return;
+    this._layoutAlgorithm = nextAlgorithm;
+    this._syncLayoutAlgorithmControl();
+    persistUiValue(LAYOUT_ALGORITHM_PATH, nextAlgorithm, LAYOUT_ALGORITHM_KEY);
+    this._applyLayoutAlgorithm({ restart: false });
+
+    if (this._lastCanvasModel) {
+      this._canvasGraph?.resetLayoutState?.();
+      this._canvasGraph?.setLayoutSnapshot?.(null);
+      this._hasRestoredLayout = false;
+      this._canvasGraph?.setGraphModel?.(this._lastCanvasModel);
+      this._applyLayoutAlgorithm({ restart: true });
+      this._fitAfterLayout({ restoreLayout: false });
+    }
+  }
+
+  _handleGraphNodeSelected(detail = {}) {
+    let nodeId = detail.path || detail.nodeId || detail.id || '';
+    let node = findGraphNode(this._lastModel, nodeId);
+    let target = getNodeChatEventTarget(node);
+    if (!target) {
+      this._clearChatSyncHighlight();
+      return;
+    }
+    this._syncChatToGraphNode(target);
+  }
+
+  _syncChatToGraphNode(target, attempt = 0) {
+    if (!target?.chatId) return;
+    if (attempt > 10) return;
+    if (activeRouteChatId() !== target.chatId) {
+      setRouteChatId(target.chatId);
+      clearTimeout(this._chatSyncTimer);
+      this._chatSyncTimer = setTimeout(() => this._syncChatToGraphNode(target, attempt + 1), 180);
+      return;
+    }
+
+    let messageTarget = findChatMessageTarget(target.messageIndex);
+    let item = messageTarget.item;
+    if (!item) {
+      if (attempt < 10) {
+        clearTimeout(this._chatSyncTimer);
+        this._chatSyncTimer = setTimeout(() => this._syncChatToGraphNode(target, attempt + 1), 140);
+      }
+      return;
+    }
+
+    this._clearChatSyncHighlight();
+    item.setAttribute('data-process-sync-active', '');
+    requestAnimationFrame(() => scrollChatMessageTargetIntoView(messageTarget));
+  }
+
+  _clearChatSyncHighlight() {
+    for (let activeItem of document.querySelectorAll('chat-message-item[data-process-sync-active]')) {
+      activeItem.removeAttribute('data-process-sync-active');
+    }
+  }
+
+  _syncLayoutAlgorithmControl() {
+    if (!this._layoutAlgorithmSelect) return;
+    this._layoutAlgorithmSelect.value = this._layoutAlgorithm || DEFAULT_LAYOUT_ALGORITHM;
+  }
+
+  _applyLayoutAlgorithm({ restart = false } = {}) {
+    this._canvasGraph?.setForceLayoutOptions?.({
+      layoutAlgorithm: this._layoutAlgorithm || DEFAULT_LAYOUT_ALGORITHM,
+    }, { restart });
   }
 
   _persistCurrentLayoutSnapshot(delay = 0) {

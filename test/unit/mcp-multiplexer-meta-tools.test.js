@@ -32,11 +32,12 @@ test('resume_chat injects the active chat goal into delegated prompts only', () 
 test('portal chat meta-tools default pool chats to orchestrator', () => {
   let source = fs.readFileSync(path.join(ROOT, 'src/node/proxy/mcp-multiplexer.js'), 'utf8');
   let routingSource = fs.readFileSync(path.join(ROOT, 'src/node/proxy/chat-delegate-routing.js'), 'utf8');
+  let orchestrationSource = fs.readFileSync(path.join(ROOT, 'src/iso/chat-orchestration.js'), 'utf8');
 
-  assert.match(source, /DEFAULT_CHAT_AGENT,[\s\S]*prepareDelegateTaskCall/);
-  assert.match(routingSource, /export const DEFAULT_CHAT_AGENT = 'orchestrator';/);
-  assert.match(routingSource, /next\.agent_slug = contextChat\?\.agent \|\| DEFAULT_CHAT_AGENT/);
-  assert.match(source, /\(args\.adapter \|\| 'pool'\) === 'pool' \? DEFAULT_CHAT_AGENT : null/);
+  assert.match(source, /prepareDelegateTaskCall,[\s\S]*resolveChatCreationAgent/);
+  assert.match(orchestrationSource, /export const DEFAULT_CHAT_AGENT = 'orchestrator';/);
+  assert.match(routingSource, /next\.agent_slug = resolveChatDelegationAgent\(\{ explicitAgent, contextChat \}\)/);
+  assert.match(source, /agent: resolveChatCreationAgent\(args\)/);
   assert.match(source, /provider: resourceGroup && resourceGroup !== 'none' \? null : \(args\.provider \|\| null\)/);
   assert.match(source, /model: resourceGroup && resourceGroup !== 'none' \? null : \(args\.model \|\| null\)/);
   assert.match(source, /resource_group: resourceGroup/);
