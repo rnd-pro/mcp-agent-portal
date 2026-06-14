@@ -85,6 +85,24 @@ function eventTimestamp(event = {}) {
   return normalizeTimestamp(event.ts || event.timestamp || event.time || event.createdAt);
 }
 
+function eventDuration(event = {}) {
+  if (!event) return null;
+  let value = event.durationMs ?? event.elapsedMs ?? event.duration_ms ?? event.elapsed_ms;
+  let duration = Number(value);
+  return Number.isFinite(duration) && duration >= 0 ? duration : null;
+}
+
+function toolEventId(event = {}) {
+  return event.tool_id
+    || event.tool_use_id
+    || event.id
+    || event.call_id
+    || event.toolCall?.id
+    || event.tool_call?.id
+    || event.part?.id
+    || null;
+}
+
 function toolName(event = {}) {
   return event.name
     || event.tool_name
@@ -106,6 +124,14 @@ function toolArguments(event = {}) {
     || event.part?.parameters
     || event.part?.state?.input
     || {};
+}
+
+function resultToolCalls(result = null) {
+  return Array.isArray(result?.toolCalls) ? result.toolCalls : [];
+}
+
+function resultToolResults(result = null) {
+  return Array.isArray(result?.toolResults) ? result.toolResults : [];
 }
 
 function compactDetail(args = {}) {
@@ -213,15 +239,27 @@ function summarizeTask(task = {}, now = Date.now()) {
   };
 }
 
-function collectToolUses(tasks, runtimeEvents = [], runtimeContext = {}, now = Date.now()) {
+function collectToolUses(
+  tasks,
+  runtimeEvents = [],
+  runtimeContext = {},
+  now = Date.now(),
+  runtimeResult = null,
+) {
   let events = [];
+  let sequence = 0;
   for (let task of tasks) {
+    let taskEvents = Array.isArray(task.events) ? task.events : [];
+    let lastTaskEvent = taskEvents.at(-1) || null;
     for (let event of task.events || []) {
       events.push({
         ...event,
         taskId: task.id,
         chatId: task.chatId || null,
         taskStatus: task.status || task.type || null,
+        taskCompletedAt: task.completedAt || null,
+        taskLastEventAt: task.lastEventAt || lastTaskEvent?.ts || lastTaskEvent?.timestamp || null,
+        sequence: sequence++,
       });
     }
   }
@@ -229,28 +267,55 @@ function collectToolUses(tasks, runtimeEvents = [], runtimeContext = {}, now = D
     events.push({
       taskId: event.taskId || runtimeContext.taskId || null,
       chatId: event.chatId || runtimeContext.chatId || null,
+      taskStatus: event.taskStatus || runtimeContext.taskStatus || null,
+      taskCompletedAt: event.taskCompletedAt || runtimeContext.taskCompletedAt || null,
+      taskLastEventAt: event.taskLastEventAt || runtimeContext.taskLastEventAt || null,
       ...event,
+      sequence: sequence++,
     });
   }
 
   let toolUses = [];
   let resultsById = new Map();
+  let unkeyedResults = [];
   for (let event of events) {
-    if (event.type === 'tool_result' && (event.tool_id || event.id)) {
-      resultsById.set(event.tool_id || event.id, event);
+    if (event.type !== 'tool_result') continue;
+    let id = toolEventId(event);
+    if (id) {
+      resultsById.set(id, event);
+    } else {
+      unkeyedResults.push(event);
     }
   }
 
+  let usedUnkeyedResults = new Set();
   for (let event of events) {
     if (event.type !== 'tool_use' && event.type !== 'tool_call') continue;
     let name = toolName(event);
     let args = toolArguments(event);
-    let result = (event.tool_id || event.id) ? resultsById.get(event.tool_id || event.id) : null;
+    let result = findToolResult(event, resultsById, unkeyedResults, usedUnkeyedResults);
     let startedAt = eventTimestamp(event);
     let completedAt = result ? eventTimestamp(result) : null;
     let usedAt = event.ts || event.timestamp || null;
-    let durationMs = startedAt && completedAt ? completedAt - startedAt : null;
+    let explicitDuration = eventDuration(result) ?? eventDuration(event);
+    let durationMs = startedAt && completedAt
+      ? Math.max(0, completedAt - startedAt)
+      : explicitDuration;
     let taskTerminal = TASK_TERMINAL_STATUSES.has(event.taskStatus || '');
+    let estimatedCompletedAt = !completedAt && taskTerminal
+      ? estimateToolCompletedAt(event, startedAt)
+      : null;
+    let terminalElapsedMs = startedAt && estimatedCompletedAt
+      ? Math.max(0, estimatedCompletedAt - startedAt)
+      : null;
+    let runningElapsedMs = startedAt && !taskTerminal ? Math.max(0, now - startedAt) : null;
+    let elapsedMs = durationMs ?? terminalElapsedMs ?? runningElapsedMs;
+    let timingSource = timingSourceForTool({
+      durationMs,
+      completedAt,
+      estimatedCompletedAt,
+      runningElapsedMs,
+    });
     toolUses.push({
       taskId: event.taskId || null,
       chatId: event.chatId || null,
@@ -260,12 +325,110 @@ function collectToolUses(tasks, runtimeEvents = [], runtimeContext = {}, now = D
       startedAt: usedAt,
       usedAt,
       completedAt: result?.ts || result?.timestamp || null,
+      estimatedCompletedAt,
       durationMs,
-      elapsedMs: startedAt ? (durationMs ?? (taskTerminal ? null : now - startedAt)) : null,
+      elapsedMs,
+      usageMs: elapsedMs,
+      timingSource,
+      timingEstimated: timingSource !== 'tool_result' && timingSource !== 'unknown',
     });
   }
 
+  addRuntimeResultTools(toolUses, runtimeResult, runtimeContext);
   return toolUses.filter((event) => event.name);
+}
+
+function runtimeToolName(call = {}) {
+  return call.name
+    || call.tool_name
+    || call.tool
+    || call.function?.name
+    || call.part?.name
+    || call.part?.tool
+    || null;
+}
+
+function runtimeToolArguments(call = {}) {
+  return call.arguments
+    || call.parameters
+    || call.input
+    || call.args
+    || call.function?.arguments
+    || call.part?.parameters
+    || call.part?.state?.input
+    || {};
+}
+
+function addRuntimeResultTools(toolUses, runtimeResult, runtimeContext) {
+  let calls = resultToolCalls(runtimeResult);
+  if (!calls.length) return;
+  let results = resultToolResults(runtimeResult);
+  for (let index = 0; index < calls.length; index++) {
+    let call = calls[index];
+    let name = runtimeToolName(call);
+    if (!name) continue;
+    let args = runtimeToolArguments(call);
+    let detail = compactDetail(args);
+    let duplicate = toolUses.some((tool) => {
+      return tool.name === name
+        && tool.taskId === (runtimeContext.taskId || null)
+        && tool.chatId === (runtimeContext.chatId || null)
+        && (!detail || tool.detail === detail);
+    });
+    if (duplicate) continue;
+    let result = results[index] || {};
+    toolUses.push({
+      taskId: runtimeContext.taskId || null,
+      chatId: runtimeContext.chatId || null,
+      name,
+      detail,
+      status: result.status || call.status || 'done',
+      startedAt: null,
+      usedAt: null,
+      completedAt: null,
+      estimatedCompletedAt: null,
+      durationMs: null,
+      elapsedMs: null,
+      usageMs: null,
+      timingSource: 'runtime_result',
+      timingEstimated: false,
+    });
+  }
+}
+
+function sameToolScope(event, result) {
+  if (event.taskId && result.taskId && event.taskId !== result.taskId) return false;
+  if (event.chatId && result.chatId && event.chatId !== result.chatId) return false;
+  return true;
+}
+
+function findToolResult(event, resultsById, unkeyedResults, usedUnkeyedResults) {
+  let id = toolEventId(event);
+  if (id && resultsById.has(id)) return resultsById.get(id);
+  for (let result of unkeyedResults) {
+    if (usedUnkeyedResults.has(result)) continue;
+    if ((result.sequence ?? -1) <= (event.sequence ?? -1)) continue;
+    if (!sameToolScope(event, result)) continue;
+    usedUnkeyedResults.add(result);
+    return result;
+  }
+  return null;
+}
+
+function estimateToolCompletedAt(event, startedAt) {
+  if (!startedAt) return null;
+  let completedAt = normalizeTimestamp(event.taskCompletedAt);
+  if (completedAt && completedAt >= startedAt) return completedAt;
+  let lastEventAt = normalizeTimestamp(event.taskLastEventAt);
+  if (lastEventAt && lastEventAt >= startedAt) return lastEventAt;
+  return null;
+}
+
+function timingSourceForTool({ durationMs, completedAt, estimatedCompletedAt, runningElapsedMs }) {
+  if (Number.isFinite(durationMs) || completedAt) return 'tool_result';
+  if (estimatedCompletedAt) return 'task_completed';
+  if (Number.isFinite(runningElapsedMs)) return 'running_elapsed';
+  return 'unknown';
 }
 
 function extractRuntimeHint(text = '') {
@@ -480,8 +643,12 @@ function summarizeLatestTool(tool = null) {
     status: tool.status || 'unknown',
     usedAt: tool.usedAt || null,
     completedAt: tool.completedAt || null,
+    estimatedCompletedAt: tool.estimatedCompletedAt ?? null,
     durationMs: tool.durationMs ?? null,
     elapsedMs: tool.elapsedMs ?? null,
+    usageMs: tool.usageMs ?? null,
+    timingSource: tool.timingSource || 'unknown',
+    timingEstimated: Boolean(tool.timingEstimated),
   };
 }
 
@@ -557,7 +724,8 @@ function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
     totalElapsedMs: elapsedValues.reduce((sum, value) => sum + value, 0),
     toolCount: tools.length,
     runningToolCount: countRunningTools(tools),
-    toolUsageMs: sumFinite(tools, 'durationMs'),
+    toolDurationMs: sumFinite(tools, 'durationMs'),
+    toolUsageMs: sumFinite(tools, 'usageMs'),
     latestTool,
     latestTools: summarizeTools(tools),
     lastActivityAt: activityTimes.length ? Math.max(...activityTimes) : null,
@@ -634,7 +802,8 @@ function buildTaskMap({ tasks, toolUses, now }) {
       elapsedMs: task.elapsedMs ?? null,
       toolCount: tools.length,
       runningToolCount: countRunningTools(tools),
-      toolUsageMs: sumFinite(tools, 'durationMs'),
+      toolDurationMs: sumFinite(tools, 'durationMs'),
+      toolUsageMs: sumFinite(tools, 'usageMs'),
       latestTool: latestToolFrom(tools),
       lastToolUsedAt: lastToolUseAt(tools),
       lastActivityAt: taskActivityTime(task),
@@ -670,6 +839,7 @@ function buildToolBucket({ id, fieldName, tools }) {
     toolCount: tools.length,
     runningToolCount: countRunningTools(tools),
     totalDurationMs: sumFinite(tools, 'durationMs'),
+    totalUsageMs: sumFinite(tools, 'usageMs'),
     totalElapsedMs: sumFinite(tools, 'elapsedMs'),
     latestTool: latestToolFrom(tools),
     lastUsedAt: lastToolUseAt(tools),
@@ -729,6 +899,9 @@ function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 
   let toolDurations = toolUses
     .map((tool) => Number(tool.durationMs))
     .filter(Number.isFinite);
+  let toolUsages = toolUses
+    .map((tool) => Number(tool.usageMs))
+    .filter(Number.isFinite);
   let stats = runtimeResult?.result?.stats || null;
   return {
     runningTasks: running.length,
@@ -737,7 +910,8 @@ function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 
     subagents: subagentCount,
     toolUses: toolUses.length,
     totalTaskElapsedMs: elapsedMs.reduce((sum, value) => sum + value, 0),
-    toolUsageMs: toolDurations.reduce((sum, value) => sum + value, 0),
+    toolDurationMs: toolDurations.reduce((sum, value) => sum + value, 0),
+    toolUsageMs: toolUsages.reduce((sum, value) => sum + value, 0),
     longestElapsedMs: elapsedMs.length ? Math.max(...elapsedMs) : null,
     latestActivityAt: tasks
       .map(taskActivityTime)
@@ -788,13 +962,22 @@ export function buildDevelopmentMap({
 
   let rawScopedTasks = allTasks
     .filter((task) => taskBelongsToScope(task, scopedChatIds, taskId) || taskDescendants.has(task.id));
+  let runtimeTask = taskId
+    ? rawScopedTasks.find((task) => task.id === taskId) || allTasks.find((task) => task.id === taskId)
+    : null;
 
   let scopedTasks = rawScopedTasks
     .map((task) => summarizeTask(task, now))
     .sort((a, b) => (normalizeTimestamp(b.startedAt) || 0) - (normalizeTimestamp(a.startedAt) || 0))
     .slice(0, TASK_LIMIT);
 
-  let toolUses = collectToolUses(rawScopedTasks, runtime.events, { taskId, chatId }, now);
+  let toolUses = collectToolUses(rawScopedTasks, runtime.events, {
+    taskId,
+    chatId,
+    taskStatus: runtimeTask?.status || runtimeTask?.type || null,
+    taskCompletedAt: runtimeTask?.completedAt || null,
+    taskLastEventAt: runtimeTask?.lastEventAt || null,
+  }, now, runtime.result);
   let latestTools = sortToolsByActivity(toolUses).slice(0, TOOL_EVENT_LIMIT);
   let subagentMap = buildSubagentMap({
     chats,
@@ -818,6 +1001,7 @@ export function buildDevelopmentMap({
 
   return {
     schemaVersion: 1,
+    stateError: taskState?.error || null,
     rootChatId: chatId,
     primaryTaskId: taskId,
     subagents,

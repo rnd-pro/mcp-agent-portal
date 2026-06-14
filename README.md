@@ -50,7 +50,7 @@ IDE Window 3 (~/project-c) ──stdio──┘      │ (detached process)    �
 ## Features
 
 - **MCP Gateway** — unified Agent Portal tools plus selected public child tools from one MCP entry
-- **Development Map** — orchestration responses include a bounded subagent map, task timings, latest tool usage, runtime usage, and prompt hints
+- **Development Map** — orchestration responses include a bounded subagent map, task timings, latest tool usage with exact or estimated timing, runtime usage, task-state errors, and prompt hints
 - **Web Dashboard** — extensible project and home sections for Agent Chat, Skills, Graph, Runtime, Settings, Marketplace, Topology, and workflow operations
 - **Agent Pool** — heterogeneous CLI adapters (Antigravity, Claude, Codex, OpenCode) running in parallel
 - **Plugin System** — external integrations (Telegram, Slack, GitHub) with alert dispatch

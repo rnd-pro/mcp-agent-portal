@@ -216,6 +216,46 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
 });
 
+test('get_portal_status surfaces internal task-state read failures', async () => {
+  let ideMessages = [];
+  let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
+  let proxyManager = {
+    servers: new Map(),
+    broadcastMonitor() {},
+    stateGraph: {
+      listChats: () => [],
+      listChatGoals: () => [],
+      get: () => ({}),
+    },
+    getHealthStatus: () => ({
+      'project-graph': { status: 'healthy' },
+      'agent-pool': { status: 'healthy' },
+    }),
+    requestFromChild: async () => {
+      throw new Error('list_tasks unavailable');
+    },
+  };
+  let multiplexer = new MCPMultiplexer(proxyManager, ws);
+  multiplexer.toolIndex.tools.set('get_skeleton', {
+    server: 'project-graph',
+    tool: { name: 'get_skeleton', description: 'Get project skeleton' },
+  });
+  multiplexer.toolIndex._ready = true;
+
+  await multiplexer._handleToolCall({
+    jsonrpc: '2.0',
+    id: 42,
+    method: 'tools/call',
+    params: {
+      name: 'get_portal_status',
+      arguments: {},
+    },
+  });
+
+  let status = JSON.parse(ideMessages[0].result.content[0].text);
+  assert.equal(status.developmentMap.stateError, 'list_tasks unavailable');
+});
+
 test('nested agent-pool delegate_task is blocked as an external MCP tool', async () => {
   let ideMessages = [];
   let childMessages = [];

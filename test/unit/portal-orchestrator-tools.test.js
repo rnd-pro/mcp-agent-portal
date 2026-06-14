@@ -234,9 +234,30 @@ describe('portal orchestrator MCP tools', () => {
       payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'get_chat_task_result'),
       true,
     );
+    assert.equal(payload.runtime.contentCount, 1);
+    assert.equal(typeof payload.runtime.textPreview, 'string');
     assert.equal('taskResult' in payload, false);
     assert.equal('content' in payload, false);
     assert.equal(JSON.stringify(payload.developmentMap).includes('secret-session-id'), false);
+  });
+
+  it('surfaces internal task-state read failures in orchestrator status', async () => {
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') throw new Error('list_tasks unavailable');
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_orchestrator_status',
+      {},
+      'test',
+      { stateGraph: sg },
+    );
+    let status = JSON.parse(result.content[0].text);
+
+    assert.equal(status.developmentMap.stateError, 'list_tasks unavailable');
   });
 
   it('reports public MCP health separately from internal runtime health', async () => {
