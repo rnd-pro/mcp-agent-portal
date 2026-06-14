@@ -205,6 +205,15 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.deepEqual(status.health, { 'project-graph': { status: 'healthy' } });
   assert.deepEqual(status.internalHealth, { 'agent-pool': { status: 'healthy' } });
   assert.equal(status.totalTools, 1);
+  assert.equal(status.developmentMap.schemaVersion, 1);
+  assert.equal(status.developmentMap.subagentMap.schemaVersion, 1);
+  assert.deepEqual(status.developmentMap.subagentMap.nodes, []);
+  assert.equal(status.developmentMap.taskMap.schemaVersion, 1);
+  assert.equal(status.developmentMap.toolMap.schemaVersion, 1);
+  assert.equal(Array.isArray(status.developmentMap.latestTools), true);
+  assert.equal(status.developmentMap.usage.runningTasks, 0);
+  assert.equal(status.developmentMap.usage.toolUses, 0);
+  assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
 });
 
 test('nested agent-pool delegate_task is blocked as an external MCP tool', async () => {
