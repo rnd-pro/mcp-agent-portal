@@ -48,6 +48,16 @@ export function formatProviderFallbackMessage(event = {}) {
   return `Provider fallback: ${from} -> ${to}.${suffix}`;
 }
 
+function eventTimestamp(event = {}) {
+  return event.ts ?? event.timestamp ?? event.time ?? event.createdAt ?? Date.now();
+}
+
+function copyDefined(target, source, keys) {
+  for (let key of keys) {
+    if (source[key] !== undefined) target[key] = source[key];
+  }
+}
+
 /** Routes task notifications from child servers to WebSocket subscribers. */
 export class TaskRouter {
   /**
@@ -77,8 +87,23 @@ export class TaskRouter {
         // Compact event summary for a bounded task event tail.
         let summary = {
           type: data.type ?? 'unknown',
-          ts: Date.now(),
+          ts: eventTimestamp(data),
         };
+        copyDefined(summary, data, [
+          'id',
+          'tool_id',
+          'tool_use_id',
+          'call_id',
+          'durationMs',
+          'elapsedMs',
+          'duration_ms',
+          'elapsed_ms',
+          'startedAt',
+          'completedAt',
+        ]);
+        if (data.toolCall?.id && summary.id === undefined) summary.id = data.toolCall.id;
+        if (data.tool_call?.id && summary.id === undefined) summary.id = data.tool_call.id;
+        if (data.part?.id && summary.id === undefined) summary.id = data.part.id;
         if (data.role) summary.role = data.role;
         let name = data.name
           ?? data.tool_name

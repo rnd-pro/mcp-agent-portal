@@ -116,6 +116,20 @@ export const ORCHESTRATOR_META_TOOLS = [
     },
   },
   {
+    name: 'get_development_map',
+    description: 'Get the Agent Portal development map for orchestrator control. Returns subagentMap nodes/tree/edges, activityMap, taskMap, toolMap, latest tool usage with durationMs/usageMs/timingSource, usage totals, liveness, legacy promptHints, and structured promptHintMap suggestions. Agent Pool remains internal and is not exposed as public MCP tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: 'Optional root chat ID to scope the map.' },
+        id: { type: 'string', description: 'Alias for chatId.' },
+        taskId: { type: 'string', description: 'Optional primary task ID to scope task descendants.' },
+        task_id: { type: 'string', description: 'Alias for taskId.' },
+        includeTaskResult: { type: 'boolean', description: 'Also read the primary task result for freshest runtime events. Defaults to false to avoid unnecessary polling.' },
+      },
+    },
+  },
+  {
     name: 'cancel_chat_task',
     description: 'Cancel the active task for a chat through Agent Portal orchestration control.',
     inputSchema: {
@@ -439,6 +453,34 @@ export async function handlePortalOrchestratorTool(
       finalAgentMessage,
       runtime: developmentMap.runtime,
       developmentMap,
+    });
+  }
+
+  if (toolName === 'get_development_map') {
+    let chatId = getChatId(args);
+    let taskId = args.taskId || args.task_id || null;
+    let chat = chatId ? sg.getChat(chatId) : null;
+    if (!taskId && chat?.pendingTaskId) taskId = chat.pendingTaskId;
+    if (!chatId && taskId) {
+      chatId = getTaskChatId(sg, taskId);
+    }
+    let taskState = await readInternalTaskState(proxyManager);
+    let taskResult = null;
+    if (args.includeTaskResult && taskId) {
+      taskResult = await callInternalTaskTool(proxyManager, 'get_task_result', { task_id: taskId });
+    }
+    return textResult({
+      ok: !taskState.error,
+      chatId,
+      taskId,
+      developmentMap: buildDevelopmentMap({
+        sg,
+        chatId,
+        taskId,
+        taskResult,
+        taskState,
+      }),
+      runtimeIncluded: Boolean(taskResult),
     });
   }
 

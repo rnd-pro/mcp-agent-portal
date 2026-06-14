@@ -144,6 +144,7 @@ test('portal orchestrator meta-tools expose control without raw agent-pool tools
     'delete_chat',
     'set_chat_session',
     'get_chat_task_result',
+    'get_development_map',
     'cancel_chat_task',
     'finish_chat_task',
     'get_orchestrator_status',

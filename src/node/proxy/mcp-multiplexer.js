@@ -63,7 +63,7 @@ export let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the mcp-agent-portal: connected MCP servers, their health, total tool count, available tags for discover_tools filtering, and the current developmentMap with task liveness classification.',
+    description: 'Get the status of the mcp-agent-portal: connected MCP servers, their health, total tool count, available tags for discover_tools filtering, and the current developmentMap with subagentMap, taskMap, toolMap, latest tool timing, liveness, and promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},

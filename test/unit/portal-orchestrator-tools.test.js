@@ -67,6 +67,7 @@ describe('portal orchestrator MCP tools', () => {
       'delete_chat',
       'set_chat_session',
       'get_chat_task_result',
+      'get_development_map',
       'cancel_chat_task',
       'finish_chat_task',
       'get_orchestrator_status',
@@ -290,6 +291,122 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal('taskResult' in payload, false);
     assert.equal('content' in payload, false);
     assert.equal(JSON.stringify(payload.developmentMap).includes('secret-session-id'), false);
+  });
+
+  it('returns an explicit development map without exposing raw Agent Pool tools', async () => {
+    let root = sg.createChat({ name: 'Root orchestration', agent: 'orchestrator' }, 'test');
+    let child = sg.createChat({
+      name: 'Child chain',
+      parentChatId: root.id,
+      agent: 'backend-engineer',
+      resource_group: 'implementation',
+    }, 'test');
+    sg.updateChatTask(root.id, 'task-root');
+    sg.updateChatTask(child.id, 'task-child');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{
+                id: 'task-root',
+                chatId: root.id,
+                status: 'running',
+                agentSlug: 'orchestrator',
+                resourceGroup: 'reasoning-heavy',
+                elapsedMs: 1200,
+                events: [{
+                  type: 'tool_use',
+                  tool_id: 'tool-shell',
+                  name: 'shell',
+                  arguments: { command: 'node --test', token: 'secret-session-id' },
+                  ts: 1000,
+                }, {
+                  type: 'tool_result',
+                  tool_id: 'tool-shell',
+                  status: 'success',
+                  output: 'ok secret-session-id',
+                  ts: 1250,
+                }],
+              }, {
+                id: 'task-child',
+                chatId: child.id,
+                parentId: 'task-root',
+                status: 'running',
+                agentSlug: 'backend-engineer',
+                resourceGroup: 'implementation',
+                elapsedMs: 800,
+                events: [],
+              }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return {
+        content: [{
+          type: 'text',
+          text: `__EVENTS__:${JSON.stringify([{
+            type: 'tool_use',
+            tool_id: 'runtime-tool',
+            tool_name: 'mcp_project_graph_get_skeleton',
+            parameters: { query: 'secret-session-id' },
+            timestamp: 1300,
+          }, {
+            type: 'tool_result',
+            tool_id: 'runtime-tool',
+            status: 'success',
+            timestamp: 1500,
+          }])}`,
+        }],
+      };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_development_map',
+      { chatId: root.id, taskId: 'task-root' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.chatId, root.id);
+    assert.equal(payload.taskId, 'task-root');
+    assert.equal(payload.runtimeIncluded, false);
+    assert.deepEqual(internalCalls.map(call => call.params.name), ['list_tasks']);
+    assert.equal(payload.developmentMap.schemaVersion, 1);
+    assert.equal(payload.developmentMap.subagents[0].chatId, child.id);
+    assert.equal(payload.developmentMap.subagentMap.tree[0].children[0].chatId, child.id);
+    assert.equal(payload.developmentMap.activityMap.subagents[0].chatId, child.id);
+    assert.equal(payload.developmentMap.latestTools[0].name, 'shell');
+    assert.equal(payload.developmentMap.latestTools[0].usageMs, 250);
+    assert.equal(payload.developmentMap.latestTools[0].timingSource, 'tool_result');
+    assert.equal(payload.developmentMap.toolMap.byChatId[root.id].latestTool.name, 'shell');
+    assert.equal(payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'resume_chat'), true);
+    assert.equal(payload.developmentMap.activityMap.promptHints.some((hint) => hint.tool === 'create_chat'), true);
+    assert.equal(JSON.stringify(payload).includes('secret-session-id'), false);
+
+    internalCalls = [];
+    let runtimeResult = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_development_map',
+      { chatId: root.id, taskId: 'task-root', includeTaskResult: true },
+      'test',
+      { stateGraph: sg },
+    );
+    let runtimePayload = JSON.parse(runtimeResult.content[0].text);
+
+    assert.equal(runtimePayload.runtimeIncluded, true);
+    assert.deepEqual(internalCalls.map(call => call.params.name), ['list_tasks', 'get_task_result']);
+    assert.equal(runtimePayload.developmentMap.latestTools[0].name, 'mcp_project_graph_get_skeleton');
+    assert.equal(runtimePayload.developmentMap.latestTools[0].usageMs, 200);
+    assert.equal(runtimePayload.developmentMap.runtime.eventCount, 2);
+    assert.equal(JSON.stringify(runtimePayload).includes('secret-session-id'), false);
   });
 
   it('falls back to the latest chat agent message and infers chat scope from task state', async () => {

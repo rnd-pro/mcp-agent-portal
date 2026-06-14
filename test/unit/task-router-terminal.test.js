@@ -51,6 +51,29 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.doesNotMatch(source, /tRes\.output \|\| tRes\.status/);
   });
 
+  it('preserves tool correlation and timing fields in cached task events', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+
+    assert.match(source, /function eventTimestamp\(event = \{\}\)/);
+    assert.match(source, /ts: eventTimestamp\(data\),/);
+    for (let field of [
+      'tool_id',
+      'tool_use_id',
+      'call_id',
+      'durationMs',
+      'elapsedMs',
+      'duration_ms',
+      'elapsed_ms',
+      'startedAt',
+      'completedAt',
+    ]) {
+      assert.match(source, new RegExp(`'${field}'`));
+    }
+    assert.match(source, /if \(data\.toolCall\?\.id && summary\.id === undefined\) summary\.id = data\.toolCall\.id;/);
+    assert.match(source, /if \(data\.tool_call\?\.id && summary\.id === undefined\) summary\.id = data\.tool_call\.id;/);
+    assert.match(source, /if \(data\.part\?\.id && summary\.id === undefined\) summary\.id = data\.part\.id;/);
+  });
+
   it('extracts the final agent response without terminal report sections', () => {
     let text = [
       '# Task Result',
