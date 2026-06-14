@@ -85,7 +85,7 @@ test('portal goal meta-tools expose orchestrator lifecycle controls', () => {
   assert.deepEqual(markGoalMessageApplied.inputSchema.required, ['goalId', 'messageId']);
 });
 
-test('nested delegate_task fails fast when chat routing preparation fails', async () => {
+test('nested agent-pool delegate_task is blocked as an external MCP tool', async () => {
   let ideMessages = [];
   let childMessages = [];
   let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
@@ -126,7 +126,41 @@ test('nested delegate_task fails fast when chat routing preparation fails', asyn
   assert.equal(ideMessages.length, 1);
   assert.equal(ideMessages[0].id, 42);
   assert.equal(ideMessages[0].result.isError, true);
-  assert.match(ideMessages[0].result.content[0].text, /Failed to prepare delegate_task: prompt unavailable/);
+  assert.match(ideMessages[0].result.content[0].text, /Agent Pool tool `delegate_task` is internal to Agent Portal/);
+});
+
+test('discover_tools hides agent-pool tools from external MCP callers', async () => {
+  let ideMessages = [];
+  let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
+  let proxyManager = {
+    servers: new Map(),
+    broadcastMonitor() {},
+    getHealthStatus: () => ({}),
+  };
+  let multiplexer = new MCPMultiplexer(proxyManager, ws);
+  multiplexer.toolIndex.tools.set('delegate_task', {
+    server: 'agent-pool',
+    tool: { name: 'delegate_task', description: 'Delegate task' },
+  });
+  multiplexer.toolIndex.tools.set('get_skeleton', {
+    server: 'project-graph',
+    tool: { name: 'get_skeleton', description: 'Get project skeleton' },
+  });
+  multiplexer.toolIndex._ready = true;
+
+  await multiplexer._handleToolCall({
+    jsonrpc: '2.0',
+    id: 43,
+    method: 'tools/call',
+    params: {
+      name: 'discover_tools',
+      arguments: {},
+    },
+  });
+
+  let payload = JSON.parse(ideMessages[0].result.content[0].text);
+  assert.deepEqual(payload.tools.map(tool => tool.name), ['get_skeleton']);
+  assert.equal(payload.total, 1);
 });
 
 test('delegate readonly tool responses broadcast nested child task events', () => {

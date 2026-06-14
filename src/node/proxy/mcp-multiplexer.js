@@ -11,36 +11,40 @@ import {
   prepareDelegateTaskCall,
   resolveChatCreationAgent,
 } from './chat-delegate-routing.js';
+import {
+  internalMcpToolBlockedResult,
+  isInternalMcpToolName,
+} from './mcp-tool-visibility.js';
 
 /**
- * Smart Tool Gateway — exposes 3 meta-tools instead of proxying all child tools.
+ * Smart Tool Gateway — exposes portal-level meta-tools instead of proxying all child tools.
  * 
  * Meta-tools:
- *   discover_tools  — search child tools by keyword, tag, or server
- *   call_tool        — proxy a call to any child tool by name
+ *   discover_tools  — search public child tools by keyword, tag, or server
+ *   call_tool        — proxy a call to a public child tool by name
  *   get_portal_status — health, server list, tool counts
  */
 
 export let META_TOOLS = [
   {
     name: 'discover_tools',
-    description: 'Search available MCP tools across all connected servers. Use this to find the right tool before calling it. Returns tool names, descriptions, and which server provides them. Call with no arguments to see all available tools, or filter by query/tag/server.\n\n💡 HINT: There are many tools available for code analysis (e.g., get_skeleton, get_ai_context), task delegation (e.g., delegate_task), and infrastructure (e.g., list_skills, create_group). Use this tool to find their exact names and arguments.',
+    description: 'Search available public MCP tools across connected servers. Agent Pool tools are internal to Agent Portal and are not exposed here. Use Agent Portal chat tools for orchestration. Returns tool names, descriptions, and which public server provides them. Call with no arguments to see all available public tools, or filter by query/tag/server.\n\n💡 HINT: Public tools may include code analysis helpers such as get_skeleton and get_ai_context.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Keyword search across tool names and descriptions. Example: "skeleton", "code analysis", "delegate"' },
         tag: { type: 'string', description: 'Filter by tag (pre-configured categories). Use get_portal_status to see available tags.' },
-        server: { type: 'string', description: 'Filter by server name. Example: "project-graph", "agent-pool"' },
+        server: { type: 'string', description: 'Filter by public server name. Example: "project-graph".' },
       },
     },
   },
   {
     name: 'call_tool',
-    description: 'Call any tool from any connected MCP server by name. First use discover_tools to find the tool name, then call it here with its arguments. The call is transparently proxied to the correct server.',
+    description: 'Call a public tool from a connected MCP server by name. First use discover_tools to find the tool name, then call it here with its arguments. Agent Pool tools are internal to Agent Portal and are not callable through this meta-tool.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Tool name (as returned by discover_tools). Example: "get_skeleton", "delegate_task"' },
+        name: { type: 'string', description: 'Tool name (as returned by discover_tools). Example: "get_skeleton".' },
         arguments: { type: 'object', description: 'Arguments to pass to the tool (matches the tool\'s inputSchema)' },
       },
       required: ['name'],
@@ -638,6 +642,15 @@ export class MCPMultiplexer {
           return;
         }
 
+        if (isInternalMcpToolName(realToolName)) {
+          this.sendToIde({
+            jsonrpc: '2.0',
+            id: msg.id,
+            result: internalMcpToolBlockedResult(realToolName),
+          });
+          return;
+        }
+
         let entry = this.toolIndex.get(realToolName);
         if (!entry) {
           await this._ensureIndex();
@@ -656,26 +669,6 @@ export class MCPMultiplexer {
             error: { code: -32601, message: `Unknown tool: "${realToolName}". Use discover_tools to find available tools.` },
           });
           return;
-        }
-
-        if (isDelegateTool(realToolName)) {
-          try {
-            let prepared = await prepareDelegateTaskCall(this.proxyManager, realToolName, realArgs, { source: 'mcp' });
-            realArgs = prepared.args;
-            if (prepared.createdChat) {
-              this.proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: prepared.createdChat } });
-            }
-          } catch (e) {
-            this.sendToIde({
-              jsonrpc: '2.0',
-              id: msg.id,
-              result: {
-                content: [{ type: 'text', text: `Failed to prepare delegate_task: ${e.message}` }],
-                isError: true,
-              },
-            });
-            return;
-          }
         }
 
         // Proxy the call to the child server

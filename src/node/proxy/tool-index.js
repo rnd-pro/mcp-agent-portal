@@ -1,4 +1,6 @@
 // @ctx tool-index.ctx
+import { isPublicMcpToolServer } from './mcp-tool-visibility.js';
+
 /**
  * ToolIndex — cached registry of all tools from all child MCP servers.
  * Supports keyword search, tag filtering, and server-based lookup.
@@ -24,6 +26,7 @@ export class ToolIndex {
     this.tools.clear();
 
     for (let serverName of proxyManager.servers.keys()) {
+      if (!isPublicMcpToolServer(serverName)) continue;
       try {
         let response = await proxyManager.requestFromChild(serverName, 'tools/list', {});
         if (response?.tools) {
@@ -69,7 +72,7 @@ export class ToolIndex {
       if (tagTools) {
         for (let name of tagTools) {
           let entry = this.tools.get(name);
-          if (entry) {
+          if (entry && isPublicMcpToolServer(entry.server)) {
             results.push({
               name,
               description: entry.tool.description || '',
@@ -78,13 +81,13 @@ export class ToolIndex {
           }
         }
       }
-      return { tools: results, total: this.tools.size };
+      return { tools: results, total: this.getPublicToolCount() };
     }
 
     // If filtering by server
     if (server) {
       for (let [name, entry] of this.tools) {
-        if (entry.server === server) {
+        if (entry.server === server && isPublicMcpToolServer(entry.server)) {
           results.push({
             name,
             description: entry.tool.description || '',
@@ -92,13 +95,14 @@ export class ToolIndex {
           });
         }
       }
-      return { tools: results, total: this.tools.size };
+      return { tools: results, total: this.getPublicToolCount() };
     }
 
     // Keyword search (name + description)
     if (query) {
       let q = query.toLowerCase();
       for (let [name, entry] of this.tools) {
+        if (!isPublicMcpToolServer(entry.server)) continue;
         let desc = (entry.tool.description || '').toLowerCase();
         if (name.toLowerCase().includes(q) || desc.includes(q)) {
           results.push({
@@ -108,18 +112,19 @@ export class ToolIndex {
           });
         }
       }
-      return { tools: results, total: this.tools.size };
+      return { tools: results, total: this.getPublicToolCount() };
     }
 
     // No filter — return all (summary only)
     for (let [name, entry] of this.tools) {
+      if (!isPublicMcpToolServer(entry.server)) continue;
       results.push({
         name,
         description: entry.tool.description || '',
         server: entry.server,
       });
     }
-    return { tools: results, total: this.tools.size };
+    return { tools: results, total: this.getPublicToolCount() };
   }
 
   /**
@@ -128,7 +133,9 @@ export class ToolIndex {
    * @returns {{ tool: object, server: string } | null}
    */
   get(name) {
-    return this.tools.get(name) || null;
+    let entry = this.tools.get(name) || null;
+    if (!entry || !isPublicMcpToolServer(entry.server)) return null;
+    return entry;
   }
 
   /**
@@ -146,9 +153,18 @@ export class ToolIndex {
   getServers() {
     let counts = new Map();
     for (let entry of this.tools.values()) {
+      if (!isPublicMcpToolServer(entry.server)) continue;
       counts.set(entry.server, (counts.get(entry.server) || 0) + 1);
     }
     return [...counts.entries()].map(([name, toolCount]) => ({ name, toolCount }));
+  }
+
+  getPublicToolCount() {
+    let count = 0;
+    for (let entry of this.tools.values()) {
+      if (isPublicMcpToolServer(entry.server)) count++;
+    }
+    return count;
   }
 
   get isReady() {

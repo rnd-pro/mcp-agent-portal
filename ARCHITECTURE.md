@@ -3,7 +3,7 @@
 
 # mcp-agent-portal
 
-**Unified MCP aggregator + AI agent runtime.** A single MCP server that proxies any number of child MCP servers — your IDE sees one `tools/list` combined from all of them. Runs a web dashboard in parallel for visual management, agent chat, and live monitoring.
+**Unified MCP gateway + AI agent runtime.** A single MCP server exposes Agent Portal orchestration tools and selected public child MCP tools. Internal execution servers such as `agent-pool-mcp` stay behind Agent Portal instead of appearing as external MCP tools. Runs a web dashboard in parallel for visual management, agent chat, and live monitoring.
 
 ```
 ┌─────────────────────────────────┐
@@ -22,7 +22,7 @@
 ```
 
 > [!TIP]
-> Add one entry to your MCP config and get access to every tool from every child server — no per-server configuration in the IDE.
+> Add one entry to your MCP config and use Agent Portal as the orchestration gateway. Public child tools are discoverable through the gateway; Agent Pool is reserved for Agent Portal's own chat/task execution path.
 
 ## Singleton Architecture
 
@@ -116,15 +116,15 @@ The portal does **not** expose all child tools directly. Instead, it presents a 
 
 | Meta-Tool | Description |
 |-----------|-------------|
-| `discover_tools` | Search child tools by keyword, tag, or server name |
-| `call_tool` | Proxy a call to any child tool by name (transparent routing) |
+| `discover_tools` | Search public child tools by keyword, tag, or server name |
+| `call_tool` | Proxy a call to a public child tool by name |
 | `get_portal_status` | Health, server list, tool counts, available tags |
 | `create_chat` | Create an Agent Chat session in the web UI |
 | `send_chat_message` | Send a message to an existing chat session |
 | `remember` | Save key-value pair to persistent memory |
 | `recall` | Query persistent memory by key substring |
 
-When an IDE sends `tools/list`, it receives these 7 meta-tools with dynamic hints about available child tools. The `call_tool` meta-tool transparently routes to the correct child server using a `ToolIndex`.
+When an IDE sends `tools/list`, it receives Agent Portal meta-tools with dynamic hints about available public child tools. The `call_tool` meta-tool routes only to public child servers using `ToolIndex`; `agent-pool-mcp` is not indexed for external MCP discovery or calls.
 
 ### MCP Aggregation Flow
 
@@ -293,7 +293,7 @@ Portal configuration is stored at `~/.agent-portal/agent-portal.json`:
 
 ## MCP Ecosystem
 
-Agent Portal aggregates the RND-PRO MCP ecosystem. The core workspace owns `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal`; optional servers are added through marketplace or local configuration.
+Agent Portal manages the RND-PRO MCP ecosystem. The core workspace owns `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal`; optional servers are added through marketplace or local configuration.
 
 | Server | Description | Status |
 |--------|-------------|--------|
@@ -303,6 +303,7 @@ Agent Portal aggregates the RND-PRO MCP ecosystem. The core workspace owns `proj
 
 > [!IMPORTANT]
 > Each child server runs as an independent process. The singleton backend manages their lifecycle — auto-start on boot, auto-restart on crash (exponential backoff: 1s → 2s → 4s → ... → 30s max), graceful shutdown on exit.
+> `agent-pool-mcp` is an internal Agent Portal execution server. External MCP clients use Agent Portal chat orchestration tools such as `create_chat` and `resume_chat`; they do not discover or call `delegate_task` directly.
 
 ## HTTP API
 

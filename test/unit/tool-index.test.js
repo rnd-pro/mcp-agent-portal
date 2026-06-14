@@ -34,11 +34,11 @@ describe('ToolIndex', () => {
     assert.strictEqual(result.tools[0].server, 'project-graph');
   });
 
-  it('search by server filters correctly', () => {
+  it('search by server hides internal agent-pool tools', () => {
     let index = makeIndex();
     let result = index.search({ server: 'agent-pool' });
-    assert.strictEqual(result.tools.length, 2);
-    assert.ok(result.tools.every(t => t.server === 'agent-pool'));
+    assert.strictEqual(result.tools.length, 0);
+    assert.strictEqual(result.total, 2);
   });
 
   it('search by tag filters correctly', () => {
@@ -52,15 +52,21 @@ describe('ToolIndex', () => {
   it('search with no params returns all tools', () => {
     let index = makeIndex();
     let result = index.search();
-    assert.strictEqual(result.tools.length, 4);
-    assert.strictEqual(result.total, 4);
+    assert.strictEqual(result.tools.length, 2);
+    assert.strictEqual(result.total, 2);
   });
 
-  it('get returns entry for known tool', () => {
+  it('get returns entry for known public tool', () => {
+    let index = makeIndex();
+    let entry = index.get('get_skeleton');
+    assert.ok(entry);
+    assert.strictEqual(entry.server, 'project-graph');
+  });
+
+  it('get hides internal agent-pool tools', () => {
     let index = makeIndex();
     let entry = index.get('delegate_task');
-    assert.ok(entry);
-    assert.strictEqual(entry.server, 'agent-pool');
+    assert.strictEqual(entry, null);
   });
 
   it('get returns null for unknown tool', () => {
@@ -72,11 +78,9 @@ describe('ToolIndex', () => {
   it('getServers returns correct counts', () => {
     let index = makeIndex();
     let servers = index.getServers();
-    assert.strictEqual(servers.length, 2);
+    assert.strictEqual(servers.length, 1);
     let pg = servers.find(s => s.name === 'project-graph');
-    let ap = servers.find(s => s.name === 'agent-pool');
     assert.strictEqual(pg.toolCount, 2);
-    assert.strictEqual(ap.toolCount, 2);
   });
 
   it('getAvailableTags returns tag names', () => {
@@ -93,14 +97,17 @@ describe('ToolIndex', () => {
     console.error = () => { errorCalls++; };
 
     try {
+      let requested = [];
       await index.rebuild({
-        servers: new Map([['broken-server', {}]]),
-        requestFromChild: async () => {
+        servers: new Map([['agent-pool', {}], ['broken-server', {}]]),
+        requestFromChild: async (serverName) => {
+          requested.push(serverName);
           throw new Error('tools/list failed');
         },
       });
 
       assert.strictEqual(errorCalls, 0);
+      assert.deepStrictEqual(requested, ['broken-server']);
       assert.strictEqual(index.failures.length, 1);
       assert.strictEqual(index.failures[0].server, 'broken-server');
       assert.match(index.failures[0].message, /tools\/list failed/);

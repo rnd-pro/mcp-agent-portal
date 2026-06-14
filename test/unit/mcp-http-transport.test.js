@@ -127,6 +127,7 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     let names = res.json.result.tools.map(t => t.name);
     assert.ok(names.includes('test_echo'), 'Should include test_echo');
     assert.ok(names.includes('test_add'), 'Should include test_add');
+    assert.equal(names.includes('delegate_task_readonly'), false, 'Should not expose agent-pool delegate tools');
   });
 
   it('POST /mcp notification returns no JSON-RPC response body', async () => {
@@ -204,7 +205,7 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     });
   });
 
-  it('injects session chatId into nested call_tool delegate calls', async () => {
+  it('blocks nested call_tool access to agent-pool delegate tools', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -223,16 +224,11 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     }, { headers: { 'mcp-session-id': sessionId } });
 
     assert.equal(res.status, 200);
-    assert.deepEqual(JSON.parse(res.json.result.content[0].text), {
-      name: 'delegate_task',
-      arguments: {
-        prompt: 'Sub task',
-        parent_chat_id: 'parent-chat-1',
-      },
-    });
+    assert.equal(res.json.result.isError, true);
+    assert.match(res.json.result.content[0].text, /Agent Pool tool `delegate_task` is internal to Agent Portal/);
   });
 
-  it('injects session chatId into direct delegate tool calls', async () => {
+  it('blocks direct access to agent-pool delegate tools', async () => {
     let initRes = await mcpRequest(port, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
       params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
@@ -248,10 +244,8 @@ describe('MCP HTTP Transport — /mcp endpoint', () => {
     }, { headers: { 'mcp-session-id': sessionId } });
 
     assert.equal(res.status, 200);
-    assert.deepEqual(JSON.parse(res.json.result.content[0].text), {
-      prompt: 'Direct sub task',
-      parent_chat_id: 'direct-parent-chat-1',
-    });
+    assert.equal(res.json.result.isError, true);
+    assert.match(res.json.result.content[0].text, /Agent Pool tool `delegate_task_readonly` is internal to Agent Portal/);
   });
 
   it('tools/call with test_add returns sum', async () => {

@@ -12,7 +12,12 @@ import { discoverOpenCodeModels } from '../adapters/index.js';
 import { createMcpHttpHandler } from '../proxy/mcp-http-handler.js';
 import { META_TOOLS, resumeChatTool } from '../proxy/mcp-multiplexer.js';
 import { handlePortalGoalTool, isPortalGoalTool } from '../proxy/portal-goal-tools.js';
-import { isDelegateTool, prepareDelegateTaskCall, resolveChatCreationAgent } from '../proxy/chat-delegate-routing.js';
+import { resolveChatCreationAgent } from '../proxy/chat-delegate-routing.js';
+import {
+  internalMcpToolBlockedResult,
+  isInternalMcpToolName,
+  isPublicMcpToolServer,
+} from '../proxy/mcp-tool-visibility.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
 import { createNetworkAccessStatus, getNetworkAccessConfig, resolveRequestedPort } from './network-access.js';
 import { createNetworkAuthController } from './network-auth.js';
@@ -362,6 +367,7 @@ const TOOL_CACHE_TTL = 10_000; // 10s
 async function _collectAllTools(proxyManager) {
   let allTools = [...META_TOOLS];
   for (let serverName of proxyManager.servers.keys()) {
+    if (!isPublicMcpToolServer(serverName)) continue;
     let cached = _toolCache.get(serverName);
     if (cached && Date.now() - cached.ts < TOOL_CACHE_TTL) {
       allTools.push(...cached.tools);
@@ -373,6 +379,7 @@ async function _collectAllTools(proxyManager) {
     
     // Collect tools again after refresh
     for (let serverName of proxyManager.servers.keys()) {
+      if (!isPublicMcpToolServer(serverName)) continue;
       let cached = _toolCache.get(serverName);
       if (cached && Date.now() - cached.ts < TOOL_CACHE_TTL) {
         allTools.push(...cached.tools);
@@ -384,6 +391,10 @@ async function _collectAllTools(proxyManager) {
 
 async function _refreshToolCache(proxyManager) {
   for (let serverName of proxyManager.servers.keys()) {
+    if (!isPublicMcpToolServer(serverName)) {
+      _toolCache.delete(serverName);
+      continue;
+    }
     try {
       let result = await proxyManager.requestFromChild(serverName, 'tools/list', {});
       if (result?.tools) {
@@ -405,24 +416,13 @@ async function _routeToolCall(proxyManager, toolName, args) {
     return _routePortalToolCall(proxyManager, toolName, args);
   }
 
-  if (isDelegateTool(toolName)) {
-    try {
-      let prepared = await prepareDelegateTaskCall(proxyManager, toolName, args, { source: 'mcp-http' });
-      args = prepared.args;
-      if (prepared.createdChat) {
-        proxyManager.broadcastMonitor({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.created', value: prepared.createdChat } });
-      }
-    } catch (e) {
-      console.error('[MCP Gateway] failed to prepare delegate_task:', e.message);
-      return {
-        content: [{ type: 'text', text: `Failed to prepare delegate_task: ${e.message}` }],
-        isError: true,
-      };
-    }
+  if (isInternalMcpToolName(toolName)) {
+    return internalMcpToolBlockedResult(toolName);
   }
 
   // Find which server owns this tool
   for (let [serverName, cached] of _toolCache) {
+    if (!isPublicMcpToolServer(serverName)) continue;
     if (cached.tools.some(t => t.name === toolName)) {
       let result = await proxyManager.requestFromChild(serverName, 'tools/call', {
         name: toolName,
@@ -435,6 +435,7 @@ async function _routeToolCall(proxyManager, toolName, args) {
   // Cache miss — refresh and retry
   await _refreshToolCache(proxyManager);
   for (let [serverName, cached] of _toolCache) {
+    if (!isPublicMcpToolServer(serverName)) continue;
     if (cached.tools.some(t => t.name === toolName)) {
       let result = await proxyManager.requestFromChild(serverName, 'tools/call', {
         name: toolName,
@@ -546,6 +547,7 @@ async function _collectChildTools(proxyManager) {
   await _refreshToolCache(proxyManager);
   let tools = [];
   for (let [server, cached] of _toolCache) {
+    if (!isPublicMcpToolServer(server)) continue;
     for (let tool of cached.tools) tools.push({ tool, server });
   }
   return tools;

@@ -7,8 +7,9 @@
 //
 // Architecture: "Group Chat" model
 // All agents (browser, Antigravity CLI, OpenCode) connect to this single endpoint.
-// Tool calls are routed to child MCP servers (agent-pool, project-graph, etc.)
-// via the same MCPProxyManager used by the stdio multiplexer.
+// Public tool calls are routed through the same MCPProxyManager used by the
+// stdio multiplexer. Agent Pool remains an internal Agent Portal child server,
+// not a public MCP tool surface.
 //
 // Usage:
 //   import { createMcpHttpHandler } from './mcp-http-handler.js';
@@ -16,6 +17,11 @@
 //   // In HTTP server: if (pathname === '/mcp') handler(req, res);
 
 import crypto from 'node:crypto';
+import {
+  filterPublicMcpTools,
+  internalMcpToolBlockedResult,
+  isInternalMcpToolName,
+} from './mcp-tool-visibility.js';
 
 /**
  * @typedef {Object} McpHttpOptions
@@ -297,7 +303,7 @@ async function processMessage(msg, req, opts, sessionId) {
     return {
       jsonrpc: '2.0',
       id: msg.id,
-      result: { tools: tools },
+      result: { tools: filterPublicMcpTools(tools) },
     };
   }
 
@@ -306,21 +312,22 @@ async function processMessage(msg, req, opts, sessionId) {
     let args = msg.params?.arguments || {};
 
     let sess = sessions.get(sessionId);
-    let isDelegate = toolName === 'delegate_task' || toolName === 'delegate_task_readonly' ||
-                     toolName === 'mcp_agent-portal_delegate_task' || toolName === 'mcp_agent-portal_delegate_task_readonly';
-    if (sess && sess.chatId && isDelegate) {
-      if (!args.parent_chat_id) {
-        args.parent_chat_id = sess.chatId;
-      }
-    }
     if (sess && sess.chatId && toolName === 'call_tool') {
       let nestedName = args.name;
-      let nestedArgs = args.arguments || {};
-      let isNestedDelegate = nestedName === 'delegate_task' || nestedName === 'delegate_task_readonly' ||
-                             nestedName === 'mcp_agent-portal_delegate_task' || nestedName === 'mcp_agent-portal_delegate_task_readonly';
-      if (isNestedDelegate && !nestedArgs.parent_chat_id) {
-        args.arguments = { ...nestedArgs, parent_chat_id: sess.chatId };
+      if (isInternalMcpToolName(nestedName)) {
+        return {
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: internalMcpToolBlockedResult(nestedName),
+        };
       }
+    }
+    if (isInternalMcpToolName(toolName)) {
+      return {
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: internalMcpToolBlockedResult(toolName),
+      };
     }
     if (sess && sess.chatId && CHAT_GOAL_TOOLS.has(toolName)) {
       if (!args.chatId && !args.chat_id) {
@@ -335,6 +342,7 @@ async function processMessage(msg, req, opts, sessionId) {
     } else {
       tools = opts.tools || [];
     }
+    tools = filterPublicMcpTools(tools);
     let tool = tools.find(t => t.name === toolName);
     if (!tool) {
       return {
