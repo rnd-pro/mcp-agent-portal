@@ -115,6 +115,11 @@ describe('orchestration development map', () => {
           chatId: root.id,
           elapsedMs: 5000,
           trackedChildren: [{ pid: 123, label: 'codex', elapsedMs: 3000 }],
+        }, {
+          id: 'task-child',
+          status: 'running',
+          chatId: child.id,
+          elapsedMs: 4000,
         }],
         staleProcesses: [],
       },
@@ -143,8 +148,14 @@ describe('orchestration development map', () => {
     assert.deepEqual(map.tasks.map((item) => item.id).sort(), ['task-child', 'task-root']);
     assert.equal(map.latestTools[0].name, 'mcp_project_graph_get_skeleton');
     assert.equal(map.latestTools[0].usedAt, '2026-06-14T10:00:00.000Z');
+    assert.equal(map.latestTools[0].completedAt, '2026-06-14T10:00:02.000Z');
     assert.equal(map.latestTools[0].durationMs, 2000);
+    assert.equal(map.latestTools[0].elapsedMs, 2000);
     assert.equal(map.latestTools.some((tool) => tool.name === 'read_file'), true);
+    assert.equal(
+      map.latestTools.find((tool) => tool.name === 'read_file').status,
+      'running',
+    );
     assert.equal(map.usage.runningTasks, 2);
     assert.equal(map.usage.totalTasks, 2);
     assert.equal(map.usage.subagents, 1);
@@ -160,6 +171,34 @@ describe('orchestration development map', () => {
     assert.equal(map.runtime.parsedResultSummary.toolResultCount, 1);
     assert.ok(map.runtime.parsedResultSummary.responsePreview.length <= 1200);
     assert.equal(JSON.stringify(map.runtime).includes('secret-session-id'), false);
+    assert.equal(map.promptHintMap.schemaVersion, 1);
+    assert.equal(Array.isArray(map.promptHintMap.hints), true);
+    assert.equal(map.promptHintMap.hints.length <= 8, true);
+    assert.deepEqual(
+      map.promptHintMap.hints.find((hint) => hint.id === 'poll-current-task').arguments,
+      { chatId: root.id, taskId: 'task-root' },
+    );
+    assert.equal(
+      map.promptHintMap.hints.find((hint) => hint.id === 'poll-current-task').tool,
+      'get_chat_task_result',
+    );
+    assert.equal(
+      map.promptHintMap.hints.find((hint) => hint.id === 'continue-chat').tool,
+      'resume_chat',
+    );
+    assert.equal(
+      map.promptHintMap.hints.find((hint) => hint.id === 'create-child-subagent')
+        .arguments.parentChatId,
+      root.id,
+    );
+    assert.equal(
+      map.promptHintMap.hints.find((hint) => hint.id === 'review-latest-tool').taskId,
+      'task-root',
+    );
+    assert.ok(
+      map.promptHintMap.hints.find((hint) => hint.id === 'aggregate-subagents')
+        .prompt.includes('1 subagent'),
+    );
     assert.ok(map.promptHints.some((hint) => hint.includes('get_chat_task_result')));
     assert.ok(map.promptHints.some((hint) => hint.includes('resume_chat')));
     assert.ok(map.promptHints.some((hint) => hint.includes('parentChatId')));
@@ -184,5 +223,31 @@ describe('orchestration development map', () => {
       tasks: [],
       staleProcesses: [],
     });
+  });
+
+  it('does not show terminal task tool calls as still running', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-done');
+    sg.set('tasks/task-done', {
+      status: 'done',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      startedAt: Date.now() - 5000,
+      completedAt: Date.now() - 1000,
+      prompt: 'Finished audit',
+      events: [{
+        type: 'tool_use',
+        name: 'shell',
+        arguments: { command: 'sed -n 1,20p file.js' },
+        ts: Date.now() - 4000,
+      }],
+    }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-done' });
+
+    assert.equal(map.latestTools[0].name, 'shell');
+    assert.equal(map.latestTools[0].status, 'done');
+    assert.equal(map.latestTools[0].elapsedMs, null);
+    assert.equal(map.promptHintMap.hints.find((hint) => hint.id === 'review-latest-tool').priority, 'normal');
   });
 });

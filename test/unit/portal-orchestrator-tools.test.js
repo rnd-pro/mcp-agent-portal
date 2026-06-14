@@ -218,6 +218,11 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.usage.subagents, 1);
     assert.equal(payload.developmentMap.usage.totalTaskElapsedMs, 150);
     assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
+    assert.equal(Array.isArray(payload.developmentMap.promptHintMap.hints), true);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'get_chat_task_result'),
+      true,
+    );
   });
 
   it('reports public MCP health separately from internal runtime health', async () => {

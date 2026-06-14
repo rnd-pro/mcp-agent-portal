@@ -71,7 +71,7 @@ export let META_TOOLS = [
   },
   {
     name: 'create_chat',
-    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with orchestration prompt hints.',
+    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with legacy promptHints and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,7 +107,7 @@ export let META_TOOLS = [
   },
   {
     name: 'resume_chat',
-    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns task routing metadata, runtime content, and a development map with subagentMap nodes/tree/edges, tasks, latest tool usage, usage totals, and prompt hints.',
+    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns task routing metadata, runtime content, and a development map with subagentMap nodes/tree/edges, tasks, latest tool usage, usage totals, legacy promptHints, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
