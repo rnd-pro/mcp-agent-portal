@@ -552,8 +552,16 @@ function extractTextResult(res) {
   return text || '';
 }
 
-async function apiRequest(path, method = 'GET', body = null) {
-  let port = getBackendPort();
+async function apiRequest(path, method = 'GET', body = null, options = {}) {
+  let port = null;
+  if (options.projectRef) {
+    let backend = findWorkspaceBackend(options.projectRef, {
+      fallbackLatest: options.fallbackLatest !== false,
+    });
+    port = backend?.port || null;
+  } else {
+    port = getBackendPort();
+  }
   if (!port) {
     console.error('Backend not running. Start it with: npx mcp-agent-portal');
     process.exit(1);
@@ -953,8 +961,13 @@ let CLI = {
   restart: {
     desc: 'Restart the running portal backend',
     async handler() {
+      let { flags } = parseFlags(args);
+      let projectRef = flags.project || process.cwd();
       try {
-        let res = await apiRequest('/api/restart', 'POST', {});
+        let res = await apiRequest('/api/restart', 'POST', {}, {
+          projectRef,
+          fallbackLatest: !flags.project,
+        });
         console.log(res.message || 'Restarting portal backend...');
       } catch (err) {
         console.error(err.message);
@@ -966,8 +979,13 @@ let CLI = {
   stop: {
     desc: 'Stop the running portal backend',
     async handler() {
+      let { flags } = parseFlags(args);
+      let projectRef = flags.project || process.cwd();
       try {
-        await apiRequest('/api/stop', 'POST', {});
+        await apiRequest('/api/stop', 'POST', {}, {
+          projectRef,
+          fallbackLatest: !flags.project,
+        });
         console.log('Stopping portal backend...');
       } catch (err) {
         console.error(err.message);
