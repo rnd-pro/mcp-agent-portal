@@ -257,6 +257,15 @@ describe('agent process graph model', () => {
             taskId: 'task-root',
             prompt: 'raw-session-token',
             reason: 'Refresh without raw Agent Pool tools.',
+          }, {
+            id: 'continue-chat',
+            label: 'Continue chat',
+            tool: 'resume_chat',
+            priority: 'normal',
+            chatId: 'root-chat',
+            taskId: 'task-root',
+            prompt: 'Continue from the current development map and verify the scoped result.',
+            reason: 'Keeps orchestration context attached to the chat.',
           }],
         },
         usage: {
@@ -271,7 +280,9 @@ describe('agent process graph model', () => {
     let summary = summarizeAgentProcessGraphModel(model);
     let taskNode = nodeByKind(model, 'agent.process.task')[0];
     let latestToolNode = nodeByKind(model, 'agent.process.latestTool')[0];
-    let hintNode = nodeByKind(model, 'agent.process.promptHint')[0];
+    let hintNodes = nodeByKind(model, 'agent.process.promptHint');
+    let hintNode = hintNodes.find(node => node.params.id === 'poll-current-task');
+    let safeHintNode = hintNodes.find(node => node.params.id === 'continue-chat');
     let errorNode = nodeByKind(model, 'agent.process.stateError')[0];
 
     assert.equal(nodeByKind(model, 'agent.process.childAgent').some(node => node.params.chatId === 'child-chat'), true);
@@ -284,10 +295,12 @@ describe('agent process graph model', () => {
     assert.equal('result' in latestToolNode.params, false);
     assert.equal(hintNode.params.tool, 'get_chat_task_result');
     assert.equal('prompt' in hintNode.params, false);
+    assert.equal('promptPreview' in hintNode.params, false);
+    assert.equal(safeHintNode.params.promptPreview, 'Continue from the current development map and verify the scoped result.');
     assert.equal(errorNode.params.source, 'developmentMap');
     assert.equal(summary.metadata.developmentMap.runningTasks, 1);
     assert.equal(summary.metadata.developmentMap.latestToolCount, 1);
-    assert.equal(summary.metadata.developmentMap.promptHintCount, 1);
+    assert.equal(summary.metadata.developmentMap.promptHintCount, 2);
     assert.equal(JSON.stringify(model).includes('raw-session-token'), false);
     assert.equal(model.edges.some(edge => edge.kind === 'agent.process.latestTool'), true);
     assert.equal(model.edges.some(edge => edge.kind === 'agent.process.promptHint'), true);

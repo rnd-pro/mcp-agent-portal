@@ -164,21 +164,36 @@ canvas-graph {
 }
 
 .apg-map-summary-hints {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 4px;
 }
 
 .apg-map-summary-hint {
-  max-inline-size: 100%;
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
   overflow: hidden;
   padding: 4px 6px;
   border: 1px solid var(--sn-border);
   border-radius: 4px;
   background: var(--sn-node-bg);
   color: var(--sn-text-dim);
+}
+
+.apg-map-summary-hint-title,
+.apg-map-summary-hint-prompt {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.apg-map-summary-hint-title {
+  color: var(--sn-text);
+  font-family: var(--sn-font-mono);
+}
+
+.apg-map-summary-hint-prompt {
+  color: var(--sn-text-dim);
 }
 
 .apg-stats {

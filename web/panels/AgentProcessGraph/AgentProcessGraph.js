@@ -6,6 +6,7 @@ import { state as dashState, events as dashEvents } from '../../dashboard-state.
 import {
   buildAgentProcessCanvasGraphModel,
   buildAgentProcessGraphModel,
+  safePromptHintPreview,
   summarizeAgentProcessGraphModel,
 } from '../../services/agent-process-graph.js';
 import { fetchDevelopmentMap } from '../../services/orchestration-development-map.js';
@@ -407,9 +408,19 @@ export class AgentProcessGraph extends Symbiote {
       let hintList = document.createElement('div');
       hintList.className = 'apg-map-summary-hints';
       for (let hint of hints) {
-        let item = document.createElement('span');
+        let item = document.createElement('div');
         item.className = 'apg-map-summary-hint';
-        item.textContent = [hint.label || hint.id, hint.tool].filter(Boolean).join(' · ');
+        let title = document.createElement('span');
+        title.className = 'apg-map-summary-hint-title';
+        title.textContent = [hint.label || hint.id, hint.tool].filter(Boolean).join(' · ');
+        item.append(title);
+        let promptPreview = safePromptHintPreview(hint.prompt);
+        if (promptPreview) {
+          let prompt = document.createElement('span');
+          prompt.className = 'apg-map-summary-hint-prompt';
+          prompt.textContent = promptPreview;
+          item.append(prompt);
+        }
         hintList.append(item);
       }
       this._developmentMapSummary.append(hintList);

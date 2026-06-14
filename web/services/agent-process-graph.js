@@ -18,10 +18,12 @@ const NODE_COLORS = {
 const DEVELOPMENT_TASK_LIMIT = 24;
 const DEVELOPMENT_TOOL_LIMIT = 12;
 const DEVELOPMENT_HINT_LIMIT = 6;
+const PROMPT_HINT_PREVIEW_LIMIT = 180;
 
 const FILE_EXT_RE = /\.(?:[cm]?js|jsx|ts|tsx|css|scss|html|json|md|mdx|ya?ml|toml|txt|csv|py|sh|go|rs|java|kt|swift|rb|php|sql|svg|png|jpe?g|gif|webp)(?::\d+)?$/i;
 const FILE_FIELD_RE = /(?:^|_)(?:file|files|path|paths|filepath|filepaths|target|targets)(?:_|$)/i;
 const TEXT_FILE_RE = /(?:^|[\s"'`(])((?:\.{1,2}\/|\/|[A-Za-z0-9_.-]+\/)[A-Za-z0-9_./@-]+\.(?:[cm]?js|jsx|ts|tsx|css|scss|html|json|md|mdx|ya?ml|toml|txt|csv|py|sh|go|rs|java|kt|swift|rb|php|sql|svg|png|jpe?g|gif|webp)(?::\d+)?)/gi;
+const SENSITIVE_PROMPT_RE = /\b(?:authorization|bearer|cookie|password|secret|token|api[_ -]?key)\b|\/Users\//i;
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -90,6 +92,13 @@ function compactLabel(value, fallback = '') {
   if (!text) return fallback;
   if (text.length <= 44) return text;
   return `${text.slice(0, 18)}...${text.slice(-20)}`;
+}
+
+export function safePromptHintPreview(value, limit = PROMPT_HINT_PREVIEW_LIMIT) {
+  let text = normalizeText(value).replace(/\s+/g, ' ');
+  if (!text || SENSITIVE_PROMPT_RE.test(text)) return '';
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 3)}...`;
 }
 
 function formatDurationMs(value) {
@@ -737,6 +746,17 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
     for (let hint of asArray(map.promptHintMap?.hints).slice(0, DEVELOPMENT_HINT_LIMIT)) {
       if (!hint?.id) continue;
       let hintNodeId = `prompt-hint:${normalizeId(hint.id)}`;
+      let promptPreview = safePromptHintPreview(hint.prompt);
+      let params = {
+        id: hint.id,
+        category: hint.category || null,
+        tool: hint.tool || null,
+        priority: hint.priority || 'normal',
+        chatId: hint.chatId || null,
+        taskId: hint.taskId || null,
+        source: 'developmentMap',
+      };
+      if (promptPreview) params.promptPreview = promptPreview;
       addNode(makeNode({
         id: hintNodeId,
         kind: 'agent.process.promptHint',
@@ -747,16 +767,8 @@ export function buildAgentProcessGraphModel({ chat = null, chats = [], childChat
         width: 162,
         height: 38,
         state: { status: hint.priority || 'normal' },
-        params: {
-          id: hint.id,
-          category: hint.category || null,
-          tool: hint.tool || null,
-          priority: hint.priority || 'normal',
-          chatId: hint.chatId || null,
-          taskId: hint.taskId || null,
-          source: 'developmentMap',
-        },
-        metadata: { description: hint.reason || '' },
+        params,
+        metadata: { description: [hint.reason || '', promptPreview].filter(Boolean).join(' / ') },
       }));
       addEdge(makeEdge({
         from: agentIdForChat(hint.chatId, 'orchestrator'),
