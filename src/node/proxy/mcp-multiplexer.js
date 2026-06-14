@@ -152,9 +152,9 @@ export let META_TOOLS = [
   },
 ];
 
-function _extractTaskId(result) {
+export function extractTaskIdFromDelegateResult(result) {
   let text = result?.content?.map(c => c.text || '').join('\n') || '';
-  return text.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] || null;
+  return text.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)?.[1] || null;
 }
 
 function normalizeIdList(value) {
@@ -253,7 +253,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
   }, 600_000);
   if (result?.isError) return result;
 
-  let taskId = _extractTaskId(result);
+  let taskId = extractTaskIdFromDelegateResult(result);
   if (taskId) {
     sg.updateChatTask(chatId, taskId);
     if (proxyManager.chatWsServer) {

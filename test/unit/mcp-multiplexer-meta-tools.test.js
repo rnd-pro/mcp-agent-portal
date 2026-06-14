@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { MCPMultiplexer, META_TOOLS } from '../../src/node/proxy/mcp-multiplexer.js';
+import {
+  MCPMultiplexer,
+  META_TOOLS,
+  extractTaskIdFromDelegateResult,
+} from '../../src/node/proxy/mcp-multiplexer.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -17,6 +21,18 @@ test('resume_chat meta-tool exposes structured context controls', () => {
   assert.equal(properties.goalMessageIds.type, 'array');
   assert.equal(properties.goalMessageIds.items.type, 'string');
   assert.equal(properties.goal_message_ids.type, 'array');
+});
+
+test('resume_chat extracts full UUID task IDs from delegate_task results', () => {
+  let taskId = '12345678-1234-4abc-8def-123456789abc';
+  let result = {
+    content: [{
+      type: 'text',
+      text: `🧠 Task delegated\n\n- **Task ID**: \`${taskId}\`\n\nUse get_task_result later.`,
+    }],
+  };
+
+  assert.equal(extractTaskIdFromDelegateResult(result), taskId);
 });
 
 test('resume_chat injects the active chat goal into delegated prompts only', () => {
@@ -95,6 +111,7 @@ test('portal orchestrator meta-tools expose control without raw agent-pool tools
     'update_chat',
     'delete_chat',
     'set_chat_session',
+    'get_chat_task_result',
     'cancel_chat_task',
     'finish_chat_task',
     'get_orchestrator_status',

@@ -63,6 +63,7 @@ describe('portal orchestrator MCP tools', () => {
       'update_chat',
       'delete_chat',
       'set_chat_session',
+      'get_chat_task_result',
       'cancel_chat_task',
       'finish_chat_task',
       'get_orchestrator_status',
@@ -129,6 +130,53 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(proxyManager.chatWsServer.taskChatMap.has('task-123'), false);
     assert.equal(proxyManager.chatWsServer.unsubscribed, 'task-123');
     assert.equal(broadcasts.some(event => event.params?.path === 'chats.updated'), true);
+  });
+
+  it('updates pending chat task bindings for orchestrator recovery', async () => {
+    let chat = sg.createChat({ name: 'Recovered task chat' }, 'test');
+
+    let attachResult = await handlePortalOrchestratorTool(
+      proxyManager,
+      'update_chat',
+      { chatId: chat.id, pendingTaskId: 'task-recovered' },
+      'test',
+      { stateGraph: sg },
+    );
+    assert.equal(attachResult.isError, undefined);
+    assert.equal(sg.getChat(chat.id).pendingTaskId, 'task-recovered');
+
+    let clearResult = await handlePortalOrchestratorTool(
+      proxyManager,
+      'update_chat',
+      { chatId: chat.id, pendingTaskId: '' },
+      'test',
+      { stateGraph: sg },
+    );
+    assert.equal(clearResult.isError, undefined);
+    assert.equal(sg.getChat(chat.id).pendingTaskId, undefined);
+  });
+
+  it('reads pending chat task results through the internal runtime', async () => {
+    let chat = sg.createChat({ name: 'Result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-result');
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(internalCalls, [{
+      serverName: 'agent-pool',
+      method: 'tools/call',
+      params: {
+        name: 'get_task_result',
+        arguments: { task_id: 'task-result' },
+      },
+    }]);
   });
 
   it('reports public MCP health separately from internal runtime health', async () => {

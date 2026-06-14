@@ -63,6 +63,8 @@ export const ORCHESTRATOR_META_TOOLS = [
         activeGoalId: { type: 'string', description: 'Active goal ID.' },
         goalIntentActive: { type: 'boolean', description: 'Whether goal intent mode is active.' },
         goalQueueMode: { type: 'string', description: 'Goal queue mode.' },
+        pendingTaskId: { type: 'string', description: 'Pending task ID to attach to the chat. Pass an empty string to clear.' },
+        pending_task_id: { type: 'string', description: 'Alias for pendingTaskId.' },
       },
     },
   },
@@ -88,6 +90,19 @@ export const ORCHESTRATOR_META_TOOLS = [
         id: { type: 'string', description: 'Alias for chatId.' },
         sessionId: { type: 'string', description: 'Provider session ID.' },
         session_id: { type: 'string', description: 'Alias for sessionId.' },
+      },
+    },
+  },
+  {
+    name: 'get_chat_task_result',
+    description: 'Get the result for a chat task through Agent Portal orchestration control.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: 'Chat ID.' },
+        id: { type: 'string', description: 'Alias for chatId.' },
+        taskId: { type: 'string', description: 'Task ID. Defaults to the chat pending task.' },
+        task_id: { type: 'string', description: 'Alias for taskId.' },
       },
     },
   },
@@ -275,9 +290,13 @@ export async function handlePortalOrchestratorTool(
   if (toolName === 'update_chat') {
     let chatId = getChatId(args);
     if (!chatId) return errorResult('Missing chatId.');
-    let { chatId: _chatId, chat_id: _chat_id, id: _id, agent_slug, ...updates } = args;
+    let { chatId: _chatId, chat_id: _chat_id, id: _id, agent_slug, pendingTaskId, pending_task_id, ...updates } = args;
     if (agent_slug && !updates.agent) updates.agent = agent_slug;
-    sg.updateChat(chatId, updates, source);
+    if (Object.keys(updates).length) sg.updateChat(chatId, updates, source);
+    if (pendingTaskId !== undefined || pending_task_id !== undefined) {
+      let taskId = pendingTaskId ?? pending_task_id;
+      sg.updateChatTask(chatId, taskId ? String(taskId) : null);
+    }
     broadcastChat(proxyManager, chatId);
     return textResult({ ok: true, chat: sg.getChat(chatId) });
   }
@@ -304,6 +323,14 @@ export async function handlePortalOrchestratorTool(
     sg.updateChatSession(chatId, sessionId);
     broadcastChat(proxyManager, chatId);
     return textResult({ ok: true, chatId, sessionId });
+  }
+
+  if (toolName === 'get_chat_task_result') {
+    let chatId = getChatId(args);
+    let chat = chatId ? sg.getChat(chatId) : null;
+    let taskId = getTaskId(args, chat);
+    if (!taskId) return errorResult('Missing taskId and no pending task is attached to the chat.');
+    return callInternalTaskTool(proxyManager, 'get_task_result', { task_id: taskId });
   }
 
   if (toolName === 'cancel_chat_task' || toolName === 'finish_chat_task') {
