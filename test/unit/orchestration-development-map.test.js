@@ -29,7 +29,7 @@ describe('orchestration development map', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('summarizes subagents, tasks, latest tools, usage, and prompt hints', () => {
+  it('summarizes subagent map, tasks, latest tools, usage, and prompt hints', () => {
     let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
     let child = sg.createChat({
       name: 'Backend chain',
@@ -90,6 +90,16 @@ describe('orchestration development map', () => {
             },
           ])}`,
         },
+        {
+          type: 'text',
+          text: `__RESULT_JSON__:${JSON.stringify({
+            response: `${'Long final response '.repeat(120)}secret-session-id`,
+            sessionId: 'secret-session-id',
+            toolCalls: [{ name: 'shell' }],
+            toolResults: [{ output: 'ok' }],
+            stats: { total_tokens: 123 },
+          })}`,
+        },
       ],
     };
 
@@ -113,13 +123,43 @@ describe('orchestration development map', () => {
     assert.equal(map.rootChatId, root.id);
     assert.equal(map.primaryTaskId, 'task-root');
     assert.deepEqual(map.subagents.map((item) => item.chatId), [child.id]);
+    assert.equal(map.subagents[0].parentChatId, root.id);
+    assert.deepEqual(map.subagents[0].taskIds, ['task-child']);
+    assert.equal(map.subagents[0].runningTaskCount, 1);
+    assert.equal(map.subagents[0].latestTool, null);
+    assert.equal(map.subagentMap.rootChatId, root.id);
+    assert.deepEqual(
+      map.subagentMap.nodes.map((node) => node.chatId).sort(),
+      [child.id, root.id].sort(),
+    );
+    assert.deepEqual(map.subagentMap.edges, [{
+      from: root.id,
+      to: child.id,
+      kind: 'agent.delegates',
+    }]);
+    assert.equal(map.subagentMap.tree.length, 1);
+    assert.equal(map.subagentMap.tree[0].chatId, root.id);
+    assert.equal(map.subagentMap.tree[0].children[0].chatId, child.id);
     assert.deepEqual(map.tasks.map((item) => item.id).sort(), ['task-child', 'task-root']);
     assert.equal(map.latestTools[0].name, 'mcp_project_graph_get_skeleton');
+    assert.equal(map.latestTools[0].usedAt, '2026-06-14T10:00:00.000Z');
     assert.equal(map.latestTools[0].durationMs, 2000);
     assert.equal(map.latestTools.some((tool) => tool.name === 'read_file'), true);
     assert.equal(map.usage.runningTasks, 2);
     assert.equal(map.usage.totalTasks, 2);
+    assert.equal(map.usage.subagents, 1);
+    assert.equal(map.usage.toolUses, 2);
+    assert.equal(map.usage.toolUsageMs, 2000);
+    assert.equal(map.usage.totalTaskElapsedMs, 9000);
+    assert.equal(map.usage.tokens, 123);
     assert.equal(map.runtime.eventCount, 2);
+    assert.equal(map.runtime.contentCount, 3);
+    assert.equal('content' in map.runtime, false);
+    assert.equal('parsedResult' in map.runtime, false);
+    assert.equal(map.runtime.parsedResultSummary.toolCallCount, 1);
+    assert.equal(map.runtime.parsedResultSummary.toolResultCount, 1);
+    assert.ok(map.runtime.parsedResultSummary.responsePreview.length <= 1200);
+    assert.equal(JSON.stringify(map.runtime).includes('secret-session-id'), false);
     assert.ok(map.promptHints.some((hint) => hint.includes('get_chat_task_result')));
     assert.ok(map.promptHints.some((hint) => hint.includes('resume_chat')));
     assert.ok(map.promptHints.some((hint) => hint.includes('parentChatId')));

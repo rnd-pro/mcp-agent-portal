@@ -161,7 +161,23 @@ describe('portal orchestrator MCP tools', () => {
 
   it('reads pending chat task results through the internal runtime', async () => {
     let chat = sg.createChat({ name: 'Result chat' }, 'test');
+    let child = sg.createChat({ name: 'Child result chat', parentChatId: chat.id }, 'test');
     sg.updateChatTask(chat.id, 'task-result');
+    sg.set('tasks/task-result', {
+      status: 'running',
+      chatId: chat.id,
+      startedAt: Date.now() - 100,
+      elapsedMs: 100,
+      events: [],
+    }, 'test');
+    sg.set('tasks/task-child', {
+      status: 'running',
+      chatId: child.id,
+      parentId: 'task-result',
+      startedAt: Date.now() - 50,
+      elapsedMs: 50,
+      events: [],
+    }, 'test');
 
     let result = await handlePortalOrchestratorTool(
       proxyManager,
@@ -195,6 +211,12 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.chatId, chat.id);
     assert.equal(payload.taskId, 'task-result');
     assert.equal(payload.developmentMap.primaryTaskId, 'task-result');
+    assert.equal(Array.isArray(payload.developmentMap.subagentMap.nodes), true);
+    assert.equal(payload.developmentMap.subagentMap.nodes.length, 2);
+    assert.equal(payload.developmentMap.subagentMap.edges[0].from, chat.id);
+    assert.equal(payload.developmentMap.subagentMap.edges[0].to, child.id);
+    assert.equal(payload.developmentMap.usage.subagents, 1);
+    assert.equal(payload.developmentMap.usage.totalTaskElapsedMs, 150);
     assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
   });
 

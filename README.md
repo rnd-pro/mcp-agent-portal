@@ -4,7 +4,7 @@
 
 # mcp-agent-portal
 
-**Unified MCP aggregator + AI agent runtime.** A single MCP server that proxies any number of child MCP servers — your IDE sees one `tools/list` combined from all of them. Runs a web dashboard in parallel for visual management, agent chat, and live monitoring.
+**Unified MCP aggregator + AI agent runtime.** A single MCP server exposes Agent Portal orchestration tools and selected public child MCP tools. Internal execution servers such as `agent-pool-mcp` stay behind Agent Portal while the dashboard provides visual management, agent chat, and live monitoring.
 
 ```
 ┌─────────────────────────────────┐
@@ -23,7 +23,7 @@
 ```
 
 > [!TIP]
-> Add one entry to your MCP config and get access to every tool from every child server — no per-server configuration in the IDE.
+> Add one entry to your MCP config and use Agent Portal as the orchestration gateway. Public child tools are discoverable through the gateway; Agent Pool is reserved for Agent Portal's own chat/task execution path.
 
 ### Singleton Architecture
 
@@ -49,7 +49,8 @@ IDE Window 3 (~/project-c) ──stdio──┘      │ (detached process)    �
 
 ## Features
 
-- **MCP Aggregation** — unified `tools/list`, `resources/list`, `prompts/list` from all child servers
+- **MCP Gateway** — unified Agent Portal tools plus selected public child tools from one MCP entry
+- **Development Map** — orchestration responses include a bounded subagent map, task timings, latest tool usage, runtime usage, and prompt hints
 - **Web Dashboard** — extensible project and home sections for Agent Chat, Skills, Graph, Runtime, Settings, Marketplace, Topology, and workflow operations
 - **Agent Pool** — heterogeneous CLI adapters (Antigravity, Claude, Codex, OpenCode) running in parallel
 - **Plugin System** — external integrations (Telegram, Slack, GitHub) with alert dispatch
@@ -75,10 +76,10 @@ Add to your IDE's MCP configuration:
 }
 ```
 
-That's it. On the next IDE restart the portal will download itself, spawn its child servers, and expose all tools.
+That's it. On the next IDE restart the portal will download itself, spawn its child servers, and expose Agent Portal orchestration plus public child tools.
 
 > [!TIP]
-> The portal replaces individual `project-graph-mcp` and `agent-pool-mcp` entries in your MCP config — you only need this single entry.
+> The portal replaces individual MCP entries. `agent-pool-mcp` stays internal to Agent Portal; external clients use portal chat tools such as `create_chat` and `resume_chat`.
 
 <details>
 <summary>Where is my MCP config file?</summary>
@@ -203,7 +204,7 @@ npx mcp-agent-portal --connect wss://...   # client — joins a master node
 
 ## MCP Ecosystem
 
-Agent Portal aggregates the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal` are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration.
+Agent Portal manages the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal` are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration. Public servers are discoverable through `discover_tools`; `agent-pool-mcp` is the internal execution runtime behind Agent Portal chat orchestration.
 
 | Server | Description | Status |
 |--------|-------------|--------|

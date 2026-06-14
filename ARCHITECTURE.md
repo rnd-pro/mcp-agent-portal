@@ -118,7 +118,7 @@ The portal does **not** expose all child tools directly. Instead, it presents a 
 |-----------|-------------|
 | `discover_tools` | Search public child tools by keyword, tag, or server name |
 | `call_tool` | Proxy a call to a public child tool by name |
-| `get_portal_status` | Health, server list, tool counts, available tags |
+| `get_portal_status` | Health, server list, tool counts, available tags, and development map |
 | `create_chat` | Create an Agent Chat session in the web UI |
 | `send_chat_message` | Send a message to an existing chat session |
 | `resume_chat` | Continue a chat and start a portal-managed orchestration run |
@@ -126,13 +126,13 @@ The portal does **not** expose all child tools directly. Instead, it presents a 
 | `update_chat`, `delete_chat`, `set_chat_session` | Manage chat routing and session metadata |
 | `cancel_chat_task`, `finish_chat_task` | Control a chat's active task through Agent Portal |
 | `create_goal`, `list_goals`, `select_goal`, `complete_goal`, ... | Manage orchestrator goal lifecycle |
-| `get_orchestrator_status` | Orchestrator state, public MCP surface, and internal runtime health |
+| `get_orchestrator_status` | Orchestrator state, public MCP surface, internal runtime health, and development map |
 | `remember` | Save key-value pair to persistent memory |
 | `recall` | Query persistent memory by key substring |
 
 When an IDE sends `tools/list`, it receives Agent Portal meta-tools with dynamic hints about available public child tools. The `call_tool` meta-tool routes only to public child servers using `ToolIndex`; `agent-pool-mcp` is filtered at the server boundary and is not indexed for external MCP discovery or calls. Agent Portal still owns orchestration controls for chats, goals, active tasks, and status through portal-named tools.
 
-`get_portal_status` reports public servers separately from internal runtime health. Internal execution servers are never presented as public MCP servers or public child tool owners.
+`get_portal_status`, `resume_chat`, `get_chat_task_result`, and `get_orchestrator_status` return a bounded `developmentMap`. The map includes a `subagentMap` with chat nodes, delegation edges, and a nested tree; bounded `tasks`; latest tool usage with timestamps and durations; aggregate usage; prompt hints; and runtime content. Internal execution servers are never presented as public MCP servers or public child tool owners.
 
 ### MCP Aggregation Flow
 

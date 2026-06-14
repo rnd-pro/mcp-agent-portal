@@ -19,6 +19,7 @@ import {
 import {
   internalMcpToolBlockedResult,
   isInternalMcpToolName,
+  isPublicMcpToolServer,
   splitMcpHealthStatus,
 } from './mcp-tool-visibility.js';
 import {
@@ -106,7 +107,7 @@ export let META_TOOLS = [
   },
   {
     name: 'resume_chat',
-    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns task routing metadata, runtime content, and a development map with subagents, tasks, latest tools, usage, and prompt hints.',
+    description: 'Continue an existing Agent Chat by sending a new user prompt and starting a delegated agent task bound to the same chat. Reuses saved provider, model, approval mode, agent role, and provider session ID when available. Returns task routing metadata, runtime content, and a development map with subagentMap nodes/tree/edges, tasks, latest tool usage, usage totals, and prompt hints.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -854,6 +855,7 @@ export class MCPMultiplexer {
 
     // If it's a notification from a child (e.g. logging)
     if (!msg.id && msg.method) {
+      if (!isPublicMcpToolServer(serverName)) return;
       this.sendToIde(msg);
       return;
     }

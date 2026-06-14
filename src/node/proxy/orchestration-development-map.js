@@ -2,6 +2,7 @@ const TASK_TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'lost']);
 const TOOL_EVENT_LIMIT = 8;
 const TASK_LIMIT = 40;
 const SUBAGENT_LIMIT = 40;
+const RUNTIME_TEXT_LIMIT = 1200;
 
 function parseJson(value) {
   if (!value || typeof value !== 'string') return null;
@@ -117,6 +118,10 @@ function compactPrompt(prompt = '', limit = 160) {
   return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
 }
 
+function compactRuntimeText(text = '', limit = RUNTIME_TEXT_LIMIT) {
+  return compactPrompt(text, limit);
+}
+
 function mergeTaskSnapshots(sg, taskState = null) {
   let tasks = new Map();
   for (let [id, task] of Object.entries(sg?.get?.('tasks') || {})) {
@@ -206,14 +211,20 @@ function summarizeTask(task = {}, now = Date.now()) {
   };
 }
 
-function normalizeToolEvents(tasks, runtimeEvents = []) {
+function collectToolUses(tasks, runtimeEvents = [], runtimeContext = {}) {
   let events = [];
   for (let task of tasks) {
     for (let event of task.events || []) {
       events.push({ ...event, taskId: task.id, chatId: task.chatId || null });
     }
   }
-  for (let event of runtimeEvents) events.push({ ...event });
+  for (let event of runtimeEvents) {
+    events.push({
+      taskId: event.taskId || runtimeContext.taskId || null,
+      chatId: event.chatId || runtimeContext.chatId || null,
+      ...event,
+    });
+  }
 
   let toolUses = [];
   let resultsById = new Map();
@@ -230,21 +241,21 @@ function normalizeToolEvents(tasks, runtimeEvents = []) {
     let result = (event.tool_id || event.id) ? resultsById.get(event.tool_id || event.id) : null;
     let startedAt = eventTimestamp(event);
     let completedAt = result ? eventTimestamp(result) : null;
+    let usedAt = event.ts || event.timestamp || null;
     toolUses.push({
       taskId: event.taskId || null,
       chatId: event.chatId || null,
       name,
       detail: compactDetail(args),
       status: result?.status || (result ? 'done' : 'running'),
-      startedAt: event.ts || event.timestamp || null,
+      startedAt: usedAt,
+      usedAt,
+      completedAt: result?.ts || result?.timestamp || null,
       durationMs: startedAt && completedAt ? completedAt - startedAt : null,
     });
   }
 
-  return toolUses
-    .filter((event) => event.name)
-    .slice(-TOOL_EVENT_LIMIT)
-    .reverse();
+  return toolUses.filter((event) => event.name);
 }
 
 function extractRuntimeHint(text = '') {
@@ -273,23 +284,179 @@ function buildPromptHints({ chatId, taskId, runtimeText, runningCount }) {
   return [...new Set(hints)].slice(0, 6);
 }
 
-function summarizeUsage(tasks, runtimeResult, now = Date.now()) {
+function taskActivityTime(task = {}) {
+  return normalizeTimestamp(task.lastEventAt || task.completedAt || task.startedAt);
+}
+
+function toolUseTime(tool = {}) {
+  if (!tool) return null;
+  return normalizeTimestamp(tool.usedAt || tool.startedAt);
+}
+
+function summarizeLatestTool(tool = null) {
+  if (!tool) return null;
+  return {
+    name: tool.name,
+    taskId: tool.taskId || null,
+    detail: tool.detail || '',
+    status: tool.status || 'unknown',
+    usedAt: tool.usedAt || null,
+    durationMs: tool.durationMs ?? null,
+  };
+}
+
+function mapByChat(items = [], field = 'chatId') {
+  let map = new Map();
+  for (let item of items) {
+    let chatId = item?.[field];
+    if (!chatId) continue;
+    let list = map.get(chatId) || [];
+    list.push(item);
+    map.set(chatId, list);
+  }
+  return map;
+}
+
+function latestToolByChat(toolUses = []) {
+  let latest = new Map();
+  for (let tool of toolUses) {
+    if (!tool.chatId) continue;
+    let current = latest.get(tool.chatId);
+    if (!current || (toolUseTime(tool) || 0) >= (toolUseTime(current) || 0)) {
+      latest.set(tool.chatId, tool);
+    }
+  }
+  return latest;
+}
+
+function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
+  let tasks = tasksByChat.get(chat.id) || [];
+  let latestTool = toolsByChat.get(chat.id) || null;
+  let activityTimes = [
+    normalizeTimestamp(chat.updatedAt),
+    ...tasks.map(taskActivityTime),
+    toolUseTime(latestTool),
+  ].filter(Boolean);
+  let elapsedValues = tasks
+    .map((task) => Number(task.elapsedMs))
+    .filter(Number.isFinite);
+  return {
+    chatId: chat.id,
+    parentChatId: chat.parentChatId || null,
+    root: rootChatId ? chat.id === rootChatId : !chat.parentChatId,
+    name: chat.name || '',
+    agent: chat.agent || null,
+    adapter: chat.adapter || null,
+    resourceGroup: chat.resource_group || null,
+    approvalMode: chat.approval_mode || null,
+    pendingTaskId: chat.pendingTaskId || null,
+    activeGoalId: chat.activeGoalId || null,
+    sessionId: chat.sessionId || null,
+    taskIds: tasks.map((task) => task.id).filter(Boolean),
+    runningTaskCount: tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length,
+    totalTaskCount: tasks.length,
+    totalElapsedMs: elapsedValues.reduce((sum, value) => sum + value, 0),
+    latestTool: summarizeLatestTool(latestTool),
+    lastActivityAt: activityTimes.length ? Math.max(...activityTimes) : null,
+    updatedAt: chat.updatedAt || null,
+    generatedAt: now,
+  };
+}
+
+function buildTree(nodes) {
+  let byId = new Map(nodes.map((node) => [node.chatId, { ...node, children: [] }]));
+  let roots = [];
+  for (let node of byId.values()) {
+    let parent = node.parentChatId ? byId.get(node.parentChatId) : null;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}
+
+function buildSubagentMap({ chats, scopedChatIds, rootChatId, tasks, toolUses, now }) {
+  let tasksByChat = mapByChat(tasks);
+  let toolsByChat = latestToolByChat(toolUses);
+  let nodes = chats
+    .filter((chat) => chat?.id && scopedChatIds.has(chat.id))
+    .map((chat) => summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now))
+    .sort((a, b) => {
+      if (rootChatId && a.chatId === rootChatId) return -1;
+      if (rootChatId && b.chatId === rootChatId) return 1;
+      return (b.lastActivityAt || 0) - (a.lastActivityAt || 0);
+    })
+    .slice(0, SUBAGENT_LIMIT);
+  let nodeIds = new Set(nodes.map((node) => node.chatId));
+  let edges = nodes
+    .filter((node) => node.parentChatId && nodeIds.has(node.parentChatId))
+    .map((node) => ({
+      from: node.parentChatId,
+      to: node.chatId,
+      kind: 'agent.delegates',
+    }));
+
+  return {
+    rootChatId,
+    nodes,
+    edges,
+    tree: buildTree(nodes),
+    generatedAt: now,
+    limits: {
+      nodes: SUBAGENT_LIMIT,
+      tasks: TASK_LIMIT,
+      latestTools: TOOL_EVENT_LIMIT,
+    },
+  };
+}
+
+function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 0, toolUses = []) {
   let running = tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || ''));
   let elapsedMs = tasks
     .map((task) => Number(task.elapsedMs))
+    .filter(Number.isFinite);
+  let toolDurations = toolUses
+    .map((tool) => Number(tool.durationMs))
     .filter(Number.isFinite);
   let stats = runtimeResult?.result?.stats || null;
   return {
     runningTasks: running.length,
     totalTasks: tasks.length,
+    completedTasks: tasks.filter((task) => TASK_TERMINAL_STATUSES.has(task.status || '')).length,
+    subagents: subagentCount,
+    toolUses: toolUses.length,
+    totalTaskElapsedMs: elapsedMs.reduce((sum, value) => sum + value, 0),
+    toolUsageMs: toolDurations.reduce((sum, value) => sum + value, 0),
     longestElapsedMs: elapsedMs.length ? Math.max(...elapsedMs) : null,
     latestActivityAt: tasks
-      .map((task) => normalizeTimestamp(task.lastEventAt || task.completedAt || task.startedAt))
+      .map(taskActivityTime)
       .filter(Boolean)
       .sort((a, b) => b - a)[0] || null,
     tokens: stats?.total_tokens ?? stats?.tokens?.total ?? null,
     cost: stats?.cost ?? null,
     generatedAt: now,
+  };
+}
+
+function summarizeParsedRuntimeResult(result = null) {
+  if (!result || typeof result !== 'object') return null;
+  let stats = result.stats || null;
+  return {
+    exitCode: result.exitCode ?? null,
+    responsePreview: compactRuntimeText(result.response || ''),
+    toolCallCount: Array.isArray(result.toolCalls) ? result.toolCalls.length : 0,
+    toolResultCount: Array.isArray(result.toolResults) ? result.toolResults.length : 0,
+    tokens: stats?.total_tokens ?? stats?.tokens?.total ?? null,
+    cost: stats?.cost ?? null,
+  };
+}
+
+function summarizeRuntime(runtime) {
+  return {
+    isError: runtime.isError,
+    textPreview: compactRuntimeText(runtime.text),
+    contentCount: runtime.content.length,
+    parsedResultSummary: summarizeParsedRuntimeResult(runtime.result),
+    eventCount: runtime.events.length,
   };
 }
 
@@ -315,45 +482,35 @@ export function buildDevelopmentMap({
     .sort((a, b) => (normalizeTimestamp(b.startedAt) || 0) - (normalizeTimestamp(a.startedAt) || 0))
     .slice(0, TASK_LIMIT);
 
-  let subagents = chats
-    .filter((chat) => chat?.id && scopedChatIds.has(chat.id) && (!chatId || chat.id !== chatId))
-    .map((chat) => ({
-      chatId: chat.id,
-      parentChatId: chat.parentChatId || null,
-      name: chat.name || '',
-      agent: chat.agent || null,
-      adapter: chat.adapter || null,
-      resourceGroup: chat.resource_group || null,
-      approvalMode: chat.approval_mode || null,
-      pendingTaskId: chat.pendingTaskId || null,
-      activeGoalId: chat.activeGoalId || null,
-      sessionId: chat.sessionId || null,
-      updatedAt: chat.updatedAt || null,
-    }))
-    .slice(0, SUBAGENT_LIMIT);
-
-  let latestTools = normalizeToolEvents(rawScopedTasks, runtime.events);
+  let toolUses = collectToolUses(rawScopedTasks, runtime.events, { taskId, chatId });
+  let latestTools = toolUses.slice(-TOOL_EVENT_LIMIT).reverse();
+  let subagentMap = buildSubagentMap({
+    chats,
+    scopedChatIds,
+    rootChatId: chatId,
+    tasks: scopedTasks,
+    toolUses,
+    now,
+  });
+  let subagents = subagentMap.nodes
+    .filter((node) => !chatId || node.chatId !== chatId);
   let runningCount = scopedTasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length;
 
   return {
     rootChatId: chatId,
     primaryTaskId: taskId,
     subagents,
+    subagentMap,
     tasks: scopedTasks,
     latestTools,
-    usage: summarizeUsage(scopedTasks, runtime, now),
+    usage: summarizeUsage(scopedTasks, runtime, now, subagents.length, toolUses),
     promptHints: buildPromptHints({
       chatId,
       taskId,
       runtimeText: runtime.text,
       runningCount,
     }),
-    runtime: {
-      isError: runtime.isError,
-      content: runtime.content,
-      parsedResult: runtime.result,
-      eventCount: runtime.events.length,
-    },
+    runtime: summarizeRuntime(runtime),
   };
 }
 

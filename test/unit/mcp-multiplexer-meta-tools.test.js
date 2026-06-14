@@ -293,3 +293,28 @@ test('delegate readonly tool responses broadcast nested child task events', () =
   assert.equal(events[0].params.chatId, 'chat-1');
   assert.equal(ideMessages[0].id, 70);
 });
+
+test('raw agent-pool notifications are not forwarded to external MCP clients', () => {
+  let ideMessages = [];
+  let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
+  let proxyManager = {
+    servers: new Map([['agent-pool', {}], ['project-graph', {}]]),
+    multiplexerCallbacks: new Set(),
+    broadcastMonitor() {},
+  };
+  let multiplexer = new MCPMultiplexer(proxyManager, ws);
+
+  multiplexer.handleChildMessage('agent-pool', {
+    jsonrpc: '2.0',
+    method: 'notifications/message',
+    params: { message: 'internal task event' },
+  });
+  assert.equal(ideMessages.length, 0);
+
+  multiplexer.handleChildMessage('project-graph', {
+    jsonrpc: '2.0',
+    method: 'notifications/tools/list_changed',
+    params: {},
+  });
+  assert.equal(ideMessages.length, 1);
+});
