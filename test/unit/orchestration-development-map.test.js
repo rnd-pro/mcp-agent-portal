@@ -293,6 +293,8 @@ describe('orchestration development map', () => {
     assert.ok(map.promptHints.some((hint) => hint.includes('get_chat_task_result')));
     assert.ok(map.promptHints.some((hint) => hint.includes('resume_chat')));
     assert.ok(map.promptHints.some((hint) => hint.includes('parentChatId')));
+    assert.equal(JSON.stringify(map).includes('Agent Pool'), false);
+    assert.equal(JSON.stringify(map).includes('agent-pool'), false);
   });
 
   it('parses bounded runtime task state from internal list responses', () => {
@@ -349,7 +351,9 @@ describe('orchestration development map', () => {
     assert.equal(hint.reason.includes('Agent Pool'), false);
     assert.equal(JSON.stringify(map.promptHints).includes(['Agent', 'Pool', 'runtime', 'hint'].join(' ')), false);
     assert.equal(JSON.stringify(map.promptHintMap).includes('Agent Pool'), false);
+    assert.equal(JSON.stringify(map.promptHintMap).includes('agent-pool'), false);
     assert.equal(JSON.stringify(map.activityMap.promptHints).includes('Agent Pool'), false);
+    assert.equal(JSON.stringify(map.activityMap.promptHints).includes('agent-pool'), false);
   });
 
   it('classifies running task liveness for cold, no-event, and quiet tasks', () => {
