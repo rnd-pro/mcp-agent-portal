@@ -560,22 +560,33 @@ function extractRuntimeHint(text = '') {
     .trim();
 }
 
+function publicPromptHintText(value = '') {
+  return String(value || '')
+    .replace(/\bAgent Pool runtime hint\b/g, 'Agent Portal runtime hint')
+    .replace(/\bAgent Pool\b/g, 'Agent Portal')
+    .replace(/\bagent-pool\b/g, 'agent-portal');
+}
+
+function publicPromptHintSource(value = '') {
+  return value === 'agent-pool' ? 'agent-portal' : value || 'agent-portal';
+}
+
 function addPromptHint(hints, hint) {
   if (!hint?.id || hints.some((item) => item.id === hint.id)) return;
   hints.push({
     id: hint.id,
     category: hint.category || 'orchestration',
-    label: hint.label || hint.id,
-    prompt: compactPrompt(hint.prompt || '', 360),
+    label: publicPromptHintText(hint.label || hint.id),
+    prompt: compactPrompt(publicPromptHintText(hint.prompt || ''), 360),
     tool: hint.tool || null,
     arguments: hint.arguments || null,
-    reason: compactPrompt(hint.reason || '', 220),
+    reason: compactPrompt(publicPromptHintText(hint.reason || ''), 220),
     chatId: hint.chatId || null,
     taskId: hint.taskId || null,
     agentSlug: hint.agentSlug || null,
     resourceGroup: hint.resourceGroup || null,
     priority: hint.priority || 'normal',
-    source: hint.source || 'agent-portal',
+    source: publicPromptHintSource(hint.source),
   });
 }
 
@@ -625,7 +636,7 @@ function buildStructuredPromptHints({
       prompt: 'Summarize task status from developmentMap: running/completed tasks, latest tool, elapsed time, blockers, and next local work. Do not poll again for at least 2 minutes unless the user asks.',
       tool: 'get_chat_task_result',
       arguments: { chatId: chatId || '', taskId },
-      reason: 'Refresh this chain without exposing raw Agent Pool tools.',
+      reason: 'Refresh this chain without exposing internal execution tools.',
       chatId,
       taskId,
       agentSlug: latestTask?.agentSlug || null,

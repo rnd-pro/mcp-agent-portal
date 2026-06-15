@@ -348,6 +348,8 @@ describe('orchestration development map', () => {
     assert.equal(hint.source, 'agent-portal');
     assert.equal(hint.reason.includes('Agent Pool'), false);
     assert.equal(JSON.stringify(map.promptHints).includes(['Agent', 'Pool', 'runtime', 'hint'].join(' ')), false);
+    assert.equal(JSON.stringify(map.promptHintMap).includes('Agent Pool'), false);
+    assert.equal(JSON.stringify(map.activityMap.promptHints).includes('Agent Pool'), false);
   });
 
   it('classifies running task liveness for cold, no-event, and quiet tasks', () => {
