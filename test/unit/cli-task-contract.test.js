@@ -12,6 +12,14 @@ function readCliSource() {
 }
 
 describe('CLI task lifecycle contract', () => {
+  it('routes CLI portal meta-tools through the shared multiplexer registry', () => {
+    let source = readCliSource();
+
+    assert.match(source, /META_TOOLS as PORTAL_META_TOOLS/);
+    assert.match(source, /new Set\(PORTAL_META_TOOLS\.map\(tool => tool\.name\)\)/);
+    assert.doesNotMatch(source, /const META_TOOLS = new Set\(\[\s*'discover_tools'/);
+  });
+
   it('uses MCP snake_case task_id arguments for task lifecycle tools', () => {
     let source = readCliSource();
 

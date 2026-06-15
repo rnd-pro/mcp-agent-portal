@@ -12,6 +12,9 @@ import {
   getAnthropicGatewayConfig,
   updateAnthropicGatewayConfig,
 } from '../src/node/config-store.js';
+import {
+  META_TOOLS as PORTAL_META_TOOLS,
+} from '../src/node/proxy/mcp-multiplexer.js';
 
 let __filename = fileURLToPath(import.meta.url);
 let __dirname = dirname(__filename);
@@ -600,15 +603,7 @@ async function apiRequest(path, method = 'GET', body = null, options = {}) {
   });
 }
 
-const META_TOOLS = new Set([
-  'discover_tools',
-  'get_portal_status',
-  'create_chat',
-  'send_chat_message',
-  'remember',
-  'recall',
-  'call_tool'
-]);
+const META_TOOLS = new Set(PORTAL_META_TOOLS.map(tool => tool.name));
 
 // Emulates an MCP Client connecting to the Multiplexer
 async function mcpCall(toolName, argsObj = {}) {
