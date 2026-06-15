@@ -3,7 +3,7 @@ import { getStateGraph } from '../state-graph.js';
 
 /**
  * Starts the Telegram Gateway, connecting external Telegram users
- * to the internal Agent Pool via the proxyManager.
+ * to Agent Portal-managed orchestration via the proxyManager.
  * 
  * @param {import('../proxy/mcp-proxy.js').MCPProxyManager} proxyManager 
  */
@@ -24,7 +24,7 @@ export function startTelegramGateway(proxyManager) {
 
   bot.start((ctx) => {
     if (authorizedChatId && String(ctx.chat.id) !== authorizedChatId) return;
-    ctx.reply('👋 Hello! I am the Agent Portal Telegram Gateway.\nSend me a task and I will delegate it to the Agent Pool.');
+    ctx.reply('👋 Hello! I am the Agent Portal Telegram Gateway.\nSend me a task and I will route it through Agent Portal orchestration.');
   });
 
   bot.on('text', async (ctx) => {
@@ -53,7 +53,7 @@ export function startTelegramGateway(proxyManager) {
     }
 
     try {
-      // Delegate to Agent Pool
+      // Use the internal execution runtime behind Agent Portal orchestration.
       const result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
         name: 'delegate_task',
         arguments: {

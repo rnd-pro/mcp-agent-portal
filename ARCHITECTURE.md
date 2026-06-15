@@ -124,15 +124,17 @@ The portal does **not** expose all child tools directly. Instead, it presents a 
 | `resume_chat` | Continue a chat and start a portal-managed orchestration run |
 | `list_chats`, `get_chat`, `get_chat_messages` | Inspect portal-owned chat state |
 | `update_chat`, `delete_chat`, `set_chat_session` | Manage chat routing and session metadata |
+| `get_chat_task_result` | Read a chat task result with final-agent-message projection, safe runtime summary, and development map |
 | `cancel_chat_task`, `finish_chat_task` | Control a chat's active task through Agent Portal |
 | `create_goal`, `list_goals`, `select_goal`, `complete_goal`, ... | Manage orchestrator goal lifecycle |
 | `get_orchestrator_status` | Orchestrator state, public MCP surface, internal runtime health, and development map |
+| `get_development_map` | Return the safe orchestration map: subagents, tasks, latest tools, usage, liveness, and prompt hints |
 | `remember` | Save key-value pair to persistent memory |
 | `recall` | Query persistent memory by key substring |
 
 When an IDE sends `tools/list`, it receives Agent Portal meta-tools with dynamic hints about available public child tools. The `call_tool` meta-tool routes only to public child servers using `ToolIndex`; `agent-pool-mcp` is filtered at the server boundary and is not indexed for external MCP discovery or calls. Agent Portal still owns orchestration controls for chats, goals, active tasks, and status through portal-named tools.
 
-`get_portal_status`, `resume_chat`, `get_chat_task_result`, and `get_orchestrator_status` return a bounded `developmentMap`. The map includes a `subagentMap` with chat nodes, delegation edges, and a nested tree; bounded `tasks`; latest tool usage with timestamps and durations; aggregate usage; prompt hints; and runtime content. Internal execution servers are never presented as public MCP servers or public child tool owners.
+`get_portal_status`, `resume_chat`, `get_chat_task_result`, `get_development_map`, and `get_orchestrator_status` return a bounded `developmentMap`. The map includes a `subagentMap` with chat nodes, delegation edges, and a nested tree; bounded `tasks`; latest tool usage with timestamps and durations; aggregate usage; prompt hints; and runtime content. Internal execution servers are never presented as public MCP servers or public child tool owners.
 
 ### MCP Aggregation Flow
 
@@ -143,13 +145,13 @@ IDE → tools/call { name: "call_tool", arguments: { name: "get_skeleton", argum
   → child stdout → handleChildMessage → rewrite ID → sendToIde → stdout → IDE
 ```
 
-## Heterogeneous Agent Pool
+## Internal Agent Runtime
 
-Multiple CLI agents run **in parallel** via the `agent-pool-mcp` package. The pool is heterogeneous: different providers handle different tasks simultaneously.
+Agent Portal runs multiple CLI agents **in parallel** through its internal `agent-pool-mcp` execution server. External MCP clients do not call Agent Pool tools directly; they use portal-owned chat and orchestration tools such as `create_chat`, `resume_chat`, `get_chat_task_result`, and `get_development_map`.
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│                AGENT POOL (parallel)                  │
+│          INTERNAL AGENT RUNTIME (parallel)            │
 │                                                       │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐ ┌────────┐ │
 │  │ Antigrav │ │ Antigrav │ │ Claude#1 │ │OpenCode │ │ Codex  │ │
@@ -164,12 +166,10 @@ Multiple CLI agents run **in parallel** via the `agent-pool-mcp` package. The po
 └───────────────────────────────────────────────────────┘
 ```
 
-### Dual Execution Architecture
+### Execution Architecture
 
 > [!NOTE]
-> The portal features two execution paths for CLI agents:
-> 1. **Direct Adapters (`src/node/adapters/`)**: Native adapters for Antigravity, Claude, and Codex that run directly within the portal process. Fallback execution path.
-> 2. **Pool Orchestrator (`agent-pool-mcp`)**: Primary execution path. All providers (Antigravity, Claude, Codex, OpenCode, OpenRouter) are natively implemented inside the `agent-pool-mcp` server. The `AgentChat` UI delegates via `adapter: "pool"`.
+> The portal owns the public orchestration path. `agent-pool-mcp` is the primary internal execution server for providers such as Antigravity, Claude, Codex, OpenCode, and OpenRouter. Direct adapters under `src/node/adapters/` are fallback/diagnostic runners and are not a public MCP delegation surface.
 
 ## Three Operating Modes
 
@@ -306,7 +306,7 @@ Agent Portal manages the RND-PRO MCP ecosystem. The core workspace owns `project
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
-| [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review, file tracking, workflow discovery | ✅ Production |
+| [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Internal execution runtime for Agent Portal chat orchestration, resource groups, pipelines, scheduling, peer review, file tracking, and workflow discovery | ✅ Production |
 | Optional marketplace MCP servers | Browser, terminal, SaaS, and domain tools configured per workspace | Configurable |
 
 > [!IMPORTANT]
@@ -506,7 +506,7 @@ mcp-agent-portal/
 ## Related Projects
 
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
-- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration, file tracking, and workflow discovery
+- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Internal execution runtime used by Agent Portal orchestration
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
 - [symbiote-ui](https://github.com/RND-PRO/symbiote-ui) — Provider UI, graph, layout, XR, theme, and WebMCP contracts
 - [symbiote-engine](https://github.com/RND-PRO/symbiote-engine) — Runtime execution, CLI, registry, persistence, and handlers

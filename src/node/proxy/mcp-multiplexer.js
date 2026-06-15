@@ -63,7 +63,7 @@ export let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the mcp-agent-portal: connected MCP servers, their health, total tool count, available tags for discover_tools filtering, and the current developmentMap with subagentMap, taskMap, toolMap, latest tool timing, liveness, and promptHintMap suggestions.',
+    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, and the current developmentMap with activityMap, subagentMap, taskMap, toolMap, latestTools timing, usage totals, liveness, compatibility promptHints, and promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -71,14 +71,14 @@ export let META_TOOLS = [
   },
   {
     name: 'create_chat',
-    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with subagentMap/taskMap/toolMap timing telemetry, task liveness classification, compatibility promptHints strings, and structured promptHintMap suggestions.',
+    description: 'Create a new Agent Chat session in the portal UI. The UI will instantly display the new chat. Returns structured chat metadata, chatId, and a development map with activityMap, subagentMap/taskMap/toolMap timing telemetry, latestTools, usage totals, task liveness classification, compatibility promptHints strings, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Name or title for the new chat.' },
         adapter: { type: 'string', description: 'Agent adapter to use (e.g. "pool", "antigravity"). Optional.' },
-        agent: { type: 'string', description: 'Agent role slug. Root Agent Pool chats use orchestrator; specialist slugs apply only to child chats with parentChatId.' },
-        agent_slug: { type: 'string', description: 'Alias for agent. Root Agent Pool chats use orchestrator; specialist slugs apply only to child chats with parentChatId.' },
+        agent: { type: 'string', description: 'Agent role slug. Root Agent Portal chats route through orchestrator; specialist slugs apply only to child chats with parentChatId.' },
+        agent_slug: { type: 'string', description: 'Alias for agent. Root Agent Portal chats route through orchestrator; specialist slugs apply only to child chats with parentChatId.' },
         provider: { type: 'string', description: 'CLI provider for pool chats (e.g. "codex", "antigravity", "opencode", "claude"). Optional.' },
         model: { type: 'string', description: 'Model to preselect for this chat. Optional.' },
         approval_mode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Access mode: yolo, auto_edit, or plan. Optional.' },
@@ -94,7 +94,7 @@ export let META_TOOLS = [
   },
   {
     name: 'send_chat_message',
-    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map with subagentMap/taskMap/toolMap timing telemetry and task liveness classification.',
+    description: 'Send a message to an existing Agent Chat session in the portal UI. The message will appear instantly in the UI. Returns structured chat metadata and the current development map with activityMap, subagentMap/taskMap/toolMap timing telemetry, latestTools, usage totals, prompt hints, and task liveness classification.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -121,8 +121,8 @@ export let META_TOOLS = [
         agent: { type: 'string', description: 'Override agent role slug for child/subagent chats. Root chats route through orchestrator.' },
         agent_slug: { type: 'string', description: 'Override agent role slug for child/subagent chats. Root chats route through orchestrator.' },
         cwd: { type: 'string', description: 'Override working directory. Defaults to the chat project path or portal project root.' },
-        context_mode: { type: 'string', enum: ['auto', 'off'], description: 'Context package mode passed to delegate_task. Default: auto.' },
-        files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths passed to delegate_task as structured context hints.' },
+        context_mode: { type: 'string', enum: ['auto', 'off'], description: 'Context package mode for the portal-managed orchestration run. Default: auto.' },
+        files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths used as structured context hints for the portal-managed orchestration run.' },
         goalMessageIds: { type: 'array', items: { type: 'string' }, description: 'Queued goal message IDs to mark applied and inject into this run.' },
         goal_message_ids: { type: 'array', items: { type: 'string' }, description: 'Alias for goalMessageIds.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600.' },

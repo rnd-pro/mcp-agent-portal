@@ -67,7 +67,7 @@ IDE Window 3 (~/project-c) ──stdio──┘      │ (detached process)    �
 - **MCP Gateway** — unified Agent Portal tools plus selected public child tools from one MCP entry
 - **Development Map** — orchestration responses include a bounded subagent map, task timings, latest tool usage with exact or estimated timing, runtime usage, task-state errors, and prompt hints
 - **Web Dashboard** — extensible project and home sections for Agent Chat, Skills, Graph, Runtime, Settings, Marketplace, Topology, and workflow operations
-- **Agent Pool** — heterogeneous CLI adapters (Antigravity, Claude, Codex, OpenCode) running in parallel
+- **Internal Agent Runtime** — Agent Portal runs heterogeneous CLI adapters (Antigravity, Claude, Codex, OpenCode) behind portal-owned chat orchestration
 - **Plugin System** — external integrations (Telegram, Slack, GitHub) with alert dispatch
 - **Distributed Mode** — master/client topology via WebSocket for multi-machine tool sharing
 - **Auto-Restart** — crashed child processes respawn with exponential backoff
@@ -224,7 +224,7 @@ Agent Portal manages the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
-| [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Multi-agent delegation, pipelines, scheduling, peer review | ✅ Production |
+| [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Internal execution runtime for Agent Portal chat orchestration, resource groups, pipelines, scheduling, and peer review | ✅ Production |
 | `.agent-portal` skills | Project-local skills, agents, and workflows | ✅ Production |
 | Optional marketplace MCP servers | Browser, terminal, SaaS, and domain tools configured per workspace | Configurable |
 
@@ -264,7 +264,7 @@ See `.agent-portal/README.md` when project-local skills are installed.
 ## Related Projects
 
 - [project-graph-mcp](https://github.com/rnd-pro/project-graph-mcp) — AST-based codebase analysis for AI agents
-- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Multi-agent orchestration across CLI providers
+- [agent-pool-mcp](https://github.com/rnd-pro/agent-pool-mcp) — Internal execution runtime used by Agent Portal orchestration
 - [Symbiote.js](https://github.com/symbiotejs/symbiote.js) — Isomorphic Reactive Web Components framework
 - [symbiote-ui](https://github.com/RND-PRO/symbiote-ui) — Provider UI, graph, layout, XR, theme, and WebMCP contracts
 - [symbiote-engine](https://github.com/RND-PRO/symbiote-engine) — Runtime execution, CLI, registry, persistence, and handlers
