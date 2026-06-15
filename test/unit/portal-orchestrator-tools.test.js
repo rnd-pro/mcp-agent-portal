@@ -346,6 +346,10 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.match, 'taskId');
     assert.equal(payload.finalAgentMessage.text, 'Completed from runtime.');
     assert.equal(sg.getChat(chat.id).lastTaskStatus, 'done');
+    assert.equal(sg.get('tasks/task-complete').status, 'done');
+    assert.equal(payload.developmentMap.usage.runningTasks, 0);
+    assert.equal(payload.developmentMap.taskMap.byId['task-complete'].status, 'done');
+    assert.equal(payload.developmentMap.taskMap.terminalIds.includes('task-complete'), true);
   });
 
   it('does not reconcile internal task results while still running', async () => {

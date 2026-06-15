@@ -281,6 +281,14 @@ function isTerminalTaskResult(taskResult = null) {
     || Boolean(parseTaskResultJson(taskResult));
 }
 
+function terminalStatusFromTaskResult(taskResult = null) {
+  let text = taskResultText(taskResult);
+  if (/## (?:\[ERR\]|⚠️)?\s*Agent Failed/i.test(text)) return 'error';
+  let exitMatch = text.match(/- Exit code:\s*(\d+)/i);
+  if (exitMatch && Number(exitMatch[1]) !== 0) return 'error';
+  return 'done';
+}
+
 function reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult) {
   if (!chatId || !taskId || !isTerminalTaskResult(taskResult)) return false;
   let chat = sg.getChat(chatId);
@@ -289,6 +297,7 @@ function reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult
   let text = taskResultText(taskResult);
   let parsedResult = parseTaskResultJson(taskResult);
   let task = sg.get(`tasks/${taskId}`);
+  let status = terminalStatusFromTaskResult(taskResult);
   proxyManager?.taskRouter?.persistFinalTaskResult?.(
     chatId,
     taskId,
@@ -296,6 +305,12 @@ function reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult
     task?.startedAt,
     parsedResult,
   );
+  sg.merge(`tasks/${taskId}`, {
+    status,
+    type: status,
+    completedAt: Date.now(),
+    updatedAt: Date.now(),
+  }, 'task-result-reconcile');
   return true;
 }
 
