@@ -255,6 +255,50 @@ function summarizeFinalAgentMessage(chat = null, taskId = null) {
   };
 }
 
+function taskResultText(taskResult = null) {
+  return taskResult?.content?.find?.((item) => item?.type === 'text' && !item.text?.startsWith('__RESULT_JSON__:'))?.text
+    ?? taskResult?.content?.[0]?.text
+    ?? '';
+}
+
+function parseTaskResultJson(taskResult = null) {
+  let jsonText = taskResult?.content?.find?.((item) => item?.text?.startsWith('__RESULT_JSON__:'))?.text;
+  if (!jsonText) return null;
+  try {
+    return JSON.parse(jsonText.substring('__RESULT_JSON__:'.length));
+  } catch {
+    return null;
+  }
+}
+
+function isTerminalTaskResult(taskResult = null) {
+  if (!taskResult || taskResult.isError) return false;
+  let text = taskResultText(taskResult);
+  if (!text.trim()) return false;
+  if (/\[RUN\]\s*Task is still running/i.test(text)) return false;
+  if (/Task [`'"]?[A-Za-z0-9-]+[`'"]? not found/i.test(text) || /Task not found/i.test(text)) return false;
+  return /# Task Result|## Agent Response|## (?:\[ERR\]|⚠️)?\s*Agent Failed/i.test(text)
+    || Boolean(parseTaskResultJson(taskResult));
+}
+
+function reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult) {
+  if (!chatId || !taskId || !isTerminalTaskResult(taskResult)) return false;
+  let chat = sg.getChat(chatId);
+  if (!chat || chat.pendingTaskId !== taskId) return false;
+  if (findFinalAgentMessage(chat, taskId)?.match === 'taskId') return false;
+  let text = taskResultText(taskResult);
+  let parsedResult = parseTaskResultJson(taskResult);
+  let task = sg.get(`tasks/${taskId}`);
+  proxyManager?.taskRouter?.persistFinalTaskResult?.(
+    chatId,
+    taskId,
+    text,
+    task?.startedAt,
+    parsedResult,
+  );
+  return true;
+}
+
 function broadcastChat(proxyManager, chatId) {
   if (!chatId) return;
   proxyManager?.broadcastMonitor?.({
@@ -437,6 +481,9 @@ export async function handlePortalOrchestratorTool(
       chat = chatId ? sg.getChat(chatId) : null;
     }
     let taskResult = await callInternalTaskTool(proxyManager, 'get_task_result', { task_id: taskId });
+    if (reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult)) {
+      chat = sg.getChat(chatId);
+    }
     let taskState = await readInternalTaskState(proxyManager);
     let developmentMap = buildDevelopmentMap({
       sg,

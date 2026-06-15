@@ -33,6 +33,17 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.equal(isTerminalTaskNotificationType('event'), false);
   });
 
+  it('normalizes terminal task notifications into terminal StateGraph status', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+
+    assert.match(source, /function terminalStatusForType\(type\)/);
+    assert.match(source, /if \(type === 'done'\) return 'done';/);
+    assert.match(source, /if \(type === 'error'\) return 'error';/);
+    assert.match(source, /if \(type === 'cancelled'\) return 'cancelled';/);
+    assert.match(source, /taskUpdate\.status = terminalStatusForType\(type\);/);
+    assert.match(source, /taskUpdate\.completedAt = taskUpdate\.completedAt \|\| Date\.now\(\);/);
+  });
+
   it('finalizes cancelled tasks without fetching a final result report', () => {
     let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
 

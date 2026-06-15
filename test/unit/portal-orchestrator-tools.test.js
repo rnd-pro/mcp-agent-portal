@@ -9,6 +9,7 @@ import {
   ORCHESTRATOR_META_TOOLS,
   handlePortalOrchestratorTool,
 } from '../../src/node/proxy/portal-orchestrator-tools.js';
+import { TaskRouter } from '../../src/node/proxy/task-router.js';
 
 describe('portal orchestrator MCP tools', () => {
   let tmpDir;
@@ -27,6 +28,7 @@ describe('portal orchestrator MCP tools', () => {
     internalCalls = [];
     broadcasts = [];
     proxyManager = {
+      stateGraph: sg,
       getHealthStatus: () => ({
         'project-graph': { status: 'healthy' },
         'agent-pool': { status: 'healthy' },
@@ -48,6 +50,7 @@ describe('portal orchestrator MCP tools', () => {
         return { content: [{ type: 'text', text: `${params.name}:ok` }] };
       },
     };
+    proxyManager.taskRouter = new TaskRouter(proxyManager);
   });
 
   afterEach(async () => {
@@ -291,6 +294,136 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal('taskResult' in payload, false);
     assert.equal('content' in payload, false);
     assert.equal(JSON.stringify(payload.developmentMap).includes('secret-session-id'), false);
+  });
+
+  it('reconciles completed internal task results into chat state', async () => {
+    let chat = sg.createChat({ name: 'Completed result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-complete');
+    sg.set('tasks/task-complete', {
+      status: 'running',
+      chatId: chat.id,
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Completed from runtime.',
+              '',
+              '---',
+              '## Stats',
+              '- Exit code: 0',
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: '__RESULT_JSON__:{"toolCalls":[],"toolResults":[]}',
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(sg.getChat(chat.id).pendingTaskId, undefined);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.match, 'taskId');
+    assert.equal(payload.finalAgentMessage.text, 'Completed from runtime.');
+    assert.equal(sg.getChat(chat.id).lastTaskStatus, 'done');
+  });
+
+  it('does not reconcile internal task results while still running', async () => {
+    let chat = sg.createChat({ name: 'Running result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-running');
+    sg.set('tasks/task-running', {
+      status: 'running',
+      chatId: chat.id,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return { content: [{ type: 'text', text: '[RUN] Task is still running.' }] };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(sg.getChat(chat.id).pendingTaskId, 'task-running');
+    assert.equal(payload.finalAgentMessage.hasText, false);
+  });
+
+  it('does not clear a newer pending task when reconciling an older task result', async () => {
+    let chat = sg.createChat({ name: 'Restarted result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-old');
+    sg.updateChatTask(chat.id, 'task-new');
+    sg.set('tasks/task-old', {
+      status: 'running',
+      chatId: chat.id,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Old completion.',
+              '',
+              '---',
+              '## Stats',
+              '- Exit code: 0',
+            ].join('\n'),
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-old' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(sg.getChat(chat.id).pendingTaskId, 'task-new');
+    assert.equal(payload.finalAgentMessage.hasText, false);
   });
 
   it('returns an explicit development map without exposing raw Agent Pool tools', async () => {

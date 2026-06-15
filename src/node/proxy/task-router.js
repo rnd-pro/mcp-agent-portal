@@ -12,6 +12,13 @@ export function isTerminalTaskNotificationType(type) {
   return TERMINAL_TYPES.has(type);
 }
 
+function terminalStatusForType(type) {
+  if (type === 'done') return 'done';
+  if (type === 'error') return 'error';
+  if (type === 'cancelled') return 'cancelled';
+  return null;
+}
+
 export function extractFinalAgentResponse(text = '') {
   let body = text || '';
   let failureIdx = body.search(/## (?:\[ERR\]|⚠️)?\s*Agent Failed/i);
@@ -71,6 +78,10 @@ export class TaskRouter {
     this._streamState = new Map();
   }
 
+  _getStateGraph() {
+    return this.mcpProxy?.stateGraph || getStateGraph();
+  }
+
   /**
    * @param {object} notification
    */
@@ -78,7 +89,7 @@ export class TaskRouter {
     let { taskId, type, data } = notification.params || {};
     if (!taskId) return;
 
-    let sg = getStateGraph();
+    let sg = this._getStateGraph();
     let meta = data?.meta;
 
     // Cache ALL events in StateGraph for delta sync and recovery
@@ -150,17 +161,20 @@ export class TaskRouter {
     }
 
     if (meta && type !== 'event') {
-      let ops = [{ op: 'merge', path: `tasks/${taskId}`, value: {
+      let taskUpdate = {
         ...meta,
         type,
         updatedAt: Date.now(),
-      }}];
+      };
 
       if (isTerminalTaskNotificationType(type)) {
+        taskUpdate.status = terminalStatusForType(type);
+        taskUpdate.completedAt = taskUpdate.completedAt || Date.now();
         setTimeout(() => {
           try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
+      let ops = [{ op: 'merge', path: `tasks/${taskId}`, value: taskUpdate }];
       try { sg.commit(ops, `agent-pool:${type}`); } catch (err) {
         console.error(`[TaskNotify] StateGraph commit failed for ${taskId}:`, err.message);
       }
@@ -198,10 +212,10 @@ export class TaskRouter {
             let jsonStr = result.content?.find(c => c.text?.startsWith('__RESULT_JSON__:'))?.text;
             let parsedResult = jsonStr ? JSON.parse(jsonStr.substring(16)) : null;
             this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
-            getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
+            this._getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
           }).catch(err => {
             console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
-            getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
+            this._getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
           });
         }
       }
@@ -227,14 +241,14 @@ export class TaskRouter {
 
         if (chatId) {
           this._persistFinalTaskResult(chatId, taskId, text, data?.meta?.startedAt, parsedResult);
-          getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
+          this._getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
         }
         if (chatWsServer) {
           chatWsServer.broadcastTaskEvent(taskId, method, { taskId, chatId });
         }
       }).catch(err => {
         console.error(`[TaskRouter] Failed to fetch final task result:`, err.message);
-        if (chatId) getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
+        if (chatId) this._getStateGraph().updateChatTask(chatId, null, { expectedTaskId: taskId });
         if (chatWsServer) {
           chatWsServer.broadcastTaskEvent(taskId, 'chat.error', {
             taskId,
@@ -264,7 +278,7 @@ export class TaskRouter {
    * @returns {object|null} Meta-delta for WS broadcast
    */
   _appendEventToChat(chatId, taskId, data) {
-    let sg = getStateGraph();
+    let sg = this._getStateGraph();
     let chat = sg.getChat(chatId);
     if (!chat) return null;
 
@@ -399,7 +413,7 @@ export class TaskRouter {
   }
 
   _findChatForTask(taskId) {
-    let sg = getStateGraph();
+    let sg = this._getStateGraph();
     let chats = sg.listChats();
     for (let chat of chats) {
       if (chat.pendingTaskId === taskId) {
@@ -422,7 +436,7 @@ export class TaskRouter {
 
     if (!chatId) return;
 
-    let sg = getStateGraph();
+    let sg = this._getStateGraph();
     let chat = sg.getChat(chatId);
     if (chat) {
       let msgs = (chat.messages || []).map((message) => (
@@ -435,6 +449,10 @@ export class TaskRouter {
     this.mcpProxy.broadcastMonitor?.({ jsonrpc: '2.0', method: 'patch', params: { path: 'chats.updated', value: chatId } });
   }
 
+  persistFinalTaskResult(chatId, taskId, text, startedAt, parsedResult) {
+    this._persistFinalTaskResult(chatId, taskId, text, startedAt, parsedResult);
+  }
+
   /**
    * @param {string} chatId 
    * @param {string} taskId
@@ -443,7 +461,7 @@ export class TaskRouter {
    * @param {object} parsedResult
    */
   _persistFinalTaskResult(chatId, taskId, text, startedAt, parsedResult) {
-    let sg = getStateGraph();
+    let sg = this._getStateGraph();
     let chat = sg.getChat(chatId);
     if (!chat) return;
 
@@ -556,7 +574,7 @@ export class TaskRouter {
       console.warn('[TaskRouter] Rejected project transaction:', rejection);
     }
 
-    let saved = getStateGraph().appendChatProjectTransactions(chat.id, accepted);
+    let saved = this._getStateGraph().appendChatProjectTransactions(chat.id, accepted);
     if (saved.length === 0) return;
 
     for (let transaction of saved) {
