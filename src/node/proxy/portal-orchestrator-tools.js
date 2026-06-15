@@ -236,8 +236,37 @@ function findFinalAgentMessage(chat = null, taskId = null) {
   return fallback;
 }
 
+function isPlanModeSummary(text = '') {
+  let normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /\bplan\b/.test(normalized) && (
+    /\babove\b/.test(normalized) ||
+    /\bready\b/.test(normalized) ||
+    /\bapproval\b/.test(normalized) ||
+    /\bproceed\b/.test(normalized)
+  );
+}
+
+function findExitPlanMessage(chat = null, taskId = null) {
+  if (!taskId) return null;
+  let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    let message = messages[i];
+    if (message?.role !== 'tool' || message?.name !== 'ExitPlanMode') continue;
+    if (message.taskId !== taskId) continue;
+    let text = String(message.input?.plan || '').trim();
+    if (!text) continue;
+    return { message: { ...message, text }, index: i, match: 'taskId-exit-plan' };
+  }
+  return null;
+}
+
 function summarizeFinalAgentMessage(chat = null, taskId = null) {
   let found = chat?.id && taskId ? findFinalAgentMessage(chat, taskId) : null;
+  let exitPlan = chat?.id && taskId ? findExitPlanMessage(chat, taskId) : null;
+  if (exitPlan && (!found || isPlanModeSummary(found.message?.text))) {
+    found = exitPlan;
+  }
   let clipped = clipFinalAgentText(found?.message?.text || '');
   return {
     hasText: Boolean(clipped.text),

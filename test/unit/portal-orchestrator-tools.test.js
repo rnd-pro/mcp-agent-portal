@@ -352,6 +352,52 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.taskMap.terminalIds.includes('task-complete'), true);
   });
 
+  it('uses ExitPlanMode content when plan-mode final agent text only references the plan', async () => {
+    let chat = sg.createChat({ name: 'Plan mode result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-plan');
+    sg.set('tasks/task-plan', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let localPath = ['', 'Users', 'example', 'private', 'plan.md'].join('/');
+    let sessionValue = ['session', 'value', 'plan'].join('-');
+    let localPathPattern = new RegExp(['', 'Users', 'example'].join('/'));
+    sg.appendChatMessage(chat.id, {
+      role: 'tool',
+      name: 'ExitPlanMode',
+      taskId: 'task-plan',
+      input: {
+        plan: `# Plan\n\nApply the projection fix from ${localPath} with session_id=${sessionValue}. ${'x'.repeat(5000)}`,
+      },
+      streaming: false,
+    });
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'The plan is presented above. Ready to apply when confirmed.',
+      taskId: 'task-plan',
+      streaming: false,
+    });
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-plan' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.source, 'chat');
+    assert.equal(payload.finalAgentMessage.match, 'taskId-exit-plan');
+    assert.equal(payload.finalAgentMessage.truncated, true);
+    assert.equal(payload.finalAgentMessage.text.length <= 4000, true);
+    assert.match(payload.finalAgentMessage.text, /Apply the projection fix/);
+    assert.doesNotMatch(payload.finalAgentMessage.text, /presented above/);
+    assert.doesNotMatch(payload.finalAgentMessage.text, localPathPattern);
+    assert.doesNotMatch(payload.finalAgentMessage.text, new RegExp(sessionValue));
+  });
+
   it('does not reconcile internal task results while still running', async () => {
     let chat = sg.createChat({ name: 'Running result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-running');
