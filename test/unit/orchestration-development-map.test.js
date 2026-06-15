@@ -316,6 +316,40 @@ describe('orchestration development map', () => {
     });
   });
 
+  it('labels runtime prompt hints as Agent Portal surface data', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-root');
+    sg.set('tasks/task-root', {
+      status: 'running',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      resourceGroup: 'orchestration-readonly',
+      startedAt: Date.now() - 1000,
+      prompt: 'Run audit',
+      events: [],
+    }, 'test');
+
+    let taskResult = {
+      content: [{
+        type: 'text',
+        text: '[RUN] Task is still running.\n\n[INFO] **Check with `get_task_result` after doing useful work.**',
+      }],
+    };
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskId: 'task-root',
+      taskResult,
+    });
+    let hint = map.promptHintMap.hints.find((item) => item.id === 'runtime-coaching');
+
+    assert.equal(hint.label, 'Agent Portal runtime hint');
+    assert.equal(hint.source, 'agent-portal');
+    assert.equal(hint.reason.includes('Agent Pool'), false);
+    assert.equal(JSON.stringify(map.promptHints).includes(['Agent', 'Pool', 'runtime', 'hint'].join(' ')), false);
+  });
+
   it('classifies running task liveness for cold, no-event, and quiet tasks', () => {
     let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
     let child = sg.createChat({ name: 'Quiet chain', parentChatId: root.id, agent: 'backend-engineer' }, 'test');

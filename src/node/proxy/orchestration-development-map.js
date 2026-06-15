@@ -607,14 +607,14 @@ function buildStructuredPromptHints({
     addPromptHint(hints, {
       id: 'runtime-coaching',
       category: 'runtime',
-      label: 'Agent Pool runtime hint',
+      label: 'Agent Portal runtime hint',
       prompt: runtimeHint,
-      reason: 'Forwarded from the internal Agent Pool running-task result.',
+      reason: 'Derived from the Agent Portal running-task result.',
       chatId,
       taskId,
       agentSlug: latestTask?.agentSlug || null,
       resourceGroup: latestTask?.resourceGroup || null,
-      source: 'agent-pool',
+      source: 'agent-portal',
     });
   }
   if (taskId) {
