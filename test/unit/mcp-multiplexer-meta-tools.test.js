@@ -85,9 +85,10 @@ test('portal chat meta-tools default pool chats to orchestrator', () => {
   assert.match(source, /prepareDelegateTaskCall,[\s\S]*resolveChatCreationAgent/);
   assert.match(orchestrationSource, /export const DEFAULT_CHAT_AGENT = 'orchestrator';/);
   assert.match(routingSource, /next\.agent_slug = resolveChatDelegationAgent\(\{ explicitAgent, contextChat \}\)/);
+  assert.match(source, /normalizeResourceGroup\(args\.resource_group\)/);
   assert.match(source, /agent: resolveChatCreationAgent\(args\)/);
-  assert.match(source, /provider: resourceGroup && resourceGroup !== 'none' \? null : \(args\.provider \|\| null\)/);
-  assert.match(source, /model: resourceGroup && resourceGroup !== 'none' \? null : \(args\.model \|\| null\)/);
+  assert.match(source, /provider: resourceGroup \? null : \(args\.provider \|\| null\)/);
+  assert.match(source, /model: resourceGroup \? null : \(args\.model \|\| null\)/);
   assert.match(source, /resource_group: resourceGroup/);
 });
 

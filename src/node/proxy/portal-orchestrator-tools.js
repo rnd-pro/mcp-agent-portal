@@ -220,8 +220,9 @@ function clipFinalAgentText(text = '') {
   };
 }
 
-function findFinalAgentMessage(chat = null, taskId = null) {
+function findFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  let allowLatestFallback = options.allowLatestFallback !== false;
   let fallback = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     let message = messages[i];
@@ -231,7 +232,7 @@ function findFinalAgentMessage(chat = null, taskId = null) {
     if (taskId && message.taskId === taskId) {
       return { message, index: i, match: 'taskId' };
     }
-    if (!fallback) fallback = { message, index: i, match: 'latest-agent' };
+    if (allowLatestFallback && !fallback) fallback = { message, index: i, match: 'latest-agent' };
   }
   return fallback;
 }
@@ -261,8 +262,8 @@ function findExitPlanMessage(chat = null, taskId = null) {
   return null;
 }
 
-function summarizeFinalAgentMessage(chat = null, taskId = null) {
-  let found = chat?.id && taskId ? findFinalAgentMessage(chat, taskId) : null;
+function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
+  let found = chat?.id ? findFinalAgentMessage(chat, taskId, options) : null;
   let exitPlan = chat?.id && taskId ? findExitPlanMessage(chat, taskId) : null;
   if (exitPlan && (!found || isPlanModeSummary(found.message?.text))) {
     found = exitPlan;
@@ -288,6 +289,10 @@ function taskResultText(taskResult = null) {
   return taskResult?.content?.find?.((item) => item?.type === 'text' && !item.text?.startsWith('__RESULT_JSON__:'))?.text
     ?? taskResult?.content?.[0]?.text
     ?? '';
+}
+
+function isRunningTaskResult(taskResult = null) {
+  return /\[RUN\]\s*Task is still running/i.test(taskResultText(taskResult));
 }
 
 function parseTaskResultJson(taskResult = null) {
@@ -518,6 +523,7 @@ export async function handlePortalOrchestratorTool(
   if (toolName === 'get_chat_task_result') {
     let chatId = getChatId(args);
     let chat = chatId ? sg.getChat(chatId) : null;
+    let hasExplicitTaskId = Boolean(args.taskId || args.task_id);
     let taskId = getTaskId(args, chat);
     if (!taskId) return errorResult('Missing taskId and no pending task is attached to the chat.');
     if (!chatId) {
@@ -536,7 +542,8 @@ export async function handlePortalOrchestratorTool(
       taskResult,
       taskState,
     });
-    let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId);
+    let allowLatestFallback = !isRunningTaskResult(taskResult) && (!hasExplicitTaskId || taskResult?.isError);
+    let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId, { allowLatestFallback });
     return textResult({
       ok: !taskResult?.isError || finalAgentMessage.hasText,
       chatId,

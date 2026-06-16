@@ -25,6 +25,11 @@ function normalizeFiles(files) {
   return [...new Set(files.map(file => String(file || '').trim()).filter(Boolean))];
 }
 
+export function normalizeResourceGroup(value) {
+  let normalized = String(value ?? '').trim();
+  return normalized && normalized !== 'none' ? normalized : null;
+}
+
 function normalizeRelFile(cwd, file) {
   let rel = path.isAbsolute(file) ? path.relative(cwd, file) : file;
   return rel.replaceAll(path.sep, '/');
@@ -280,6 +285,12 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   let explicitChatId = next.chat_id || next.chatId || null;
   let parentChatId = next.parent_chat_id || next.parentChatId || null;
   let explicitAgent = next.agent_slug || next.agent || null;
+  let explicitResourceGroupValue = next.resource_group ?? next.resourceGroup;
+  let hasResourceGroupOverride = explicitResourceGroupValue !== undefined
+    && explicitResourceGroupValue !== null
+    && String(explicitResourceGroupValue).trim() !== '';
+  next.resource_group = normalizeResourceGroup(explicitResourceGroupValue);
+  delete next.resourceGroup;
   let createdChat = null;
   let contextChatId = explicitChatId;
   let contextChat = explicitChatId ? sg.getChat(explicitChatId) : null;
@@ -289,7 +300,8 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
     let parentChat = sg.getChat(parentChatId) || sg.get(`chats/${parentChatId}`) || null;
     let inheritedForDefaultAgent = !explicitAgent;
     let childAgent = explicitAgent || DEFAULT_CHAT_AGENT;
-    let childResourceGroup = next.resource_group || (inheritedForDefaultAgent ? parentChat?.resource_group : null) || null;
+    let childResourceGroup = next.resource_group
+      || (inheritedForDefaultAgent && !hasResourceGroupOverride ? normalizeResourceGroup(parentChat?.resource_group) : null);
     let childApprovalMode = next.approval_mode || (inheritedForDefaultAgent ? parentChat?.approval_mode : null) || null;
     let child = sg.createChat({
       name: chatTitleFromPrompt(next.prompt),
@@ -319,9 +331,11 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   next.agent_slug = resolveChatDelegationAgent({ explicitAgent, contextChat });
   delete next.agent;
 
-  let hasRoutingOverride = Boolean(next.provider || next.model || next.resource_group || next.resourceGroup);
+  let hasRoutingOverride = Boolean(next.provider || next.model || hasResourceGroupOverride);
   if (!next.approval_mode && contextChat?.approval_mode) next.approval_mode = contextChat.approval_mode;
-  if (!next.resource_group && contextChat?.resource_group) next.resource_group = contextChat.resource_group;
+  if (!hasResourceGroupOverride && !next.resource_group && contextChat?.resource_group) {
+    next.resource_group = normalizeResourceGroup(contextChat.resource_group);
+  }
   if (!next.session_id && !next.sessionId && contextChat?.sessionId && !hasRoutingOverride) {
     next.session_id = contextChat.sessionId;
   }
@@ -330,7 +344,7 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
       || (proxyManager?.projectRoot && proxyManager.projectRoot !== '/' ? proxyManager.projectRoot : process.env.HOME);
   }
 
-  if (next.resource_group && next.resource_group !== 'none') {
+  if (next.resource_group) {
     delete next.provider;
     delete next.model;
   } else {
@@ -359,6 +373,7 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
 
   delete next.chatId;
   delete next.parentChatId;
+  if (!next.resource_group) delete next.resource_group;
   return { args: next, chatId: next.chat_id || contextChatId || null, parentChatId, createdChat };
 }
 

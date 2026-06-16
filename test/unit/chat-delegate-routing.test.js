@@ -170,6 +170,30 @@ describe('chat delegate routing', () => {
     assert.equal(switched.args.resource_group, 'orchestration-readonly');
   });
 
+  it('treats resource_group none as an explicit group clear', async () => {
+    let chat = sg.createChat({
+      name: 'Main',
+      agent: 'orchestrator',
+      provider: 'claude',
+      model: 'deepseek/deepseek-v4-pro',
+      resource_group: 'reasoning-heavy',
+    }, 'test');
+    sg.updateChatSession(chat.id, 'claude-session');
+
+    let prepared = await prepareDelegateTaskCall(proxyManager, 'delegate_task', {
+      chat_id: chat.id,
+      prompt: 'Continue without a group',
+      resource_group: 'none',
+      provider: 'codex',
+      model: 'gpt-test',
+    }, { stateGraph: sg, source: 'test' });
+
+    assert.equal(prepared.args.resource_group, undefined);
+    assert.equal(prepared.args.provider, 'codex');
+    assert.equal(prepared.args.model, 'gpt-test');
+    assert.equal(prepared.args.session_id, undefined);
+  });
+
   it('adds compact project graph focus context from files hints', async () => {
     let projectPath = path.join(tmpDir, 'project');
     let project = sg.addProject({ path: projectPath, name: 'Project' });

@@ -13,6 +13,7 @@ import {
 } from './portal-orchestrator-tools.js';
 import {
   isDelegateTool,
+  normalizeResourceGroup,
   prepareDelegateTaskCall,
   resolveChatCreationAgent,
 } from './chat-delegate-routing.js';
@@ -299,7 +300,8 @@ export async function resumeChatTool(proxyManager, args = {}) {
   };
   if (args.provider) delegateArgs.provider = args.provider;
   if (args.model) delegateArgs.model = args.model;
-  if (args.resource_group) delegateArgs.resource_group = args.resource_group;
+  let resourceGroup = normalizeResourceGroup(args.resource_group);
+  if (resourceGroup) delegateArgs.resource_group = resourceGroup;
   if (args.session_id || args.sessionId) delegateArgs.session_id = args.session_id || args.sessionId;
   if (args.approval_mode) delegateArgs.approval_mode = args.approval_mode;
   if (args.agent || args.agent_slug) delegateArgs.agent_slug = args.agent || args.agent_slug;
@@ -652,13 +654,13 @@ export class MCPMultiplexer {
           if (parentMeta) projectId = parentMeta.projectId || null;
         }
         
-        let resourceGroup = args.resource_group || null;
+        let resourceGroup = normalizeResourceGroup(args.resource_group);
         let chat = sg.createChat({
           name: args.name,
           adapter: args.adapter || 'pool',
           agent: resolveChatCreationAgent(args),
-          provider: resourceGroup && resourceGroup !== 'none' ? null : (args.provider || null),
-          model: resourceGroup && resourceGroup !== 'none' ? null : (args.model || null),
+          provider: resourceGroup ? null : (args.provider || null),
+          model: resourceGroup ? null : (args.model || null),
           approval_mode: args.approval_mode || null,
           resource_group: resourceGroup,
           chatType: args.chatType || null,

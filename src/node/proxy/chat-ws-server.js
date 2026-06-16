@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import { getStateGraph } from '../state-graph.js';
 import { fetchTaskResult } from './mcp-helpers.js';
-import { prepareDelegateTaskCall, resolveChatCreationAgent } from './chat-delegate-routing.js';
+import { normalizeResourceGroup, prepareDelegateTaskCall, resolveChatCreationAgent } from './chat-delegate-routing.js';
 
 /** WebSocket server for chat-based agent interactions. */
 export class ChatWsServer {
@@ -53,6 +53,10 @@ export class ChatWsServer {
     let { chatId, prompt, sessionId, timeout, model, provider, approval_mode, resource_group, context_mode } = params;
     let agentSlug = params.agent || params.agent_slug || null;
     if (!prompt) return;
+    let hasResourceGroupOverride = resource_group !== undefined
+      && resource_group !== null
+      && String(resource_group).trim() !== '';
+    resource_group = normalizeResourceGroup(resource_group);
 
     let sg = getStateGraph();
     if (!chatId || !sg.getChat(chatId)) {
@@ -67,7 +71,7 @@ export class ChatWsServer {
         provider: provider || null,
         model: model || null,
         approval_mode: approval_mode || null,
-        resource_group: resource_group || null,
+        resource_group,
       });
       chatId = chat.id;
       sg.appendChatMessage(chatId, { role: 'user', content: prompt });
@@ -91,7 +95,9 @@ export class ChatWsServer {
         if (!model && chatData.model) model = chatData.model;
         if (!sessionId && chatData.sessionId) sessionId = chatData.sessionId;
         if (!approval_mode && chatData.approval_mode) approval_mode = chatData.approval_mode;
-        if (!resource_group && chatData.resource_group) resource_group = chatData.resource_group;
+        if (!hasResourceGroupOverride && !resource_group && chatData.resource_group) {
+          resource_group = normalizeResourceGroup(chatData.resource_group);
+        }
         if ((!agentSlug || agentSlug === 'none') && chatData.agent) agentSlug = chatData.agent;
       }
     }
@@ -103,7 +109,7 @@ export class ChatWsServer {
       agentSlug = resolveChatCreationAgent({ adapter: 'pool', agent: agentSlug });
     }
 
-    if (resource_group && resource_group !== 'none') {
+    if (resource_group) {
       provider = null;
       model = null;
     }
@@ -113,7 +119,7 @@ export class ChatWsServer {
     if (model) delegateArgs.model = model;
     if (provider) delegateArgs.provider = provider;
     if (approval_mode) delegateArgs.approval_mode = approval_mode;
-    if (resource_group && resource_group !== 'none') delegateArgs.resource_group = resource_group;
+    if (resource_group) delegateArgs.resource_group = resource_group;
     if (context_mode === 'auto' || context_mode === 'off') delegateArgs.context_mode = context_mode;
     if (Array.isArray(params.files)) {
       let files = [...new Set(params.files.map(file => String(file || '').trim()).filter(Boolean))];
