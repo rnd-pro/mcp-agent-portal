@@ -326,10 +326,12 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
       totalEvents,
     };
   }
-  if (isIntroOnlyFinalAgentText(text) && (toolCallCount > 0 || totalEvents > 0)) {
+  if (isIntroOnlyFinalAgentText(text)) {
     return {
       state: 'weak-intro-only',
-      reason: 'intro-only-final-with-runtime-activity',
+      reason: toolCallCount > 0 || totalEvents > 0
+        ? 'intro-only-final-with-runtime-activity'
+        : 'intro-only-final',
       toolCallCount,
       totalEvents,
     };

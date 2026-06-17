@@ -543,6 +543,48 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.totalEvents, 31);
   });
 
+  it('flags intro-only final audit text even when runtime result is unavailable', async () => {
+    let chat = sg.createChat({ name: 'Intro-only unavailable result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-intro-unavailable');
+    sg.set('tasks/task-intro-unavailable', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'Here is the requirement-by-requirement completion-proof audit for the 24h Public Runtime Package Construction cycle.',
+      taskId: 'task-intro-unavailable',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return { isError: true, content: [{ type: 'text', text: 'runtime result unavailable' }] };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-intro-unavailable' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.ok, true);
+    assert.equal(payload.runtime.isError, true);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-intro-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'intro-only-final');
+    assert.equal(payload.finalAgentMessage.quality.toolCallCount, 0);
+    assert.equal(payload.finalAgentMessage.quality.totalEvents, 0);
+  });
+
   it('flags heading-only final audit text when runtime activity shows real work happened', async () => {
     let chat = sg.createChat({ name: 'Heading-only result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-heading');
