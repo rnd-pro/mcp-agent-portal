@@ -278,6 +278,18 @@ function isGenericFinalAgentText(text = '') {
   ].includes(normalized);
 }
 
+function isIntroOnlyFinalAgentText(text = '') {
+  let normalized = String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  return [
+    /^now i have all (?:the )?evidence\.? here is (?:the )?.+\.?$/,
+    /^i now have (?:a )?(?:complete|full) picture\.? here is (?:my|the) .+\.?$/,
+    /^here is (?:my|the) .+\.?$/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
 function finalAgentMessageQuality(text = '', parsedResult = null) {
   if (!text) return { state: 'missing', reason: 'no-final-agent-text' };
   let toolCallCount = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls.length : 0;
@@ -286,6 +298,14 @@ function finalAgentMessageQuality(text = '', parsedResult = null) {
     return {
       state: 'weak-generic',
       reason: 'generic-final-with-runtime-activity',
+      toolCallCount,
+      totalEvents,
+    };
+  }
+  if (isIntroOnlyFinalAgentText(text) && (toolCallCount > 0 || totalEvents > 0)) {
+    return {
+      state: 'weak-intro-only',
+      reason: 'intro-only-final-with-runtime-activity',
       toolCallCount,
       totalEvents,
     };
