@@ -285,6 +285,7 @@ function isIntroOnlyFinalAgentText(text = '') {
     .replace(/\s+/g, ' ');
   return [
     /^now i have all (?:the )?evidence\.? here is (?:the )?.+\.?$/,
+    /^now i have all (?:the )?evidence\.? let me (?:compile|prepare|produce|write) (?:the )?.+\.?$/,
     /^i now have (?:a )?(?:complete|full) picture\.? here is (?:my|the) .+\.?$/,
     /^here is (?:my|the) .+\.?$/,
   ].some((pattern) => pattern.test(normalized));

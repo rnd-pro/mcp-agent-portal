@@ -585,6 +585,64 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.totalEvents, 0);
   });
 
+  it('flags compile-the-audit preface as intro-only when runtime activity exists', async () => {
+    let chat = sg.createChat({ name: 'Compile preface result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-compile-preface');
+    sg.set('tasks/task-compile-preface', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'Now I have all the evidence. Let me compile the completion-proof audit.',
+      taskId: 'task-compile-preface',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        let response = 'Now I have all the evidence. Let me compile the completion-proof audit.';
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 22,
+                toolCalls: [
+                  { name: 'Read', args: { file_path: 'checklist.md' } },
+                  { name: 'Bash', args: { command: 'npm pack --dry-run' } },
+                ],
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-compile-preface' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-intro-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'intro-only-final-with-runtime-activity');
+    assert.equal(payload.finalAgentMessage.quality.toolCallCount, 2);
+    assert.equal(payload.finalAgentMessage.quality.totalEvents, 22);
+  });
+
   it('flags heading-only final audit text when runtime activity shows real work happened', async () => {
     let chat = sg.createChat({ name: 'Heading-only result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-heading');
