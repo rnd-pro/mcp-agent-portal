@@ -581,6 +581,8 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.hasText, true);
     assert.equal(payload.finalAgentMessage.source, 'chat');
     assert.equal(payload.finalAgentMessage.match, 'taskId-exit-plan');
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-exit-plan');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'exit-plan-mode-final');
     assert.equal(payload.finalAgentMessage.truncated, true);
     assert.equal(payload.finalAgentMessage.text.length <= 4000, true);
     assert.match(payload.finalAgentMessage.text, /Apply the projection fix/);

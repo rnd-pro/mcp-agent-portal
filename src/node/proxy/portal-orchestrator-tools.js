@@ -290,10 +290,18 @@ function isIntroOnlyFinalAgentText(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
-function finalAgentMessageQuality(text = '', parsedResult = null) {
+function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) {
   if (!text) return { state: 'missing', reason: 'no-final-agent-text' };
   let toolCallCount = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls.length : 0;
   let totalEvents = Number.isFinite(parsedResult?.totalEvents) ? parsedResult.totalEvents : 0;
+  if (options.match === 'taskId-exit-plan') {
+    return {
+      state: 'weak-exit-plan',
+      reason: 'exit-plan-mode-final',
+      toolCallCount,
+      totalEvents,
+    };
+  }
   if (isGenericFinalAgentText(text) && (toolCallCount > 0 || totalEvents > 0)) {
     return {
       state: 'weak-generic',
@@ -320,7 +328,9 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
     found = exitPlan;
   }
   let clipped = clipFinalAgentText(found?.message?.text || '');
-  let quality = finalAgentMessageQuality(clipped.text, options.parsedResult);
+  let quality = finalAgentMessageQuality(clipped.text, options.parsedResult, {
+    match: found?.match || null,
+  });
   return {
     hasText: Boolean(clipped.text),
     text: clipped.text,
