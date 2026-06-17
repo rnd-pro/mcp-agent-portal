@@ -352,6 +352,65 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.taskMap.terminalIds.includes('task-complete'), true);
   });
 
+  it('replaces short task placeholders with completed runtime results', async () => {
+    let chat = sg.createChat({ name: 'Placeholder result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-placeholder');
+    sg.set('tasks/task-placeholder', {
+      status: 'running',
+      chatId: chat.id,
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      taskId: 'task-placeholder',
+      text: 'I now have a complete picture. Here is my audit report.',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Detailed audit body with actionable findings.',
+              '',
+              '---',
+              '## Stats',
+              '- Exit code: 0',
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: '__RESULT_JSON__:{"toolCalls":[],"toolResults":[]}',
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let messages = sg.getChat(chat.id).messages.filter(message => message.role === 'agent');
+
+    assert.equal(payload.finalAgentMessage.text, 'Detailed audit body with actionable findings.');
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].text, 'Detailed audit body with actionable findings.');
+    assert.equal(sg.getChat(chat.id).lastTaskStatus, 'done');
+    assert.equal(sg.get('tasks/task-placeholder').status, 'done');
+  });
+
   it('uses ExitPlanMode content when plan-mode final agent text only references the plan', async () => {
     let chat = sg.createChat({ name: 'Plan mode result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-plan');

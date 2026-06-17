@@ -3,6 +3,7 @@ import {
   buildDevelopmentMap,
   parseTaskStateResult,
 } from './orchestration-development-map.js';
+import { extractFinalAgentResponse } from './task-router.js';
 
 const FINAL_AGENT_MESSAGE_TEXT_LIMIT = 4000;
 const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
@@ -327,8 +328,12 @@ function reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult
   if (!chatId || !taskId || !isTerminalTaskResult(taskResult)) return false;
   let chat = sg.getChat(chatId);
   if (!chat || chat.pendingTaskId !== taskId) return false;
-  if (findFinalAgentMessage(chat, taskId)?.match === 'taskId') return false;
   let text = taskResultText(taskResult);
+  let existing = findFinalAgentMessage(chat, taskId);
+  let body = extractFinalAgentResponse(text);
+  if (existing?.match === 'taskId' && (!body || String(existing.message?.text || '').trim() === body.trim())) {
+    return false;
+  }
   let parsedResult = parseTaskResultJson(taskResult);
   let task = sg.get(`tasks/${taskId}`);
   let status = terminalStatusFromTaskResult(taskResult);

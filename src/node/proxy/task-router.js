@@ -501,8 +501,16 @@ export class TaskRouter {
     let meta = {};
     if (text) {
       let body = extractFinalAgentResponse(text);
-      let lastAgent = [...msgs].reverse().find(m => m.role === 'agent');
-      if (!lastAgent || !lastAgent.streaming) {
+      let lastAgentIndex = msgs.findLastIndex(m => m.role === 'agent' && m.taskId === taskId);
+      let lastAgent = lastAgentIndex >= 0 ? msgs[lastAgentIndex] : [...msgs].reverse().find(m => m.role === 'agent');
+      if (lastAgent?.taskId === taskId && body) {
+        msgs[lastAgentIndex] = {
+          ...lastAgent,
+          text: body,
+          taskId,
+          streaming: false,
+        };
+      } else if (!lastAgent || !lastAgent.streaming) {
         msgs.push({ role: 'agent', text: body, taskId, streaming: false });
       } else {
         lastAgent.text = body || lastAgent.text;
@@ -532,13 +540,19 @@ export class TaskRouter {
     }
 
     let elapsedSec = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
-    msgs.push({
+    let thinkingIndex = msgs.findLastIndex(m => m.role === 'thinking' && m.taskId === taskId && m.done);
+    let thinkingMessage = {
       role: 'thinking',
       taskId,
       elapsed: elapsedSec,
       done: true,
       meta: Object.keys(meta).length > 0 ? meta : null
-    });
+    };
+    if (thinkingIndex >= 0) {
+      msgs[thinkingIndex] = thinkingMessage;
+    } else {
+      msgs.push(thinkingMessage);
+    }
 
     // Finalize all streaming flags
     msgs = msgs.map(m => m.streaming ? { ...m, streaming: false } : m);
