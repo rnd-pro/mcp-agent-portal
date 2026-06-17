@@ -411,6 +411,70 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(sg.get('tasks/task-placeholder').status, 'done');
   });
 
+  it('flags generic final text when runtime activity shows real work happened', async () => {
+    let chat = sg.createChat({ name: 'Generic final result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-generic-final');
+    sg.set('tasks/task-generic-final', {
+      status: 'running',
+      chatId: chat.id,
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Done.',
+              '',
+              '---',
+              '## Tools Used (1)',
+              '',
+              '- **Read**',
+              '',
+              '---',
+              '## Stats',
+              '- Exit code: 0',
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response: 'Done.',
+              exitCode: 0,
+              totalEvents: 27,
+              toolCalls: [{ name: 'Read', args: { file_path: 'checklist.md' } }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.text, 'Done.');
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-generic');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'generic-final-with-runtime-activity');
+    assert.equal(payload.finalAgentMessage.quality.toolCallCount, 1);
+    assert.equal(payload.finalAgentMessage.quality.totalEvents, 27);
+  });
+
   it('uses ExitPlanMode content when plan-mode final agent text only references the plan', async () => {
     let chat = sg.createChat({ name: 'Plan mode result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-plan');

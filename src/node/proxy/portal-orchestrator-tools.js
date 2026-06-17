@@ -263,6 +263,36 @@ function findExitPlanMessage(chat = null, taskId = null) {
   return null;
 }
 
+function isGenericFinalAgentText(text = '') {
+  let normalized = String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.!]+$/g, '');
+  return [
+    'done',
+    'completed',
+    'complete',
+    'finished',
+    'ok',
+    'all done',
+  ].includes(normalized);
+}
+
+function finalAgentMessageQuality(text = '', parsedResult = null) {
+  if (!text) return { state: 'missing', reason: 'no-final-agent-text' };
+  let toolCallCount = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls.length : 0;
+  let totalEvents = Number.isFinite(parsedResult?.totalEvents) ? parsedResult.totalEvents : 0;
+  if (isGenericFinalAgentText(text) && (toolCallCount > 0 || totalEvents > 0)) {
+    return {
+      state: 'weak-generic',
+      reason: 'generic-final-with-runtime-activity',
+      toolCallCount,
+      totalEvents,
+    };
+  }
+  return { state: 'ok' };
+}
+
 function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let found = chat?.id ? findFinalAgentMessage(chat, taskId, options) : null;
   let exitPlan = chat?.id && taskId ? findExitPlanMessage(chat, taskId) : null;
@@ -270,6 +300,7 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
     found = exitPlan;
   }
   let clipped = clipFinalAgentText(found?.message?.text || '');
+  let quality = finalAgentMessageQuality(clipped.text, options.parsedResult);
   return {
     hasText: Boolean(clipped.text),
     text: clipped.text,
@@ -280,6 +311,7 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
     source: found ? 'chat' : null,
     match: found?.match || null,
     truncated: clipped.truncated,
+    quality,
     limits: {
       text: FINAL_AGENT_MESSAGE_TEXT_LIMIT,
     },
@@ -547,8 +579,12 @@ export async function handlePortalOrchestratorTool(
       taskResult,
       taskState,
     });
+    let parsedResult = parseTaskResultJson(taskResult);
     let allowLatestFallback = !isRunningTaskResult(taskResult) && (!hasExplicitTaskId || taskResult?.isError);
-    let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId, { allowLatestFallback });
+    let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId, {
+      allowLatestFallback,
+      parsedResult,
+    });
     return textResult({
       ok: !taskResult?.isError || finalAgentMessage.hasText,
       chatId,
