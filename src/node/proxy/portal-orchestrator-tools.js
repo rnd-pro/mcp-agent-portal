@@ -290,6 +290,22 @@ function isIntroOnlyFinalAgentText(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
+function isHeadingOnlyFinalAgentText(text = '') {
+  let lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0 || lines.length > 3) return false;
+  let heading = lines[0].toLowerCase();
+  if (!/^#{1,3}\s+.*\b(?:final|closure|completion)\b.*\b(?:audit|report|review)\b/.test(heading)) {
+    return false;
+  }
+  return lines.length === 1 || lines.slice(1).every((line) => {
+    let normalized = line.toLowerCase();
+    return normalized.startsWith('**scope:**') || normalized.startsWith('scope:');
+  });
+}
+
 function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) {
   if (!text) return { state: 'missing', reason: 'no-final-agent-text' };
   let toolCallCount = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls.length : 0;
@@ -314,6 +330,14 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
     return {
       state: 'weak-intro-only',
       reason: 'intro-only-final-with-runtime-activity',
+      toolCallCount,
+      totalEvents,
+    };
+  }
+  if (isHeadingOnlyFinalAgentText(text)) {
+    return {
+      state: 'weak-heading-only',
+      reason: 'heading-only-final',
       toolCallCount,
       totalEvents,
     };

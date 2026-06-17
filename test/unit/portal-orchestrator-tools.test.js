@@ -543,6 +543,73 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.totalEvents, 31);
   });
 
+  it('flags heading-only final audit text when runtime activity shows real work happened', async () => {
+    let chat = sg.createChat({ name: 'Heading-only result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-heading');
+    sg.set('tasks/task-heading', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: [
+        '## Final Closure Audit -- 24h Public Runtime Package Construction Cycle',
+        '',
+        '**Scope:** Parent branch `main`, HEAD `abc123`.',
+      ].join('\n'),
+      taskId: 'task-heading',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        let response = [
+          '## Final Closure Audit -- 24h Public Runtime Package Construction Cycle',
+          '',
+          '**Scope:** Parent branch `main`, HEAD `abc123`.',
+        ].join('\n');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: response,
+            },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 7,
+                toolCalls: [
+                  { name: 'Read', args: { file_path: 'checklist.md' } },
+                  { name: 'Bash', args: { command: 'git status --short' } },
+                ],
+                toolResults: [{ status: 'ok' }, { status: 'ok' }],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-heading-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'heading-only-final');
+  });
+
   it('uses ExitPlanMode content when plan-mode final agent text only references the plan', async () => {
     let chat = sg.createChat({ name: 'Plan mode result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-plan');
