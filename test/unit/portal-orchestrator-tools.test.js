@@ -922,6 +922,79 @@ describe('portal orchestrator MCP tools', () => {
     assert.doesNotMatch(payload.finalAgentMessage.text, new RegExp(sessionValue));
   });
 
+  it('prefers task-scoped ordinary final with proof marker over ExitPlanMode when both exist', async () => {
+    let chat = sg.createChat({ name: 'Ordinary final outranks ExitPlan chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-ordinary-outranks');
+    sg.set('tasks/task-ordinary-outranks', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Finish and end with COMPLETION_PROOF:*',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    let ordinaryText = [
+      'Findings are ready.',
+      '',
+      '1. Defect D1 fixed.',
+      '2. Tests added.',
+      '',
+      'COMPLETION_PROOF:PASS',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'tool',
+      name: 'ExitPlanMode',
+      taskId: 'task-ordinary-outranks',
+      input: { plan: 'ExitPlan: apply projection fix.' },
+      streaming: false,
+    });
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: ordinaryText,
+      taskId: 'task-ordinary-outranks',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: ordinaryText,
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response: ordinaryText,
+              exitCode: 0,
+              totalEvents: 20,
+              toolCalls: [
+                { name: 'TodoWrite', arguments: { todos: [{ content: 'Fix D1', status: 'completed' }] } },
+              ],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.match, 'taskId');
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.match(payload.finalAgentMessage.text, /Findings are ready/);
+    assert.match(payload.finalAgentMessage.tail, /COMPLETION_PROOF:PASS/);
+  });
+
   it('does not reconcile internal task results while still running', async () => {
     let chat = sg.createChat({ name: 'Running result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-running');

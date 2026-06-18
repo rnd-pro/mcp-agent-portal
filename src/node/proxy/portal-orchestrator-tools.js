@@ -364,11 +364,22 @@ function latestTodoWriteState(parsedResult = null) {
   return null;
 }
 
+function requiredFinalMarkersSatisfied(text = '', markers = []) {
+  let normalized = normalizeRequiredFinalMarkers(markers);
+  if (!normalized.length) return false;
+  for (let marker of normalized) {
+    let markerState = finalMarkerState(text, marker);
+    if (!markerState.found || !markerState.final) return false;
+  }
+  return true;
+}
+
 function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) {
   if (!text) return { state: 'missing', reason: 'no-final-agent-text' };
   let toolCallCount = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls.length : 0;
   let totalEvents = Number.isFinite(parsedResult?.totalEvents) ? parsedResult.totalEvents : 0;
   let requiredFinalMarkers = normalizeRequiredFinalMarkers(options.requiredFinalMarkers);
+  let allMarkersSatisfied = requiredFinalMarkers.length > 0;
   for (let marker of requiredFinalMarkers) {
     let markerState = finalMarkerState(text, marker);
     let markerReasonPrefix = marker.toLowerCase().replace(/_/g, '-');
@@ -405,6 +416,9 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
         };
       }
     }
+  }
+  if (allMarkersSatisfied && options.match !== 'taskId-exit-plan') {
+    return { state: 'ok' };
   }
   if (options.match === 'taskId-exit-plan') {
     return {
@@ -446,7 +460,8 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
 function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let found = chat?.id ? findFinalAgentMessage(chat, taskId, options) : null;
   let exitPlan = chat?.id && taskId ? findExitPlanMessage(chat, taskId) : null;
-  if (exitPlan && (!found || isPlanModeSummary(found.message?.text))) {
+  let foundSatisfiesMarkers = found?.match === 'taskId' && requiredFinalMarkersSatisfied(found.message?.text, options.requiredFinalMarkers);
+  if (exitPlan && (!found || (isPlanModeSummary(found.message?.text) && !foundSatisfiesMarkers))) {
     found = exitPlan;
   }
   let clipped = clipFinalAgentText(found?.message?.text || '');
