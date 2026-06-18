@@ -212,11 +212,16 @@ function sanitizeFinalAgentText(text = '') {
 
 function clipFinalAgentText(text = '') {
   let safe = sanitizeFinalAgentText(text);
+  let lines = safe.split('\n').map(line => line.trim()).filter(Boolean);
+  let tail = safe.slice(-1000);
+  let lastLine = lines.at(-1) || '';
   if (safe.length <= FINAL_AGENT_MESSAGE_TEXT_LIMIT) {
-    return { text: safe, truncated: false };
+    return { text: safe, tail, lastLine, truncated: false };
   }
   return {
     text: safe.slice(0, FINAL_AGENT_MESSAGE_TEXT_LIMIT - 3).trimEnd() + '...',
+    tail,
+    lastLine,
     truncated: true,
   };
 }
@@ -307,10 +312,100 @@ function isHeadingOnlyFinalAgentText(text = '') {
   });
 }
 
+function parseMaybeJson(value) {
+  if (!value || typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeRequiredFinalMarkers(markers = []) {
+  return (Array.isArray(markers) ? markers : [])
+    .map(marker => String(marker || '').trim().replace(/:?\*?$/, ''))
+    .filter(Boolean);
+}
+
+function finalMarkerState(text = '', marker = '') {
+  let lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  let safeMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let pattern = new RegExp(`^${safeMarker}:[A-Z_][A-Z0-9_-]*(?:\\s+-\\s+.+)?$`);
+  let index = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (pattern.test(lines[i])) {
+      index = i;
+      break;
+    }
+  }
+  return {
+    found: index >= 0,
+    final: index >= 0 && index === lines.length - 1,
+    line: index >= 0 ? lines[index] : null,
+  };
+}
+
+function latestTodoWriteState(parsedResult = null) {
+  let calls = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls : [];
+  for (let i = calls.length - 1; i >= 0; i--) {
+    let call = calls[i] || {};
+    let name = String(call.name || call.tool || call.toolName || '').toLowerCase();
+    if (name !== 'todowrite' && name !== 'todo_write') continue;
+    let input = parseMaybeJson(call.arguments ?? call.input ?? call.parameters ?? {});
+    let todos = Array.isArray(input?.todos) ? input.todos : [];
+    if (!todos.length) continue;
+    let incomplete = todos.filter(todo => String(todo?.status || '').toLowerCase() !== 'completed');
+    return {
+      total: todos.length,
+      incompleteCount: incomplete.length,
+      incompleteStatuses: [...new Set(incomplete.map(todo => String(todo?.status || 'unknown')))].slice(0, 8),
+    };
+  }
+  return null;
+}
+
 function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) {
   if (!text) return { state: 'missing', reason: 'no-final-agent-text' };
   let toolCallCount = Array.isArray(parsedResult?.toolCalls) ? parsedResult.toolCalls.length : 0;
   let totalEvents = Number.isFinite(parsedResult?.totalEvents) ? parsedResult.totalEvents : 0;
+  let requiredFinalMarkers = normalizeRequiredFinalMarkers(options.requiredFinalMarkers);
+  for (let marker of requiredFinalMarkers) {
+    let markerState = finalMarkerState(text, marker);
+    let markerReasonPrefix = marker.toLowerCase().replace(/_/g, '-');
+    if (!markerState.found) {
+      return {
+        state: 'weak-missing-marker',
+        reason: `${markerReasonPrefix}-marker-missing`,
+        requiredMarker: marker,
+        toolCallCount,
+        totalEvents,
+      };
+    }
+    if (!markerState.final) {
+      return {
+        state: 'weak-missing-marker',
+        reason: `${markerReasonPrefix}-marker-not-final`,
+        requiredMarker: marker,
+        markerLine: markerState.line,
+        toolCallCount,
+        totalEvents,
+      };
+    }
+    if (markerState.line === `${marker}:PASS`) {
+      let todoState = latestTodoWriteState(parsedResult);
+      if (todoState?.incompleteCount > 0) {
+        return {
+          state: 'weak-todo-inconsistent',
+          reason: 'completion-proof-pass-with-incomplete-todos',
+          requiredMarker: marker,
+          incompleteTodoCount: todoState.incompleteCount,
+          incompleteTodoStatuses: todoState.incompleteStatuses,
+          toolCallCount,
+          totalEvents,
+        };
+      }
+    }
+  }
   if (options.match === 'taskId-exit-plan') {
     return {
       state: 'weak-exit-plan',
@@ -357,10 +452,13 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let clipped = clipFinalAgentText(found?.message?.text || '');
   let quality = finalAgentMessageQuality(clipped.text, options.parsedResult, {
     match: found?.match || null,
+    requiredFinalMarkers: options.requiredFinalMarkers,
   });
   return {
     hasText: Boolean(clipped.text),
     text: clipped.text,
+    tail: clipped.tail,
+    lastLine: clipped.lastLine,
     chatId: chat?.id || null,
     taskId: found?.message?.taskId || taskId || null,
     messageIndex: Number.isInteger(found?.index) ? found.index : null,
@@ -393,6 +491,11 @@ function parseTaskResultJson(taskResult = null) {
   } catch {
     return null;
   }
+}
+
+function requiredFinalMarkersForTask(task = null) {
+  let prompt = String(task?.prompt || task?.input || '');
+  return /\bCOMPLETION_PROOF\b/.test(prompt) ? ['COMPLETION_PROOF'] : [];
 }
 
 function isTerminalTaskResult(taskResult = null) {
@@ -638,9 +741,11 @@ export async function handlePortalOrchestratorTool(
     });
     let parsedResult = parseTaskResultJson(taskResult);
     let allowLatestFallback = !isRunningTaskResult(taskResult) && (!hasExplicitTaskId || taskResult?.isError);
+    let task = sg.get(`tasks/${taskId}`);
     let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId, {
       allowLatestFallback,
       parsedResult,
+      requiredFinalMarkers: requiredFinalMarkersForTask(task),
     });
     return textResult({
       ok: !taskResult?.isError || finalAgentMessage.hasText,

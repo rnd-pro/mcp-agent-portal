@@ -382,10 +382,16 @@ describe('Task State Cache — StateGraph integration', () => {
     assert.equal(applied.item.delivery, 'goal');
     assert.equal(applied.item.status, 'applied');
     assert.ok(applied.item.appliedAt);
+    assert.equal(applied.goal.scopeChangelog.length, 1);
+    assert.equal(applied.goal.scopeChangelog[0].messageId, applied.item.id);
+    assert.equal(applied.goal.scopeChangelog[0].delivery, 'goal');
+    assert.match(applied.goal.scopeChangelog[0].textPreview, /Restart the goal/);
 
     let marked = sg.updateChatGoalQueueMessage(goal.id, queued.item.id, { status: 'applied' }, 'test');
     assert.equal(marked.item.status, 'applied');
     assert.ok(marked.item.appliedAt);
+    assert.equal(marked.goal.scopeChangelog.length, 2);
+    assert.equal(marked.goal.scopeChangelog[1].messageId, queued.item.id);
     assert.equal(sg.listChatGoalQueue(goal.id).length, 0);
 
     sg.enqueueChatGoalMessage(goal.id, { text: 'Queue me', delivery: 'after' }, 'test');

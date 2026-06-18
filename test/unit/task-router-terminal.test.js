@@ -163,6 +163,8 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.match(source, /msgs\.push\(\{ role: 'agent', text, taskId, streaming: true \}\);/);
     assert.match(source, /msgs\.push\(\{ role: 'agent', text: body, taskId, streaming: false \}\);/);
     assert.match(source, /role: 'tool',\n\s+taskId,/);
+    assert.match(source, /resultSummary: summarizeToolResult/);
+    assert.match(source, /resultUnavailableReason: missingToolResultReason/);
     assert.match(source, /role: 'thinking',\n\s+taskId,/);
   });
 

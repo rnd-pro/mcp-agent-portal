@@ -979,6 +979,22 @@ export class StateGraph extends EventEmitter {
     return { id: goalId, ...next };
   }
 
+  _appendGoalScopeChange(current, item, source, now = Date.now()) {
+    let existing = Array.isArray(current.scopeChangelog) ? current.scopeChangelog : [];
+    let text = String(item?.text || '').replace(/\s+/g, ' ').trim();
+    let entry = {
+      id: crypto.randomUUID().slice(0, 12),
+      messageId: item?.id || null,
+      delivery: item?.delivery || null,
+      status: item?.status || null,
+      textPreview: text.length > 240 ? `${text.slice(0, 237)}...` : text,
+      appliedAt: item?.appliedAt || now,
+      appliedBy: item?.updatedBy || source,
+      createdAt: now,
+    };
+    return [...existing, entry].slice(-50);
+  }
+
   listChatGoals({ chatId = null, projectId = null, status = null } = {}) {
     let statusFilter = status ? normalizeChatGoalStatus(status) : null;
     return Object.entries(this._state.goals || {})
@@ -1009,6 +1025,7 @@ export class StateGraph extends EventEmitter {
       context: normalized.context,
       scenarios: normalized.scenarios,
       queue: this._normalizeGoalQueue(opts.queue),
+      scopeChangelog: Array.isArray(opts.scopeChangelog) ? opts.scopeChangelog.slice(-50) : [],
       createdBy: opts.createdBy || opts.created_by || source,
       updatedBy: opts.updatedBy || opts.updated_by || source,
       createdAt: now,
@@ -1041,7 +1058,10 @@ export class StateGraph extends EventEmitter {
     });
     if (!item.text) return null;
     let queue = [...this._normalizeGoalQueue(current.queue), item];
-    let goal = this._setChatGoalQueue(goalId, current, queue, source, now);
+    let nextCurrent = item.status === 'applied'
+      ? { ...current, scopeChangelog: this._appendGoalScopeChange(current, item, source, now) }
+      : current;
+    let goal = this._setChatGoalQueue(goalId, nextCurrent, queue, source, now);
     return { goal, item };
   }
 
@@ -1060,6 +1080,7 @@ export class StateGraph extends EventEmitter {
     if (!current) return null;
     let now = Date.now();
     let found = null;
+    let shouldAppendScopeChange = false;
     let queue = this._normalizeGoalQueue(current.queue).map((item) => {
       if (item.id !== messageId) return item;
       let status = updates.status ? normalizeChatGoalQueueStatus(updates.status) : item.status;
@@ -1072,11 +1093,15 @@ export class StateGraph extends EventEmitter {
       });
       if (status === 'applied' && !next.appliedAt) next.appliedAt = now;
       if (status === 'discarded' && !next.discardedAt) next.discardedAt = now;
+      shouldAppendScopeChange = status === 'applied' && item.status !== 'applied';
       found = next;
       return next;
     });
     if (!found) return null;
-    let goal = this._setChatGoalQueue(goalId, current, queue, source, now);
+    let nextCurrent = shouldAppendScopeChange
+      ? { ...current, scopeChangelog: this._appendGoalScopeChange(current, found, source, now) }
+      : current;
+    let goal = this._setChatGoalQueue(goalId, nextCurrent, queue, source, now);
     return { goal, item: found };
   }
 
@@ -1101,6 +1126,9 @@ export class StateGraph extends EventEmitter {
       ...normalizeChatGoalInput({ ...current, ...updates, status }),
       status,
       queue: this._normalizeGoalQueue(updates.queue || current.queue),
+      scopeChangelog: Array.isArray(updates.scopeChangelog)
+        ? updates.scopeChangelog.slice(-50)
+        : (Array.isArray(current.scopeChangelog) ? current.scopeChangelog : []),
       updatedBy: updates.updatedBy || updates.updated_by || source,
       updatedAt: now,
     };

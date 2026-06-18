@@ -141,6 +141,35 @@ describe('orchestration development map', () => {
           elapsedMs: 4000,
         }],
         staleProcesses: [],
+        systemLoad: {
+          total: 4,
+          ours: 2,
+          external: 1,
+          cpu: {
+            count: 8,
+            loadAvg1m: 3.2,
+            loadAvg5m: 2.4,
+            loadAvg15m: 2,
+            loadRatio1m: 0.4,
+          },
+          memory: {
+            totalBytes: 16000000000,
+            freeBytes: 4000000000,
+            usedRatio: 0.75,
+          },
+          process: {
+            trackedChildren: 2,
+          },
+          capacity: {
+            state: 'busy',
+            reason: 'external_agents',
+            recommendedMaxParallelTasks: 4,
+            runningTaskCount: 2,
+            staleProcessCount: 0,
+            trackedChildCount: 2,
+          },
+          warning: `System load references ${secret}`,
+        },
       },
     });
 
@@ -208,6 +237,21 @@ describe('orchestration development map', () => {
     assert.equal(map.toolMap.byChatId[root.id].latestTool.name, 'mcp_project_graph_get_skeleton');
     assert.equal(map.toolMap.byChatId[root.id].tools.length, 5);
     assert.equal(map.toolMap.byChatId[child.id].toolCount, 0);
+    assert.equal(map.delegationGraph.schemaVersion, 1);
+    assert.equal(map.delegationGraph.edges.some((edge) => edge.kind === 'agent.delegates'), true);
+    assert.equal(map.delegationGraph.edges.some((edge) => edge.kind === 'task.delegates'), true);
+    assert.equal(map.delegationGraph.nodes.some((node) => node.id === root.id && node.type === 'chat'), true);
+    assert.equal(map.delegationGraph.nodes.some((node) => node.id === 'task-root' && node.type === 'task'), true);
+    assert.equal(map.activityTimeline.schemaVersion, 1);
+    assert.equal(map.activityTimeline.events.length > 0, true);
+    assert.equal(map.activityTimeline.events[0].at >= map.activityTimeline.events.at(-1).at, true);
+    assert.equal(map.system.available, true);
+    assert.equal(map.system.agents.external, 1);
+    assert.equal(map.system.cpu.count, 8);
+    assert.equal(map.system.memory.usedRatio, 0.75);
+    assert.equal(map.system.capacity.state, 'busy');
+    assert.equal(map.system.capacity.recommendedMaxParallelTasks, 4);
+    assert.equal(map.system.warning.includes(secret), false);
     assert.equal(map.subagentMap.nodes[0].latestTool.name, 'mcp_project_graph_get_skeleton');
     assert.equal(map.subagentMap.nodes[0].toolCount, 5);
     assert.equal(map.usage.runningTasks, 2);
@@ -217,6 +261,9 @@ describe('orchestration development map', () => {
     assert.equal(map.usage.toolDurationMs, 2000);
     assert.equal(map.usage.toolUsageMs >= 2000, true);
     assert.equal(map.usage.totalTaskElapsedMs, 9000);
+    assert.equal(map.usage.capacity.state, 'busy');
+    assert.equal(map.activityMap.summary.capacity.state, 'busy');
+    assert.equal(map.activityMap.system.capacity.state, 'busy');
     assert.equal(map.usage.tokens, 123);
     assert.equal(map.usage.liveness.zeroEventTaskCount, 1);
     assert.equal(map.taskMap.byId['task-root'].liveness.eventCount, 3);
@@ -304,6 +351,7 @@ describe('orchestration development map', () => {
         text: `${JSON.stringify({
           tasks: [{ id: 'task-1', status: 'running' }],
           staleProcesses: [{ pid: 100, taskId: 'old' }],
+          systemLoad: { capacity: { state: 'available' } },
         })}\n\n---\nActive tasks footer`,
       }],
     };
@@ -311,6 +359,7 @@ describe('orchestration development map', () => {
     assert.deepEqual(parseTaskStateResult(result), {
       tasks: [{ id: 'task-1', status: 'running' }],
       staleProcesses: [{ pid: 100, taskId: 'old' }],
+      systemLoad: { capacity: { state: 'available' } },
     });
     assert.deepEqual(parseTaskStateResult({ content: [{ type: 'text', text: 'not-json' }] }), {
       tasks: [],
@@ -456,6 +505,8 @@ describe('orchestration development map', () => {
     assert.equal(map.latestTools[0].timingSource, 'task_completed');
     assert.equal(map.latestTools[0].usageMs, 4000);
     assert.equal(map.latestTools[0].estimatedCompletedAt, completedAt);
+    assert.equal(map.latestTools[0].resultSummary, null);
+    assert.equal(map.latestTools[0].resultUnavailableReason, 'not_reported_by_runner');
   });
 
   it('keeps completed result tool calls visible when event cache is empty', () => {
@@ -494,7 +545,10 @@ describe('orchestration development map', () => {
     assert.equal(map.latestTools[0].status, 'success');
     assert.equal(map.latestTools[0].timingSource, 'runtime_result');
     assert.equal(map.latestTools[0].usageMs, null);
+    assert.equal(map.latestTools[0].resultSummary, 'ok');
+    assert.equal(map.latestTools[0].resultUnavailableReason, null);
     assert.equal(map.toolMap.byTaskId['task-result-only'].toolCount, 1);
+    assert.equal(map.toolMap.byTaskId['task-result-only'].latestTool.resultSummary, 'ok');
     assert.equal(map.usage.tokens, 7);
   });
 
@@ -542,6 +596,8 @@ describe('orchestration development map', () => {
     assert.equal(map.latestTools[0].elapsedMs, 1500);
     assert.equal(map.latestTools[0].usageMs, 1500);
     assert.equal(map.latestTools[0].timingSource, 'tool_result');
+    assert.equal(map.latestTools[0].resultSummary, 'ok');
+    assert.equal(map.latestTools[0].resultUnavailableReason, null);
     assert.equal(map.usage.toolDurationMs, 1500);
     assert.equal(map.usage.toolUsageMs, 1500);
   });

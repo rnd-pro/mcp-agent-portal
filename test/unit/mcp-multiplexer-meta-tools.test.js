@@ -74,6 +74,7 @@ test('resume_chat injects the active chat goal into delegated prompts only', () 
   assert.match(source, /if \(goalQueueMessages\.length\) delegateArgs\.goalQueueMessages = goalQueueMessages;/);
   assert.match(source, /prepareDelegateTaskCall\(proxyManager, 'delegate_task', delegateArgs/);
   assert.match(source, /delegateSummary: summarizeDelegateArgs\(delegateArgs\)/);
+  assert.match(source, /delegationPolicy: prepared\.delegationPolicy \|\| null/);
   assert.doesNotMatch(source, /\nsession_id: delegateArgs\.session_id/);
 });
 

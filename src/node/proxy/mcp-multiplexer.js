@@ -327,6 +327,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
       taskId: null,
       error: result?.content?.[0]?.text || 'Delegation failed.',
       delegateSummary: summarizeDelegateArgs(delegateArgs),
+      delegationPolicy: prepared.delegationPolicy || null,
       routing: {
         chatId: prepared.chatId || chatId,
         parentChatId: prepared.parentChatId || null,
@@ -355,6 +356,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
     approval_mode: delegateArgs.approval_mode || null,
     has_session: Boolean(delegateArgs.session_id),
     delegateSummary: summarizeDelegateArgs(delegateArgs),
+    delegationPolicy: prepared.delegationPolicy || null,
     routing: {
       chatId: prepared.chatId || chatId,
       parentChatId: prepared.parentChatId || null,

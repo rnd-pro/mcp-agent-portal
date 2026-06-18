@@ -475,6 +475,170 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.totalEvents, 27);
   });
 
+  it('flags missing required completion proof final marker', async () => {
+    let chat = sg.createChat({ name: 'Missing proof marker result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-missing-proof');
+    sg.set('tasks/task-missing-proof', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Finish the audit and end with COMPLETION_PROOF:*',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'All requirements are covered.',
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response: 'All requirements are covered.',
+              exitCode: 0,
+              totalEvents: 9,
+              toolCalls: [{ name: 'Read', args: { file_path: 'checklist.md' } }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'completion-proof-marker-missing');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'COMPLETION_PROOF');
+  });
+
+  it('flags required completion proof marker that is not the final line', async () => {
+    let chat = sg.createChat({ name: 'Non-final proof marker result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-non-final-proof');
+    sg.set('tasks/task-non-final-proof', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Finish the audit and end with COMPLETION_PROOF:*',
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      taskId: 'task-non-final-proof',
+      text: [
+        'All requirements are covered.',
+        'COMPLETION_PROOF:PASS',
+        'Extra trailing explanation.',
+      ].join('\n'),
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return { isError: true, content: [{ type: 'text', text: 'runtime result unavailable' }] };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-non-final-proof' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'completion-proof-marker-not-final');
+    assert.equal(payload.finalAgentMessage.quality.markerLine, 'COMPLETION_PROOF:PASS');
+    assert.equal(payload.finalAgentMessage.lastLine, 'Extra trailing explanation.');
+  });
+
+  it('flags completion proof pass when the latest TodoWrite still has incomplete items', async () => {
+    let chat = sg.createChat({ name: 'Todo inconsistent proof result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-todo-inconsistent');
+    sg.set('tasks/task-todo-inconsistent', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Finish the audit and end with COMPLETION_PROOF:*',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    let response = [
+      'All requirements are covered.',
+      '',
+      'COMPLETION_PROOF:PASS',
+    ].join('\n');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              response,
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response,
+              exitCode: 0,
+              totalEvents: 11,
+              toolCalls: [{
+                name: 'TodoWrite',
+                arguments: {
+                  todos: [
+                    { content: 'Verify files', status: 'completed' },
+                    { content: 'Produce final proof', status: 'in_progress' },
+                  ],
+                },
+              }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-todo-inconsistent');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'completion-proof-pass-with-incomplete-todos');
+    assert.equal(payload.finalAgentMessage.quality.incompleteTodoCount, 1);
+    assert.deepEqual(payload.finalAgentMessage.quality.incompleteTodoStatuses, ['in_progress']);
+  });
+
   it('flags intro-only final text when runtime activity shows real work happened', async () => {
     let chat = sg.createChat({ name: 'Intro-only final result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-intro-only-final');
@@ -1023,6 +1187,8 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(scopedPayload.finalAgentMessage.match, 'latest-agent');
     assert.equal(scopedPayload.finalAgentMessage.truncated, true);
     assert.equal(scopedPayload.finalAgentMessage.text.length <= 4000, true);
+    assert.equal(scopedPayload.finalAgentMessage.tail.length <= 1000, true);
+    assert.equal(scopedPayload.finalAgentMessage.lastLine.length > 0, true);
     assert.match(scopedPayload.finalAgentMessage.text, /Fallback synthesis/);
     assert.doesNotMatch(scopedPayload.finalAgentMessage.text, localPathPattern);
     assert.doesNotMatch(scopedPayload.finalAgentMessage.text, new RegExp(sessionValue));

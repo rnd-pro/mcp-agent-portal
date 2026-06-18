@@ -6,6 +6,10 @@ const SUBAGENT_LIMIT = 40;
 const PROMPT_HINT_LIMIT = 8;
 const COLD_START_GRACE_MS = 15000;
 const QUIET_TASK_MS = 60000;
+const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
+const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
+const SECRET_WORD_RE = /\b(?:secret|session|token|api[_-]?key)[A-Za-z0-9_-]*\b/gi;
 
 function parseJson(value) {
   if (!value || typeof value !== 'string') return null;
@@ -171,6 +175,34 @@ function summarizeToolDetail(args = {}) {
     return { kind: 'command', label: '[command]' };
   }
   return { kind: null, label: '' };
+}
+
+function compactResultSummary(value, limit = 220) {
+  let text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  text = String(text || '')
+    .replace(LOCAL_PATH_RE, '[local-path]')
+    .replace(BEARER_RE, 'Bearer [redacted]')
+    .replace(SECRET_FIELD_RE, '$1: [redacted]')
+    .replace(SECRET_WORD_RE, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
+function toolResultValue(result = null) {
+  if (!result) return null;
+  return result.output ?? result.result ?? result.status ?? null;
+}
+
+function toolResultSummary(result = null) {
+  let value = toolResultValue(result);
+  return value === null || value === undefined ? null : compactResultSummary(value);
+}
+
+function toolResultUnavailableReason(result = null, terminal = false) {
+  if (!result) return terminal ? 'not_reported_by_runner' : 'running';
+  let value = toolResultValue(result);
+  return String(value ?? '').trim() ? null : 'empty_result';
 }
 
 function safeErrorKind(error) {
@@ -449,6 +481,8 @@ function collectToolUses(
       usageMs: elapsedMs,
       timingSource,
       timingEstimated: timingSource !== 'tool_result' && timingSource !== 'unknown',
+      resultSummary: toolResultSummary(result),
+      resultUnavailableReason: toolResultUnavailableReason(result, taskTerminal),
     });
   }
 
@@ -495,6 +529,7 @@ function addRuntimeResultTools(toolUses, runtimeResult, runtimeContext) {
     });
     if (duplicate) continue;
     let result = results[index] || {};
+    let hasResult = index < results.length;
     toolUses.push({
       taskId: runtimeContext.taskId || null,
       chatId: runtimeContext.chatId || null,
@@ -512,6 +547,8 @@ function addRuntimeResultTools(toolUses, runtimeResult, runtimeContext) {
       usageMs: null,
       timingSource: 'runtime_result',
       timingEstimated: false,
+      resultSummary: toolResultSummary(result),
+      resultUnavailableReason: toolResultUnavailableReason(hasResult ? result : null, true),
     });
   }
 }
@@ -778,6 +815,8 @@ function summarizeLatestTool(tool = null) {
     usageMs: tool.usageMs ?? null,
     timingSource: tool.timingSource || 'unknown',
     timingEstimated: Boolean(tool.timingEstimated),
+    resultSummary: tool.resultSummary || null,
+    resultUnavailableReason: tool.resultUnavailableReason || null,
   };
 }
 
@@ -1126,6 +1165,7 @@ function buildActivityMap({
   usage,
   promptHintMap,
   stateError,
+  system,
   now,
 }) {
   let nodes = (subagentMap.nodes || []).map((node) => summarizeActivityNode(node, taskMap));
@@ -1147,6 +1187,7 @@ function buildActivityMap({
       longestElapsedMs: usage.longestElapsedMs ?? null,
       latestActivityAt: usage.latestActivityAt || null,
       liveness: usage.liveness || null,
+      capacity: usage.capacity || null,
       tokens: usage.tokens ?? null,
       cost: usage.cost ?? null,
     },
@@ -1155,6 +1196,7 @@ function buildActivityMap({
     edges: subagentMap.edges || [],
     latestTools: latestTools.map(summarizeLatestTool),
     promptHints: (promptHintMap.hints || []).map(summarizeActivityHint),
+    system,
     limits: {
       nodes: SUBAGENT_LIMIT,
       latestTools: TOOL_EVENT_LIMIT,
@@ -1164,7 +1206,7 @@ function buildActivityMap({
   };
 }
 
-function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 0, toolUses = []) {
+function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 0, toolUses = [], system = null) {
   let running = tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || ''));
   let elapsedMs = tasks
     .map((task) => Number(task.elapsedMs))
@@ -1191,6 +1233,7 @@ function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 
       .filter(Boolean)
       .sort((a, b) => b - a)[0] || null,
     liveness: summarizeUsageLiveness(running),
+    capacity: system?.capacity || null,
     tokens: stats?.total_tokens ?? stats?.tokens?.total ?? null,
     cost: stats?.cost ?? null,
     generatedAt: now,
@@ -1211,6 +1254,150 @@ function summarizeUsageLiveness(runningTasks = []) {
     noEventTaskCount: noEvents.length,
     coldStartTaskCount: coldStarts.length,
     quietTaskCount: quiet.length,
+  };
+}
+
+function finiteNumber(value) {
+  let number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function summarizeSystemLoad(systemLoad = null, tasks = [], now = Date.now()) {
+  if (!systemLoad || typeof systemLoad !== 'object') {
+    return {
+      schemaVersion: 1,
+      available: false,
+      generatedAt: now,
+      capacity: {
+        state: 'unknown',
+        reason: 'task_state_missing_system_load',
+        runningTaskCount: tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length,
+      },
+    };
+  }
+
+  let cpu = systemLoad.cpu || {};
+  let memory = systemLoad.memory || {};
+  let capacity = systemLoad.capacity || {};
+  let runningTaskCount = finiteNumber(capacity.runningTaskCount)
+    ?? tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length;
+  return {
+    schemaVersion: 1,
+    available: true,
+    generatedAt: now,
+    agents: {
+      total: finiteNumber(systemLoad.total) ?? 0,
+      ours: finiteNumber(systemLoad.ours) ?? 0,
+      external: finiteNumber(systemLoad.external) ?? 0,
+    },
+    cpu: {
+      count: finiteNumber(cpu.count),
+      loadAvg1m: finiteNumber(cpu.loadAvg1m),
+      loadAvg5m: finiteNumber(cpu.loadAvg5m),
+      loadAvg15m: finiteNumber(cpu.loadAvg15m),
+      loadRatio1m: finiteNumber(cpu.loadRatio1m),
+    },
+    memory: {
+      totalBytes: finiteNumber(memory.totalBytes),
+      freeBytes: finiteNumber(memory.freeBytes),
+      usedRatio: finiteNumber(memory.usedRatio),
+    },
+    process: {
+      trackedChildren: finiteNumber(systemLoad.process?.trackedChildren) ?? finiteNumber(systemLoad.ours) ?? 0,
+      staleProcessCount: finiteNumber(capacity.staleProcessCount) ?? 0,
+    },
+    capacity: {
+      state: capacity.state || 'unknown',
+      reason: capacity.reason || null,
+      recommendedMaxParallelTasks: finiteNumber(capacity.recommendedMaxParallelTasks),
+      runningTaskCount,
+      trackedChildCount: finiteNumber(capacity.trackedChildCount) ?? finiteNumber(systemLoad.ours) ?? 0,
+    },
+    warning: typeof systemLoad.warning === 'string' ? compactResultSummary(systemLoad.warning) : null,
+  };
+}
+
+function maxTimestamp(values = []) {
+  let timestamps = values.map(normalizeTimestamp).filter(Boolean);
+  return timestamps.length ? Math.max(...timestamps) : null;
+}
+
+function buildDelegationGraph({ subagentMap, taskMap, now }) {
+  let nodes = (subagentMap.nodes || []).map((node) => ({
+    id: node.chatId,
+    type: 'chat',
+    parentId: node.parentChatId || null,
+    agent: node.agent || null,
+    taskIds: node.taskIds || [],
+    runningTaskCount: node.runningTaskCount || 0,
+    totalTaskCount: node.totalTaskCount || 0,
+    lastAnyEventAt: maxTimestamp([
+      node.lastActivityAt,
+      node.latestTool?.usedAt,
+      node.latestTool?.completedAt,
+      node.updatedAt,
+    ]),
+    liveness: node.liveness || null,
+  }));
+
+  let taskNodes = Object.values(taskMap.byId || {}).map((task) => ({
+    id: task.id,
+    type: 'task',
+    parentId: task.parentTaskId || task.chatId || null,
+    chatId: task.chatId || null,
+    agent: task.agentSlug || null,
+    status: task.status || 'unknown',
+    lastAnyEventAt: maxTimestamp([
+      task.lastActivityAt,
+      task.lastEventAt,
+      task.lastToolUsedAt,
+      task.completedAt,
+      task.startedAt,
+    ]),
+    liveness: task.liveness || null,
+  }));
+
+  return {
+    schemaVersion: 1,
+    generatedAt: now,
+    nodes: [...nodes, ...taskNodes],
+    edges: [
+      ...(subagentMap.edges || []),
+      ...(taskMap.edges || []),
+    ],
+    limits: {
+      nodes: SUBAGENT_LIMIT + TASK_LIMIT,
+    },
+  };
+}
+
+function buildActivityTimeline({ tasks, latestTools, now }) {
+  let taskEvents = tasks.map((task) => ({
+    type: 'task.activity',
+    at: taskActivityTime(task),
+    taskId: task.id,
+    chatId: task.chatId || null,
+    status: task.status || 'unknown',
+    agentSlug: task.agentSlug || null,
+    liveness: task.liveness || null,
+  }));
+  let toolEvents = latestTools.map((tool) => ({
+    type: tool.status === 'running' ? 'tool.started' : 'tool.completed',
+    at: normalizeTimestamp(tool.completedAt || tool.estimatedCompletedAt || tool.usedAt),
+    tool: summarizeLatestTool(tool),
+    taskId: tool.taskId || null,
+    chatId: tool.chatId || null,
+  }));
+  return {
+    schemaVersion: 1,
+    generatedAt: now,
+    events: [...taskEvents, ...toolEvents]
+      .filter((event) => event.at)
+      .sort((a, b) => (b.at || 0) - (a.at || 0))
+      .slice(0, TOOL_EVENT_LIMIT * 2),
+    limits: {
+      events: TOOL_EVENT_LIMIT * 2,
+    },
   };
 }
 
@@ -1291,7 +1478,8 @@ export function buildDevelopmentMap({
     latestTools,
     now,
   });
-  let usage = summarizeUsage(scopedTasks, runtime, now, subagents.length, toolUses);
+  let system = summarizeSystemLoad(taskState?.systemLoad || null, scopedTasks, now);
+  let usage = summarizeUsage(scopedTasks, runtime, now, subagents.length, toolUses, system);
   let promptHintArgs = {
     chatId,
     taskId,
@@ -1313,8 +1501,11 @@ export function buildDevelopmentMap({
     usage,
     promptHintMap,
     stateError,
+    system,
     now,
   });
+  let delegationGraph = buildDelegationGraph({ subagentMap, taskMap, now });
+  let activityTimeline = buildActivityTimeline({ tasks: scopedTasks, latestTools, now });
 
   return {
     schemaVersion: 1,
@@ -1327,6 +1518,9 @@ export function buildDevelopmentMap({
     taskMap,
     latestTools,
     toolMap,
+    delegationGraph,
+    activityTimeline,
+    system,
     usage,
     activityMap,
     promptHintMap,
@@ -1341,5 +1535,6 @@ export function parseTaskStateResult(result = {}) {
   return {
     tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
     staleProcesses: Array.isArray(parsed.staleProcesses) ? parsed.staleProcesses : [],
+    systemLoad: parsed.systemLoad && typeof parsed.systemLoad === 'object' ? parsed.systemLoad : null,
   };
 }

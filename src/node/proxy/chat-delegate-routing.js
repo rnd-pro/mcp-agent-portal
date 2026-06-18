@@ -198,6 +198,31 @@ function collectFocusImports(skeleton = {}, files = []) {
     }));
 }
 
+function inferDelegationPolicy(args = {}, context = {}) {
+  let approvalMode = args.approval_mode || null;
+  let resourceGroup = normalizeResourceGroup(args.resource_group);
+  let source = 'agent_pool_default';
+  if (context.explicitApprovalMode) source = 'explicit';
+  else if (context.chatApprovalMode && approvalMode === context.chatApprovalMode) source = 'chat';
+  else if (resourceGroup && !approvalMode) source = 'agent_pool_resource_group';
+
+  let resourceGroupHintsReadOnly = Boolean(resourceGroup && /(?:read.?only|review|audit)/i.test(resourceGroup));
+  let readOnly = approvalMode === 'plan'
+    ? true
+    : approvalMode
+      ? false
+      : resourceGroupHintsReadOnly ? true : null;
+
+  return {
+    accessMode: approvalMode,
+    accessModeSource: source,
+    readOnly,
+    resourceGroup,
+    routingOverride: Boolean(context.hasRoutingOverride),
+    sessionInherited: Boolean(args.session_id && !context.hasRoutingOverride),
+  };
+}
+
 async function buildProjectGraphFocus(proxyManager, cwd, files = []) {
   if (!files.length || !cwd) return null;
   let skeleton = await callProjectGraphTool(proxyManager, 'get_skeleton', { path: cwd });
@@ -285,6 +310,7 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   let explicitChatId = next.chat_id || next.chatId || null;
   let parentChatId = next.parent_chat_id || next.parentChatId || null;
   let explicitAgent = next.agent_slug || next.agent || null;
+  let explicitApprovalMode = next.approval_mode || null;
   let explicitResourceGroupValue = next.resource_group ?? next.resourceGroup;
   let hasResourceGroupOverride = explicitResourceGroupValue !== undefined
     && explicitResourceGroupValue !== null
@@ -374,7 +400,12 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   delete next.chatId;
   delete next.parentChatId;
   if (!next.resource_group) delete next.resource_group;
-  return { args: next, chatId: next.chat_id || contextChatId || null, parentChatId, createdChat };
+  let delegationPolicy = inferDelegationPolicy(next, {
+    explicitApprovalMode,
+    chatApprovalMode: contextChat?.approval_mode || null,
+    hasRoutingOverride,
+  });
+  return { args: next, chatId: next.chat_id || contextChatId || null, parentChatId, createdChat, delegationPolicy };
 }
 
 export default {

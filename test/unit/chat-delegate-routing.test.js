@@ -54,6 +54,14 @@ describe('chat delegate routing', () => {
     assert.equal(prepared.args.model, undefined);
     assert.equal(prepared.args.cwd, projectPath);
     assert.match(prepared.args.prompt, /^\[Goal Intent\]/);
+    assert.deepEqual(prepared.delegationPolicy, {
+      accessMode: 'yolo',
+      accessModeSource: 'chat',
+      readOnly: false,
+      resourceGroup: 'reasoning-heavy',
+      routingOverride: false,
+      sessionInherited: false,
+    });
   });
 
   it('injects active goal context for MCP delegate calls bound to a chat', async () => {
@@ -168,6 +176,10 @@ describe('chat delegate routing', () => {
     }, { stateGraph: sg, source: 'test' });
     assert.equal(switched.args.session_id, undefined);
     assert.equal(switched.args.resource_group, 'orchestration-readonly');
+    assert.equal(switched.delegationPolicy.accessMode, null);
+    assert.equal(switched.delegationPolicy.accessModeSource, 'agent_pool_resource_group');
+    assert.equal(switched.delegationPolicy.readOnly, true);
+    assert.equal(switched.delegationPolicy.routingOverride, true);
   });
 
   it('treats resource_group none as an explicit group clear', async () => {

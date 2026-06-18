@@ -7,6 +7,10 @@ import {
 
 const TERMINAL_TYPES = new Set(['done', 'error', 'cancelled']);
 const TASK_EVENT_CACHE_LIMIT = 200;
+const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
+const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
+const SECRET_WORD_RE = /\b(?:secret|session|token|api[_-]?key)[A-Za-z0-9_-]*\b/gi;
 
 export function isTerminalTaskNotificationType(type) {
   return TERMINAL_TYPES.has(type);
@@ -63,6 +67,32 @@ function copyDefined(target, source, keys) {
   for (let key of keys) {
     if (source[key] !== undefined) target[key] = source[key];
   }
+}
+
+function compactResultSummary(value, limit = 220) {
+  let text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  text = String(text || '')
+    .replace(LOCAL_PATH_RE, '[local-path]')
+    .replace(BEARER_RE, 'Bearer [redacted]')
+    .replace(SECRET_FIELD_RE, '$1: [redacted]')
+    .replace(SECRET_WORD_RE, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
+function summarizeToolResult(result) {
+  if (result === undefined || result === null) return null;
+  let value = typeof result === 'object'
+    ? result.output ?? result.result ?? result.status ?? result
+    : result;
+  return compactResultSummary(value);
+}
+
+function missingToolResultReason(result) {
+  if (result === undefined || result === null) return 'not_reported_by_runner';
+  let value = typeof result === 'object' ? result.output ?? result.result ?? result.status : result;
+  return String(value ?? '').trim() ? null : 'empty_result';
 }
 
 /** Routes task notifications from child servers to WebSocket subscribers. */
@@ -325,6 +355,8 @@ export class TaskRouter {
           name: toolName,
           input,
           result: null,
+          resultSummary: null,
+          resultUnavailableReason: 'running',
           streaming: true,
         });
         changed = true;
@@ -338,7 +370,13 @@ export class TaskRouter {
         // Find the last streaming tool and close it
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === 'tool' && msgs[i].streaming) {
-            msgs[i] = { ...msgs[i], result, streaming: false };
+            msgs[i] = {
+              ...msgs[i],
+              result,
+              resultSummary: summarizeToolResult(result),
+              resultUnavailableReason: missingToolResultReason(result),
+              streaming: false,
+            };
             changed = true;
             break;
           }
@@ -487,6 +525,8 @@ export class TaskRouter {
           name: call.name,
           input: call.args,
           result: tRes ? (tRes.output ?? tRes.status) : null,
+          resultSummary: summarizeToolResult(tRes),
+          resultUnavailableReason: missingToolResultReason(tRes),
           streaming: false,
         });
       }
