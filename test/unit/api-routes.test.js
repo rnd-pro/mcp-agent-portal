@@ -60,6 +60,9 @@ describe('api-routes', () => {
     let routes = createRoutes({ proxyManager: mockProxyManager, projectRoot: '/tmp' });
     assert.ok(routes, 'should return routes object');
     assert.ok(typeof routes === 'object', 'routes should be an object');
+    assert.equal(typeof routes['GET /api/workflow-board'], 'function');
+    assert.equal(typeof routes['POST /api/workflow-board/transition'], 'function');
+    assert.equal(typeof routes['POST /api/workflow-board/transitions'], 'function');
   });
 
   it('dispatch returns false for unknown routes', async () => {

@@ -12,6 +12,9 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'build', 'cove
 const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html']);
 const IMPORT_MAP_FILES = ['web/index.html', 'demo/index.html', 'demo/build.js'];
 const REQUIRED_BROWSER_IMPORTS = ['three'];
+const REQUIRED_TRANSITIVE_IMPORTS = new Map([
+  ['symbiote-engine/contracts', 'contracts/index.js'],
+]);
 const BROWSER_FORBIDDEN_SPECIFIERS = new Set([
 ]);
 
@@ -151,6 +154,16 @@ describe('symbiote-ui provider consumer boundary', () => {
       for (let specifier of REQUIRED_BROWSER_IMPORTS) {
         if (!source.includes(`"${specifier}":`)) {
           violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
+        }
+      }
+      for (let [specifier, targetSuffix] of REQUIRED_TRANSITIVE_IMPORTS) {
+        let escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        let pattern = new RegExp(`"${escaped}"\\s*:\\s*"([^"]+)"`);
+        let match = pattern.exec(source);
+        if (!match) {
+          violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
+        } else if (!match[1].endsWith(targetSuffix)) {
+          violations.push(`${repoPath} maps ${specifier} to ${match[1]} instead of ${targetSuffix}`);
         }
       }
     }

@@ -184,6 +184,7 @@ let indexHtml = `<!DOCTYPE html>
 	        "symbiote-ui/display/icons": "${basePath}packages/symbiote-ui/display/icons.js",
 	        "symbiote-ui/display/event-feed-adapter": "${basePath}packages/symbiote-ui/display/event-feed-adapter.js",
 	        "symbiote-engine": "${basePath}packages/symbiote-engine/index.js",
+	        "symbiote-engine/contracts": "${basePath}packages/symbiote-engine/contracts/index.js",
 	        "symbiote-engine/": "${basePath}packages/symbiote-engine/",
 	        "three": "${basePath}vendor/three/build/three.module.js?v=0-184-0"
 	      }

@@ -1,0 +1,551 @@
+const WORKFLOW_BOARD_ENDPOINT = '/api/workflow-board';
+const WORKFLOW_TRANSITIONS_ENDPOINT = '/api/workflow-board/transitions';
+const WORKFLOW_ORCHESTRATE_ENDPOINT = '/api/workflow-board/orchestrate';
+const WORKFLOW_CONTROL_ENDPOINT = '/api/workflow-board/control';
+const WORKFLOW_RECOVERY_RECONCILE_ENDPOINT = '/api/workflow-board/recovery/reconcile';
+
+const DEFAULT_BOARD_ID = 'agent-workflow-default';
+const DEFAULT_BOARD_MODE = 'passive';
+const DEFAULT_COLUMN_ID = 'backlog';
+const DEFAULT_COLUMNS = [
+  {
+    id: 'ideas',
+    title: 'Ideas / Inbox',
+    description: 'Raw ideas, audit follow-ups, and unscoped observations.',
+  },
+  {
+    id: 'backlog',
+    title: 'Backlog',
+    description: 'Candidate work that needs scope before execution.',
+  },
+  {
+    id: 'ready',
+    title: 'Tasks / Ready',
+    description: 'Accepted work with owner and acceptance criteria.',
+  },
+  {
+    id: 'in-progress',
+    title: 'In Progress',
+    description: 'Active execution under orchestrator or human ownership.',
+  },
+  {
+    id: 'quality-audit',
+    title: 'Quality Audit',
+    description: 'Review, tests, hygiene, and explicit waivers.',
+  },
+  {
+    id: 'commit-publish',
+    title: 'Commit / Publish',
+    description: 'Release gate, clean diff, and publication readiness.',
+  },
+  {
+    id: 'done',
+    title: 'Done',
+    description: 'Closed work with cleanup and closure recorded.',
+  },
+];
+
+const ACTIVE_COLUMN_IDS = new Set(['ready', 'in-progress', 'quality-audit', 'commit-publish']);
+const RECOVERY_FLAG_KEYS = new Set([
+  'needs_resume',
+  'needs-audit',
+  'needs_audit',
+  'recovering',
+  'stale',
+  'lost',
+  'blocked',
+]);
+
+function normalizeText(value, fallback = '') {
+  let text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text || fallback;
+}
+
+function asObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  return [value];
+}
+
+function normalizeId(value, fallback = '') {
+  let text = normalizeText(value, fallback);
+  return text.toLowerCase().replace(/[^a-z0-9._:-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function titleFromId(value) {
+  let text = normalizeText(value);
+  if (!text) return '';
+  return text
+    .split(/[-_:/]+/)
+    .filter(Boolean)
+    .map(part => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function compactText(value, limit = 220) {
+  let text = normalizeText(value);
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 3)}...`;
+}
+
+function normalizeTimestamp(value) {
+  if (!value) return '';
+  let date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeText(item)).filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([key]) => normalizeText(key))
+      .filter(Boolean);
+  }
+  return normalizeText(value) ? [normalizeText(value)] : [];
+}
+
+function normalizeFlags(card = {}) {
+  let flags = new Set();
+  for (let flag of normalizeStringList(card.flags)) flags.add(flag);
+  for (let flag of normalizeStringList(card.recoveryFlags || card.recovery_flags)) flags.add(flag);
+
+  let recovery = asObject(card.recovery);
+  for (let [key, enabled] of Object.entries(recovery)) {
+    if (enabled === true || normalizeText(enabled)) flags.add(key);
+  }
+
+  let status = normalizeText(card.status).toLowerCase();
+  if (status === 'blocked') flags.add('blocked');
+  if (status === 'stale' || card.stale === true) flags.add('stale');
+  if (card.blocked === true || normalizeText(card.blockedReason)) flags.add('blocked');
+  if (card.needsResume === true || card.needs_resume === true) flags.add('needs_resume');
+  if (card.needsAudit === true || card.needs_audit === true) flags.add('needs_audit');
+  if (card.recovering === true) flags.add('recovering');
+
+  return [...flags].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeColumn(raw = {}, index = 0) {
+  let column = asObject(raw);
+  let id = normalizeId(column.id || column.columnId || column.key || column.name, `column-${index + 1}`);
+  let title = normalizeText(column.title || column.label || column.name, titleFromId(id));
+  return {
+    id,
+    title,
+    description: normalizeText(column.description || column.summary),
+    gate: normalizeText(column.gate || column.policy?.gate),
+    limit: Number.isFinite(Number(column.limit)) ? Number(column.limit) : null,
+    order: Number.isFinite(Number(column.order)) ? Number(column.order) : index,
+    policy: asObject(column.policy),
+    cards: [],
+  };
+}
+
+function normalizeEntityRefs(card = {}) {
+  let refs = asObject(card.entityRefs || card.entity_refs);
+  let goalId = normalizeText(refs.goalId || refs.goal_id || card.goalId || card.goal_id);
+  let chatId = normalizeText(refs.chatId || refs.chat_id || card.chatId || card.chat_id);
+  let taskIds = normalizeStringList(refs.taskIds || refs.task_ids || card.taskIds || card.task_ids);
+  return {
+    ...(goalId ? { goalId } : {}),
+    ...(chatId ? { chatId } : {}),
+    ...(taskIds.length ? { taskIds } : {}),
+  };
+}
+
+function normalizeCheck(raw = {}) {
+  let check = asObject(raw);
+  return {
+    id: normalizeText(check.id || check.key || check.name),
+    label: normalizeText(check.label || check.title || check.name || check.id, 'Check'),
+    status: normalizeText(check.status || check.state, 'pending'),
+    note: normalizeText(check.note || check.summary || check.message),
+  };
+}
+
+function normalizeEvent(raw = {}) {
+  let event = asObject(raw);
+  return {
+    id: normalizeText(event.id || event.eventId || event.transitionId),
+    label: normalizeText(event.label || event.title || event.type || event.status, 'Event'),
+    status: normalizeText(event.status || event.result),
+    actor: normalizeText(event.actor || event.owner),
+    timestamp: normalizeTimestamp(event.timestamp || event.createdAt || event.updatedAt || event.time),
+    note: normalizeText(event.note || event.reason || event.message || event.summary),
+  };
+}
+
+function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID) {
+  let card = asObject(raw);
+  let title = normalizeText(card.title || card.name || card.summary, `Work item ${index + 1}`);
+  let id = normalizeText(card.id || card.cardId || card.key);
+  if (!id) id = normalizeId(`${fallbackColumnId}-${title}`, `card-${index + 1}`);
+
+  let columnId = normalizeId(
+    card.columnId
+      || card.column_id
+      || card.workflowColumn
+      || card.workflow_column
+      || card.stage
+      || fallbackColumnId,
+    fallbackColumnId,
+  );
+  let flags = normalizeFlags(card);
+  let labels = normalizeStringList(card.labels || card.tags).slice(0, 6);
+  let entityRefs = normalizeEntityRefs(card);
+  let files = normalizeStringList(card.files || card.fileRefs || card.file_refs || card.paths);
+  let checks = asArray(card.checks || card.workflowChecks || card.workflow_checks).map(normalizeCheck);
+  let events = asArray(card.events || card.eventHistory || card.event_history).map(normalizeEvent);
+  let priority = normalizeText(card.priority || card.severity || card.rank);
+
+  return {
+    id,
+    title,
+    summary: compactText(card.description || card.summary || card.body || card.prompt || ''),
+    columnId,
+    projectId: normalizeText(card.projectId || card.project_id || card.project || entityRefs.projectId),
+    kind: normalizeText(card.kind || card.type, 'work-item'),
+    priority,
+    status: normalizeText(card.status || card.runtimeStatus || card.runtime_status),
+    owner: normalizeText(card.owner || card.assignee || card.agent || card.agentSlug),
+    assignedAgent: normalizeText(card.assignedAgent || card.assigned_agent || card.agent || card.agentSlug),
+    resourceGroup: normalizeText(card.resourceGroup || card.resource_group),
+    approvalMode: normalizeText(card.approvalMode || card.approval_mode),
+    blocker: normalizeText(card.blocker || card.blockedReason || card.blocked_reason),
+    updatedAt: normalizeTimestamp(card.updatedAt || card.updated_at || card.modifiedAt),
+    createdAt: normalizeTimestamp(card.createdAt || card.created_at),
+    version: Number.isFinite(Number(card.version)) ? Number(card.version) : null,
+    order: Number.isFinite(Number(card.order ?? card.position ?? card.rank))
+      ? Number(card.order ?? card.position ?? card.rank)
+      : index,
+    flags,
+    labels,
+    entityRefs,
+    files,
+    checks,
+    events,
+    run: asObject(card.run || card.workflowRun || card.workflow_run || asArray(card.runs)[0]),
+    runs: asArray(card.runs || card.workflowRuns || card.workflow_runs),
+    lease: asObject(card.lease || card.workflowLease || card.workflow_lease),
+    automation: asObject(card.automation),
+    metadata: asObject(card.metadata),
+    developmentMap: asObject(card.developmentMap || card.development_map),
+    allowedTransitions: asArray(card.allowedTransitions || card.allowed_transitions),
+    raw: card,
+  };
+}
+
+function normalizeTransition(raw = {}) {
+  let transition = asObject(raw);
+  let from = normalizeId(transition.from || transition.fromColumnId || transition.from_column_id);
+  let to = normalizeId(transition.to || transition.toColumnId || transition.to_column_id);
+  if (!from || !to) return null;
+  return {
+    from,
+    to,
+    label: normalizeText(transition.label || transition.title, `Move to ${titleFromId(to)}`),
+    gate: normalizeText(transition.gate || transition.policy?.gate),
+    destructive: Boolean(transition.destructive),
+    requiresReason: Boolean(transition.requiresReason || transition.requires_reason),
+    mode: normalizeText(transition.mode || transition.intentMode),
+  };
+}
+
+function embeddedCardsFromColumns(columns = []) {
+  let cards = [];
+  for (let column of asArray(columns)) {
+    let columnId = normalizeId(column?.id || column?.columnId || column?.key || column?.name, DEFAULT_COLUMN_ID);
+    for (let card of asArray(column?.cards || column?.items)) {
+      cards.push({
+        ...asObject(card),
+        columnId: card?.columnId || card?.column_id || columnId,
+      });
+    }
+  }
+  return cards;
+}
+
+function ensureColumns(columns, cards) {
+  let byId = new Map();
+  for (let column of columns) byId.set(column.id, { ...column, cards: [] });
+  for (let card of cards) {
+    if (!byId.has(card.columnId)) {
+      byId.set(card.columnId, {
+        id: card.columnId,
+        title: titleFromId(card.columnId),
+        description: '',
+        gate: '',
+        limit: null,
+        order: byId.size,
+        policy: {},
+        cards: [],
+      });
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.order - b.order);
+}
+
+function sortCards(cards = []) {
+  return [...cards].sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    let aTime = Date.parse(a.updatedAt || a.createdAt || '') || 0;
+    let bTime = Date.parse(b.updatedAt || b.createdAt || '') || 0;
+    return bTime - aTime;
+  });
+}
+
+function flagNeedsRecovery(flag) {
+  let key = normalizeText(flag).toLowerCase();
+  return RECOVERY_FLAG_KEYS.has(key);
+}
+
+function deriveCounters(cards, columns) {
+  let counters = {
+    total: cards.length,
+    active: cards.filter(card => ACTIVE_COLUMN_IDS.has(card.columnId)).length,
+    blocked: cards.filter(card => card.flags.some(flag => normalizeText(flag).toLowerCase() === 'blocked')).length,
+    recovery: cards.filter(card => card.flags.some(flagNeedsRecovery)).length,
+    done: cards.filter(card => card.columnId === 'done').length,
+    columns: columns.length,
+  };
+  return counters;
+}
+
+function normalizeCounters(rawCounters, derived) {
+  let counters = asObject(rawCounters);
+  return {
+    total: Number.isFinite(Number(counters.total ?? counters.cards)) ? Number(counters.total ?? counters.cards) : derived.total,
+    active: Number.isFinite(Number(counters.active)) ? Number(counters.active) : derived.active,
+    blocked: Number.isFinite(Number(counters.blocked)) ? Number(counters.blocked) : derived.blocked,
+    recovery: Number.isFinite(Number(counters.recovery ?? counters.needsRecovery))
+      ? Number(counters.recovery ?? counters.needsRecovery)
+      : derived.recovery,
+    done: Number.isFinite(Number(counters.done)) ? Number(counters.done) : derived.done,
+    columns: Number.isFinite(Number(counters.columns)) ? Number(counters.columns) : derived.columns,
+  };
+}
+
+function assignCardsToColumns(columns, cards) {
+  let byColumn = new Map(columns.map(column => [column.id, { ...column, cards: [] }]));
+  for (let card of sortCards(cards)) {
+    let column = byColumn.get(card.columnId);
+    if (column) column.cards.push(card);
+  }
+  return [...byColumn.values()];
+}
+
+function appendParam(params, key, value) {
+  let text = normalizeText(value);
+  if (text) params.set(key, text);
+}
+
+export function buildWorkflowBoardUrl(filters = {}, endpoint = WORKFLOW_BOARD_ENDPOINT) {
+  let params = new URLSearchParams();
+  appendParam(params, 'scope', filters.scope);
+  appendParam(params, 'projectId', filters.projectId);
+  appendParam(params, 'boardId', filters.boardId);
+  appendParam(params, 'mode', filters.mode);
+  let query = params.toString();
+  return query ? `${endpoint}?${query}` : endpoint;
+}
+
+export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
+  let root = asObject(payload);
+  let projection = asObject(root.projection);
+  let source = asObject(
+    projection.board
+      || projection.workflowBoard
+      || root.board
+      || root.workflowBoard
+      || root.workflow_board
+      || projection
+      || root,
+  );
+  let rawColumns = asArray(source.columns || root.columns);
+  let rawCards = [
+    ...embeddedCardsFromColumns(rawColumns),
+    ...asArray(source.cards || source.items || projection.cards || projection.items || root.cards || root.items),
+  ];
+
+  let normalizedCards = rawCards.map((card, index) => {
+    let fallbackColumnId = normalizeId(card?.columnId || card?.column_id || DEFAULT_COLUMN_ID);
+    return normalizeCard(card, index, fallbackColumnId);
+  });
+
+  let columns = ensureColumns(
+    rawColumns.length ? rawColumns.map(normalizeColumn) : DEFAULT_COLUMNS.map(normalizeColumn),
+    normalizedCards,
+  );
+  columns = assignCardsToColumns(columns, normalizedCards);
+
+  let transitions = asArray(source.transitions || root.transitions)
+    .map(normalizeTransition)
+    .filter(Boolean);
+  let counters = normalizeCounters(
+    source.counters || source.summary || projection.counts || projection.counters || root.counters,
+    deriveCounters(normalizedCards, columns),
+  );
+  let boardId = normalizeText(source.id || source.boardId || source.board_id || projection.boardId || filters.boardId, DEFAULT_BOARD_ID);
+  let scopeSource = asObject(source.scope || projection.scope);
+  let scope = normalizeText(
+    scopeSource.kind || scopeSource.scope || source.scope || filters.scope || (filters.projectId ? 'project' : 'home'),
+    'home',
+  );
+  let projectId = normalizeText(scopeSource.projectId || source.projectId || source.project_id || filters.projectId);
+  let mode = normalizeText(source.mode || source.boardMode || source.board_mode || filters.mode, DEFAULT_BOARD_MODE);
+
+  return {
+    id: boardId,
+    boardId,
+    title: normalizeText(source.title || source.name, projectId ? 'Project Workflow Board' : 'Workflow Board'),
+    description: normalizeText(source.description || source.summary),
+    scope,
+    projectId,
+    mode,
+    updatedAt: normalizeTimestamp(source.updatedAt || source.updated_at || root.updatedAt),
+    columns,
+    cards: normalizedCards,
+    transitions,
+    counters,
+    filters: asObject(source.filters || root.filters),
+    recovery: asObject(source.recovery || root.recovery),
+    raw: root,
+  };
+}
+
+export async function fetchWorkflowBoard(filters = {}, options = {}) {
+  let fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Workflow board fetch failed: fetch is not available in this runtime.');
+  }
+
+  let response = await fetchImpl(buildWorkflowBoardUrl(filters, options.endpoint), {
+    signal: options.signal,
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Workflow board fetch failed: /api/workflow-board returned HTTP ${response.status}.`);
+  }
+  let payload = await response.json();
+  if (payload?.error) {
+    throw new Error(`Workflow board fetch failed: ${payload.error}`);
+  }
+  return normalizeWorkflowBoardPayload(payload, filters);
+}
+
+export async function requestWorkflowTransition(input = {}, options = {}) {
+  let fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Workflow transition request failed: fetch is not available in this runtime.');
+  }
+
+  let boardId = normalizeText(input.boardId || input.board_id);
+  let cardId = normalizeText(input.cardId || input.card_id);
+  let fromColumnId = normalizeId(input.fromColumnId || input.from_column_id);
+  let toColumnId = normalizeId(input.toColumnId || input.to_column_id || input.to);
+  if (!boardId) throw new Error('Workflow transition request failed: boardId is required.');
+  if (!cardId) throw new Error('Workflow transition request failed: cardId is required.');
+  if (!fromColumnId) throw new Error('Workflow transition request failed: fromColumnId is required.');
+  if (!toColumnId) throw new Error('Workflow transition request failed: toColumnId is required.');
+
+  let request = {
+    boardId,
+    cardId,
+    fromColumnId,
+    toColumnId,
+    actor: normalizeText(input.actor, 'human'),
+    mode: normalizeText(input.mode, 'manual'),
+    reason: normalizeText(input.reason),
+    entityRefs: asObject(input.entityRefs || input.entity_refs),
+    expectedVersion: Number.isFinite(Number(input.expectedVersion)) ? Number(input.expectedVersion) : null,
+  };
+
+  let response = await fetchImpl(options.endpoint || WORKFLOW_TRANSITIONS_ENDPOINT, {
+    method: 'POST',
+    signal: options.signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error(`Workflow transition request failed: API returned HTTP ${response.status}.`);
+  }
+
+  let payload = await response.json();
+  if (payload?.error) {
+    throw new Error(`Workflow transition request failed: ${payload.error}`);
+  }
+  return payload;
+}
+
+async function postWorkflowAction(endpoint, input = {}, options = {}) {
+  let fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Workflow action failed: fetch is not available in this runtime.');
+  }
+  let response = await fetchImpl(options.endpoint || endpoint, {
+    method: 'POST',
+    signal: options.signal,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`Workflow action failed: API returned HTTP ${response.status}.`);
+  }
+  let payload = await response.json();
+  if (payload?.error) throw new Error(`Workflow action failed: ${payload.error}`);
+  return payload;
+}
+
+export function orchestrateWorkflowCard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_ORCHESTRATE_ENDPOINT, input, options);
+}
+
+export function controlWorkflowCard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_CONTROL_ENDPOINT, input, options);
+}
+
+export function reconcileWorkflowRecovery(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_RECOVERY_RECONCILE_ENDPOINT, input, options);
+}
+
+export function getAdjacentColumn(board = {}, columnId = '', direction = 1) {
+  let columns = asArray(board.columns);
+  let index = columns.findIndex(column => column.id === columnId);
+  if (index < 0) return null;
+  return columns[index + direction] || null;
+}
+
+export function getCardTransitions(board = {}, card = {}) {
+  let transitions = asArray(board.transitions)
+    .filter(transition => transition.from === card.columnId);
+  if (transitions.length) return transitions;
+
+  let previous = getAdjacentColumn(board, card.columnId, -1);
+  let next = getAdjacentColumn(board, card.columnId, 1);
+  return [previous, next]
+    .filter(Boolean)
+    .map(column => ({
+      from: card.columnId,
+      to: column.id,
+      label: `Move to ${column.title}`,
+      gate: '',
+      destructive: column.id === 'done' || column.id === 'backlog',
+      requiresReason: column.id === 'done' || column.id === 'backlog',
+      mode: 'manual',
+    }));
+}
+
+export default fetchWorkflowBoard;

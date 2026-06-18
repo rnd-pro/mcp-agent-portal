@@ -116,6 +116,8 @@ export class AgentChat extends Symbiote {
   _overlayLayoutFrame = 0;
   _overlayLayoutResizeObserver = null;
   _overlayLayoutSyncHandler = null;
+  _workflowGoalStageId = '';
+  _workflowGoalStageLabel = '';
   init$ = {
     messages: [],
     messageItems: [],
@@ -144,6 +146,7 @@ export class AgentChat extends Symbiote {
     goalQueueNowTitle: tPortal('chat.goal.queueNow'),
     goalQueueAfterTitle: tPortal('chat.goal.queueAfter'),
     goalQueueClearTitle: tPortal('chat.goal.queueClear'),
+    goalWorkflowTitle: tPortal('chat.goal.openWorkflowBoard'),
     isInputDisabled: true,
     isSubagentChat: false,
     inputPlaceholder: tPortal('chat.placeholder.ready'),
@@ -798,7 +801,54 @@ export class AgentChat extends Symbiote {
       this.ref.goalQueueAfterButton.setAttribute('aria-pressed', queueMode === 'after' ? 'true' : 'false');
     }
     if (this.ref.goalQueueClearButton) this.ref.goalQueueClearButton.hidden = queue.length === 0;
+    this._syncGoalWorkflowDom(goal);
     this._queueOverlayStackSync();
+  }
+
+  _syncGoalWorkflowDom(goal = null) {
+    let meta = this.ref.goalWorkflowMeta;
+    let button = this.ref.goalWorkflowButton;
+    let hasGoal = Boolean(goal?.id);
+    if (button) button.hidden = !hasGoal;
+    if (!meta) return;
+    if (!hasGoal) {
+      meta.hidden = true;
+      meta.textContent = '';
+      this._workflowGoalStageId = '';
+      this._workflowGoalStageLabel = '';
+      return;
+    }
+    if (this._workflowGoalStageId === goal.id && this._workflowGoalStageLabel) {
+      meta.hidden = false;
+      meta.textContent = tPortal('chat.goal.workflowStage', { stage: this._workflowGoalStageLabel });
+      return;
+    }
+    meta.hidden = true;
+    this._loadGoalWorkflowStage(goal);
+  }
+
+  async _loadGoalWorkflowStage(goal = null) {
+    let goalId = goal?.id || '';
+    if (!goalId || (this._workflowGoalStageId === goalId && this._workflowGoalStageLabel)) return;
+    this._workflowGoalStageId = goalId;
+    this._workflowGoalStageLabel = '';
+    try {
+      let projectId = goal.projectId || this.$.chatParams?.projectId || dashState.activeProjectId || '';
+      let qs = new URLSearchParams();
+      if (projectId) qs.set('projectId', projectId);
+      let res = await fetch(`/api/workflow-board${qs.toString() ? `?${qs}` : ''}`);
+      let data = await res.json();
+      if (!res.ok || data?.error) return;
+      let projection = data.projection || {};
+      let cards = Array.isArray(projection.cards) ? projection.cards : [];
+      let card = cards.find(item => item?.entityRefs?.goalId === goalId);
+      if (!card) return;
+      let column = (projection.columns || []).find(item => item.id === card.columnId);
+      this._workflowGoalStageLabel = column?.title || card.columnId || '';
+      if (this.$.activeGoal?.id === goalId) this._syncGoalWorkflowDom(this.$.activeGoal);
+    } catch (err) {
+      console.warn('[AgentChat] workflow stage lookup failed:', err.message);
+    }
   }
 
   async onGoalLifecycleClick(event) {
@@ -819,7 +869,18 @@ export class AgentChat extends Symbiote {
       await this._clearGoalQueue();
       return;
     }
+    if (action === 'open-workflow-board') {
+      this._openWorkflowBoard();
+      return;
+    }
     await this._updateGoalLifecycle(action);
+  }
+
+  _openWorkflowBoard() {
+    let goal = this.$.activeGoal || {};
+    let projectId = goal.projectId || this.$.chatParams?.projectId || dashState.activeProjectId || '';
+    let query = projectId ? `?project=${encodeURIComponent(projectId)}` : '';
+    window.location.hash = `#workflow-board${query}`;
   }
 
   async _recordGoalQueueMessage({ text, delivery = 'after', status = 'queued' } = {}) {

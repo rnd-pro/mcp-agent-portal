@@ -74,6 +74,10 @@ describe('portal orchestrator MCP tools', () => {
       'cancel_chat_task',
       'finish_chat_task',
       'get_orchestrator_status',
+      'list_workflow_boards',
+      'get_workflow_board',
+      'request_workflow_transition',
+      'get_workflow_recovery_state',
     ]) {
       assert.ok(names.includes(name), `missing ${name}`);
     }
@@ -157,6 +161,44 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(proxyManager.chatWsServer.taskChatMap.has('task-123'), false);
     assert.equal(proxyManager.chatWsServer.unsubscribed, 'task-123');
     assert.equal(broadcasts.some(event => event.params?.path === 'chats.updated'), true);
+  });
+
+  it('routes workflow board MCP tools through the workflow service', async () => {
+    let calls = [];
+    let workflowService = {
+      requestWorkflowTransition: async (args, context) => {
+        calls.push({ args, context });
+        return {
+          ok: true,
+          status: 'blocked',
+          gateResult: { ok: false, failures: [{ gate: 'version_conflict' }] },
+          rollbackColumnId: args.fromColumnId,
+        };
+      },
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'request_workflow_transition',
+      {
+        board_id: 'agent-workflow-default',
+        card_id: 'card-1',
+        from_column_id: 'ready',
+        to_column_id: 'in-progress',
+        expected_version: 7,
+      },
+      'test',
+      { stateGraph: sg, workflowService },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(payload.status, 'blocked');
+    assert.equal(payload.rollbackColumnId, 'ready');
+    assert.equal(calls[0].args.boardId, 'agent-workflow-default');
+    assert.equal(calls[0].args.cardId, 'card-1');
+    assert.equal(calls[0].args.expectedVersion, 7);
+    assert.equal(calls[0].context.toolName, 'request_workflow_transition');
   });
 
   it('updates pending chat task bindings for orchestrator recovery', async () => {

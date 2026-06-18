@@ -5,6 +5,11 @@ import {
   parseTaskStateResult,
 } from './orchestration-development-map.js';
 import { extractFinalAgentResponse } from './task-router.js';
+import {
+  WORKFLOW_BOARD_TOOLS,
+  handleWorkflowBoardTool,
+  isWorkflowBoardTool,
+} from './workflow-board-tools.js';
 
 const FINAL_AGENT_MESSAGE_TEXT_LIMIT = 4000;
 const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
@@ -168,6 +173,7 @@ export const ORCHESTRATOR_META_TOOLS = [
       properties: {},
     },
   },
+  ...WORKFLOW_BOARD_TOOLS,
 ];
 
 const ORCHESTRATOR_TOOL_NAMES = new Set(
@@ -663,6 +669,13 @@ export async function handlePortalOrchestratorTool(
   }
 
   let sg = await getStateGraph(options);
+
+  if (isWorkflowBoardTool(toolName)) {
+    return handleWorkflowBoardTool(proxyManager, toolName, args, source, {
+      ...options,
+      stateGraph: sg,
+    });
+  }
 
   if (toolName === 'list_chats') {
     return textResult({

@@ -29,6 +29,7 @@ export default html`
       <span class="goal-status-main">
         <span class="goal-status-title" ref="goalStatusTitle"></span>
         <span class="goal-status-meta" ref="goalStatusMeta"></span>
+        <span class="goal-status-workflow" ref="goalWorkflowMeta" hidden></span>
       </span>
       <div class="goal-status-queue" ref="goalQueuePanel" hidden>
         <span class="goal-status-queue-label" ref="goalQueueLabel"></span>
@@ -43,6 +44,9 @@ export default html`
         </button>
       </div>
       <div class="goal-status-actions">
+        <button type="button" class="goal-status-action" data-goal-action="open-workflow-board" ref="goalWorkflowButton" ${{ title: 'goalWorkflowTitle', onclick: 'onGoalLifecycleClick' }}>
+          <span class="material-symbols-outlined">view_kanban</span>
+        </button>
         <button type="button" class="goal-status-action" data-goal-action="cancel-intent" ref="goalCancelButton" ${{ title: 'goalCancelTitle', onclick: 'onGoalLifecycleClick' }}>
           <span class="material-symbols-outlined">close</span>
         </button>

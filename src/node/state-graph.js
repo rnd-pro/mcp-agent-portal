@@ -64,6 +64,12 @@ function defaultState() {
     chats: {},
     goals: {},
     tasks: {},
+    workflowBoards: {},
+    workflowCards: {},
+    workflowTransitions: {},
+    workflowChecks: {},
+    workflowRuns: {},
+    workflowLeases: {},
     layouts: {},
     settings: {
       mcpServers: {},

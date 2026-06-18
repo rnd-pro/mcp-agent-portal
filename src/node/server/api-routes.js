@@ -12,6 +12,7 @@ import { createProjectGraphRoutes } from './routes/project-graph-routes.js';
 import { createSettingsRoutes } from './routes/settings-routes.js';
 import { createAudioTranscribeRoutes } from './routes/audio-transcribe-routes.js';
 import { createStateRoutes } from './routes/state-routes.js';
+import { createWorkflowBoardRoutes } from './routes/workflow-board-routes.js';
 
 /**
  * Build the Portal root route map. Accepts context once at init time.
@@ -28,6 +29,7 @@ export function createRoutes(ctx) {
     ...createAgentPortalRoutes(ctx),
     ...createOperationRoutes(ctx),
     ...createStateRoutes(ctx),
+    ...createWorkflowBoardRoutes(ctx),
     ...createAudioTranscribeRoutes(),
   };
 }

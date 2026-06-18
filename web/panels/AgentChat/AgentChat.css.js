@@ -215,7 +215,8 @@ pg-agent-chat {
 }
 
 .goal-status-title,
-.goal-status-meta {
+.goal-status-meta,
+.goal-status-workflow {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -229,6 +230,11 @@ pg-agent-chat {
 .goal-status-meta {
   font-size: var(--sn-layout-menu-action-size, 12px);
   color: var(--sn-muted);
+}
+
+.goal-status-workflow {
+  font-size: calc(var(--sn-layout-menu-action-size, 12px) - 1px);
+  color: var(--sn-text-dim);
 }
 
 .goal-status-actions {

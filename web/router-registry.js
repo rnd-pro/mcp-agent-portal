@@ -59,6 +59,7 @@ export const panelTypes = {
   'tool-explorer':{ title: tPortal('text.toolExplorer'),  icon: 'build',         component: 'pg-tool-explorer' },
   'active-context':{title: tPortal('text.activeContext'), icon: 'data_object',   component: 'pg-active-context' },
   'active-tasks': { title: tPortal('text.activeTasks'),   icon: 'memory',        component: 'pg-active-tasks' },
+  'workflow-board': { title: tPortal('text.workflowBoard'), icon: 'view_kanban', component: 'pg-workflow-board' },
   'pipeline-mgr': { title: tPortal('text.pipelines'),     icon: 'schema',        component: 'pg-pipeline-mgr' },
   'group-mgr':    { title: tPortal('text.resourceGroups'),icon: 'groups',        component: 'pg-group-manager' },
   'theme-editor': { title: tPortal('text.theme'),         icon: 'palette',       component: 'pg-theme-editor-panel' },
@@ -222,6 +223,11 @@ registerSection('tool-explorer', {
 registerSection('orchestration', {
   icon: 'memory', label: tPortal('text.activeTasks'), order: 29, scope: 'home',
   layout: withChat(() => panel('active-tasks', 'board'), false)
+});
+
+registerSection('workflow-board', {
+  icon: 'view_kanban', label: tPortal('text.workflowBoard'), order: 29.05, scope: 'both',
+  layout: withChat(() => panel('workflow-board', 'board'), false, { ratio: 0.78 })
 });
 
 registerSection('workflows', {
