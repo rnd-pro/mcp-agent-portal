@@ -1,14 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import {
   MCPMultiplexer,
   META_TOOLS,
   extractTaskIdFromDelegateResult,
+  resumeChatTool,
   summarizeDelegateArgs,
 } from '../../src/node/proxy/mcp-multiplexer.js';
+import {
+  parseResourceGroupDiagnostics,
+} from '../../src/node/proxy/chat-delegate-routing.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -424,4 +429,189 @@ test('raw agent-pool notifications are not forwarded to external MCP clients', (
     params: {},
   });
   assert.equal(ideMessages.length, 1);
+});
+
+test('resume_chat error field keys include resourceGroupDiagnostics for registration', () => {
+  let source = fs.readFileSync(path.join(ROOT, 'src/node/proxy/mcp-multiplexer.js'), 'utf8');
+
+  assert.match(source, /parseResourceGroupDiagnostics\b/);
+  assert.match(source, /resourceGroupDiagnostics,/);
+  assert.match(source, /developmentMap: buildDevelopmentMap\(/);
+});
+
+test('parseResourceGroupDiagnostics surfaces sanitized not_found group capacity info', () => {
+  let errorText = `❌ Resource group \`nonexistent\` not found.
+
+Available resource groups (2):
+  - \`orchestration-readonly\` (provider: codex, model: gpt-5, capacity: 0/3)
+  - \`reasoning-heavy\` (provider: claude, model: deepseek/deepseek-v4-pro, capacity: 1/2)`;
+
+  let diagnostics = parseResourceGroupDiagnostics(errorText);
+
+  assert.equal(diagnostics.errorKind, 'not_found');
+  assert.equal(diagnostics.groupName, 'nonexistent');
+  assert.equal(diagnostics.availableCount, 2);
+  assert.equal(JSON.stringify(diagnostics).includes('agent-pool'), false);
+  assert.equal(JSON.stringify(diagnostics).includes('Agent Pool'), false);
+  assert.equal(JSON.stringify(diagnostics).includes('session'), false);
+
+  assert.equal(diagnostics.availableGroups[0].name, 'orchestration-readonly');
+  assert.equal(diagnostics.availableGroups[0].capacity.active, 0);
+  assert.equal(diagnostics.availableGroups[0].capacity.max, 3);
+
+  assert.equal(diagnostics.availableGroups[1].capacity.active, 1);
+  assert.equal(diagnostics.availableGroups[1].capacity.max, 2);
+});
+
+test('parseResourceGroupDiagnostics surfaces sanitized at_capacity group info', () => {
+  let errorText = `⚠️ Resource group \`reasoning-heavy\` is at capacity (2/2 active tasks). Wait for an existing task in this group to complete, or use an available alternative.
+
+Available resource groups (1):
+  - \`implementation\` (provider: opencode, model: default, capacity: 2/4)`;
+
+  let diagnostics = parseResourceGroupDiagnostics(errorText);
+
+  assert.equal(diagnostics.errorKind, 'at_capacity');
+  assert.equal(diagnostics.groupName, 'reasoning-heavy');
+  assert.deepEqual(diagnostics.capacity, { active: 2, max: 2 });
+  assert.equal(diagnostics.availableCount, 1);
+  assert.equal(JSON.stringify(diagnostics).includes('agent-pool'), false);
+  assert.equal(JSON.stringify(diagnostics).includes('Agent Pool'), false);
+
+  assert.equal(diagnostics.availableGroups[0].name, 'implementation');
+  assert.equal(diagnostics.availableGroups[0].capacity.active, 2);
+});
+
+test('get_portal_status development map propagates resourceGroups from task errors', async () => {
+  let ideMessages = [];
+  let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
+  let proxyManager = {
+    servers: new Map(),
+    broadcastMonitor() {},
+    stateGraph: {
+      listChats: () => [],
+      listChatGoals: () => [],
+      get: () => ({}),
+    },
+    getHealthStatus: () => ({
+      'project-graph': { status: 'healthy' },
+      'agent-pool': { status: 'healthy' },
+    }),
+    requestFromChild: async (_serverName, _method, params) => {
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    },
+  };
+  let multiplexer = new MCPMultiplexer(proxyManager, ws);
+  multiplexer.toolIndex.tools.set('get_skeleton', {
+    server: 'project-graph',
+    tool: { name: 'get_skeleton', description: 'Get project skeleton' },
+  });
+  multiplexer.toolIndex._ready = true;
+
+  await multiplexer._handleToolCall({
+    jsonrpc: '2.0',
+    id: 44,
+    method: 'tools/call',
+    params: {
+      name: 'get_portal_status',
+      arguments: {},
+    },
+  });
+
+  let status = JSON.parse(ideMessages[0].result.content[0].text);
+  assert.equal(status.developmentMap.schemaVersion, 1);
+  assert.equal(status.developmentMap.resourceGroups, null);
+});
+
+test('resume_chat error preserves resourceGroupDiagnostics alongside delegateSummary', () => {
+  let source = fs.readFileSync(path.join(ROOT, 'src/node/proxy/mcp-multiplexer.js'), 'utf8');
+
+  assert.match(source, /resourceGroupDiagnostics,\s*\n\s*routing:/);
+  assert.match(source, /delegateSummary:\s*summarizeDelegateArgs\(delegateArgs\)/);
+  assert.match(source, /delegationPolicy:\s*prepared\.delegationPolicy/);
+  assert.doesNotMatch(source, /\nresourceGroupDiagnostics:\s*[a-z_]+\.get/);
+});
+
+test('resume_chat error response includes structured resource group diagnostics', async () => {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-chat-rg-'));
+  let previousEnv = {
+    PORTAL_STATE_DIR: process.env.PORTAL_STATE_DIR,
+    PORTAL_STATE_PATH: process.env.PORTAL_STATE_PATH,
+    PORTAL_WAL_PATH: process.env.PORTAL_WAL_PATH,
+    PORTAL_CHATS_DIR: process.env.PORTAL_CHATS_DIR,
+  };
+  process.env.PORTAL_STATE_DIR = tmpDir;
+  process.env.PORTAL_STATE_PATH = path.join(tmpDir, 'state.json');
+  process.env.PORTAL_WAL_PATH = path.join(tmpDir, 'state.wal');
+  process.env.PORTAL_CHATS_DIR = path.join(tmpDir, 'chats');
+
+  try {
+    let { getStateGraph } = await import('../../src/node/state-graph.js');
+    let sg = getStateGraph();
+    let chat = sg.createChat({
+      name: 'Resource group error test',
+      adapter: 'pool',
+      agent: 'orchestrator',
+      resource_group: 'missing-group',
+    }, 'test');
+
+    let proxyManager = {
+      projectRoot: ROOT,
+      broadcastMonitor() {},
+      requestFromChild: async (_serverName, _method, params) => {
+        if (params.name === 'list_tasks') {
+          return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+        }
+        assert.equal(params.name, 'delegate_task');
+        return {
+          isError: true,
+          content: [{
+            type: 'text',
+            text: `❌ Resource group \`missing-group\` not found.
+
+Available resource groups (1):
+  - \`orchestration-readonly\` (provider: codex, model: gpt-5, capacity: 0/3)`,
+          }],
+        };
+      },
+    };
+
+    let result = await resumeChatTool(proxyManager, {
+      chatId: chat.id,
+      prompt: 'Try unavailable resource group',
+      resource_group: 'missing-group',
+    });
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(result.isError, true);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.chatId, chat.id);
+    assert.equal(payload.taskId, null);
+    assert.match(payload.error, /Resource group `missing-group` not found/);
+    assert.equal(payload.delegateSummary.resourceGroup, 'missing-group');
+    assert.equal(payload.resourceGroupDiagnostics.errorKind, 'not_found');
+    assert.equal(payload.resourceGroupDiagnostics.groupName, 'missing-group');
+    assert.equal(payload.resourceGroupDiagnostics.availableGroups[0].name, 'orchestration-readonly');
+    assert.deepEqual(payload.resourceGroupDiagnostics.availableGroups[0].capacity, { active: 0, max: 3 });
+    assert.equal(JSON.stringify(payload.resourceGroupDiagnostics).includes('agent-pool'), false);
+    assert.equal(JSON.stringify(payload).includes('session_id'), false);
+    assert.equal(payload.developmentMap.resourceGroups.errorKind, 'not_found');
+  } finally {
+    for (let [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

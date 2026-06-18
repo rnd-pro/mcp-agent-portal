@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { StateGraph } from '../../src/node/state-graph.js';
-import { prepareDelegateTaskCall } from '../../src/node/proxy/chat-delegate-routing.js';
+import { extractResourceGroupDiagnostics, parseResourceGroupDiagnostics, prepareDelegateTaskCall } from '../../src/node/proxy/chat-delegate-routing.js';
 
 describe('chat delegate routing', () => {
   let tmpDir;
@@ -337,5 +337,111 @@ describe('chat delegate routing', () => {
     assert.equal(prepared.args.agent_slug, 'orchestrator');
     assert.equal(prepared.args.focus_graph, undefined);
     assert.equal(calls.length, 0);
+  });
+});
+
+describe('parse resource group diagnostics', () => {
+  it('parses missing resource group error with available alternatives', () => {
+    let errorText = `❌ Resource group \`nonexistent\` not found.
+
+Available resource groups (2):
+  - \`orchestration-readonly\` (provider: codex, model: gpt-5, capacity: 0/3)
+  - \`reasoning-heavy\` (provider: claude, model: deepseek/deepseek-v4-pro, capacity: 1/2, fallback: codex/gpt-5)`;
+
+    let diagnostics = parseResourceGroupDiagnostics(errorText);
+
+    assert.equal(diagnostics.errorKind, 'not_found');
+    assert.equal(diagnostics.groupName, 'nonexistent');
+    assert.equal(diagnostics.availableCount, 2);
+    assert.equal(diagnostics.reason.includes('not configured'), true);
+
+    assert.equal(diagnostics.availableGroups[0].name, 'orchestration-readonly');
+    assert.equal(diagnostics.availableGroups[0].provider, 'codex');
+    assert.equal(diagnostics.availableGroups[0].model, 'gpt-5');
+    assert.deepEqual(diagnostics.availableGroups[0].capacity, { active: 0, max: 3 });
+
+    assert.equal(diagnostics.availableGroups[1].name, 'reasoning-heavy');
+    assert.equal(diagnostics.availableGroups[1].provider, 'claude');
+    assert.equal(diagnostics.availableGroups[1].model, 'deepseek/deepseek-v4-pro');
+    assert.deepEqual(diagnostics.availableGroups[1].capacity, { active: 1, max: 2 });
+    assert.deepEqual(diagnostics.availableGroups[1].fallbackProfiles, ['codex/gpt-5']);
+  });
+
+  it('parses at-capacity resource group error with alternatives', () => {
+    let errorText = `⚠️ Resource group \`reasoning-heavy\` is at capacity (2/2 active tasks). Wait for an existing task in this group to complete, or use an available alternative.
+
+Available resource groups (1):
+  - \`implementation\` (provider: opencode, model: default, capacity: 2/4)`;
+
+    let diagnostics = parseResourceGroupDiagnostics(errorText);
+
+    assert.equal(diagnostics.errorKind, 'at_capacity');
+    assert.equal(diagnostics.groupName, 'reasoning-heavy');
+    assert.deepEqual(diagnostics.capacity, { active: 2, max: 2 });
+    assert.equal(diagnostics.availableCount, 1);
+    assert.equal(diagnostics.reason.includes('no available capacity'), true);
+
+    assert.equal(diagnostics.availableGroups[0].name, 'implementation');
+    assert.equal(diagnostics.availableGroups[0].provider, 'opencode');
+    assert.equal(diagnostics.availableGroups[0].model, 'default');
+    assert.deepEqual(diagnostics.availableGroups[0].capacity, { active: 2, max: 4 });
+  });
+
+  it('returns null for non-resource-group errors', () => {
+    assert.equal(parseResourceGroupDiagnostics('Some other error happened'), null);
+    assert.equal(parseResourceGroupDiagnostics(''), null);
+    assert.equal(parseResourceGroupDiagnostics(null), null);
+  });
+
+  it('extracts diagnostics from task result object', () => {
+    let taskResult = {
+      content: [{
+        type: 'text',
+        text: `❌ Resource group \`missing-group\` not found.
+
+Available resource groups (1):
+  - \`orchestration-readonly\` (provider: codex)`,
+      }],
+    };
+
+    let diagnostics = extractResourceGroupDiagnostics(taskResult);
+    assert.equal(diagnostics.errorKind, 'not_found');
+    assert.equal(diagnostics.groupName, 'missing-group');
+    assert.equal(diagnostics.availableCount, 1);
+  });
+
+  it('returns null from task result without resource group errors', () => {
+    let taskResult = {
+      content: [{ type: 'text', text: 'Some non-rg error' }],
+    };
+
+    assert.equal(extractResourceGroupDiagnostics(taskResult), null);
+    assert.equal(extractResourceGroupDiagnostics({ content: [] }), null);
+    assert.equal(extractResourceGroupDiagnostics(null), null);
+  });
+
+  it('parses error without any available groups', () => {
+    let errorText = `❌ Resource group \`missing-group\` not found.
+
+No other resource groups are available in this workspace.`;
+
+    let diagnostics = parseResourceGroupDiagnostics(errorText);
+    assert.equal(diagnostics.errorKind, 'not_found');
+    assert.equal(diagnostics.groupName, 'missing-group');
+    assert.equal(diagnostics.availableCount, 0);
+    assert.deepEqual(diagnostics.availableGroups, []);
+  });
+
+  it('parses at-capacity error with no other groups having capacity', () => {
+    let errorText = `⚠️ Resource group \`reasoning-heavy\` is at capacity (2/2 active tasks). Wait for an existing task in this group to complete, or use an available alternative.
+
+No other resource groups currently have capacity in this workspace.`;
+
+    let diagnostics = parseResourceGroupDiagnostics(errorText);
+    assert.equal(diagnostics.errorKind, 'at_capacity');
+    assert.equal(diagnostics.groupName, 'reasoning-heavy');
+    assert.deepEqual(diagnostics.capacity, { active: 2, max: 2 });
+    assert.equal(diagnostics.availableCount, 0);
+    assert.deepEqual(diagnostics.availableGroups, []);
   });
 });

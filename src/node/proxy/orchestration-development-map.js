@@ -1,3 +1,5 @@
+import { parseResourceGroupDiagnostics } from './chat-delegate-routing.js';
+
 const TASK_TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'lost']);
 const TOOL_EVENT_LIMIT = 8;
 const TOOL_BUCKET_LIMIT = 5;
@@ -1426,6 +1428,10 @@ function promptHintTexts(promptHintMap = {}) {
   return (promptHintMap.hints || []).map(formatPromptHint).slice(0, 6);
 }
 
+function extractResourceGroupStatus(result = {}) {
+  return parseResourceGroupDiagnostics(result?.content?.[0]?.text || '');
+}
+
 export function buildDevelopmentMap({
   sg,
   chatId = null,
@@ -1526,6 +1532,7 @@ export function buildDevelopmentMap({
     promptHintMap,
     promptHints: promptHintTexts(promptHintMap),
     runtime: summarizeRuntime(runtime),
+    resourceGroups: extractResourceGroupStatus(taskResult || {}),
   };
 }
 

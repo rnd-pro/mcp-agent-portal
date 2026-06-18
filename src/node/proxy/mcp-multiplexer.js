@@ -14,6 +14,7 @@ import {
 import {
   isDelegateTool,
   normalizeResourceGroup,
+  parseResourceGroupDiagnostics,
   prepareDelegateTaskCall,
   resolveChatCreationAgent,
 } from './chat-delegate-routing.js';
@@ -321,6 +322,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
   }, 600_000);
   if (result?.isError) {
     let taskState = await readInternalTaskState(proxyManager);
+    let resourceGroupDiagnostics = parseResourceGroupDiagnostics(result?.content?.[0]?.text || '');
     return jsonTextResult({
       ok: false,
       chatId,
@@ -328,6 +330,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
       error: result?.content?.[0]?.text || 'Delegation failed.',
       delegateSummary: summarizeDelegateArgs(delegateArgs),
       delegationPolicy: prepared.delegationPolicy || null,
+      resourceGroupDiagnostics,
       routing: {
         chatId: prepared.chatId || chatId,
         parentChatId: prepared.parentChatId || null,

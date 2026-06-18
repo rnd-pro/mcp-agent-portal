@@ -408,6 +408,95 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   return { args: next, chatId: next.chat_id || contextChatId || null, parentChatId, createdChat, delegationPolicy };
 }
 
+const RG_NOT_FOUND_RE = /❌\s+Resource group\s+`([^`]+)`\s+not found\./;
+const RG_AT_CAPACITY_RE = /⚠️\s+Resource group\s+`([^`]+)`\s+is at capacity\s+\((\d+)\/(\d+)\s+active tasks?\)/;
+const RG_AVAILABLE_HEADER_RE = /Available resource groups\s*\(\d+\):/;
+const RG_ALT_LINE_RE = /^\s*-\s*`([^`]+)`\s*(?:\((.+)\))?/;
+
+function parseAvailableGroupLines(text) {
+  let section = text.split(RG_AVAILABLE_HEADER_RE)[1];
+  if (!section) return [];
+  let results = [];
+  let lines = section.trim().split('\n');
+  for (let line of lines) {
+    let match = line.match(RG_ALT_LINE_RE);
+    if (!match) continue;
+    let entry = { name: match[1] };
+    let details = match[2] || '';
+
+    let providerMatch = details.match(/provider:\s*([^,)]+)/);
+    if (providerMatch) entry.provider = providerMatch[1].trim();
+
+    let modelMatch = details.match(/model:\s*([^,)]+)/);
+    if (modelMatch) entry.model = modelMatch[1].trim();
+
+    let capMatch = details.match(/capacity:\s*(\d+)\/(\d+)/);
+    if (capMatch) {
+      entry.capacity = {
+        active: parseInt(capMatch[1], 10),
+        max: parseInt(capMatch[2], 10),
+      };
+    }
+
+    let fallbackMatch = details.match(/fallback:\s*(.+)/);
+    if (fallbackMatch) {
+      entry.fallbackProfiles = fallbackMatch[1]
+        .split(' -> ')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    results.push(entry);
+  }
+  return results;
+}
+
+/**
+ * Parse resource group failure diagnostics from an Agent Pool delegate_task
+ * error response. Returns structured data that can be surfaced safely through
+ * public Agent Portal tools without exposing raw Agent Pool internals.
+ *
+ * @param {string} errorText
+ * @returns {object|null}
+ */
+export function parseResourceGroupDiagnostics(errorText = '') {
+  let text = String(errorText || '');
+  let notFoundMatch = text.match(RG_NOT_FOUND_RE);
+  if (notFoundMatch) {
+    let availableGroups = parseAvailableGroupLines(text);
+    return {
+      errorKind: 'not_found',
+      groupName: notFoundMatch[1],
+      reason: `The requested resource group is not configured in this workspace.`,
+      availableGroups,
+      availableCount: availableGroups.length,
+    };
+  }
+
+  let capacityMatch = text.match(RG_AT_CAPACITY_RE);
+  if (capacityMatch) {
+    let availableGroups = parseAvailableGroupLines(text);
+    return {
+      errorKind: 'at_capacity',
+      groupName: capacityMatch[1],
+      capacity: {
+        active: parseInt(capacityMatch[2], 10),
+        max: parseInt(capacityMatch[3], 10),
+      },
+      reason: `The requested resource group has no available capacity.`,
+      availableGroups,
+      availableCount: availableGroups.length,
+    };
+  }
+
+  return null;
+}
+
+export function extractResourceGroupDiagnostics(result = {}) {
+  let text = result?.content?.[0]?.text || '';
+  return parseResourceGroupDiagnostics(text);
+}
+
 export default {
   DEFAULT_CHAT_AGENT,
   isDelegateTool,

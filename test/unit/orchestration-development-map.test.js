@@ -636,4 +636,85 @@ describe('orchestration development map', () => {
     assert.equal(map.taskMap.byId['task-done'].toolUsageMs, 4000);
     assert.equal(map.promptHintMap.hints.find((hint) => hint.id === 'review-latest-tool').priority, 'normal');
   });
+
+  it('propagates resource group diagnostics from task error into development map', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-root');
+
+    let taskResult = {
+      isError: true,
+      content: [{
+        type: 'text',
+        text: `❌ Resource group \`nonexistent\` not found.
+
+Available resource groups (2):
+  - \`orchestration-readonly\` (capacity: 0/3)
+  - \`reasoning-heavy\` (capacity: 1/2)`,
+      }],
+    };
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskId: 'task-root',
+      taskResult,
+      taskState: {
+        tasks: [{ id: 'task-root', status: 'done', chatId: root.id }],
+        staleProcesses: [],
+      },
+    });
+
+    assert.equal(map.resourceGroups.errorKind, 'not_found');
+    assert.equal(map.resourceGroups.groupName, 'nonexistent');
+    assert.equal(map.resourceGroups.availableCount, 2);
+    assert.deepEqual(map.resourceGroups.availableGroups[0], { name: 'orchestration-readonly', capacity: { active: 0, max: 3 } });
+    assert.equal(JSON.stringify(map.resourceGroups).includes('agent-pool'), false);
+    assert.equal(JSON.stringify(map.resourceGroups).includes('Agent Pool'), false);
+  });
+
+  it('returns null resourceGroups for normal task results without resource group errors', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskResult: {
+        content: [{ type: 'text', text: 'Task delegated successfully' }],
+      },
+    });
+
+    assert.equal(map.resourceGroups, null);
+  });
+
+  it('propagates at-capacity resource group state into development map', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+
+    let taskResult = {
+      isError: true,
+      content: [{
+        type: 'text',
+        text: `⚠️ Resource group \`reasoning-heavy\` is at capacity (2/2 active tasks). Wait for an existing task in this group to complete, or use an available alternative.
+
+Available resource groups (1):
+  - \`implementation\` (capacity: 2/4)`,
+      }],
+    };
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskResult,
+      taskState: {
+        tasks: [],
+        staleProcesses: [],
+      },
+    });
+
+    assert.equal(map.resourceGroups.errorKind, 'at_capacity');
+    assert.equal(map.resourceGroups.groupName, 'reasoning-heavy');
+    assert.deepEqual(map.resourceGroups.capacity, { active: 2, max: 2 });
+    assert.equal(map.resourceGroups.availableCount, 1);
+    assert.deepEqual(map.resourceGroups.availableGroups[0], { name: 'implementation', capacity: { active: 2, max: 4 } });
+    assert.equal(JSON.stringify(map.resourceGroups).includes('agent-pool'), false);
+  });
 });
