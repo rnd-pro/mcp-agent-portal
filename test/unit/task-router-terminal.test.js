@@ -1,13 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path, { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { StateGraph } from '../../src/node/state-graph.js';
 import {
   extractFinalAgentResponse,
   formatProviderFallbackMessage,
   isTerminalTaskNotificationType,
+  TaskRouter,
 } from '../../src/node/proxy/task-router.js';
 import { ChatWsServer } from '../../src/node/proxy/chat-ws-server.js';
 
@@ -30,6 +33,7 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.equal(isTerminalTaskNotificationType('done'), true);
     assert.equal(isTerminalTaskNotificationType('error'), true);
     assert.equal(isTerminalTaskNotificationType('cancelled'), true);
+    assert.equal(isTerminalTaskNotificationType('lost'), true);
     assert.equal(isTerminalTaskNotificationType('event'), false);
   });
 
@@ -40,6 +44,7 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.match(source, /if \(type === 'done'\) return 'done';/);
     assert.match(source, /if \(type === 'error'\) return 'error';/);
     assert.match(source, /if \(type === 'cancelled'\) return 'cancelled';/);
+    assert.match(source, /if \(type === 'lost'\) return 'lost';/);
     assert.match(source, /taskUpdate\.status = terminalStatusForType\(type\);/);
     assert.match(source, /taskUpdate\.completedAt = taskUpdate\.completedAt \|\| Date\.now\(\);/);
   });
@@ -214,5 +219,51 @@ describe('TaskRouter terminal lifecycle handling', () => {
         tokenCount: 3,
       },
     }]);
+  });
+
+  it('classifies lost as a terminal notification and normalizes status even without meta', () => {
+    let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');
+
+    assert.match(source, /'lost'/);
+    assert.match(source, /const TERMINAL_TYPES = new Set\(\['done', 'error', 'cancelled', 'lost'\]\);/);
+    assert.match(source, /if \(type === 'lost'\) return 'lost';/);
+    assert.match(source, /if \(isTerminalTaskNotificationType\(type\)\) \{/);
+    assert.match(source, /taskUpdate\.completedAt = taskUpdate\.completedAt \|\| Date\.now\(\);/);
+  });
+
+  it('sets terminal StateGraph status from notification type when meta is absent', () => {
+    let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-router-terminal-'));
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    let router = new TaskRouter({
+      stateGraph: sg,
+      chatWsServer: {
+        taskChatMap: new Map(),
+        chatSubscriptions: new Map(),
+      },
+    });
+
+    try {
+      sg.set('tasks/task-lost-no-meta', { status: 'running', events: [] }, 'test');
+
+      router.route({
+        params: {
+          taskId: 'task-lost-no-meta',
+          type: 'lost',
+          data: {},
+        },
+      });
+
+      let task = sg.get('tasks/task-lost-no-meta');
+      assert.equal(task.status, 'lost');
+      assert.equal(task.type, 'lost');
+      assert.equal(Number.isFinite(task.completedAt), true);
+    } finally {
+      sg.flush();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

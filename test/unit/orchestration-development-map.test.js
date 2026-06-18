@@ -717,4 +717,156 @@ Available resource groups (1):
     assert.deepEqual(map.resourceGroups.availableGroups[0], { name: 'implementation', capacity: { active: 2, max: 4 } });
     assert.equal(JSON.stringify(map.resourceGroups).includes('agent-pool'), false);
   });
+
+  it('exposes requestedTask lifecycle state: found, terminal, and liveness', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-done');
+    sg.set('tasks/task-done', {
+      status: 'done',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      startedAt: Date.now() - 10000,
+      completedAt: Date.now() - 2000,
+      elapsedMs: 8000,
+      events: [],
+    }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-done' });
+
+    assert.equal(map.requestedTask.found, true);
+    assert.equal(map.requestedTask.id, 'task-done');
+    assert.equal(map.requestedTask.status, 'done');
+    assert.equal(map.requestedTask.terminalStatus, true);
+    assert.equal(map.requestedTask.unavailableReason, null);
+    assert.equal(map.requestedTask.resultUnavailableReason, 'task_terminal');
+    assert.equal(map.requestedTask.liveness.state, 'terminal');
+    assert.equal(map.requestedTask.liveness.severity, 'normal');
+  });
+
+  it('exposes requestedTask as not_found when task row is missing after TTL or never existed', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-gone' });
+
+    assert.equal(map.requestedTask.found, false);
+    assert.equal(map.requestedTask.id, 'task-gone');
+    assert.equal(map.requestedTask.status, null);
+    assert.equal(map.requestedTask.terminalStatus, null);
+    assert.equal(map.requestedTask.unavailableReason, 'not_found');
+    assert.equal(map.requestedTask.resultUnavailableReason, 'no_task_row');
+    assert.equal(map.requestedTask.liveness, null);
+  });
+
+  it('treats lost task status as terminal and not running', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-lost');
+    sg.set('tasks/task-lost', {
+      status: 'lost',
+      chatId: root.id,
+      agentSlug: 'backend-engineer',
+      startedAt: Date.now() - 50000,
+      elapsedMs: 50000,
+      events: [],
+    }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-lost' });
+
+    assert.equal(map.requestedTask.found, true);
+    assert.equal(map.requestedTask.terminalStatus, true);
+    assert.equal(map.requestedTask.liveness.state, 'terminal');
+    assert.equal(map.usage.runningTasks, 0);
+    assert.equal(map.usage.totalTasks, 1);
+    assert.equal(map.usage.completedTasks, 1);
+    assert.equal(map.taskMap.runningIds.length, 0);
+    assert.equal(map.taskMap.terminalIds.length, 1);
+    assert.equal(map.taskMap.terminalIds[0], 'task-lost');
+    assert.equal(map.taskMap.byId['task-lost'].liveness.state, 'terminal');
+  });
+
+  it('surfaces stale processes summary without raw process metadata', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskState: {
+        tasks: [],
+        staleProcesses: [
+          { pid: 9999, taskId: 'task-stale-1', command: 'sensitive command' },
+          { pid: 8888, taskId: 'task-stale-2' },
+          { pid: 7777, command: 'orphan' },
+        ],
+      },
+    });
+
+    assert.deepEqual(map.staleProcesses, { count: 3, taskIds: ['task-stale-1', 'task-stale-2'] });
+    assert.equal(JSON.stringify(map.staleProcesses).includes('9999'), false);
+    assert.equal(JSON.stringify(map.staleProcesses).includes('sensitive command'), false);
+    assert.equal(JSON.stringify(map.staleProcesses).includes('8888'), false);
+  });
+
+  it('reports empty stale processes when none are present', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskState: { tasks: [], staleProcesses: [] },
+    });
+
+    assert.deepEqual(map.staleProcesses, { count: 0, taskIds: [] });
+  });
+
+  it('reports empty stale processes when taskState is not provided', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id });
+
+    assert.deepEqual(map.staleProcesses, { count: 0, taskIds: [] });
+  });
+
+  it('classifies unknown task status as warning liveness instead of running', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-unknown');
+    sg.set('tasks/task-unknown', {
+      status: 'unknown',
+      chatId: root.id,
+    }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-unknown' });
+
+    assert.equal(map.requestedTask.found, true);
+    assert.equal(map.requestedTask.terminalStatus, false);
+    assert.equal(map.requestedTask.liveness.state, 'unknown');
+    assert.equal(map.requestedTask.liveness.severity, 'warning');
+    assert.equal(map.usage.runningTasks, 0);
+    assert.equal(map.activityMap.summary.runningTasks, 0);
+    assert.equal(map.activityMap.nodes[0].liveness.state, 'unknown');
+    assert.equal(map.activityMap.nodes[0].liveness.severity, 'warning');
+    assert.equal(map.activityMap.nodes[0].liveness.unknownTaskCount, 1);
+    assert.equal(map.system.capacity.runningTaskCount, 0);
+    assert.equal(map.taskMap.runningIds.length, 0);
+  });
+
+  it('bounds stale process task ids while preserving total count', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    let staleProcesses = Array.from({ length: 25 }, (_, index) => ({
+      pid: 1000 + index,
+      taskId: `task-stale-${index}`,
+      command: `secret command ${index}`,
+    }));
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskState: { tasks: [], staleProcesses },
+    });
+
+    assert.equal(map.staleProcesses.count, 25);
+    assert.equal(map.staleProcesses.taskIds.length, 20);
+    assert.equal(map.staleProcesses.taskIds[0], 'task-stale-0');
+    assert.equal(map.staleProcesses.taskIds[19], 'task-stale-19');
+    assert.equal(JSON.stringify(map.staleProcesses).includes('secret command'), false);
+    assert.equal(JSON.stringify(map.staleProcesses).includes('1000'), false);
+  });
 });

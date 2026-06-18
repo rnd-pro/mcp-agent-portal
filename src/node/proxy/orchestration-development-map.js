@@ -1,17 +1,23 @@
 import { parseResourceGroupDiagnostics } from './chat-delegate-routing.js';
 
 const TASK_TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'lost']);
+const TASK_RUNNING_STATUSES = new Set(['running', 'pending', 'queued', 'starting', 'active', 'in_progress']);
 const TOOL_EVENT_LIMIT = 8;
 const TOOL_BUCKET_LIMIT = 5;
 const TASK_LIMIT = 40;
 const SUBAGENT_LIMIT = 40;
 const PROMPT_HINT_LIMIT = 8;
+const STALE_PROCESS_TASK_ID_LIMIT = 20;
 const COLD_START_GRACE_MS = 15000;
 const QUIET_TASK_MS = 60000;
 const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
 const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
 const SECRET_WORD_RE = /\b(?:secret|session|token|api[_-]?key)[A-Za-z0-9_-]*\b/gi;
+
+export function isRunningTaskStatus(status) {
+  return TASK_RUNNING_STATUSES.has(String(status || ''));
+}
 
 function parseJson(value) {
   if (!value || typeof value !== 'string') return null;
@@ -337,6 +343,18 @@ function summarizeTaskLiveness(task = {}, now = Date.now()) {
     : startedAt ? Math.max(0, now - startedAt) : null;
   let quietSince = lastEventAt || startedAt || null;
   let quietMs = quietSince ? Math.max(0, now - quietSince) : null;
+
+  if (status === 'unknown') {
+    return {
+      state: 'unknown',
+      severity: 'warning',
+      reason: 'Task status is unknown — task row may be missing, stale, or TTL-cleared.',
+      eventCount,
+      quietMs,
+      thresholdMs: null,
+      lastEventAt: null,
+    };
+  }
 
   if (terminal) {
     return {
@@ -889,7 +907,7 @@ function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
     activeGoalId: chat.activeGoalId || null,
     hasSession: Boolean(chat.sessionId),
     taskIds: tasks.map((task) => task.id).filter(Boolean),
-    runningTaskCount: tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length,
+    runningTaskCount: tasks.filter((task) => isRunningTaskStatus(task.status)).length,
     totalTaskCount: tasks.length,
     totalElapsedMs: elapsedValues.reduce((sum, value) => sum + value, 0),
     toolCount: tools.length,
@@ -906,17 +924,23 @@ function summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now) {
 }
 
 function summarizeNodeLiveness(tasks = []) {
-  let liveTasks = tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || ''));
+  let liveTasks = tasks.filter((task) => isRunningTaskStatus(task.status));
+  let unknownTasks = tasks.filter((task) => task.liveness?.state === 'unknown');
   let warningTasks = liveTasks.filter((task) => task.liveness?.severity === 'warning');
   let zeroEventTasks = liveTasks.filter((task) => {
     return task.liveness?.state === 'no_events' || task.liveness?.state === 'cold_start';
   });
   let quietTasks = liveTasks.filter((task) => task.liveness?.state === 'quiet');
-  let highest = warningTasks[0]?.liveness || zeroEventTasks[0]?.liveness || liveTasks[0]?.liveness || null;
+  let highest = warningTasks[0]?.liveness
+    || zeroEventTasks[0]?.liveness
+    || liveTasks[0]?.liveness
+    || unknownTasks[0]?.liveness
+    || null;
   return {
     state: highest?.state || (tasks.length ? 'terminal' : 'idle'),
     severity: highest?.severity || 'normal',
-    warningTaskCount: warningTasks.length,
+    warningTaskCount: warningTasks.length + unknownTasks.length,
+    unknownTaskCount: unknownTasks.length,
     zeroEventTaskCount: zeroEventTasks.length,
     quietTaskCount: quietTasks.length,
     runningTaskCount: liveTasks.length,
@@ -1005,7 +1029,7 @@ function buildTaskMap({ tasks, toolUses, now }) {
     schemaVersion: 1,
     byId,
     runningIds: tasks
-      .filter((task) => task?.id && !TASK_TERMINAL_STATUSES.has(task.status || ''))
+      .filter((task) => task?.id && isRunningTaskStatus(task.status))
       .map((task) => task.id),
     terminalIds: tasks
       .filter((task) => task?.id && TASK_TERMINAL_STATUSES.has(task.status || ''))
@@ -1209,7 +1233,7 @@ function buildActivityMap({
 }
 
 function summarizeUsage(tasks, runtimeResult, now = Date.now(), subagentCount = 0, toolUses = [], system = null) {
-  let running = tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || ''));
+  let running = tasks.filter((task) => isRunningTaskStatus(task.status));
   let elapsedMs = tasks
     .map((task) => Number(task.elapsedMs))
     .filter(Number.isFinite);
@@ -1273,7 +1297,7 @@ function summarizeSystemLoad(systemLoad = null, tasks = [], now = Date.now()) {
       capacity: {
         state: 'unknown',
         reason: 'task_state_missing_system_load',
-        runningTaskCount: tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length,
+        runningTaskCount: tasks.filter((task) => isRunningTaskStatus(task.status)).length,
       },
     };
   }
@@ -1282,7 +1306,7 @@ function summarizeSystemLoad(systemLoad = null, tasks = [], now = Date.now()) {
   let memory = systemLoad.memory || {};
   let capacity = systemLoad.capacity || {};
   let runningTaskCount = finiteNumber(capacity.runningTaskCount)
-    ?? tasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length;
+    ?? tasks.filter((task) => isRunningTaskStatus(task.status)).length;
   return {
     schemaVersion: 1,
     available: true,
@@ -1432,6 +1456,49 @@ function extractResourceGroupStatus(result = {}) {
   return parseResourceGroupDiagnostics(result?.content?.[0]?.text || '');
 }
 
+function summarizeStaleProcesses(staleProcesses = []) {
+  let list = Array.isArray(staleProcesses) ? staleProcesses : [];
+  return {
+    count: list.length,
+    taskIds: list.map((p) => p?.taskId).filter(Boolean).slice(0, STALE_PROCESS_TASK_ID_LIMIT),
+  };
+}
+
+function buildRequestedTask({ taskId, runtimeTask, scopedTasks, now }) {
+  if (!taskId) return null;
+  let found = Boolean(runtimeTask);
+  if (!found) {
+    return {
+      found: false,
+      id: taskId,
+      status: null,
+      terminalStatus: null,
+      liveness: null,
+      unavailableReason: 'not_found',
+      resultUnavailableReason: 'no_task_row',
+    };
+  }
+  let taskStatus = runtimeTask.status || runtimeTask.type || 'unknown';
+  let terminal = TASK_TERMINAL_STATUSES.has(taskStatus);
+  let liveness = summarizeTaskLiveness({
+    status: taskStatus,
+    startedAt: runtimeTask.startedAt,
+    completedAt: runtimeTask.completedAt,
+    elapsedMs: runtimeTask.elapsedMs,
+    eventCount: runtimeTask.eventCount ?? (Array.isArray(runtimeTask.events) ? runtimeTask.events.length : 0),
+    lastEventAt: runtimeTask.lastEventAt,
+  }, now);
+  return {
+    found: true,
+    id: taskId,
+    status: taskStatus,
+    terminalStatus: terminal,
+    liveness,
+    unavailableReason: null,
+    resultUnavailableReason: terminal ? 'task_terminal' : null,
+  };
+}
+
 export function buildDevelopmentMap({
   sg,
   chatId = null,
@@ -1475,7 +1542,7 @@ export function buildDevelopmentMap({
   });
   let subagents = subagentMap.nodes
     .filter((node) => !chatId || node.chatId !== chatId);
-  let runningCount = scopedTasks.filter((task) => !TASK_TERMINAL_STATUSES.has(task.status || '')).length;
+  let runningCount = scopedTasks.filter((task) => isRunningTaskStatus(task.status)).length;
   let taskMap = buildTaskMap({ tasks: scopedTasks, toolUses, now });
   let toolMap = buildToolMap({
     tasks: scopedTasks,
@@ -1512,12 +1579,15 @@ export function buildDevelopmentMap({
   });
   let delegationGraph = buildDelegationGraph({ subagentMap, taskMap, now });
   let activityTimeline = buildActivityTimeline({ tasks: scopedTasks, latestTools, now });
+  let staleProcesses = taskState?.staleProcesses || [];
+  let requestedTask = buildRequestedTask({ taskId, runtimeTask, scopedTasks, now });
 
   return {
     schemaVersion: 1,
     stateError,
     rootChatId: chatId,
     primaryTaskId: taskId,
+    requestedTask,
     subagents,
     subagentMap,
     tasks: scopedTasks,
@@ -1529,6 +1599,7 @@ export function buildDevelopmentMap({
     system,
     usage,
     activityMap,
+    staleProcesses: summarizeStaleProcesses(staleProcesses),
     promptHintMap,
     promptHints: promptHintTexts(promptHintMap),
     runtime: summarizeRuntime(runtime),

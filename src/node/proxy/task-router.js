@@ -5,7 +5,7 @@ import {
   extractPortalProjectTransactions,
 } from '../project-transactions.js';
 
-const TERMINAL_TYPES = new Set(['done', 'error', 'cancelled']);
+const TERMINAL_TYPES = new Set(['done', 'error', 'cancelled', 'lost']);
 const TASK_EVENT_CACHE_LIMIT = 200;
 const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
 const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
@@ -20,6 +20,7 @@ function terminalStatusForType(type) {
   if (type === 'done') return 'done';
   if (type === 'error') return 'error';
   if (type === 'cancelled') return 'cancelled';
+  if (type === 'lost') return 'lost';
   return null;
 }
 
@@ -67,6 +68,12 @@ function copyDefined(target, source, keys) {
   for (let key of keys) {
     if (source[key] !== undefined) target[key] = source[key];
   }
+}
+
+function scheduleUnrefTimer(callback, delayMs) {
+  let timer = setTimeout(callback, delayMs);
+  timer.unref?.();
+  return timer;
 }
 
 function compactResultSummary(value, limit = 220) {
@@ -190,9 +197,9 @@ export class TaskRouter {
       }
     }
 
-    if (meta && type !== 'event') {
+    if ((meta || isTerminalTaskNotificationType(type)) && type !== 'event') {
       let taskUpdate = {
-        ...meta,
+        ...(meta || {}),
         type,
         updatedAt: Date.now(),
       };
@@ -200,7 +207,7 @@ export class TaskRouter {
       if (isTerminalTaskNotificationType(type)) {
         taskUpdate.status = terminalStatusForType(type);
         taskUpdate.completedAt = taskUpdate.completedAt || Date.now();
-        setTimeout(() => {
+        scheduleUnrefTimer(() => {
           try { sg.del(`tasks/${taskId}`, 'task-ttl'); } catch (e) { console.warn(`[TaskNotify] TTL cleanup failed for ${taskId}:`, e.message); }
         }, 10 * 60 * 1000);
       }
@@ -224,7 +231,7 @@ export class TaskRouter {
     if (!clients || clients.size === 0) {
       if (!this.pendingNotifications.has(taskId)) {
         this.pendingNotifications.set(taskId, []);
-        setTimeout(() => this.pendingNotifications.delete(taskId), 5000);
+        scheduleUnrefTimer(() => this.pendingNotifications.delete(taskId), 5000);
       }
       this.pendingNotifications.get(taskId).push(notification);
 
@@ -439,7 +446,7 @@ export class TaskRouter {
 
       // Delay terminal notifications so UI can process intermediate events first
       if (terminalNotes.length > 0) {
-        setTimeout(() => {
+        scheduleUnrefTimer(() => {
           for (let note of terminalNotes) {
             this.route(note);
           }

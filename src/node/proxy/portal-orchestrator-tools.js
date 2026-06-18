@@ -1,6 +1,7 @@
 import { isPublicMcpToolServer } from './mcp-tool-visibility.js';
 import {
   buildDevelopmentMap,
+  isRunningTaskStatus,
   parseTaskStateResult,
 } from './orchestration-development-map.js';
 import { extractFinalAgentResponse } from './task-router.js';
@@ -837,7 +838,7 @@ export async function handlePortalOrchestratorTool(
       },
       tasks: {
         total: tasks.length,
-        active: tasks.filter(task => !['done', 'error', 'cancelled', 'lost'].includes(task.status)).length,
+        active: tasks.filter(task => isRunningTaskStatus(task.status)).length,
       },
       developmentMap: buildDevelopmentMap({ sg, taskState }),
       staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),

@@ -272,6 +272,10 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.taskMap.byId['task-result'].toolCount, 1);
     assert.equal(payload.developmentMap.taskMap.byId['task-result'].liveness.state, 'active');
     assert.equal(payload.developmentMap.taskMap.byId['task-child'].liveness.state, 'cold_start');
+    assert.equal(payload.developmentMap.requestedTask.found, true);
+    assert.equal(payload.developmentMap.requestedTask.status, 'running');
+    assert.equal(payload.developmentMap.requestedTask.terminalStatus, false);
+    assert.equal(payload.developmentMap.requestedTask.resultUnavailableReason, null);
     assert.equal(payload.developmentMap.toolMap.byTaskId['task-result'].latestTool.name, 'read_file');
     assert.equal(payload.developmentMap.activityMap.latestTools[0].name, 'read_file');
     assert.equal(Array.isArray(payload.developmentMap.promptHints), true);
@@ -350,6 +354,11 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.usage.runningTasks, 0);
     assert.equal(payload.developmentMap.taskMap.byId['task-complete'].status, 'done');
     assert.equal(payload.developmentMap.taskMap.terminalIds.includes('task-complete'), true);
+    assert.equal(payload.developmentMap.requestedTask.found, true);
+    assert.equal(payload.developmentMap.requestedTask.id, 'task-complete');
+    assert.equal(payload.developmentMap.requestedTask.status, 'done');
+    assert.equal(payload.developmentMap.requestedTask.terminalStatus, true);
+    assert.equal(payload.developmentMap.requestedTask.resultUnavailableReason, 'task_terminal');
   });
 
   it('replaces short task placeholders with completed runtime results', async () => {
@@ -1206,6 +1215,9 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.latestTools[0].name, 'shell');
     assert.equal(payload.developmentMap.latestTools[0].usageMs, 250);
     assert.equal(payload.developmentMap.latestTools[0].timingSource, 'tool_result');
+    assert.equal(payload.developmentMap.requestedTask.found, true);
+    assert.equal(payload.developmentMap.requestedTask.id, 'task-root');
+    assert.equal(payload.developmentMap.requestedTask.status, 'running');
     assert.equal(payload.developmentMap.toolMap.byChatId[root.id].latestTool.name, 'shell');
     assert.equal(payload.developmentMap.promptHintMap.hints.some((hint) => hint.tool === 'resume_chat'), true);
     assert.equal(payload.developmentMap.activityMap.promptHints.some((hint) => hint.tool === 'create_chat'), true);
@@ -1316,6 +1328,24 @@ describe('portal orchestrator MCP tools', () => {
 
     assert.equal(status.developmentMap.stateError, 'list_tasks unavailable');
     assert.deepEqual(status.staleProcesses, { count: 0, taskIds: [] });
+  });
+
+  it('does not count unknown task status as active in orchestrator status', async () => {
+    sg.set('tasks/task-unknown', { status: 'unknown' }, 'test');
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_orchestrator_status',
+      {},
+      'test',
+      { stateGraph: sg },
+    );
+    let status = JSON.parse(result.content[0].text);
+
+    assert.equal(status.tasks.total, 1);
+    assert.equal(status.tasks.active, 0);
+    assert.equal(status.developmentMap.usage.runningTasks, 0);
+    assert.equal(status.developmentMap.taskMap.runningIds.length, 0);
   });
 
   it('summarizes stale processes without exposing raw process metadata', async () => {
