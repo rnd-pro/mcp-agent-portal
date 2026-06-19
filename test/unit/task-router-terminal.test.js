@@ -105,6 +105,43 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.equal(extractFinalAgentResponse(text), 'pong');
   });
 
+  it('keeps markdown separators that introduce a closure packet', () => {
+    let text = [
+      '# Task Result',
+      '## Agent Response',
+      'Now I have all the evidence I need.',
+      '',
+      '---',
+      '',
+      '## Workflow Kanban MVP Closure Audit',
+      '',
+      'All acceptance criteria are covered.',
+      '',
+      'WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS',
+      'WORKFLOW_RESULT: completed',
+      '',
+      '---',
+      '## Stats',
+      '- Exit code: 0',
+    ].join('\n');
+
+    assert.equal(
+      extractFinalAgentResponse(text),
+      [
+        'Now I have all the evidence I need.',
+        '',
+        '---',
+        '',
+        '## Workflow Kanban MVP Closure Audit',
+        '',
+        'All acceptance criteria are covered.',
+        '',
+        'WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS',
+        'WORKFLOW_RESULT: completed',
+      ].join('\n'),
+    );
+  });
+
   it('removes progress preface when a closure packet follows it', () => {
     let text = [
       '# Task Result',

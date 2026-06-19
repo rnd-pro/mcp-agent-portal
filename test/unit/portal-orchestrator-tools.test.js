@@ -2182,6 +2182,78 @@ describe('portal orchestrator MCP tools', () => {
     assert.match(payload.finalAgentMessage.tail, /COMPLETION_PROOF:PASS/);
   });
 
+  it('prefers a task-scoped proof packet over a later summary from the same task', async () => {
+    let chat = sg.createChat({ name: 'Proof packet before summary chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-proof-before-summary');
+    sg.set('tasks/task-proof-before-summary', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Finish and include WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS or :FAIL.',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    let packetText = [
+      'Workflow outcome: completed',
+      '',
+      'All acceptance criteria are addressed with verification evidence.',
+      '',
+      'WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS',
+      'WORKFLOW_RESULT: completed',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: packetText,
+      taskId: 'task-proof-before-summary',
+      streaming: false,
+    });
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'Audit complete. No blockers remain.',
+      taskId: 'task-proof-before-summary',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: packetText,
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response: packetText,
+              exitCode: 0,
+              totalEvents: 77,
+              toolCalls: [{ name: 'Read', arguments: { file_path: 'checklist.md' } }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, true);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.match, 'taskId');
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.match(payload.finalAgentMessage.text, /Workflow outcome: completed/);
+    assert.match(payload.finalAgentMessage.tail, /WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS/);
+    assert.doesNotMatch(payload.finalAgentMessage.text, /Audit complete\\. No blockers remain/);
+  });
+
   it('does not reconcile internal task results while still running', async () => {
     let chat = sg.createChat({ name: 'Running result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-running');

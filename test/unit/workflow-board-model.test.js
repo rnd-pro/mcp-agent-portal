@@ -399,6 +399,8 @@ links:
       domain: 'backend',
       owner: 'orchestrator',
       assignedAgent: 'backend-engineer',
+      resourceGroup: 'implementation',
+      approvalMode: 'auto_edit',
       acceptanceCriteria: ['Runtime task is linked'],
       actor: 'test',
     });
@@ -426,6 +428,8 @@ links:
     assert.equal(calls.length, 1);
     assert.match(calls[0].arguments.prompt, /Final response contract:/);
     assert.match(calls[0].arguments.prompt, /WORKFLOW_RESULT:/);
+    assert.equal(calls[0].arguments.resource_group, 'implementation');
+    assert.equal(calls[0].arguments.approval_mode, 'auto_edit');
     assert.equal(sg.getChat(first.card.entityRefs.chatId)?.pendingTaskId, taskId);
     assert.equal(proxyManager.chatWsServer.taskChatMap.get(taskId), first.card.entityRefs.chatId);
     assert.equal(sg.get(`tasks/${taskId}`)?.kind, 'workflow-runtime-task');
@@ -526,6 +530,50 @@ links:
     assert.match(calls[0].arguments.prompt, /Required proof marker lines:/);
     assert.match(calls[0].arguments.prompt, /`RELEASE_AUTH_PACKET:PASS` or `RELEASE_AUTH_PACKET:FAIL`/);
     assert.match(calls[0].arguments.prompt, /before any `WORKFLOW_RESULT:/);
+  });
+
+  it('adds required proof marker instructions for custom workflow markers', async () => {
+    let taskId = '77777777-7777-4777-8777-777777777777';
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
+        return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Repair workflow-kanban closure audit',
+      body: 'Final marker: WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS or WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:FAIL.',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      owner: 'orchestrator',
+      assignedAgent: 'orchestrator',
+      acceptanceCriteria: ['The final response includes the custom workflow-kanban proof marker.'],
+      actor: 'test',
+    });
+
+    await service.orchestrateWorkItem({
+      cardId: created.card.id,
+      actor: 'workflow-board',
+    });
+
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].arguments.prompt, /Required proof marker lines:/);
+    assert.match(
+      calls[0].arguments.prompt,
+      /`WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:PASS` or `WORKFLOW_KANBAN_MVP_CLOSURE_AUDIT:FAIL`/,
+    );
+    assert.doesNotMatch(calls[0].arguments.prompt, /`WORKFLOW_RESULT:PASS`/);
   });
 
   it('reconciles completed workflow runtime tasks into audit-ready board state', async () => {

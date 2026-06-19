@@ -210,8 +210,8 @@ export const WORKFLOW_BOARD_TOOLS = [
         actor: { type: 'string', description: 'Actor requesting the command.' },
         entityRefs: { type: 'object', description: 'Linked goals, chats, tasks, or files.' },
         expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        resourceGroup: { type: 'string', description: 'Optional resource group for action=orchestrate.' },
-        approvalMode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Approval mode for action=orchestrate.' },
+        resourceGroup: { type: 'string', description: 'Optional resource group for create_item or orchestrate.' },
+        approvalMode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Approval mode for create_item or orchestrate.' },
         eventTypes: {
           type: 'array',
           items: { type: 'string' },
@@ -394,6 +394,8 @@ function serviceArgsForAction(action, args = {}) {
       domain: args.domain,
       columnId: args.columnId,
       owner: args.owner,
+      resourceGroup: args.resourceGroup,
+      approvalMode: args.approvalMode,
       acceptanceCriteria: args.acceptanceCriteria,
       metadata: args.metadata,
     });

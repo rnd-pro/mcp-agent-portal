@@ -244,18 +244,26 @@ function clipFinalAgentText(text = '') {
 function findFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let messages = Array.isArray(chat?.messages) ? chat.messages : [];
   let allowLatestFallback = options.allowLatestFallback !== false;
+  let requiredMarkers = normalizeRequiredFinalMarkers(options.requiredFinalMarkers);
   let fallback = null;
+  let taskFallback = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     let message = messages[i];
     if (message?.role !== 'agent') continue;
     let text = String(message.text || '').trim();
     if (!text) continue;
     if (taskId && message.taskId === taskId) {
-      return { message, index: i, match: 'taskId' };
+      let candidate = { message, index: i, match: 'taskId' };
+      if (!taskFallback) taskFallback = candidate;
+      if (!requiredMarkers.length) return candidate;
+      if (requiredFinalMarkersSatisfied(extractFinalAgentResponse(text), requiredMarkers)) {
+        return candidate;
+      }
+      continue;
     }
     if (allowLatestFallback && !fallback) fallback = { message, index: i, match: 'latest-agent' };
   }
-  return fallback;
+  return taskFallback || fallback;
 }
 
 function isPlanModeSummary(text = '') {
@@ -547,6 +555,21 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
   return { state: 'ok' };
 }
 
+function findTaskScopedProofPacketMessage(chat = null, taskId = null, options = {}) {
+  let requiredMarkers = normalizeRequiredFinalMarkers(options.requiredFinalMarkers);
+  if (!taskId || !requiredMarkers.length) return null;
+  let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    let message = messages[i];
+    if (message?.role !== 'agent' || message.taskId !== taskId) continue;
+    let normalizedText = extractFinalAgentResponse(message.text || '');
+    if (requiredFinalMarkersSatisfied(normalizedText, requiredMarkers)) {
+      return { message, index: i, match: 'taskId' };
+    }
+  }
+  return null;
+}
+
 function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let found = chat?.id ? findFinalAgentMessage(chat, taskId, options) : null;
   let exitPlan = chat?.id && taskId ? findExitPlanMessage(chat, taskId) : null;
@@ -562,6 +585,19 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
     match: found?.match || null,
     requiredFinalMarkers: options.requiredFinalMarkers,
   });
+  if (quality.state === 'weak-missing-marker') {
+    let proofPacket = findTaskScopedProofPacketMessage(chat, taskId, options);
+    if (proofPacket && proofPacket.index !== found?.index) {
+      found = proofPacket;
+      normalizedText = extractFinalAgentResponse(found.message?.text || '');
+      fullText = sanitizeFinalAgentText(normalizedText);
+      clipped = clipFinalAgentText(normalizedText);
+      quality = finalAgentMessageQuality(fullText, options.parsedResult, {
+        match: found.match,
+        requiredFinalMarkers: options.requiredFinalMarkers,
+      });
+    }
+  }
   return {
     hasText: Boolean(clipped.text),
     text: clipped.text,

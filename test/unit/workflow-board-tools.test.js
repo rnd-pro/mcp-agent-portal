@@ -117,7 +117,14 @@ describe('workflow board MCP tool', () => {
     let argsByAction = {
       list_boards: { action: 'list_boards', projectId: 'project-1' },
       get_board: { action: 'get_board', boardId: 'board-1', goalId: 'goal-1', chatId: 'chat-1', includeRuntime: true },
-      create_item: { action: 'create_item', title: 'Task', owner: 'agent', domain: 'orchestration' },
+      create_item: {
+        action: 'create_item',
+        title: 'Task',
+        owner: 'agent',
+        domain: 'orchestration',
+        resourceGroup: 'implementation',
+        approvalMode: 'auto_edit',
+      },
       update_item: { action: 'update_item', cardId: 'card-1', patch: { owner: 'agent' } },
       update_board: { action: 'update_board', patch: { mode: 'manual', automation: { pickup: 'manual' } } },
       control_board: { action: 'control_board', control: 'pause', projectId: 'project-1' },
@@ -155,6 +162,8 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[1].args.chatId, 'chat-1');
     assert.equal(calls[2].args.boardId, 'agent-workflow-default');
     assert.equal(calls[2].args.domain, 'orchestration');
+    assert.equal(calls[2].args.resourceGroup, 'implementation');
+    assert.equal(calls[2].args.approvalMode, 'auto_edit');
     assert.equal(calls[4].args.patch.mode, 'manual');
     assert.equal(calls[5].args.action, 'pause');
     assert.equal(calls[6].args.columnId, 'ready');

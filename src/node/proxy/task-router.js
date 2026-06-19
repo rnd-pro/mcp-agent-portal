@@ -76,7 +76,7 @@ export function extractFinalAgentResponse(text = '') {
   if (startIdx >= 0) {
     body = body.substring(startIdx + '## Agent Response'.length).trim();
   }
-  let endIdx = body.search(/\n+(?:---|## Tools Used|## Errors|## Stats)/i);
+  let endIdx = body.search(/\n+(?:(?:---\n+)?(?:## Tools Used|## Errors|## Stats))/i);
   if (endIdx > 0) {
     body = body.substring(0, endIdx).trim();
   }

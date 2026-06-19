@@ -34,6 +34,7 @@ const RUNTIME_READY_STATUSES = new Set(['queued', 'pending', 'requested', 'creat
 const RUNTIME_RUNNING_STATUSES = new Set(['running', 'active', 'started', 'streaming']);
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled', 'stopped']);
 const KNOWN_WORKFLOW_PROOF_MARKERS = ['COMPLETION_PROOF', 'RELEASE_AUTH_PACKET'];
+const PROOF_MARKER_PATTERN = /\b([A-Z][A-Z0-9_]{2,})\s*:\s*(?:\*|PASS|FAIL)(?=$|[^A-Z0-9_])/g;
 
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -1420,7 +1421,15 @@ export function createWorkflowBoardService(opts = {}) {
       ...(Array.isArray(card.context) ? card.context : []),
       args.reason,
     ].filter(Boolean).join('\n');
-    return KNOWN_WORKFLOW_PROOF_MARKERS.filter(marker => new RegExp(`\\b${marker}\\b`).test(text));
+    let markers = new Set();
+    let match;
+    while ((match = PROOF_MARKER_PATTERN.exec(text))) {
+      if (match[1] !== 'WORKFLOW_RESULT') markers.add(match[1]);
+    }
+    for (let marker of KNOWN_WORKFLOW_PROOF_MARKERS) {
+      if (new RegExp(`\\b${marker}\\b`).test(text)) markers.add(marker);
+    }
+    return [...markers];
   }
 
   function buildWorkItemPrompt(card, args = {}) {
