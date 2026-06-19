@@ -1506,6 +1506,64 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.taskId, 'task-running');
   });
 
+  it('does not mark current running task progress text as final-answer ready', async () => {
+    let chat = sg.createChat({ name: 'Running progress chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-running');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'I have the current evidence and will verify one more workflow board detail.',
+      taskId: 'task-running',
+      streaming: false,
+    });
+    sg.set('tasks/task-running', {
+      status: 'running',
+      chatId: chat.id,
+      events: [{ type: 'message', text: 'working' }],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return { content: [{ type: 'text', text: '[RUN] Task is still running.' }] };
+      }
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{ id: 'task-running', status: 'running', chatId: chat.id }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-running' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.developmentMap.requestedTask.status, 'running');
+    assert.equal(payload.developmentMap.requestedTask.terminalStatus, false);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.match, 'taskId');
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      false,
+    );
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'close-stage'),
+      false,
+    );
+  });
+
   it('does not clear a newer pending task when reconciling an older task result', async () => {
     let chat = sg.createChat({ name: 'Restarted result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-old');

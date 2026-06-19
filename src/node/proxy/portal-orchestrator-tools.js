@@ -536,6 +536,20 @@ function isFinalAgentMessageReady(finalAgentMessage = null) {
   return finalAgentMessage?.hasText === true && finalAgentMessage?.quality?.state === 'ok';
 }
 
+function isRequestedTaskTerminal(developmentMap = {}) {
+  let requestedTask = developmentMap.requestedTask || {};
+  if (requestedTask.terminalStatus === true) return true;
+  let status = String(requestedTask.status || '').trim().toLowerCase();
+  return ['done', 'finished', 'complete', 'completed', 'success', 'failed', 'error', 'cancelled', 'stopped'].includes(status);
+}
+
+function isTaskTerminalForFinalAnswer(developmentMap = {}, taskResult = null, taskState = null, taskId = null) {
+  if (isRequestedTaskTerminal(developmentMap)) return true;
+  let runtimeTask = runtimeTaskForId(taskState, taskId);
+  if (runtimeTask && isRunningTaskStatus(runtimeTask.status)) return false;
+  return isTerminalTaskResult(taskResult);
+}
+
 function compactHintText(text = '', limit = 360) {
   let value = String(text || '').replace(/\s+/g, ' ').trim();
   return value.length <= limit ? value : `${value.slice(0, limit - 3).trimEnd()}...`;
@@ -594,16 +608,25 @@ function withFinalAnswerReadiness(
   chatId = null,
   taskId = null,
   finalAgentMessage = null,
+  options = {},
 ) {
-  let ready = isFinalAgentMessageReady(finalAgentMessage);
+  let taskTerminal = isTaskTerminalForFinalAnswer(
+    developmentMap,
+    options.taskResult,
+    options.taskState,
+    taskId,
+  );
+  let ready = taskTerminal && isFinalAgentMessageReady(finalAgentMessage);
   if (ready) return { finalAnswerReady: true, developmentMap };
 
-  let repairHint = finalAnswerRepairHint(chatId, taskId, finalAgentMessage);
   let baseHints = developmentMap.promptHintMap?.hints || [];
-  let hints = [
-    repairHint,
-    ...baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== repairHint.id),
-  ];
+  let repairHint = taskTerminal ? finalAnswerRepairHint(chatId, taskId, finalAgentMessage) : null;
+  let hints = taskTerminal
+    ? [
+        repairHint,
+        ...baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== repairHint.id),
+      ]
+    : baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== 'repair-final-answer');
   let promptHintMap = {
     ...(developmentMap.promptHintMap || {}),
     hints,
@@ -967,7 +990,10 @@ export async function handlePortalOrchestratorTool(
         requiredFinalMarkersForChatTask(chat, taskId),
       ),
     });
-    let readiness = withFinalAnswerReadiness(developmentMap, chatId, taskId, finalAgentMessage);
+    let readiness = withFinalAnswerReadiness(developmentMap, chatId, taskId, finalAgentMessage, {
+      taskResult,
+      taskState,
+    });
     return textResult({
       ok: !taskResult?.isError || finalAgentMessage.hasText,
       chatId,
