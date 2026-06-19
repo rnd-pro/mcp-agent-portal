@@ -195,11 +195,28 @@ export const WORKFLOW_BOARD_TOOLS = [
         columnId: { type: 'string', description: 'Initial column for create_item.' },
         automation: { type: 'object', description: 'Column automation patch for action=update_column.' },
         owner: { type: 'string', description: 'Optional work-item owner.' },
+        assignedAgent: { type: 'string', description: 'Optional preferred agent for create_item routing.' },
         acceptanceCriteria: {
           type: 'array',
           items: { type: 'string' },
           description: 'Acceptance criteria for gated transitions.',
         },
+        context: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Durable work-item context lines for create_item.',
+        },
+        routingHints: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional routing hints for create_item.',
+        },
+        blockers: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Known work-item blockers for create_item.',
+        },
+        metadata: { type: 'object', description: 'Optional work-item metadata for create_item.' },
         patch: { type: 'object', description: 'Fields to patch for update_item.' },
         fromColumnId: { type: 'string', description: 'Expected current column for transition.' },
         toColumnId: { type: 'string', enum: DEFAULT_WORKFLOW_COLUMN_IDS, description: 'Destination column for transition.' },
@@ -394,9 +411,13 @@ function serviceArgsForAction(action, args = {}) {
       domain: args.domain,
       columnId: args.columnId,
       owner: args.owner,
+      assignedAgent: args.assignedAgent,
       resourceGroup: args.resourceGroup,
       approvalMode: args.approvalMode,
       acceptanceCriteria: args.acceptanceCriteria,
+      context: args.context,
+      routingHints: args.routingHints,
+      blockers: args.blockers,
       metadata: args.metadata,
     });
   }

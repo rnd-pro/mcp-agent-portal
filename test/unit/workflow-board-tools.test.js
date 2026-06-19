@@ -79,6 +79,11 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.action.enum.includes('update_column'), true);
     assert.equal(schema.properties.action.enum.includes('claim_work_item'), false);
     assert.equal(schema.properties.domain.type, 'string');
+    assert.equal(schema.properties.assignedAgent.type, 'string');
+    assert.equal(schema.properties.context.items.type, 'string');
+    assert.equal(schema.properties.routingHints.items.type, 'string');
+    assert.equal(schema.properties.blockers.items.type, 'string');
+    assert.equal(schema.properties.metadata.type, 'object');
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {
@@ -121,9 +126,15 @@ describe('workflow board MCP tool', () => {
         action: 'create_item',
         title: 'Task',
         owner: 'agent',
+        assignedAgent: 'release-manager',
         domain: 'orchestration',
         resourceGroup: 'implementation',
         approvalMode: 'auto_edit',
+        acceptanceCriteria: ['Verify facts'],
+        context: ['Use current release packet'],
+        routingHints: ['release'],
+        blockers: ['Waiting for approval'],
+        metadata: { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' },
       },
       update_item: { action: 'update_item', cardId: 'card-1', patch: { owner: 'agent' } },
       update_board: { action: 'update_board', patch: { mode: 'manual', automation: { pickup: 'manual' } } },
@@ -162,8 +173,14 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[1].args.chatId, 'chat-1');
     assert.equal(calls[2].args.boardId, 'agent-workflow-default');
     assert.equal(calls[2].args.domain, 'orchestration');
+    assert.equal(calls[2].args.assignedAgent, 'release-manager');
     assert.equal(calls[2].args.resourceGroup, 'implementation');
     assert.equal(calls[2].args.approvalMode, 'auto_edit');
+    assert.deepEqual(calls[2].args.acceptanceCriteria, ['Verify facts']);
+    assert.deepEqual(calls[2].args.context, ['Use current release packet']);
+    assert.deepEqual(calls[2].args.routingHints, ['release']);
+    assert.deepEqual(calls[2].args.blockers, ['Waiting for approval']);
+    assert.deepEqual(calls[2].args.metadata, { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' });
     assert.equal(calls[4].args.patch.mode, 'manual');
     assert.equal(calls[5].args.action, 'pause');
     assert.equal(calls[6].args.columnId, 'ready');
