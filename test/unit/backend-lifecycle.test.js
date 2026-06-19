@@ -42,13 +42,59 @@ function closeFrame() {
   return Buffer.from([0x88, 0x00]);
 }
 
+function textFrame(data) {
+  let payload = Buffer.from(data, 'utf8');
+  if (payload.length >= 126) {
+    throw new Error('test textFrame only supports short payloads');
+  }
+  return Buffer.concat([Buffer.from([0x81, payload.length]), payload]);
+}
+
+function framedMessage(message) {
+  let payload = Buffer.from(JSON.stringify(message), 'utf8');
+  return Buffer.concat([
+    Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`),
+    payload,
+  ]);
+}
+
+function parseClientTextFrame(frame) {
+  let payloadLength = frame[1] & 0x7f;
+  let offset = 2;
+  if (payloadLength === 126) {
+    payloadLength = frame.readUInt16BE(2);
+    offset = 4;
+  } else if (payloadLength === 127) {
+    payloadLength = Number(frame.readBigUInt64BE(2));
+    offset = 10;
+  }
+  let mask = frame.slice(offset, offset + 4);
+  let payload = frame.slice(offset + 4, offset + 4 + payloadLength);
+  let unmasked = Buffer.alloc(payload.length);
+  for (let i = 0; i < payload.length; i++) {
+    unmasked[i] = payload[i] ^ mask[i % 4];
+  }
+  return JSON.parse(unmasked.toString('utf8'));
+}
+
+function parseFramedStdout(writes) {
+  let output = Buffer.concat(writes).toString('utf8');
+  let headerEnd = output.indexOf('\r\n\r\n');
+  assert.notEqual(headerEnd, -1);
+  let header = output.slice(0, headerEnd);
+  let length = Number(header.match(/Content-Length:\s*(\d+)/i)?.[1]);
+  let body = output.slice(headerEnd + 4, headerEnd + 4 + length);
+  return JSON.parse(body);
+}
+
 function createProxyHarness(mod, options = {}) {
+  let { buffered = [], ...proxyOptions } = options;
   let stdin = new FakeStream();
   let stdout = new FakeStream();
   let sockets = [];
   let timers = [];
   let exits = [];
-  let proxy = mod.startStdioProxy(12345, [], {
+  let proxy = mod.startStdioProxy(12345, buffered, {
     stdin,
     stdout,
     exit: code => exits.push(code),
@@ -69,7 +115,7 @@ function createProxyHarness(mod, options = {}) {
     logger: { error() {}, warn() {} },
     retryBaseMs: 1,
     retryMaxMs: 1,
-    ...options,
+    ...proxyOptions,
   });
   return { stdin, stdout, sockets, timers, exits, proxy };
 }
@@ -269,7 +315,10 @@ describe('backend lifecycle', () => {
     let harness = createProxyHarness(mod, { maxRetries: 2 });
 
     await Promise.resolve();
-    harness.sockets[0].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+    harness.sockets[0].emit(
+      'data',
+      Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'),
+    );
 
     for (let i = 0; i < 5; i++) {
       harness.sockets.at(-1).emit('close');
@@ -299,6 +348,42 @@ describe('backend lifecycle', () => {
     harness.sockets[1].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
 
     assert.equal(harness.sockets[1].writes.length, 2);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
+  it('forwards buffered framed initialize messages and keeps framed output', async () => {
+    let mod = await import(
+      `../../src/node/server/backend-lifecycle.js?test=${Date.now()}-framed-init`
+    );
+    let initialize = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        roots: [{ uri: 'file:///tmp/portal-framed-root' }],
+        clientInfo: { name: 'codex-managed', version: 'test' },
+      },
+    };
+    let harness = createProxyHarness(mod, {
+      buffered: [framedMessage(initialize)],
+    });
+
+    await Promise.resolve();
+    harness.sockets[0].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+
+    assert.equal(harness.sockets[0].writes.length, 2);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[0].writes[1]), initialize);
+
+    let response = {
+      jsonrpc: '2.0',
+      id: 1,
+      result: { serverInfo: { name: 'mcp-agent-portal' } },
+    };
+    harness.sockets[0].emit('data', textFrame(JSON.stringify(response)));
+
+    assert.deepEqual(parseFramedStdout(harness.stdout.writes), response);
     assert.deepEqual(harness.exits, []);
 
     harness.proxy.stop();
