@@ -1068,6 +1068,64 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.lastLine, 'WORKFLOW_RESULT: **completed**');
   });
 
+  it('allows required proof marker rendered as a markdown heading', async () => {
+    let chat = sg.createChat({ name: 'Markdown proof marker result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-markdown-proof-marker');
+    sg.set('tasks/task-markdown-proof-marker', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Audit workflow kanban and return WORKFLOW_KANBAN_RELEASE_GATE:*.',
+    }, 'test');
+    let response = [
+      'The workflow kanban release gate is covered by code, tests, and docs.',
+      '## WORKFLOW_KANBAN_RELEASE_GATE:PASS',
+      'WORKFLOW_RESULT: completed',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-markdown-proof-marker',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: response,
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response,
+              exitCode: 0,
+              totalEvents: 44,
+              toolCalls: [{ name: 'Bash', args: { command: 'npm test' } }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-markdown-proof-marker' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.equal(payload.finalAgentMessage.lastLine, 'WORKFLOW_RESULT: completed');
+  });
+
   it('uses runtime task prompt when checking required completion proof marker', async () => {
     let chat = sg.createChat({ name: 'Runtime proof marker result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-runtime-proof');

@@ -386,8 +386,17 @@ function normalizeRequiredFinalMarkers(markers = []) {
     .filter(Boolean);
 }
 
+function normalizeFinalMarkerLine(line = '') {
+  let value = String(line || '').trim().replace(/^#{1,6}\s*/, '').trim();
+  if (/^\*\*[^*]+\*\*$/.test(value)) {
+    value = value.slice(2, -2).trim();
+  }
+  return value;
+}
+
 function finalMarkerState(text = '', marker = '') {
-  let lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  let rawLines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  let lines = rawLines.map(normalizeFinalMarkerLine);
   let safeMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let pattern = new RegExp(`^${safeMarker}:[A-Z_][A-Z0-9_-]*(?:\\s+[-\\u2013\\u2014]\\s+.+)?$`);
   let index = -1;
@@ -397,7 +406,7 @@ function finalMarkerState(text = '', marker = '') {
       break;
     }
   }
-  let trailingLines = index >= 0 ? lines.slice(index + 1) : [];
+  let trailingLines = index >= 0 ? rawLines.slice(index + 1) : [];
   return {
     found: index >= 0,
     final: index >= 0 && (
