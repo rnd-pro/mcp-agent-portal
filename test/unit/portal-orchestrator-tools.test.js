@@ -909,6 +909,81 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.totalEvents, 22);
   });
 
+  it('flags progress-log final text when terminal tasks still describe pending work', async () => {
+    let chat = sg.createChat({ name: 'Progress log result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-progress-log');
+    sg.set('tasks/task-progress-log', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let response = [
+      'I\u2019ll keep this as a read-only orchestration pass.',
+      'The context/checklist confirm this is still a 0.3.0-alpha.2 package.',
+      'The evidence scan is slower than expected. I\u2019m giving it one more interval.',
+      'That rg process is still not yielding output after a minute, so I\u2019m stopping that scan.',
+      'The targeted tests passed. Two rg probes are still slow/hung; ' +
+      'I\u2019ll stop them if they do not return promptly.',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-progress-log',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 44,
+                toolCalls: [
+                  { name: 'Read', args: { file_path: 'checklist.md' } },
+                  { name: 'Bash', args: { command: 'node --test' } },
+                ],
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-progress-log' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-progress-log');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'progress-log-final-with-runtime-activity');
+    assert.equal(payload.finalAgentMessage.quality.toolCallCount, 2);
+    assert.equal(payload.finalAgentMessage.quality.totalEvents, 44);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      true,
+    );
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'close-stage'),
+      false,
+    );
+    assert.equal(payload.developmentMap.promptHintMap.hints[0].priority, 'high');
+  });
+
   it('flags heading-only final audit text when runtime activity shows real work happened', async () => {
     let chat = sg.createChat({ name: 'Heading-only result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-heading');
@@ -1090,6 +1165,7 @@ describe('portal orchestrator MCP tools', () => {
     );
     let payload = JSON.parse(result.content[0].text);
 
+    assert.equal(payload.finalAnswerReady, true);
     assert.equal(payload.finalAgentMessage.hasText, true);
     assert.equal(payload.finalAgentMessage.match, 'taskId');
     assert.equal(payload.finalAgentMessage.quality.state, 'ok');

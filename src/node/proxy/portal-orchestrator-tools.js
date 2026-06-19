@@ -305,6 +305,28 @@ function isIntroOnlyFinalAgentText(text = '') {
   ].some((pattern) => pattern.test(normalized));
 }
 
+function isProgressLogFinalAgentText(text = '') {
+  let lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 3) return false;
+  let normalized = lines.join(' ').toLowerCase();
+  let progressLineCount = lines.filter((line) => {
+    let lower = line.toLowerCase();
+    return /\bi(?:'|\u2019)ll\b|\bi will\b|\bi(?:'|\u2019)m\b|\bi am\b/.test(lower);
+  }).length;
+  let hasPendingWork = [
+    /\bi(?:'|\u2019)ll\s+(?:collect|classify|stop|use|verify|check|finalize)\b/,
+    /\bi will\s+(?:collect|classify|stop|use|verify|check|finalize)\b/,
+    /\bi(?:'|\u2019)m\s+(?:now\s+)?(?:reading|checking|switching|giving|collecting)\b/,
+    /\bone more interval\b/,
+    /\bstill\s+(?:running|slow|not yielding|hung)\b/,
+    /\bif (?:it|they) (?:does|do) not\b/,
+  ].some((pattern) => pattern.test(normalized));
+  return progressLineCount >= 2 && hasPendingWork;
+}
+
 function isHeadingOnlyFinalAgentText(text = '') {
   let lines = String(text || '')
     .split(/\r?\n/)
@@ -455,6 +477,16 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
       totalEvents,
     };
   }
+  if (isProgressLogFinalAgentText(text)) {
+    return {
+      state: 'weak-progress-log',
+      reason: toolCallCount > 0 || totalEvents > 0
+        ? 'progress-log-final-with-runtime-activity'
+        : 'progress-log-final',
+      toolCallCount,
+      totalEvents,
+    };
+  }
   if (isHeadingOnlyFinalAgentText(text)) {
     return {
       state: 'weak-heading-only',
@@ -469,7 +501,8 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
 function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
   let found = chat?.id ? findFinalAgentMessage(chat, taskId, options) : null;
   let exitPlan = chat?.id && taskId ? findExitPlanMessage(chat, taskId) : null;
-  let foundSatisfiesMarkers = found?.match === 'taskId' && requiredFinalMarkersSatisfied(found.message?.text, options.requiredFinalMarkers);
+  let foundSatisfiesMarkers = found?.match === 'taskId'
+    && requiredFinalMarkersSatisfied(found.message?.text, options.requiredFinalMarkers);
   if (exitPlan && (!found || (isPlanModeSummary(found.message?.text) && !foundSatisfiesMarkers))) {
     found = exitPlan;
   }
@@ -493,6 +526,100 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
     quality,
     limits: {
       text: FINAL_AGENT_MESSAGE_TEXT_LIMIT,
+    },
+  };
+}
+
+function isFinalAgentMessageReady(finalAgentMessage = null) {
+  return finalAgentMessage?.hasText === true && finalAgentMessage?.quality?.state === 'ok';
+}
+
+function compactHintText(text = '', limit = 360) {
+  let value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length <= limit ? value : `${value.slice(0, limit - 3).trimEnd()}...`;
+}
+
+function formatLocalPromptHint(hint = {}) {
+  if (hint.tool) {
+    let args = hint.arguments ? JSON.stringify(hint.arguments) : '{}';
+    return `${hint.label}: ${hint.tool}(${args}) - ${hint.reason || hint.prompt}`;
+  }
+  return `${hint.label}: ${hint.prompt}`;
+}
+
+function summarizeLocalActivityHint(hint = {}) {
+  return {
+    id: hint.id,
+    category: hint.category || 'orchestration',
+    label: hint.label || hint.id,
+    prompt: hint.prompt || '',
+    tool: hint.tool || null,
+    arguments: hint.arguments || null,
+    reason: hint.reason || '',
+    chatId: hint.chatId || null,
+    taskId: hint.taskId || null,
+    priority: hint.priority || 'normal',
+    source: hint.source || 'agent-portal',
+  };
+}
+
+function finalAnswerRepairHint(chatId, taskId, finalAgentMessage = {}) {
+  let quality = finalAgentMessage.quality || {};
+  return {
+    id: 'repair-final-answer',
+    category: 'recovery',
+    label: 'Repair final answer',
+    prompt: compactHintText(
+      'Ask the task owner to replace the terminal response with a concrete PASS/FAIL closure, ' +
+      'blocking issues, verification evidence, and next action before closing the stage.',
+    ),
+    tool: 'resume_chat',
+    arguments: { chatId: chatId || '', prompt: '<request concrete final closure>' },
+    reason: compactHintText(
+      `Terminal task final answer is not closure-ready: ${quality.state || 'unknown'} ` +
+      `(${quality.reason || 'no reason'}).`,
+      220,
+    ),
+    chatId,
+    taskId,
+    priority: 'high',
+    source: 'agent-portal',
+  };
+}
+
+function withFinalAnswerReadiness(
+  developmentMap = {},
+  chatId = null,
+  taskId = null,
+  finalAgentMessage = null,
+) {
+  let ready = isFinalAgentMessageReady(finalAgentMessage);
+  if (ready) return { finalAnswerReady: true, developmentMap };
+
+  let repairHint = finalAnswerRepairHint(chatId, taskId, finalAgentMessage);
+  let baseHints = developmentMap.promptHintMap?.hints || [];
+  let hints = [
+    repairHint,
+    ...baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== repairHint.id),
+  ];
+  let promptHintMap = {
+    ...(developmentMap.promptHintMap || {}),
+    hints,
+  };
+  let activityMap = developmentMap.activityMap
+    ? {
+        ...developmentMap.activityMap,
+        promptHints: hints.map(summarizeLocalActivityHint),
+      }
+    : developmentMap.activityMap;
+
+  return {
+    finalAnswerReady: false,
+    developmentMap: {
+      ...developmentMap,
+      promptHintMap,
+      promptHints: hints.map(formatLocalPromptHint).slice(0, 6),
+      activityMap,
     },
   };
 }
@@ -807,13 +934,15 @@ export async function handlePortalOrchestratorTool(
       parsedResult,
       requiredFinalMarkers: requiredFinalMarkersForTask(task),
     });
+    let readiness = withFinalAnswerReadiness(developmentMap, chatId, taskId, finalAgentMessage);
     return textResult({
       ok: !taskResult?.isError || finalAgentMessage.hasText,
       chatId,
       taskId,
+      finalAnswerReady: readiness.finalAnswerReady,
       finalAgentMessage,
       runtime: developmentMap.runtime,
-      developmentMap,
+      developmentMap: readiness.developmentMap,
     });
   }
 
