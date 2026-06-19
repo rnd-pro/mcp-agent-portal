@@ -1065,6 +1065,7 @@ export function createWorkflowBoardService(opts = {}) {
       id: cardId,
       actor: args.actor,
       expectedVersion: args.expectedVersion ?? args.expected_version,
+      checks: args.checks,
     });
     return { ok: true, ...result };
   }

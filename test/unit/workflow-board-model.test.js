@@ -213,6 +213,62 @@ describe('workflow board model and service', () => {
     );
   });
 
+  it('persists update checks before accepting gated closeout transitions', () => {
+    let created = service.createOrUpdateCard({
+      title: 'Close audited workflow item',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'quality-audit',
+      actor: 'test',
+    });
+    let blocked = service.requestTransition({
+      cardId: created.card.id,
+      fromColumnId: 'quality-audit',
+      toColumnId: 'commit-publish',
+      expectedVersion: created.card.version,
+      actor: 'test',
+      reason: 'Audit evidence is missing.',
+    });
+
+    assert.equal(blocked.status, 'blocked');
+    assert.equal(blocked.gateResult.failures[0].gate, 'audit_pass_or_explicit_waiver');
+
+    let updated = service.updateWorkItem({
+      cardId: created.card.id,
+      actor: 'test',
+      expectedVersion: created.card.version,
+      checks: {
+        audit: { status: 'pass', evidence: 'node --test test/unit/workflow-board-model.test.js' },
+        cleanDiff: { status: 'pass', evidence: 'git diff --check' },
+        hygiene: { status: 'pass', evidence: 'reviewed staged diff' },
+      },
+    });
+
+    assert.equal(updated.checks.audit.status, 'pass');
+    assert.equal(service.getBoardProjection().cards[0].checks.audit.status, 'pass');
+
+    let audited = service.requestTransition({
+      cardId: created.card.id,
+      fromColumnId: 'quality-audit',
+      toColumnId: 'commit-publish',
+      expectedVersion: updated.card.version,
+      actor: 'test',
+      reason: 'Audit evidence recorded.',
+    });
+    let done = service.requestTransition({
+      cardId: created.card.id,
+      fromColumnId: 'commit-publish',
+      toColumnId: 'done',
+      expectedVersion: audited.card.version,
+      actor: 'test',
+      reason: 'Clean diff and hygiene evidence recorded.',
+    });
+
+    assert.equal(audited.status, 'accepted');
+    assert.equal(done.status, 'accepted');
+    assert.equal(service.getCard(created.card.id).columnId, 'done');
+  });
+
   it('returns board projections scoped by project without using markdown as live state', () => {
     let alpha = service.createOrUpdateCard({
       title: 'Alpha backend work',
