@@ -447,6 +447,60 @@ describe('backend lifecycle', () => {
     harness.proxy.stop();
   });
 
+  it('delivers replayed initialize response when the first response was not sent before reconnect', async () => {
+    let mod = await import(
+      `../../src/node/server/backend-lifecycle.js?test=${Date.now()}-replay-response`
+    );
+    let initialize = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        roots: [{ uri: 'file:///tmp/portal-replay-root' }],
+        clientInfo: { name: 'codex-managed', version: 'test' },
+      },
+    };
+    let initialized = {
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+      params: {},
+    };
+    let harness = createProxyHarness(mod, {
+      buffered: [framedMessage(initialize), framedMessage(initialized)],
+    });
+
+    await Promise.resolve();
+    harness.sockets[0].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+    assert.equal(harness.sockets[0].writes.length, 3);
+    assert.equal(harness.stdout.writes.length, 0);
+
+    harness.sockets[0].emit('data', closeFrame());
+    while (harness.timers.length && harness.sockets.length < 2) {
+      harness.timers.shift()();
+      await Promise.resolve();
+    }
+
+    assert.equal(harness.sockets.length, 2);
+    harness.sockets[1].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+
+    assert.equal(harness.sockets[1].writes.length, 3);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[1].writes[1]), initialize);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[1].writes[2]), initialized);
+
+    let response = {
+      jsonrpc: '2.0',
+      id: 1,
+      result: { serverInfo: { name: 'mcp-agent-portal' } },
+    };
+    harness.sockets[1].emit('data', textFrame(JSON.stringify(response)));
+
+    assert.deepEqual(parseFramedStdout(harness.stdout.writes), response);
+    assert.equal(harness.stdout.writes.length, 2);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
   it('returns a JSON-RPC error when queued request waits too long disconnected', async () => {
     let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-queue-timeout`);
     let harness = createProxyHarness(mod, { queuedMessageTimeoutMs: 1 });

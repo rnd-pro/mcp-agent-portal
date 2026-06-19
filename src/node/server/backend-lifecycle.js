@@ -274,6 +274,7 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   let reconnectCurrent = null;
   let replayInitialize = null;
   let replayInitialized = null;
+  let deliveredResponseIds = new Set();
   let suppressedReplayResponseIds = new Set();
 
   function getMessageId(message) {
@@ -301,9 +302,21 @@ export function startStdioProxy(port, buffered = [], options = {}) {
     for (let item of [replayInitialize, replayInitialized]) {
       if (!item?.message) continue;
       socket.write(maskAndFrame(item.message));
-      if (item.id !== null && item.id !== undefined) {
-        suppressedReplayResponseIds.add(String(item.id));
+      let key = item.id !== null && item.id !== undefined ? String(item.id) : null;
+      if (key && deliveredResponseIds.has(key)) {
+        suppressedReplayResponseIds.add(key);
       }
+    }
+  }
+
+  function markDeliveredResponse(data) {
+    try {
+      let parsed = JSON.parse(data);
+      if (parsed?.id === null || parsed?.id === undefined) return;
+      if (!('result' in parsed) && !('error' in parsed)) return;
+      deliveredResponseIds.add(String(parsed.id));
+    } catch {
+      // Non-JSON payloads cannot be tracked as JSON-RPC responses.
     }
   }
 
@@ -555,6 +568,7 @@ export function startStdioProxy(port, buffered = [], options = {}) {
         
         if (frame.opcode === 1) { // text
           if (shouldSuppressReplayResponse(frame.data)) continue;
+          markDeliveredResponse(frame.data);
           writeToClient(frame.data);
         } else if (frame.opcode === 8) { // close
           scheduleOnce('close-frame');
