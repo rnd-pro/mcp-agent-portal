@@ -300,6 +300,7 @@ function isIntroOnlyFinalAgentText(text = '') {
   return [
     /^now i have all (?:the )?evidence\.? here is (?:the )?.+\.?$/,
     /^now i have all (?:the )?evidence\.? let me (?:compile|prepare|produce|write) (?:the )?.+\.?$/,
+    /^i now have (?:comprehensive|complete|full|sufficient) evidence(?: from .+?)?\.? let me (?:compile|prepare|produce|write|present) (?:the )?.+?(?: as (?:my|the) plan)?\.?$/,
     /^now i have sufficient (?:data|evidence|information)(?: for (?:the )?.+?)?\.? let me (?:compile|prepare|produce|write) (?:the )?.+\.?$/,
     /^i now have (?:a )?(?:complete|full) picture\.? here is (?:my|the) .+\.?$/,
     /^here is (?:my|the) .+\.?$/,

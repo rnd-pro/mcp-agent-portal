@@ -1170,6 +1170,73 @@ describe('portal orchestrator MCP tools', () => {
     );
   });
 
+  it('flags plan-presentation preface as intro-only when task completed', async () => {
+    let chat = sg.createChat({ name: 'Release authorization preface chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-release-preface');
+    sg.set('tasks/task-release-preface', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let response = 'I now have comprehensive evidence from all inspected sources. Let me present the release authorization packet as my plan.';
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-release-preface',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 34,
+                toolCalls: Array.from({ length: 25 }, (_, index) => ({
+                  name: index % 2 === 0 ? 'Read' : 'Bash',
+                  args: {},
+                })),
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-release-preface' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-intro-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'intro-only-final-with-runtime-activity');
+    assert.equal(payload.finalAgentMessage.quality.toolCallCount, 25);
+    assert.equal(payload.finalAgentMessage.quality.totalEvents, 34);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      true,
+    );
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'close-stage'),
+      false,
+    );
+  });
+
   it('flags progress-log final text when terminal tasks still describe pending work', async () => {
     let chat = sg.createChat({ name: 'Progress log result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-progress-log');
