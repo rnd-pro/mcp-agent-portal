@@ -272,12 +272,51 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   let shuttingDown = false;
   let retryTimer = null;
   let reconnectCurrent = null;
+  let replayInitialize = null;
+  let replayInitialized = null;
+  let suppressedReplayResponseIds = new Set();
 
   function getMessageId(message) {
     try {
       return JSON.parse(message)?.id;
     } catch {
       return null;
+    }
+  }
+
+  function recordSessionBootstrap(message) {
+    try {
+      let parsed = JSON.parse(message);
+      if (parsed?.method === 'initialize') {
+        replayInitialize = { message, id: parsed.id };
+      } else if (parsed?.method === 'initialized' || parsed?.method === 'notifications/initialized') {
+        replayInitialized = { message, id: parsed.id };
+      }
+    } catch {
+      // Non-JSON payloads are not MCP session bootstrap messages.
+    }
+  }
+
+  function replaySessionBootstrap(socket) {
+    for (let item of [replayInitialize, replayInitialized]) {
+      if (!item?.message) continue;
+      socket.write(maskAndFrame(item.message));
+      if (item.id !== null && item.id !== undefined) {
+        suppressedReplayResponseIds.add(String(item.id));
+      }
+    }
+  }
+
+  function shouldSuppressReplayResponse(data) {
+    try {
+      let parsed = JSON.parse(data);
+      if (parsed?.id === null || parsed?.id === undefined) return false;
+      let key = String(parsed.id);
+      if (!suppressedReplayResponseIds.has(key)) return false;
+      suppressedReplayResponseIds.delete(key);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -375,6 +414,7 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   }
 
   function handleClientMessage(message) {
+    recordSessionBootstrap(message);
     if (connected && ws) {
       try {
         ws.write(maskAndFrame(message));
@@ -485,10 +525,12 @@ export function startStdioProxy(port, buffered = [], options = {}) {
           scheduleOnce('handshake-failed');
           return;
         }
+        let shouldReplayBootstrap = everConnected && (replayInitialize || replayInitialized);
         connected = true;
         everConnected = true;
         retries = 0; // Reset retries on successful connection
         wsBuffer = combined.slice(idx + 4);
+        if (shouldReplayBootstrap) replaySessionBootstrap(socket);
         // Flush queued stdin messages
         while (queue.length) {
           const line = dequeueMessage();
@@ -512,6 +554,7 @@ export function startStdioProxy(port, buffered = [], options = {}) {
         wsBuffer = wsBuffer.slice(frame.totalLen);
         
         if (frame.opcode === 1) { // text
+          if (shouldSuppressReplayResponse(frame.data)) continue;
           writeToClient(frame.data);
         } else if (frame.opcode === 8) { // close
           scheduleOnce('close-frame');

@@ -28,6 +28,14 @@ const CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.join(os.homedir(), '.
 
 const MAX_CRASHES = 10;
 const DISABLED_MCP_SERVERS = new Set(['context-x']);
+const MCP_CLIENT_SUMMARY_LIMIT = 12;
+
+function boundedTelemetryText(value, max = 80) {
+  if (typeof value !== 'string') return null;
+  let text = value.replace(/[\r\n\t]+/g, ' ').replace(/[^\x20-\x7e]/g, '').trim();
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
 
 /**
  * Inactivity Watchdog
@@ -69,6 +77,9 @@ export class MCPProxyManager {
     this.monitors = new Set();
     /** @type {Set<Function>} */
     this.multiplexerCallbacks = new Set();
+    /** @type {Map<object, object>} */
+    this.mcpClients = new Map();
+    this.nextMcpClientId = 1;
     this.nextRequestId = 1;
     /** @type {Map<string, { resolve: Function, reject: Function, watchdog?: object }>} */
     this.pendingRequests = new Map();
@@ -81,6 +92,71 @@ export class MCPProxyManager {
     this.taskRouter = new TaskRouter(this);
 
     this.loadConfig();
+  }
+
+  trackMcpClient(ws) {
+    let now = Date.now();
+    let client = {
+      id: `mcp-${this.nextMcpClientId++}`,
+      transport: 'mcp-ws',
+      connectedAt: now,
+      lastActivityAt: now,
+      initialized: false,
+      clientName: null,
+      lastMethod: null,
+      rootCount: 0,
+    };
+    this.mcpClients.set(ws, client);
+    return client;
+  }
+
+  touchMcpClient(ws, method = null) {
+    let client = this.mcpClients.get(ws);
+    if (!client) return null;
+    client.lastActivityAt = Date.now();
+    let safeMethod = boundedTelemetryText(method, 80);
+    if (safeMethod) client.lastMethod = safeMethod;
+    return client;
+  }
+
+  markMcpClientInitialized(ws, msg = {}) {
+    let client = this.touchMcpClient(ws, 'initialize');
+    if (!client) return null;
+    let params = msg.params || {};
+    client.initialized = true;
+    client.clientName = boundedTelemetryText(params.clientInfo?.name || params.clientInfo?.title, 80);
+    let roots = params.roots || params.capabilities?.roots;
+    client.rootCount = Array.isArray(roots) ? roots.length : 0;
+    return client;
+  }
+
+  untrackMcpClient(ws) {
+    this.mcpClients.delete(ws);
+  }
+
+  getMcpClientSummary(now = Date.now()) {
+    let clients = [...this.mcpClients.values()]
+      .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+    return {
+      schemaVersion: 1,
+      total: clients.length,
+      initialized: clients.filter(client => client.initialized).length,
+      quiet: clients.filter(client => now - (client.lastActivityAt || 0) > 120000).length,
+      lastActivityAt: clients[0]?.lastActivityAt || null,
+      transports: {
+        mcpWs: clients.filter(client => client.transport === 'mcp-ws').length,
+      },
+      clients: clients.slice(0, MCP_CLIENT_SUMMARY_LIMIT).map(client => ({
+        id: client.id,
+        transport: client.transport,
+        initialized: client.initialized,
+        clientName: client.clientName,
+        lastMethod: client.lastMethod,
+        rootCount: client.rootCount,
+        connectedAt: client.connectedAt,
+        lastActivityAt: client.lastActivityAt,
+      })),
+    };
   }
 
   loadConfig() {
@@ -750,6 +826,9 @@ export class MCPProxyManager {
   handleIdeWs(req, socket, head) {
     let wss = new WebSocketServer({ noServer: true });
     wss.handleUpgrade(req, socket, head, (ws) => {
+      this.trackMcpClient(ws);
+      ws.on('close', () => this.untrackMcpClient(ws));
+      ws.on('error', () => this.untrackMcpClient(ws));
       let multiplexer = new MCPMultiplexer(this, ws);
       multiplexer.listen();
       // Project registration happens in multiplexer on initialize (from IDE roots)

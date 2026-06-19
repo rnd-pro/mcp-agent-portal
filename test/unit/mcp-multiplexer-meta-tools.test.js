@@ -17,6 +17,45 @@ import {
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
+test('MCP proxy client telemetry summarizes live clients without root paths', async () => {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-mcp-client-telemetry-'));
+  let originalConfigPath = process.env.PORTAL_CONFIG_PATH;
+  process.env.PORTAL_CONFIG_PATH = path.join(tmpDir, 'agent-portal.json');
+
+  try {
+    let { MCPProxyManager } = await import(`../../src/node/proxy/mcp-proxy.js?test=${Date.now()}`);
+    let manager = new MCPProxyManager(tmpDir);
+    let ws = {};
+
+    manager.trackMcpClient(ws);
+    manager.markMcpClientInitialized(ws, {
+      params: {
+        clientInfo: { name: 'codex-managed\ntransport' },
+        roots: [{ uri: 'file:///private/project/root' }],
+      },
+    });
+
+    let summary = manager.getMcpClientSummary(Date.now() + 130000);
+
+    assert.equal(summary.schemaVersion, 1);
+    assert.equal(summary.total, 1);
+    assert.equal(summary.initialized, 1);
+    assert.equal(summary.quiet, 1);
+    assert.equal(summary.transports.mcpWs, 1);
+    assert.equal(summary.clients[0].clientName, 'codex-managed transport');
+    assert.equal(summary.clients[0].rootCount, 1);
+    assert.equal(summary.clients[0].lastMethod, 'initialize');
+    assert.equal(JSON.stringify(summary).includes('/private/project/root'), false);
+
+    manager.untrackMcpClient(ws);
+    assert.equal(manager.getMcpClientSummary().total, 0);
+  } finally {
+    if (originalConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+    else process.env.PORTAL_CONFIG_PATH = originalConfigPath;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('resume_chat meta-tool exposes structured context controls', () => {
   let resumeChat = META_TOOLS.find(tool => tool.name === 'resume_chat');
   let properties = resumeChat.inputSchema.properties;
@@ -186,6 +225,24 @@ test('get_portal_status separates public servers from internal runtime health', 
       'project-graph': { status: 'healthy' },
       'agent-pool': { status: 'healthy' },
     }),
+    getMcpClientSummary: () => ({
+      schemaVersion: 1,
+      total: 2,
+      initialized: 1,
+      quiet: 1,
+      lastActivityAt: 456,
+      transports: { mcpWs: 2 },
+      clients: [{
+        id: 'mcp-1',
+        transport: 'mcp-ws',
+        initialized: true,
+        clientName: 'codex-managed',
+        lastMethod: 'tools/call',
+        rootCount: 1,
+        connectedAt: 123,
+        lastActivityAt: 456,
+      }],
+    }),
     requestFromChild: async (_serverName, _method, params) => {
       if (params.name === 'list_tasks') {
         return {
@@ -268,6 +325,10 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.equal(status.systemLoad.memory.usedRatio, 0.75);
   assert.equal(status.systemLoad.capacity.recommendedMaxParallelTasks, 4);
   assert.deepEqual(status.systemLoad, status.developmentMap.system);
+  assert.equal(status.mcpClients.total, 2);
+  assert.equal(status.mcpClients.initialized, 1);
+  assert.equal(status.mcpClients.clients[0].clientName, 'codex-managed');
+  assert.equal(JSON.stringify(status.mcpClients).includes('/private'), false);
   assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
   assert.equal(JSON.stringify(status.staleProcesses).includes('23456'), false);
   assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);

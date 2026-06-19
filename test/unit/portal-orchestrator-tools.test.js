@@ -33,6 +33,24 @@ describe('portal orchestrator MCP tools', () => {
         'project-graph': { status: 'healthy' },
         'agent-pool': { status: 'healthy' },
       }),
+      getMcpClientSummary: () => ({
+        schemaVersion: 1,
+        total: 2,
+        initialized: 1,
+        quiet: 0,
+        lastActivityAt: 456,
+        transports: { mcpWs: 2 },
+        clients: [{
+          id: 'mcp-1',
+          transport: 'mcp-ws',
+          initialized: true,
+          clientName: 'codex-managed',
+          lastMethod: 'tools/call',
+          rootCount: 1,
+          connectedAt: 123,
+          lastActivityAt: 456,
+        }],
+      }),
       broadcastMonitor(event) {
         broadcasts.push(event);
       },
@@ -1607,6 +1625,9 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(status.systemLoad.memory.usedRatio, 0.75);
     assert.equal(status.systemLoad.capacity.recommendedMaxParallelTasks, 4);
     assert.deepEqual(status.systemLoad, status.developmentMap.system);
+    assert.equal(status.mcpClients.total, 2);
+    assert.equal(status.mcpClients.initialized, 1);
+    assert.equal(status.mcpClients.clients[0].clientName, 'codex-managed');
     assert.equal(JSON.stringify(status.staleProcesses).includes('12345'), false);
     assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
   });

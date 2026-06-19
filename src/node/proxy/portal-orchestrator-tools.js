@@ -169,7 +169,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_orchestrator_status',
-    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, systemLoad capacity summary, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, task liveness classification, and structured promptHintMap suggestions.',
+    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, systemLoad capacity summary, MCP client/proxy telemetry, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, task liveness classification, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1015,6 +1015,7 @@ export async function handlePortalOrchestratorTool(
         active: tasks.filter(task => isRunningTaskStatus(task.status)).length,
       },
       systemLoad: developmentMap.system,
+      mcpClients: proxyManager.getMcpClientSummary?.() || null,
       developmentMap,
       staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });

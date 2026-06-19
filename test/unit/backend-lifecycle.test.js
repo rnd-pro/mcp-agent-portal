@@ -110,7 +110,8 @@ function createProxyHarness(mod, options = {}) {
       return fn;
     },
     clearTimeout: fn => {
-      timers = timers.filter(timer => timer !== fn);
+      let index = timers.indexOf(fn);
+      if (index !== -1) timers.splice(index, 1);
     },
     logger: { error() {}, warn() {} },
     retryBaseMs: 1,
@@ -384,6 +385,63 @@ describe('backend lifecycle', () => {
     harness.sockets[0].emit('data', textFrame(JSON.stringify(response)));
 
     assert.deepEqual(parseFramedStdout(harness.stdout.writes), response);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
+  it('replays MCP session bootstrap after reconnect without duplicating initialize output', async () => {
+    let mod = await import(
+      `../../src/node/server/backend-lifecycle.js?test=${Date.now()}-replay-bootstrap`
+    );
+    let initialize = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        roots: [{ uri: 'file:///tmp/portal-replay-root' }],
+        clientInfo: { name: 'codex-managed', version: 'test' },
+      },
+    };
+    let initialized = {
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+      params: {},
+    };
+    let harness = createProxyHarness(mod, {
+      buffered: [framedMessage(initialize), framedMessage(initialized)],
+    });
+
+    await Promise.resolve();
+    harness.sockets[0].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+
+    assert.equal(harness.sockets[0].writes.length, 3);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[0].writes[1]), initialize);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[0].writes[2]), initialized);
+
+    let response = {
+      jsonrpc: '2.0',
+      id: 1,
+      result: { serverInfo: { name: 'mcp-agent-portal' } },
+    };
+    harness.sockets[0].emit('data', textFrame(JSON.stringify(response)));
+    assert.deepEqual(parseFramedStdout(harness.stdout.writes), response);
+    let outputCount = harness.stdout.writes.length;
+
+    harness.sockets[0].emit('data', closeFrame());
+    while (harness.timers.length && harness.sockets.length < 2) {
+      harness.timers.shift()();
+      await Promise.resolve();
+    }
+    assert.equal(harness.sockets.length, 2);
+    harness.sockets[1].emit('data', Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+
+    assert.equal(harness.sockets[1].writes.length, 3);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[1].writes[1]), initialize);
+    assert.deepEqual(parseClientTextFrame(harness.sockets[1].writes[2]), initialized);
+
+    harness.sockets[1].emit('data', textFrame(JSON.stringify(response)));
+    assert.equal(harness.stdout.writes.length, outputCount);
     assert.deepEqual(harness.exits, []);
 
     harness.proxy.stop();

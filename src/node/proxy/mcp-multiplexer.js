@@ -80,7 +80,7 @@ export let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, systemLoad capacity summary, and the current developmentMap with activityMap, subagentMap, taskMap, toolMap, latestTools timing, usage totals, liveness, compatibility promptHints, and promptHintMap suggestions.',
+    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, systemLoad capacity summary, active MCP client/proxy telemetry, and the current developmentMap with activityMap, subagentMap, taskMap, toolMap, latestTools timing, usage totals, liveness, compatibility promptHints, and promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -521,6 +521,9 @@ export class MCPMultiplexer {
   }
 
   handleIdeMessage(msg) {
+    if (this.ws) {
+      this.proxyManager.touchMcpClient?.(this.ws, msg?.method || null);
+    }
     this.proxyManager.broadcastMonitor({
       jsonrpc: '2.0',
       method: 'event',
@@ -528,6 +531,9 @@ export class MCPMultiplexer {
     });
 
     if (msg.method === 'initialize') {
+      if (this.ws) {
+        this.proxyManager.markMcpClientInitialized?.(this.ws, msg);
+      }
       // Register IDE workspaces as projects from MCP roots
       let roots = msg.params?.roots || [];
       if (roots.length > 0) {
@@ -678,6 +684,7 @@ export class MCPMultiplexer {
             failures: this.toolIndex.failures || [],
           },
           systemLoad: developmentMap.system,
+          mcpClients: this.proxyManager.getMcpClientSummary?.() || null,
           developmentMap,
           staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
         };
