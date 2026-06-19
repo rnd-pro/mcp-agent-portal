@@ -507,8 +507,9 @@ function summarizeFinalAgentMessage(chat = null, taskId = null, options = {}) {
   if (exitPlan && (!found || (isPlanModeSummary(found.message?.text) && !foundSatisfiesMarkers))) {
     found = exitPlan;
   }
+  let fullText = sanitizeFinalAgentText(found?.message?.text || '');
   let clipped = clipFinalAgentText(found?.message?.text || '');
-  let quality = finalAgentMessageQuality(clipped.text, options.parsedResult, {
+  let quality = finalAgentMessageQuality(fullText, options.parsedResult, {
     match: found?.match || null,
     requiredFinalMarkers: options.requiredFinalMarkers,
   });

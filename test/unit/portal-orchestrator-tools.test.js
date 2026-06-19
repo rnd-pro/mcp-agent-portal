@@ -709,6 +709,55 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'COMPLETION_PROOF');
   });
 
+  it('checks required completion proof markers against full text when projection is clipped', async () => {
+    let chat = sg.createChat({ name: 'Clipped proof marker result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-clipped-proof');
+    sg.set('tasks/task-clipped-proof', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Finish the audit and end with COMPLETION_PROOF:*',
+    }, 'test');
+    let response = [
+      'Release audit findings:',
+      '',
+      'x'.repeat(4300),
+      '',
+      'COMPLETION_PROOF:FAIL',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-clipped-proof',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return { isError: true, content: [{ type: 'text', text: 'runtime result unavailable' }] };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-clipped-proof' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.equal(payload.finalAgentMessage.truncated, true);
+    assert.equal(payload.finalAgentMessage.text.length <= 4000, true);
+    assert.equal(payload.finalAgentMessage.tail.includes('COMPLETION_PROOF:FAIL'), true);
+    assert.equal(payload.finalAgentMessage.lastLine, 'COMPLETION_PROOF:FAIL');
+  });
+
   it('uses the preceding user task request when checking required completion proof marker', async () => {
     let chat = sg.createChat({ name: 'User proof marker result chat' }, 'test');
     sg.appendChatMessage(chat.id, {
