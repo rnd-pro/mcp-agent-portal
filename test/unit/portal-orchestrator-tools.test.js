@@ -1732,6 +1732,77 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.promptHintMap.hints[0].priority, 'high');
   });
 
+  it('uses the closure packet after progress-preface final text', async () => {
+    let chat = sg.createChat({ name: 'Progress preface closure chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-progress-preface-closure');
+    sg.set('tasks/task-progress-preface-closure', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let response = [
+      'I’ll pull the workflow board projection before writing the packet.',
+      'I’m checking the latest task evidence before the final classification.',
+      'completed',
+      '',
+      '**Workflow QA Classification**',
+      'card-58157e95-b70: PASS.',
+      'card-411f01b6-5e9: needs_follow_up.',
+      '',
+      '**Agent Portal Runtime**',
+      'Board and task-result tools are responsive.',
+      '',
+      'WORKFLOW_RESULT: completed',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-progress-preface-closure',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 27,
+                toolCalls: [{ name: 'mcp_tool', args: {} }],
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-progress-preface-closure' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.match(payload.finalAgentMessage.text, /^\*\*Workflow QA Classification\*\*/);
+    assert.doesNotMatch(payload.finalAgentMessage.text, /I’ll pull/);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      false,
+    );
+  });
+
   it('flags heading-only final audit text when runtime activity shows real work happened', async () => {
     let chat = sg.createChat({ name: 'Heading-only result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-heading');

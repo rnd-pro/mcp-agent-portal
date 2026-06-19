@@ -105,6 +105,35 @@ describe('TaskRouter terminal lifecycle handling', () => {
     assert.equal(extractFinalAgentResponse(text), 'pong');
   });
 
+  it('removes progress preface when a closure packet follows it', () => {
+    let text = [
+      '# Task Result',
+      '## Agent Response',
+      'I’ll read the board projection first.',
+      'I’m checking the latest task evidence before writing the packet.',
+      'completed',
+      '',
+      '**Workflow QA Classification**',
+      'card-1: PASS.',
+      '',
+      'WORKFLOW_RESULT: completed',
+      '',
+      '---',
+      '## Stats',
+      '- Exit code: 0',
+    ].join('\n');
+
+    assert.equal(
+      extractFinalAgentResponse(text),
+      [
+        '**Workflow QA Classification**',
+        'card-1: PASS.',
+        '',
+        'WORKFLOW_RESULT: completed',
+      ].join('\n'),
+    );
+  });
+
   it('keeps agent failure diagnostics before the terminal stats section', () => {
     let text = [
       '## [ERR] Agent Failed (exit code 1)',

@@ -24,6 +24,42 @@ function terminalStatusForType(type) {
   return null;
 }
 
+function progressPrefaceLine(line = '') {
+  let lower = String(line || '').trim().toLowerCase();
+  return /\bi(?:'|\u2019)ll\b|\bi will\b|\bi(?:'|\u2019)m\b|\bi am\b/.test(lower);
+}
+
+function hasPendingProgressIntent(text = '') {
+  let normalized = String(text || '').replace(/\s+/g, ' ').toLowerCase();
+  return [
+    /\bi(?:'|\u2019)ll\s+(?:collect|classify|pull|read|stop|use|verify|check|finalize|wait|locate)\b/,
+    /\bi will\s+(?:collect|classify|pull|read|stop|use|verify|check|finalize|wait|locate)\b/,
+    /\bi(?:'|\u2019)m\s+(?:now\s+)?(?:reading|checking|switching|giving|collecting|pulling)\b/,
+    /\bi(?:'|\u2019)m\s+checking\b/,
+    /\bone more interval\b/,
+    /\bstill\s+(?:running|slow|not yielding|hung)\b/,
+  ].some(pattern => pattern.test(normalized));
+}
+
+function closureHeadingLine(line = '') {
+  let value = String(line || '').trim();
+  return /^#{1,6}\s+\S/.test(value) || /^\*\*[^*]+\*\*$/.test(value);
+}
+
+function stripProgressPreface(body = '') {
+  if (!/\bWORKFLOW_RESULT\s*:/i.test(body)) return body;
+  let lines = String(body || '').split(/\r?\n/);
+  let firstClosureIndex = lines.findIndex((line, index) => {
+    if (!closureHeadingLine(line)) return false;
+    return lines.slice(index).some(item => /\bWORKFLOW_RESULT\s*:/i.test(item));
+  });
+  if (firstClosureIndex <= 0) return body;
+  let prefix = lines.slice(0, firstClosureIndex);
+  let progressLineCount = prefix.filter(progressPrefaceLine).length;
+  if (progressLineCount < 2 || !hasPendingProgressIntent(prefix.join('\n'))) return body;
+  return lines.slice(firstClosureIndex).join('\n').trim();
+}
+
 export function extractFinalAgentResponse(text = '') {
   let body = text || '';
   let failureIdx = body.search(/## (?:\[ERR\]|⚠️)?\s*Agent Failed/i);
@@ -44,7 +80,7 @@ export function extractFinalAgentResponse(text = '') {
   if (endIdx > 0) {
     body = body.substring(0, endIdx).trim();
   }
-  return body;
+  return stripProgressPreface(body);
 }
 
 function formatProviderProfile(profile = {}) {
