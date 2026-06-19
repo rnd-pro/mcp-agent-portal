@@ -379,6 +379,10 @@ function isWorkflowResultLine(line = '') {
     .test(String(line || '').trim());
 }
 
+function isMarkdownFenceLine(line = '') {
+  return /^`{3,}\s*$/.test(String(line || '').trim());
+}
+
 function parseMaybeJson(value) {
   if (!value || typeof value !== 'string') return value;
   try {
@@ -419,7 +423,7 @@ function finalMarkerState(text = '', marker = '') {
     found: index >= 0,
     final: index >= 0 && (
       index === lines.length - 1 ||
-      trailingLines.every(line => isWorkflowResultLine(line))
+      trailingLines.every(line => isMarkdownFenceLine(line) || isWorkflowResultLine(line))
     ),
     line: index >= 0 ? lines[index] : null,
   };
@@ -678,7 +682,7 @@ function workflowRepairHintArguments(baseHint = null, chatId = null, taskId = nu
     ? markers.map(marker => `${marker}:PASS or ${marker}:FAIL`).join(' and ')
     : 'the required PASS/FAIL proof marker';
   let markerPlacement = markers.length
-    ? `Final marker placement: the terminal response must end with ${markerText} on a final line before WORKFLOW_RESULT. Do not put narrative text after the marker.`
+    ? `Final marker placement: the terminal response must end with ${markerText} on a final line before WORKFLOW_RESULT. Do not wrap the marker in a Markdown code fence. Do not put narrative text after the marker.`
     : null;
   let requiredProof = markers.length
     ? `Required proof: include ${markerText}, blocking issues, verification evidence, and WORKFLOW_RESULT.`
@@ -721,7 +725,7 @@ function finalAnswerRepairHint(chatId, taskId, finalAgentMessage = {}, options =
   let quality = finalAgentMessage.quality || {};
   let markers = normalizeRequiredFinalMarkers([quality.requiredMarker]).filter(Boolean);
   let markerInstruction = markers.length
-    ? ` The terminal response must end with ${markers.map(m => `\`${m}:PASS\` or \`${m}:FAIL\``).join(' and ')} on a final line before \`WORKFLOW_RESULT\`.`
+    ? ` The terminal response must end with ${markers.map(m => `\`${m}:PASS\` or \`${m}:FAIL\``).join(' and ')} on a final line before \`WORKFLOW_RESULT\`; do not wrap the marker in a Markdown code fence.`
     : '';
   let workflowBaseHint = workflowRepairBaseHint(options.baseHints);
   if (workflowBaseHint) {
