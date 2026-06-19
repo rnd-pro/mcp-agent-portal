@@ -18,6 +18,12 @@ const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
 const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
 
+function cleanUndefined(input = {}) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+}
+
 export const ORCHESTRATOR_META_TOOLS = [
   {
     name: 'list_chats',
@@ -612,12 +618,79 @@ function summarizeLocalActivityHint(hint = {}) {
   };
 }
 
-function finalAnswerRepairHint(chatId, taskId, finalAgentMessage = {}) {
+function workflowRepairBaseHint(baseHints = []) {
+  return baseHints.find((hint) => (
+    hint?.id === 'create-workflow-item'
+    && hint.tool === 'workflow_board'
+    && hint.arguments?.action === 'create_item'
+  )) || null;
+}
+
+function workflowRepairHintArguments(baseHint = null, chatId = null, taskId = null, markers = [], quality = {}) {
+  let baseArgs = baseHint?.arguments || {};
+  let markerText = markers.length
+    ? `${markers.join(', ')}:PASS or :FAIL`
+    : 'the required PASS/FAIL proof marker';
+  let body = [
+    `Repair the terminal final answer for task ${taskId || '(unknown task)'}.`,
+    '',
+    'Scope: produce the concrete final closure that the previous terminal response omitted.',
+    `Required proof: include ${markerText}, blocking issues, verification evidence, and WORKFLOW_RESULT.`,
+    `Observed weak final state: ${quality.state || 'unknown'} (${quality.reason || 'no reason'}).`,
+    'Do not end with an introduction to a report; include the report itself.',
+  ].join('\n');
+  return cleanUndefined({
+    ...baseArgs,
+    title: taskId ? `Repair final answer for ${taskId}` : 'Repair workflow final answer',
+    body,
+    kind: baseArgs.kind || 'repair',
+    priority: baseArgs.priority || 'high',
+    domain: baseArgs.domain || 'orchestration',
+    owner: baseArgs.owner || 'orchestrator',
+    acceptanceCriteria: [
+      'Final response includes the concrete closure body.',
+      `Final response includes ${markerText}.`,
+      'Final response includes WORKFLOW_RESULT.',
+      'Result is verified before moving past quality-audit.',
+    ],
+    entityRefs: {
+      ...(baseArgs.entityRefs || {}),
+      chatId: chatId || baseArgs.entityRefs?.chatId,
+      taskIds: taskId ? [taskId] : baseArgs.entityRefs?.taskIds,
+    },
+  });
+}
+
+function finalAnswerRepairHint(chatId, taskId, finalAgentMessage = {}, options = {}) {
   let quality = finalAgentMessage.quality || {};
   let markers = normalizeRequiredFinalMarkers([quality.requiredMarker]).filter(Boolean);
   let markerInstruction = markers.length
     ? ` The terminal response must end with ${markers.map(m => `\`${m}:PASS\` or \`${m}:FAIL\``).join(' and ')} on a final line before \`WORKFLOW_RESULT\`.`
     : '';
+  let workflowBaseHint = workflowRepairBaseHint(options.baseHints);
+  if (workflowBaseHint) {
+    return {
+      id: 'repair-final-answer',
+      category: 'recovery',
+      label: 'Repair final answer through workflow board',
+      prompt: compactHintText(
+        'Create a workflow-board repair item for the terminal response, then move it to ready. ' +
+        'Active-goal task repair must stay board-routed.' +
+        markerInstruction,
+      ),
+      tool: 'workflow_board',
+      arguments: workflowRepairHintArguments(workflowBaseHint, chatId, taskId, markers, quality),
+      reason: compactHintText(
+        `Terminal task final answer is not closure-ready: ${quality.state || 'unknown'} ` +
+        `(${quality.reason || 'no reason'}).`,
+        220,
+      ),
+      chatId,
+      taskId,
+      priority: 'high',
+      source: 'agent-portal',
+    };
+  }
   return {
     id: 'repair-final-answer',
     category: 'recovery',
@@ -669,7 +742,7 @@ function withFinalAnswerReadiness(
   if (ready) return { finalAnswerReady: true, developmentMap };
 
   let baseHints = developmentMap.promptHintMap?.hints || [];
-  let repairHint = canEvaluateFinal ? finalAnswerRepairHint(chatId, taskId, finalAgentMessage) : null;
+  let repairHint = canEvaluateFinal ? finalAnswerRepairHint(chatId, taskId, finalAgentMessage, { baseHints }) : null;
   let hints = canEvaluateFinal
     ? [
         repairHint,

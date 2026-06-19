@@ -78,6 +78,7 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.action.enum.includes('control_board'), true);
     assert.equal(schema.properties.action.enum.includes('update_column'), true);
     assert.equal(schema.properties.action.enum.includes('claim_work_item'), false);
+    assert.equal(schema.properties.domain.type, 'string');
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {
@@ -116,7 +117,7 @@ describe('workflow board MCP tool', () => {
     let argsByAction = {
       list_boards: { action: 'list_boards', projectId: 'project-1' },
       get_board: { action: 'get_board', boardId: 'board-1', goalId: 'goal-1', chatId: 'chat-1', includeRuntime: true },
-      create_item: { action: 'create_item', title: 'Task', owner: 'agent' },
+      create_item: { action: 'create_item', title: 'Task', owner: 'agent', domain: 'orchestration' },
       update_item: { action: 'update_item', cardId: 'card-1', patch: { owner: 'agent' } },
       update_board: { action: 'update_board', patch: { mode: 'manual', automation: { pickup: 'manual' } } },
       control_board: { action: 'control_board', control: 'pause', projectId: 'project-1' },
@@ -153,6 +154,7 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[1].args.goalId, 'goal-1');
     assert.equal(calls[1].args.chatId, 'chat-1');
     assert.equal(calls[2].args.boardId, 'agent-workflow-default');
+    assert.equal(calls[2].args.domain, 'orchestration');
     assert.equal(calls[4].args.patch.mode, 'manual');
     assert.equal(calls[5].args.action, 'pause');
     assert.equal(calls[6].args.columnId, 'ready');

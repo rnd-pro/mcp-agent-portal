@@ -802,6 +802,76 @@ describe('portal orchestrator MCP tools', () => {
     assert.match(repairHint.arguments.prompt, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
   });
 
+  it('routes active-goal final-answer repair hints through workflow board items', async () => {
+    let chat = sg.createChat({
+      name: 'Active goal release packet repair chat',
+      projectId: 'symbiote-workspace',
+      goalIntentActive: true,
+    }, 'test');
+    let goal = sg.createChatGoal({
+      chatId: chat.id,
+      projectId: 'symbiote-workspace',
+      title: 'Release gate',
+      description: 'Prepare release packet.',
+    }, 'test');
+    sg.updateChatTask(chat.id, 'task-active-goal-release-packet');
+    sg.set('tasks/task-active-goal-release-packet', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Prepare the release packet. Final proof marker must be RELEASE_AUTH_PACKET:*.',
+      completedAt: Date.now() - 1000,
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'All evidence gathered. Here is the final release authorization packet:',
+      taskId: 'task-active-goal-release-packet',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'All evidence gathered. Here is the final release authorization packet:',
+              `__RESULT_JSON__:${JSON.stringify({ totalEvents: 3, toolCalls: [{ name: 'Bash' }] })}`,
+            ].join('\n'),
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-active-goal-release-packet' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let repairHint = payload.developmentMap.promptHintMap.hints.find((hint) => hint.id === 'repair-final-answer');
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.ok(repairHint);
+    assert.equal(repairHint.tool, 'workflow_board');
+    assert.equal(repairHint.arguments.action, 'create_item');
+    assert.equal(repairHint.arguments.projectId, 'symbiote-workspace');
+    assert.equal(repairHint.arguments.domain, 'orchestration');
+    assert.equal(repairHint.arguments.entityRefs.chatId, chat.id);
+    assert.equal(repairHint.arguments.entityRefs.goalId, goal.id);
+    assert.deepEqual(repairHint.arguments.entityRefs.taskIds, ['task-active-goal-release-packet']);
+    assert.match(repairHint.arguments.body, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
+    assert.equal(payload.developmentMap.promptHints.some((hint) => hint.includes('resume_chat')), false);
+  });
+
   it('allows release authorization packet proof before trailing workflow result marker', async () => {
     let chat = sg.createChat({ name: 'Release packet workflow result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-release-packet-workflow-result');
