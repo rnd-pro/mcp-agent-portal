@@ -701,6 +701,105 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
     assert.equal(payload.finalAgentMessage.quality.reason, 'release-auth-packet-marker-missing');
     assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'RELEASE_AUTH_PACKET');
+    let repairHint = payload.developmentMap.promptHintMap.hints.find((hint) => hint.id === 'repair-final-answer');
+    assert.ok(repairHint);
+    assert.match(repairHint.prompt, /RELEASE_AUTH_PACKET:PASS/);
+    assert.match(repairHint.arguments.prompt, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
+  });
+
+  it('keeps repair hint for terminal missing-marker chat results when runtime result is unavailable', async () => {
+    let chat = sg.createChat({ name: 'Restarted release packet repair chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-restarted-release-packet');
+    sg.set('tasks/task-restarted-release-packet', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Prepare the release packet. Final proof marker must be RELEASE_AUTH_PACKET:*.',
+      completedAt: Date.now() - 1000,
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'All evidence gathered. Producing the release authorization packet now.',
+      taskId: 'task-restarted-release-packet',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: 'Task result unavailable after backend restart.' }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-restarted-release-packet' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let repairHint = payload.developmentMap.promptHintMap.hints.find((hint) => hint.id === 'repair-final-answer');
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.developmentMap.requestedTask.terminalStatus, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'RELEASE_AUTH_PACKET');
+    assert.ok(repairHint);
+    assert.match(repairHint.prompt, /RELEASE_AUTH_PACKET:PASS/);
+    assert.match(repairHint.arguments.prompt, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
+  });
+
+  it('keeps repair hint for task-scoped missing-marker finals after runtime task rows are lost', async () => {
+    let chat = sg.createChat({ name: 'Lost task row release packet repair chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-lost-release-packet');
+    sg.appendChatMessage(chat.id, {
+      role: 'user',
+      text: 'Prepare the release packet. Final proof marker must be RELEASE_AUTH_PACKET:*.',
+    });
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'All evidence gathered. Producing the release authorization packet now.',
+      taskId: 'task-lost-release-packet',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: 'Task task-lost-release-packet not found.' }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-lost-release-packet' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let repairHint = payload.developmentMap.promptHintMap.hints.find((hint) => hint.id === 'repair-final-answer');
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.developmentMap.requestedTask.found, false);
+    assert.equal(payload.finalAgentMessage.match, 'taskId');
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'RELEASE_AUTH_PACKET');
+    assert.ok(repairHint);
+    assert.match(repairHint.prompt, /RELEASE_AUTH_PACKET:PASS/);
+    assert.match(repairHint.arguments.prompt, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
   });
 
   it('allows release authorization packet proof before trailing workflow result marker', async () => {

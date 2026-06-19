@@ -614,16 +614,26 @@ function summarizeLocalActivityHint(hint = {}) {
 
 function finalAnswerRepairHint(chatId, taskId, finalAgentMessage = {}) {
   let quality = finalAgentMessage.quality || {};
+  let markers = normalizeRequiredFinalMarkers([quality.requiredMarker]).filter(Boolean);
+  let markerInstruction = markers.length
+    ? ` The terminal response must end with ${markers.map(m => `\`${m}:PASS\` or \`${m}:FAIL\``).join(' and ')} on a final line before \`WORKFLOW_RESULT\`.`
+    : '';
   return {
     id: 'repair-final-answer',
     category: 'recovery',
     label: 'Repair final answer',
     prompt: compactHintText(
       'Ask the task owner to replace the terminal response with a concrete PASS/FAIL closure, ' +
-      'blocking issues, verification evidence, and next action before closing the stage.',
+      'blocking issues, verification evidence, and next action before closing the stage.' +
+      markerInstruction,
     ),
     tool: 'resume_chat',
-    arguments: { chatId: chatId || '', prompt: '<request concrete final closure>' },
+    arguments: {
+      chatId: chatId || '',
+      prompt: markers.length
+        ? `Produce a concrete final answer that includes ${markers.join(', ')}:PASS or :FAIL proof, blocking issues, verification evidence, and WORKFLOW_RESULT.`
+        : '<request concrete final closure with WORKFLOW_RESULT>',
+    },
     reason: compactHintText(
       `Terminal task final answer is not closure-ready: ${quality.state || 'unknown'} ` +
       `(${quality.reason || 'no reason'}).`,
@@ -649,12 +659,18 @@ function withFinalAnswerReadiness(
     options.taskState,
     taskId,
   );
-  let ready = taskTerminal && isFinalAgentMessageReady(finalAgentMessage);
+  let runtimeTask = runtimeTaskForId(options.taskState, taskId);
+  let requestedTaskStatus = String(developmentMap.requestedTask?.status || '').trim();
+  let taskKnownRunning = Boolean(runtimeTask && isRunningTaskStatus(runtimeTask.status))
+    || Boolean(developmentMap.requestedTask?.terminalStatus === false && isRunningTaskStatus(requestedTaskStatus));
+  let hasTaskScopedFinal = Boolean(finalAgentMessage?.hasText && finalAgentMessage.match === 'taskId' && !taskKnownRunning);
+  let canEvaluateFinal = taskTerminal || hasTaskScopedFinal;
+  let ready = canEvaluateFinal && isFinalAgentMessageReady(finalAgentMessage);
   if (ready) return { finalAnswerReady: true, developmentMap };
 
   let baseHints = developmentMap.promptHintMap?.hints || [];
-  let repairHint = taskTerminal ? finalAnswerRepairHint(chatId, taskId, finalAgentMessage) : null;
-  let hints = taskTerminal
+  let repairHint = canEvaluateFinal ? finalAnswerRepairHint(chatId, taskId, finalAgentMessage) : null;
+  let hints = canEvaluateFinal
     ? [
         repairHint,
         ...baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== repairHint.id),

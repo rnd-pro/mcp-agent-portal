@@ -487,6 +487,47 @@ links:
     assert.equal(service.listEvents({ cardId: created.card.id }).some(event => event.eventType === 'orchestration'), true);
   });
 
+  it('adds required proof marker instructions when a workflow card names one', async () => {
+    let taskId = '66666666-6666-4666-8666-666666666666';
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
+        return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Release authorization packet',
+      body: 'Prepare the release packet. Final proof marker must be RELEASE_AUTH_PACKET:*.',
+      columnId: 'ready',
+      projectId: 'symbiote-workspace',
+      domain: 'release',
+      owner: 'release-manager',
+      assignedAgent: 'release-manager',
+      acceptanceCriteria: ['The packet ends with a release authorization proof marker.'],
+      actor: 'test',
+    });
+
+    await service.orchestrateWorkItem({
+      cardId: created.card.id,
+      actor: 'workflow-board',
+    });
+
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].arguments.prompt, /Required proof marker lines:/);
+    assert.match(calls[0].arguments.prompt, /`RELEASE_AUTH_PACKET:PASS` or `RELEASE_AUTH_PACKET:FAIL`/);
+    assert.match(calls[0].arguments.prompt, /before any `WORKFLOW_RESULT:/);
+  });
+
   it('reconciles completed workflow runtime tasks into audit-ready board state', async () => {
     let taskId = '44444444-4444-4444-8444-444444444444';
     let proxyManager = {

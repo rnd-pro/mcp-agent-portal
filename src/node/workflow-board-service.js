@@ -33,6 +33,7 @@ const RUNTIME_DONE_STATUSES = new Set(['done', 'finished', 'complete', 'complete
 const RUNTIME_READY_STATUSES = new Set(['queued', 'pending', 'requested', 'created']);
 const RUNTIME_RUNNING_STATUSES = new Set(['running', 'active', 'started', 'streaming']);
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled', 'stopped']);
+const KNOWN_WORKFLOW_PROOF_MARKERS = ['COMPLETION_PROOF', 'RELEASE_AUTH_PACKET'];
 
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -1411,6 +1412,17 @@ export function createWorkflowBoardService(opts = {}) {
     return lease;
   }
 
+  function requiredProofMarkersForWorkItem(card = {}, args = {}) {
+    let text = [
+      card.title,
+      card.body,
+      ...(Array.isArray(card.acceptanceCriteria) ? card.acceptanceCriteria : []),
+      ...(Array.isArray(card.context) ? card.context : []),
+      args.reason,
+    ].filter(Boolean).join('\n');
+    return KNOWN_WORKFLOW_PROOF_MARKERS.filter(marker => new RegExp(`\\b${marker}\\b`).test(text));
+  }
+
   function buildWorkItemPrompt(card, args = {}) {
     let criteria = card.acceptanceCriteria.length
       ? `\n\nAcceptance criteria:\n${card.acceptanceCriteria.map(item => `- ${item}`).join('\n')}`
@@ -1421,6 +1433,14 @@ export function createWorkflowBoardService(opts = {}) {
     let markdownPath = textOrNull(card.metadata?.markdownPath);
     let fileHint = markdownPath ? `\n\nWorkflow work-item file: ${markdownPath}` : '';
     let preferredAgent = textOrNull(args.agent ?? args.agent_slug ?? card.assignedAgent);
+    let proofMarkers = requiredProofMarkersForWorkItem(card, args);
+    let proofMarkerContract = proofMarkers.length
+      ? [
+          '- Required proof marker lines:',
+          ...proofMarkers.map(marker => `  - \`${marker}:PASS\` or \`${marker}:FAIL\``),
+          '- Place required proof marker lines after the report body and before any `WORKFLOW_RESULT:` line.',
+        ].join('\n')
+      : '';
     let outputContract = [
       '',
       '',
@@ -1430,8 +1450,9 @@ export function createWorkflowBoardService(opts = {}) {
       '- Name the concrete evidence inspected and commands or checks run.',
       '- Separate product findings from Agent Portal workflow/runtime issues.',
       '- Do not end with an introduction to a report; include the report itself.',
+      proofMarkerContract,
       '- End with `WORKFLOW_RESULT: completed`, `WORKFLOW_RESULT: blocked`, or `WORKFLOW_RESULT: needs_follow_up`.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     return [
       `Run the Agent Portal workflow work item "${card.title}".`,
       card.body ? `\n\n${card.body}` : '',
