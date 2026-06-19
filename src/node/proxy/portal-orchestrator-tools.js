@@ -344,6 +344,19 @@ function isHeadingOnlyFinalAgentText(text = '') {
   });
 }
 
+function isMarkerOnlyFinalAgentText(text = '') {
+  let lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0 || lines.length > 4) return false;
+  let passMarker = /^#{0,3}\s*[A-Z][A-Z0-9_]+:PASS(?:\s+-\s+.+)?$/;
+  let outcome = /^#{0,3}\s*(?:workflow\s+outcome|outcome|status)\s*:\s*[\w -]+$/i;
+  let separator = /^-{3,}$/;
+  return lines.some((line) => passMarker.test(line))
+    && lines.every((line) => passMarker.test(line) || outcome.test(line) || separator.test(line));
+}
+
 function parseMaybeJson(value) {
   if (!value || typeof value !== 'string') return value;
   try {
@@ -448,6 +461,14 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
         };
       }
     }
+  }
+  if (isMarkerOnlyFinalAgentText(text)) {
+    return {
+      state: 'weak-marker-only',
+      reason: 'marker-only-final',
+      toolCallCount,
+      totalEvents,
+    };
   }
   if (allMarkersSatisfied && options.match !== 'taskId-exit-plan') {
     return { state: 'ok' };

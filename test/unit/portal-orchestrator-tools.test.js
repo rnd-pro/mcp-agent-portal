@@ -1312,6 +1312,73 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.reason, 'heading-only-final');
   });
 
+  it('flags marker-only PASS final text as not closure-ready', async () => {
+    let chat = sg.createChat({ name: 'Marker-only result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-marker-only');
+    sg.set('tasks/task-marker-only', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let response = [
+      '---',
+      '',
+      '# RELEASE_CUT_DECISION:PASS',
+      '',
+      '## Workflow Outcome: completed',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-marker-only',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 38,
+                toolCalls: [
+                  { name: 'Read', args: { file_path: 'checklist.md' } },
+                  { name: 'Bash', args: { command: 'npm test' } },
+                ],
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-marker-only' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-marker-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'marker-only-final');
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      true,
+    );
+  });
+
   it('uses ExitPlanMode content when plan-mode final agent text only references the plan', async () => {
     let chat = sg.createChat({ name: 'Plan mode result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-plan');

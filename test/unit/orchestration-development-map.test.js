@@ -209,9 +209,11 @@ describe('orchestration development map', () => {
     assert.equal(map.latestTools[0].detailLabel, '[query]');
     assert.equal(map.latestTools[0].timingSource, 'tool_result');
     assert.equal(map.latestTools.some((tool) => tool.name === 'read_file'), true);
+    assert.equal(map.latestTools.find((tool) => tool.name === 'read_file').status, 'done');
+    assert.equal(map.latestTools.find((tool) => tool.name === 'read_file').timingSource, 'event_superseded');
     assert.equal(
-      map.latestTools.find((tool) => tool.name === 'read_file').status,
-      'running',
+      map.latestTools.find((tool) => tool.name === 'read_file').resultUnavailableReason,
+      'superseded_by_later_event',
     );
     assert.equal(map.latestTools.find((tool) => tool.name === 'shell').detailLabel, '[command]');
     assert.equal(map.latestTools.find((tool) => tool.name === 'fetch_url').detailLabel, 'secret.example.test');
@@ -635,6 +637,50 @@ describe('orchestration development map', () => {
     assert.equal(map.latestTools[0].resultUnavailableReason, null);
     assert.equal(map.usage.toolDurationMs, 1500);
     assert.equal(map.usage.toolUsageMs, 1500);
+  });
+
+  it('does not count superseded running tool events as active tools', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-stream');
+    sg.set('tasks/task-stream', {
+      status: 'running',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      startedAt: 1000,
+      prompt: 'Audit live tool telemetry',
+      events: [{
+        type: 'tool_use',
+        name: 'Read',
+        arguments: { file_path: '/tmp/project/src/node/server.js' },
+        ts: 2000,
+      }, {
+        type: 'message',
+        role: 'assistant',
+        content: 'Read complete, checking tests.',
+        ts: 2600,
+      }, {
+        type: 'tool_use',
+        name: 'Bash',
+        arguments: { command: 'node --test' },
+        ts: 3000,
+      }],
+    }, 'test');
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-stream' });
+    let taskTools = map.toolMap.byTaskId['task-stream'].tools;
+    let readTool = taskTools.find((tool) => tool.name === 'Read');
+    let bashTool = taskTools.find((tool) => tool.name === 'Bash');
+
+    assert.equal(map.taskMap.byId['task-stream'].runningToolCount, 1);
+    assert.equal(map.toolMap.byTaskId['task-stream'].runningToolCount, 1);
+    assert.equal(map.subagentMap.nodes[0].runningToolCount, 1);
+    assert.equal(readTool.status, 'done');
+    assert.equal(readTool.estimatedCompletedAt, 2600);
+    assert.equal(readTool.elapsedMs, 600);
+    assert.equal(readTool.timingSource, 'event_superseded');
+    assert.equal(readTool.resultUnavailableReason, 'superseded_by_later_event');
+    assert.equal(bashTool.status, 'running');
+    assert.equal(bashTool.timingSource, 'running_elapsed');
   });
 
   it('estimates terminal task tool usage instead of hiding timing', () => {

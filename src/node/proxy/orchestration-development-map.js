@@ -208,8 +208,11 @@ function toolResultSummary(result = null) {
   return value === null || value === undefined ? null : compactResultSummary(value);
 }
 
-function toolResultUnavailableReason(result = null, terminal = false) {
-  if (!result) return terminal ? 'not_reported_by_runner' : 'running';
+function toolResultUnavailableReason(result = null, terminal = false, superseded = false) {
+  if (!result) {
+    if (superseded) return 'superseded_by_later_event';
+    return terminal ? 'not_reported_by_runner' : 'running';
+  }
   let value = toolResultValue(result);
   return String(value ?? '').trim() ? null : 'empty_result';
 }
@@ -471,18 +474,22 @@ function collectToolUses(
       ? Math.max(0, completedAt - startedAt)
       : explicitDuration;
     let taskTerminal = TASK_TERMINAL_STATUSES.has(event.taskStatus || '');
-    let estimatedCompletedAt = !completedAt && taskTerminal
-      ? estimateToolCompletedAt(event, startedAt)
+    let supersededCompletedAt = !completedAt && !taskTerminal
+      ? estimateSupersededToolCompletedAt(event, events, startedAt)
       : null;
-    let terminalElapsedMs = startedAt && estimatedCompletedAt
+    let estimatedCompletedAt = !completedAt
+      ? taskTerminal ? estimateToolCompletedAt(event, startedAt) : supersededCompletedAt
+      : null;
+    let estimatedElapsedMs = startedAt && estimatedCompletedAt
       ? Math.max(0, estimatedCompletedAt - startedAt)
       : null;
-    let runningElapsedMs = startedAt && !taskTerminal ? Math.max(0, now - startedAt) : null;
-    let elapsedMs = durationMs ?? terminalElapsedMs ?? runningElapsedMs;
+    let runningElapsedMs = startedAt && !taskTerminal && !estimatedCompletedAt ? Math.max(0, now - startedAt) : null;
+    let elapsedMs = durationMs ?? estimatedElapsedMs ?? runningElapsedMs;
     let timingSource = timingSourceForTool({
       durationMs,
       completedAt,
       estimatedCompletedAt,
+      supersededCompletedAt,
       runningElapsedMs,
     });
     toolUses.push({
@@ -492,7 +499,7 @@ function collectToolUses(
       detail: detail.label,
       detailKind: detail.kind,
       detailLabel: detail.label,
-      status: result?.status || (result ? 'done' : taskTerminal ? event.taskStatus : 'running'),
+      status: result?.status || (result ? 'done' : estimatedCompletedAt ? 'done' : taskTerminal ? event.taskStatus : 'running'),
       startedAt: usedAt,
       usedAt,
       completedAt: result?.ts || result?.timestamp || null,
@@ -503,7 +510,7 @@ function collectToolUses(
       timingSource,
       timingEstimated: timingSource !== 'tool_result' && timingSource !== 'unknown',
       resultSummary: toolResultSummary(result),
-      resultUnavailableReason: toolResultUnavailableReason(result, taskTerminal),
+      resultUnavailableReason: toolResultUnavailableReason(result, taskTerminal, Boolean(supersededCompletedAt)),
     });
   }
 
@@ -602,8 +609,21 @@ function estimateToolCompletedAt(event, startedAt) {
   return null;
 }
 
-function timingSourceForTool({ durationMs, completedAt, estimatedCompletedAt, runningElapsedMs }) {
+function estimateSupersededToolCompletedAt(event, events, startedAt) {
+  if (!startedAt) return null;
+  let eventSequence = event.sequence ?? -1;
+  for (let nextEvent of events) {
+    if ((nextEvent.sequence ?? -1) <= eventSequence) continue;
+    if (!sameToolScope(event, nextEvent)) continue;
+    let nextAt = eventTimestamp(nextEvent);
+    if (nextAt && nextAt >= startedAt) return nextAt;
+  }
+  return null;
+}
+
+function timingSourceForTool({ durationMs, completedAt, estimatedCompletedAt, supersededCompletedAt, runningElapsedMs }) {
   if (Number.isFinite(durationMs) || completedAt) return 'tool_result';
+  if (supersededCompletedAt) return 'event_superseded';
   if (estimatedCompletedAt) return 'task_completed';
   if (Number.isFinite(runningElapsedMs)) return 'running_elapsed';
   return 'unknown';
