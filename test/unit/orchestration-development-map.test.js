@@ -864,6 +864,36 @@ Available resource groups (1):
     assert.equal(map.taskMap.byId['task-lost'].liveness.state, 'terminal');
   });
 
+  it('does not emit a failed-task recovery hint for lost tasks with terminal agent markers', () => {
+    let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
+    sg.updateChatTask(root.id, 'task-lost');
+    sg.set('tasks/task-lost', {
+      status: 'lost',
+      chatId: root.id,
+      agentSlug: 'orchestrator',
+      startedAt: Date.now() - 50000,
+      completedAt: Date.now() - 1000,
+      elapsedMs: 49000,
+      events: [],
+    }, 'test');
+    sg.appendChatMessage(root.id, {
+      role: 'agent',
+      taskId: 'task-lost',
+      streaming: false,
+      text: 'Verified planning evidence is recorded.\n\nROOT_1_0_PLAN:PASS',
+    });
+
+    let map = buildDevelopmentMap({ sg, chatId: root.id, taskId: 'task-lost' });
+
+    assert.equal(map.requestedTask.status, 'lost');
+    assert.equal(map.requestedTask.terminalStatus, true);
+    assert.equal(
+      map.promptHintMap.hints.some((hint) => hint.id === 'recover-failed-task'),
+      false,
+    );
+    assert.equal(map.promptHintMap.hints.some((hint) => hint.id === 'close-stage'), true);
+  });
+
   it('surfaces stale processes summary without raw process metadata', () => {
     let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
 

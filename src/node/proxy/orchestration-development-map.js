@@ -15,6 +15,7 @@ const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
 const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
 const SECRET_WORD_RE = /\b(?:secret|session|token|api[_-]?key)[A-Za-z0-9_-]*\b/gi;
+const TERMINAL_FINAL_MARKER_RE = /(?:^|\n)\s*[A-Z][A-Z0-9_]*:(?:PASS|FAIL)\s*$/;
 
 export function isRunningTaskStatus(status) {
   return TASK_RUNNING_STATUSES.has(String(status || ''));
@@ -685,12 +686,16 @@ function buildStructuredPromptHints({
   subagents = [],
   tasks = [],
   workflowContext = {},
+  closureReadyTaskIds = new Set(),
 }) {
   let hints = [];
   let runtimeHint = extractRuntimeHint(runtimeText);
   let primaryTask = taskId ? tasks.find((task) => task.id === taskId) : null;
   let latestTask = primaryTask || tasks[0] || null;
-  let failedTask = tasks.find((task) => ['error', 'lost'].includes(task.status));
+  let failedTask = tasks.find((task) => (
+    task.status === 'error'
+    || (task.status === 'lost' && !closureReadyTaskIds.has(task.id))
+  ));
   let latestTool = latestTools[0] || null;
 
   if (runtimeHint) {
@@ -867,6 +872,24 @@ function buildPromptHintMap(args) {
       hints: PROMPT_HINT_LIMIT,
     },
   };
+}
+
+function terminalFinalTaskIds(sg, chats = [], tasks = []) {
+  let chatById = new Map(chats.map((chat) => [chat?.id, chat]));
+  let ids = new Set();
+  for (let task of tasks) {
+    if (!task?.id || !TASK_TERMINAL_STATUSES.has(task.status)) continue;
+    let chat = sg?.getChat?.(task.chatId) || chatById.get(task.chatId);
+    let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+    let hasTerminalMarker = messages.some((message) => (
+      message?.role === 'agent'
+      && message.streaming !== true
+      && message.taskId === task.id
+      && TERMINAL_FINAL_MARKER_RE.test(String(message.text || '').trim())
+    ));
+    if (hasTerminalMarker) ids.add(task.id);
+  }
+  return ids;
 }
 
 function taskActivityTime(task = {}) {
@@ -1659,6 +1682,7 @@ export function buildDevelopmentMap({
     subagents,
     tasks: scopedTasks,
     workflowContext: workflowContextForChat(rootChat),
+    closureReadyTaskIds: terminalFinalTaskIds(sg, chats, scopedTasks),
     now,
   };
   let promptHintMap = buildPromptHintMap(promptHintArgs);
