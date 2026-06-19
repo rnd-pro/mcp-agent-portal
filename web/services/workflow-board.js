@@ -1,5 +1,6 @@
 const WORKFLOW_BOARD_ENDPOINT = '/api/workflow-board';
 const WORKFLOW_TRANSITIONS_ENDPOINT = '/api/workflow-board/transitions';
+const WORKFLOW_DECOMPOSE_ENDPOINT = '/api/workflow-board/decompose';
 const WORKFLOW_ORCHESTRATE_ENDPOINT = '/api/workflow-board/orchestrate';
 const WORKFLOW_CONTROL_ENDPOINT = '/api/workflow-board/control';
 const WORKFLOW_DELETE_ENDPOINT = '/api/workflow-board/delete';
@@ -295,6 +296,8 @@ function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID
     body: normalizeBodyText(card.body || card.markdown || card.description || card.prompt || ''),
     summary: compactText(card.description || card.summary || card.body || card.prompt || ''),
     columnId,
+    parentCardId: normalizeText(card.parentCardId || card.parent_card_id),
+    childCardIds: normalizeStringList(card.childCardIds || card.child_card_ids),
     projectId: normalizeText(card.projectId || card.project_id || card.project || entityRefs.projectId),
     kind: normalizeText(card.kind || card.type, 'work-item'),
     priority,
@@ -605,6 +608,10 @@ async function postWorkflowAction(endpoint, input = {}, options = {}) {
 
 export function orchestrateWorkflowCard(input = {}, options = {}) {
   return postWorkflowAction(WORKFLOW_ORCHESTRATE_ENDPOINT, input, options);
+}
+
+export function decomposeWorkflowCard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_DECOMPOSE_ENDPOINT, input, options);
 }
 
 export function controlWorkflowCard(input = {}, options = {}) {

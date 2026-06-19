@@ -27,6 +27,11 @@ const ACTIONS = {
     description: 'Create a workflow card/work item.',
     required: ['title'],
   },
+  decompose: {
+    method: 'decomposeWorkItem',
+    description: 'Split a broad workflow card into first-class child cards without starting them automatically.',
+    required: ['cardId', 'childItems'],
+  },
   update_item: {
     method: 'updateWorkItem',
     description: 'Patch a workflow card/work item.',
@@ -96,6 +101,18 @@ const ACTION_EXAMPLES = {
     projectId: 'project-id',
     owner: 'orchestrator',
     acceptanceCriteria: ['Tests pass', 'Audit is clean'],
+  },
+  decompose: {
+    action: 'decompose',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'parent-card-id',
+    childItems: [
+      {
+        title: 'Audit scoped contract',
+        owner: 'code-reviewer',
+        acceptanceCriteria: ['Audit result is recorded'],
+      },
+    ],
   },
   transition: {
     action: 'transition',
@@ -187,12 +204,19 @@ export const WORKFLOW_BOARD_TOOLS = [
         includeRuntime: { type: 'boolean', description: 'Include linked runtime projection for get_board.' },
         includeResolved: { type: 'boolean', description: 'Include resolved recovery records for recovery.' },
         cardId: { type: 'string', description: 'Workflow card/work-item ID.' },
+        parentCardId: { type: 'string', description: 'Parent workflow card ID for child cards.' },
         title: { type: 'string', description: 'Work-item title for create_item.' },
         body: { type: 'string', description: 'Optional work-item body for create_item.' },
+        childItems: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Child card definitions for action=decompose.',
+        },
         kind: { type: 'string', description: 'Optional work-item kind.' },
         priority: { type: 'string', description: 'Optional priority.' },
         domain: { type: 'string', description: 'Optional work-item domain for classification gates.' },
         columnId: { type: 'string', description: 'Initial column for create_item.' },
+        childColumnId: { type: 'string', description: 'Initial column for child cards created by action=decompose.' },
         automation: { type: 'object', description: 'Column automation patch for action=update_column.' },
         owner: { type: 'string', description: 'Optional work-item owner.' },
         assignedAgent: { type: 'string', description: 'Optional preferred agent for create_item routing.' },
@@ -411,6 +435,7 @@ function serviceArgsForAction(action, args = {}) {
       priority: args.priority,
       domain: args.domain,
       columnId: args.columnId,
+      parentCardId: args.parentCardId,
       owner: args.owner,
       assignedAgent: args.assignedAgent,
       resourceGroup: args.resourceGroup,
@@ -427,6 +452,14 @@ function serviceArgsForAction(action, args = {}) {
       ...common,
       patch: args.patch,
       checks: args.checks,
+    });
+  }
+  if (action === 'decompose') {
+    return cleanUndefined({
+      ...common,
+      childItems: args.childItems,
+      childColumnId: args.childColumnId,
+      columnId: args.columnId,
     });
   }
   if (action === 'update_board') {

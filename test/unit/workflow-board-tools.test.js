@@ -11,6 +11,7 @@ const ACTION_METHODS = {
   list_boards: 'listWorkflowBoards',
   get_board: 'getWorkflowBoard',
   create_item: 'createWorkItem',
+  decompose: 'decomposeWorkItem',
   update_item: 'updateWorkItem',
   update_board: 'updateWorkflowBoard',
   control_board: 'controlWorkflowBoard',
@@ -74,6 +75,7 @@ describe('workflow board MCP tool', () => {
     assert.deepEqual(schema.required, ['action']);
     assert.equal(schema.properties.action.enum.includes('help'), true);
     assert.equal(schema.properties.action.enum.includes('transition'), true);
+    assert.equal(schema.properties.action.enum.includes('decompose'), true);
     assert.equal(schema.properties.action.enum.includes('update_board'), true);
     assert.equal(schema.properties.action.enum.includes('control_board'), true);
     assert.equal(schema.properties.action.enum.includes('update_column'), true);
@@ -85,6 +87,9 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.blockers.items.type, 'string');
     assert.equal(schema.properties.metadata.type, 'object');
     assert.equal(schema.properties.checks.type, 'object');
+    assert.equal(schema.properties.parentCardId.type, 'string');
+    assert.equal(schema.properties.childItems.type, 'array');
+    assert.equal(schema.properties.childColumnId.type, 'string');
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {
@@ -137,6 +142,12 @@ describe('workflow board MCP tool', () => {
         blockers: ['Waiting for approval'],
         metadata: { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' },
       },
+      decompose: {
+        action: 'decompose',
+        cardId: 'card-parent',
+        childColumnId: 'ready',
+        childItems: [{ title: 'Child task', owner: 'agent', acceptanceCriteria: ['Done'] }],
+      },
       update_item: {
         action: 'update_item',
         cardId: 'card-1',
@@ -187,13 +198,16 @@ describe('workflow board MCP tool', () => {
     assert.deepEqual(calls[2].args.routingHints, ['release']);
     assert.deepEqual(calls[2].args.blockers, ['Waiting for approval']);
     assert.deepEqual(calls[2].args.metadata, { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' });
-    assert.deepEqual(calls[3].args.checks, { audit: { status: 'pass' } });
-    assert.equal(calls[4].args.patch.mode, 'manual');
-    assert.equal(calls[5].args.action, 'pause');
-    assert.equal(calls[6].args.columnId, 'ready');
-    assert.equal(calls[8].args.expectedVersion, 7);
-    assert.equal(calls[9].args.resource_group, 'codex');
-    assert.equal(calls[10].args.action, 'pause');
+    assert.equal(calls[3].args.cardId, 'card-parent');
+    assert.equal(calls[3].args.childColumnId, 'ready');
+    assert.deepEqual(calls[3].args.childItems, [{ title: 'Child task', owner: 'agent', acceptanceCriteria: ['Done'] }]);
+    assert.deepEqual(calls[4].args.checks, { audit: { status: 'pass' } });
+    assert.equal(calls[5].args.patch.mode, 'manual');
+    assert.equal(calls[6].args.action, 'pause');
+    assert.equal(calls[7].args.columnId, 'ready');
+    assert.equal(calls[9].args.expectedVersion, 7);
+    assert.equal(calls[10].args.resource_group, 'codex');
+    assert.equal(calls[11].args.action, 'pause');
   });
 
   it('preserves blocked transition gate semantics and suggests the next action', async () => {

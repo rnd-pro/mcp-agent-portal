@@ -723,6 +723,18 @@ export function createWorkflowBoardService(opts = {}) {
         lease: clone(stateGraph.get(`workflowLeases/${card.id}`) ?? null),
         events: listEvents({ boardId: board.id, cardId: card.id, limit: MAX_EVENT_LIMIT }),
       }));
+    let childIdsByParent = new Map();
+    for (let card of persistedBoardCards) {
+      let parentCardId = textOrNull(card.parentCardId ?? card.parent_card_id);
+      if (!parentCardId) continue;
+      let childIds = childIdsByParent.get(parentCardId) ?? [];
+      childIds.push(card.id);
+      childIdsByParent.set(parentCardId, childIds);
+    }
+    persistedBoardCards = persistedBoardCards.map(card => ({
+      ...card,
+      childCardIds: childIdsByParent.get(card.id) ?? [],
+    }));
     let linkedTaskIds = new Set(persistedBoardCards.flatMap(card => uniqueArray([
       ...card.entityRefs.taskIds,
       ...card.runs.flatMap(run => run.taskIds),
@@ -1068,6 +1080,103 @@ export function createWorkflowBoardService(opts = {}) {
       checks: args.checks,
     });
     return { ok: true, ...result };
+  }
+
+  function childItemsFromArgs(args = {}) {
+    let value = args.childItems ?? args.child_items ?? args.children ?? args.items ?? args.subtasks;
+    if (!Array.isArray(value) || value.length === 0) {
+      throw new Error('Workflow decomposition requires a non-empty childItems array.');
+    }
+    return value.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new Error(`Workflow decomposition childItems[${index}] must be an object.`);
+      }
+      if (!textOrNull(item.title)) {
+        throw new Error(`Workflow decomposition childItems[${index}] requires title.`);
+      }
+      return item;
+    });
+  }
+
+  function decomposeWorkItem(args = {}) {
+    let cardId = normalizeCardId(args);
+    let parent = getCard(cardId);
+    let expectedVersion = args.expectedVersion ?? args.expected_version;
+    if (expectedVersion !== undefined && expectedVersion !== null) {
+      let version = Number(expectedVersion);
+      if (!Number.isFinite(version) || parent.version !== Math.floor(version)) {
+        throw new Error(`Workflow card version conflict for ${cardId}. Reload the card and retry.`);
+      }
+    }
+    let actor = textOrNull(args.actor) ?? 'orchestrator';
+    let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
+    let ts = now();
+    let children = childItemsFromArgs(args).map((item) => {
+      let childContext = textArray(item.context);
+      let childRoutingHints = textArray(item.routingHints ?? item.routing_hints);
+      let id = textOrNull(item.id ?? item.cardId ?? item.card_id) ?? nextId(makeId, 'card');
+      if (stateGraph.get(`workflowCards/${id}`)) {
+        throw new Error(`Workflow decomposition child card already exists: ${id}`);
+      }
+      return normalizeWorkflowCardInput({
+        ...item,
+        id,
+        boardId: parent.boardId,
+        columnId: textOrNull(item.columnId ?? item.column_id) ?? childColumnId,
+        parentCardId: parent.id,
+        projectId: textOrNull(item.projectId ?? item.project_id) ?? parent.projectId,
+        domain: textOrNull(item.domain) ?? parent.domain,
+        kind: textOrNull(item.kind) ?? 'task',
+        priority: textOrNull(item.priority) ?? parent.priority,
+        owner: textOrNull(item.owner) ?? parent.owner,
+        resourceGroup: textOrNull(item.resourceGroup ?? item.resource_group) ?? parent.resourceGroup,
+        approvalMode: textOrNull(item.approvalMode ?? item.approval_mode) ?? parent.approvalMode,
+        context: [...textArray(parent.context), ...childContext],
+        routingHints: [...textArray(parent.routingHints), ...childRoutingHints],
+      }, {
+        id,
+        actor,
+        now: ts,
+        version: 1,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    });
+    let board = ensureBoard(parent.boardId);
+    let eventId = textOrNull(args.eventId ?? args.event_id) ?? nextId(makeId, 'decomposition');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId,
+      eventType: 'decomposition',
+      boardId: board.id,
+      cardId: parent.id,
+      fromColumnId: parent.columnId,
+      toColumnId: parent.columnId,
+      actor,
+      mode: 'manual',
+      reason: textOrNull(args.reason) ?? `Decomposed workflow card ${parent.id} into ${children.length} child card(s).`,
+      status: 'accepted',
+      cardVersion: parent.version,
+      gateResult: { ok: true, checks: [], failures: [] },
+      sideEffects: children.map(child => ({
+        type: 'child_card_created',
+        cardId: child.id,
+        parentCardId: parent.id,
+        columnId: child.columnId,
+        assignedAgent: child.assignedAgent,
+      })),
+    }, { id: eventId, now: ts });
+    stateGraph.commit([
+      ...children.map(child => ({ op: 'set', path: `workflowCards/${child.id}`, value: child })),
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceFor(actor));
+    return {
+      ok: true,
+      board,
+      parent,
+      children,
+      event,
+      childCardIds: children.map(child => child.id),
+    };
   }
 
   function updateWorkflowColumn(args = {}) {
@@ -2156,6 +2265,7 @@ export function createWorkflowBoardService(opts = {}) {
     getWorkflowBoard,
     createWorkItem,
     updateWorkItem,
+    decomposeWorkItem,
     updateWorkflowBoard,
     updateWorkflowColumn,
     controlWorkflowBoard,

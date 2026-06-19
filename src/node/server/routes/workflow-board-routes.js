@@ -56,6 +56,16 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    'POST /api/workflow-board/decompose': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().decomposeWorkItem(body);
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'POST /api/workflow-board/transition': requestTransition,
     'POST /api/workflow-board/transitions': requestTransition,
 

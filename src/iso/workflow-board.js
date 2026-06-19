@@ -386,6 +386,7 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
     kind: textOrNull(input.kind) ?? 'work-item',
     priority: textOrNull(input.priority),
     body: textOrNull(input.body ?? input.description ?? input.summary),
+    parentCardId: textOrNull(input.parentCardId ?? input.parent_card_id),
     projectId: textOrNull(input.projectId ?? input.project_id),
     domain: textOrNull(input.domain),
     owner: textOrNull(input.owner),

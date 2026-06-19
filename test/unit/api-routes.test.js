@@ -61,6 +61,7 @@ describe('api-routes', () => {
     assert.ok(routes, 'should return routes object');
     assert.ok(typeof routes === 'object', 'routes should be an object');
     assert.equal(typeof routes['GET /api/workflow-board'], 'function');
+    assert.equal(typeof routes['POST /api/workflow-board/decompose'], 'function');
     assert.equal(typeof routes['POST /api/workflow-board/transition'], 'function');
     assert.equal(typeof routes['POST /api/workflow-board/transitions'], 'function');
     assert.equal(typeof routes['POST /api/workflow-board/delete'], 'function');

@@ -99,6 +99,7 @@ seed_column: backlog
       for (let key of [
         'GET /api/workflow-board',
         'POST /api/workflow-board/cards',
+        'POST /api/workflow-board/decompose',
         'POST /api/workflow-board/transition',
         'POST /api/workflow-board/orchestrate',
         'POST /api/workflow-board/control',
@@ -132,6 +133,29 @@ seed_column: backlog
       assert.equal(created.ok, true);
       assert.equal(created.card.columnId, 'ideas');
 
+      let decomposeRes = makeRes();
+      await routes['POST /api/workflow-board/decompose'](
+        makeReq('POST', '/api/workflow-board/decompose', {
+          cardId: created.card.id,
+          expectedVersion: created.card.version,
+          childItems: [{
+            id: 'card-route-child',
+            title: 'Route child card',
+            owner: 'route-agent',
+            acceptanceCriteria: ['Child route works'],
+          }],
+          actor: 'route-test',
+          reason: 'Split route card into child work.',
+        }),
+        decomposeRes,
+      );
+      let decomposed = decomposeRes.json();
+
+      assert.equal(decomposeRes.status, 200);
+      assert.equal(decomposed.ok, true);
+      assert.deepEqual(decomposed.result.childCardIds, ['card-route-child']);
+      assert.equal(decomposed.result.children[0].parentCardId, created.card.id);
+
       let boardRes = makeRes();
       await routes['GET /api/workflow-board'](
         makeReq('GET', '/api/workflow-board?projectId=project-alpha'),
@@ -143,9 +167,14 @@ seed_column: backlog
       assert.equal(board.ok, true);
       assert.deepEqual(board.projection.cards.map(card => card.id), [
         created.card.id,
+        'card-route-child',
         'work-item-route-seed',
         'runtime-task-route-orphan',
       ]);
+      assert.deepEqual(
+        board.projection.cards.find(card => card.id === created.card.id).childCardIds,
+        ['card-route-child'],
+      );
       assert.equal(
         board.projection.cards.find(card => card.id === 'work-item-route-seed').columnId,
         'backlog',
@@ -253,7 +282,8 @@ seed_column: backlog
 
       assert.equal(eventsRes.status, 200);
       assert.equal(events.ok, true);
-      assert.deepEqual(events.events.map(event => event.status), ['accepted']);
+      assert.deepEqual(events.events.map(event => event.eventType), ['decomposition', 'transition']);
+      assert.deepEqual(events.events.map(event => event.status), ['accepted', 'accepted']);
 
       let boardEventsRes = makeRes();
       await routes['GET /api/workflow-board/events'](

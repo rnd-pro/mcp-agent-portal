@@ -269,6 +269,83 @@ describe('workflow board model and service', () => {
     assert.equal(service.getCard(created.card.id).columnId, 'done');
   });
 
+  it('decomposes a broad workflow card into linked child cards', () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Implement broad workflow board work',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'backlog',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      context: ['Parent context'],
+      actor: 'test',
+    });
+    let result = service.decomposeWorkItem({
+      cardId: parent.card.id,
+      expectedVersion: parent.card.version,
+      actor: 'test',
+      reason: 'Split broad card into scoped children.',
+      childItems: [
+        {
+          title: 'Audit decomposition contract',
+          owner: 'code-reviewer',
+          assignedAgent: 'code-reviewer',
+          acceptanceCriteria: ['Audit result is recorded'],
+        },
+        {
+          title: 'Implement decomposition contract',
+          owner: 'backend-engineer',
+          assignedAgent: 'backend-engineer',
+          domain: 'backend',
+          acceptanceCriteria: ['Regression tests pass'],
+          context: ['Child-specific context'],
+        },
+      ],
+    });
+    let projection = service.getBoardProjection();
+    let projectedParent = projection.cards.find(card => card.id === parent.card.id);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.children.length, 2);
+    assert.deepEqual(result.children.map(card => card.parentCardId), [parent.card.id, parent.card.id]);
+    assert.deepEqual(result.children.map(card => card.columnId), ['backlog', 'backlog']);
+    assert.deepEqual(result.children.map(card => card.projectId), ['agent-portal', 'agent-portal']);
+    assert.deepEqual(result.children.map(card => card.domain), ['orchestration', 'backend']);
+    assert.deepEqual(projectedParent.childCardIds, result.children.map(card => card.id));
+    assert.equal(projection.cards.find(card => card.id === result.children[0].id).parentCardId, parent.card.id);
+    assert.equal(result.event.eventType, 'decomposition');
+    assert.deepEqual(
+      result.event.sideEffects.map(item => item.type),
+      ['child_card_created', 'child_card_created'],
+    );
+  });
+
+  it('does not partially persist decomposition children when one child is invalid', () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Split atomically',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'backlog',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['No partial child cards'],
+      actor: 'test',
+    });
+
+    assert.throws(
+      () => service.decomposeWorkItem({
+        cardId: parent.card.id,
+        actor: 'test',
+        childItems: [
+          { id: 'child-valid', title: 'Valid child', acceptanceCriteria: ['Valid'] },
+          { id: 'child-invalid', title: 'Invalid child', columnId: 'unknown-column' },
+        ],
+      }),
+      /Unknown workflow column/,
+    );
+    assert.equal(service.getBoardProjection().cards.some(card => card.id === 'child-valid'), false);
+    assert.equal(service.getBoardProjection().events.some(event => event.eventType === 'decomposition'), false);
+  });
+
   it('returns board projections scoped by project without using markdown as live state', () => {
     let alpha = service.createOrUpdateCard({
       title: 'Alpha backend work',
