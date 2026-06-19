@@ -60,6 +60,7 @@ export const panelTypes = {
   'active-context':{title: tPortal('text.activeContext'), icon: 'data_object',   component: 'pg-active-context' },
   'active-tasks': { title: tPortal('text.activeTasks'),   icon: 'memory',        component: 'pg-active-tasks' },
   'workflow-board': { title: tPortal('text.workflowBoard'), icon: 'view_kanban', component: 'pg-workflow-board' },
+  'workflow-card-markdown': { title: tPortal('text.markdownEditor'), icon: 'edit_note', component: 'pg-workflow-card-markdown' },
   'pipeline-mgr': { title: tPortal('text.pipelines'),     icon: 'schema',        component: 'pg-pipeline-mgr' },
   'group-mgr':    { title: tPortal('text.resourceGroups'),icon: 'groups',        component: 'pg-group-manager' },
   'theme-editor': { title: tPortal('text.theme'),         icon: 'palette',       component: 'pg-theme-editor-panel' },
@@ -227,7 +228,16 @@ registerSection('orchestration', {
 
 registerSection('workflow-board', {
   icon: 'view_kanban', label: tPortal('text.workflowBoard'), order: 29.05, scope: 'both',
-  layout: withChat(() => panel('workflow-board', 'board'), false, { ratio: 0.78 })
+  layout: withChat(
+    () => split('horizontal',
+      panel('workflow-board', 'board'),
+      panel('workflow-card-markdown', 'secondary'),
+      0.7,
+      'workspace',
+    ),
+    false,
+    { ratio: 0.82 },
+  )
 });
 
 registerSection('workflows', {

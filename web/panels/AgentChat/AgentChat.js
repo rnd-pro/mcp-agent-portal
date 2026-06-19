@@ -55,6 +55,11 @@ import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import {
   buildChatTitleRequestNote,
 } from './chat-title.js';
+import {
+  buildGoalWorkflowBoardHash,
+  fetchGoalWorkflowSummary,
+  formatGoalWorkflowSummary,
+} from './workflow-summary.js';
 import '../../components/ChatSidebar/ChatSidebar.js';
 
 const DEFAULT_POOL_AGENT = 'orchestrator';
@@ -116,8 +121,8 @@ export class AgentChat extends Symbiote {
   _overlayLayoutFrame = 0;
   _overlayLayoutResizeObserver = null;
   _overlayLayoutSyncHandler = null;
-  _workflowGoalStageId = '';
-  _workflowGoalStageLabel = '';
+  _workflowGoalSummaryKey = '';
+  _workflowGoalSummaryText = '';
   init$ = {
     messages: [],
     messageItems: [],
@@ -814,40 +819,59 @@ export class AgentChat extends Symbiote {
     if (!hasGoal) {
       meta.hidden = true;
       meta.textContent = '';
-      this._workflowGoalStageId = '';
-      this._workflowGoalStageLabel = '';
+      this._workflowGoalSummaryKey = '';
+      this._workflowGoalSummaryText = '';
       return;
     }
-    if (this._workflowGoalStageId === goal.id && this._workflowGoalStageLabel) {
+    let filters = this._goalWorkflowFilters(goal);
+    let summaryKey = JSON.stringify(filters);
+    if (this._workflowGoalSummaryKey === summaryKey && this._workflowGoalSummaryText) {
       meta.hidden = false;
-      meta.textContent = tPortal('chat.goal.workflowStage', { stage: this._workflowGoalStageLabel });
+      meta.textContent = tPortal('chat.goal.workflowSummary', {
+        summary: this._workflowGoalSummaryText,
+      });
       return;
     }
     meta.hidden = true;
-    this._loadGoalWorkflowStage(goal);
+    this._loadGoalWorkflowSummary(goal);
   }
 
-  async _loadGoalWorkflowStage(goal = null) {
-    let goalId = goal?.id || '';
-    if (!goalId || (this._workflowGoalStageId === goalId && this._workflowGoalStageLabel)) return;
-    this._workflowGoalStageId = goalId;
-    this._workflowGoalStageLabel = '';
+  _goalWorkflowFilters(goal = null) {
+    return {
+      projectId: goal?.projectId || this.$.chatParams?.projectId || dashState.activeProjectId || '',
+      goalId: goal?.id || '',
+      chatId: this._loadedChatId || dashState.activeChatId || '',
+    };
+  }
+
+  _goalWorkflowSummaryLabels() {
+    return {
+      cardSingular: tPortal('chat.goal.workflowCard'),
+      cardPlural: tPortal('chat.goal.workflowCards'),
+      active: tPortal('chat.goal.workflowActive'),
+      blocked: tPortal('chat.goal.workflowBlocked'),
+      recovery: tPortal('chat.goal.workflowRecovery'),
+      done: tPortal('chat.goal.workflowDone'),
+    };
+  }
+
+  async _loadGoalWorkflowSummary(goal = null) {
+    let filters = this._goalWorkflowFilters(goal);
+    let summaryKey = JSON.stringify(filters);
+    if (!filters.goalId || (this._workflowGoalSummaryKey === summaryKey && this._workflowGoalSummaryText)) {
+      return;
+    }
+    this._workflowGoalSummaryKey = summaryKey;
+    this._workflowGoalSummaryText = '';
     try {
-      let projectId = goal.projectId || this.$.chatParams?.projectId || dashState.activeProjectId || '';
-      let qs = new URLSearchParams();
-      if (projectId) qs.set('projectId', projectId);
-      let res = await fetch(`/api/workflow-board${qs.toString() ? `?${qs}` : ''}`);
-      let data = await res.json();
-      if (!res.ok || data?.error) return;
-      let projection = data.projection || {};
-      let cards = Array.isArray(projection.cards) ? projection.cards : [];
-      let card = cards.find(item => item?.entityRefs?.goalId === goalId);
-      if (!card) return;
-      let column = (projection.columns || []).find(item => item.id === card.columnId);
-      this._workflowGoalStageLabel = column?.title || card.columnId || '';
-      if (this.$.activeGoal?.id === goalId) this._syncGoalWorkflowDom(this.$.activeGoal);
+      let summary = await fetchGoalWorkflowSummary(filters);
+      this._workflowGoalSummaryText = formatGoalWorkflowSummary(
+        summary,
+        this._goalWorkflowSummaryLabels(),
+      );
+      if (this.$.activeGoal?.id === filters.goalId) this._syncGoalWorkflowDom(this.$.activeGoal);
     } catch (err) {
-      console.warn('[AgentChat] workflow stage lookup failed:', err.message);
+      console.warn('[AgentChat] workflow summary lookup failed:', err.message);
     }
   }
 
@@ -877,10 +901,9 @@ export class AgentChat extends Symbiote {
   }
 
   _openWorkflowBoard() {
-    let goal = this.$.activeGoal || {};
-    let projectId = goal.projectId || this.$.chatParams?.projectId || dashState.activeProjectId || '';
-    let query = projectId ? `?project=${encodeURIComponent(projectId)}` : '';
-    window.location.hash = `#workflow-board${query}`;
+    window.location.hash = buildGoalWorkflowBoardHash(
+      this._goalWorkflowFilters(this.$.activeGoal || {}),
+    );
   }
 
   async _recordGoalQueueMessage({ text, delivery = 'after', status = 'queued' } = {}) {

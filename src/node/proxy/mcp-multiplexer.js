@@ -29,6 +29,21 @@ import {
   parseTaskStateResult,
 } from './orchestration-development-map.js';
 
+const INTERNAL_TASK_STATE_TIMEOUT_MS = 5_000;
+const TOOL_INDEX_REBUILD_TIMEOUT_MS = 10_000;
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer = null;
+  let timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 /**
  * Smart Tool Gateway — exposes portal-level meta-tools instead of proxying all child tools.
  * 
@@ -65,7 +80,7 @@ export let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, and the current developmentMap with activityMap, subagentMap, taskMap, toolMap, latestTools timing, usage totals, liveness, compatibility promptHints, and promptHintMap suggestions.',
+    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, systemLoad capacity summary, and the current developmentMap with activityMap, subagentMap, taskMap, toolMap, latestTools timing, usage totals, liveness, compatibility promptHints, and promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -232,7 +247,7 @@ async function readInternalTaskState(proxyManager) {
     let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
       name: 'list_tasks',
       arguments: {},
-    }, 600_000);
+    }, INTERNAL_TASK_STATE_TIMEOUT_MS);
     return parseTaskStateResult(result);
   } catch (error) {
     return { tasks: [], staleProcesses: [], error: error.message };
@@ -385,6 +400,8 @@ export class MCPMultiplexer {
     this.nextInternalId = 1;
     this.toolIndex = new ToolIndex();
     this._indexPromise = null;
+    this._indexTimeoutMs = TOOL_INDEX_REBUILD_TIMEOUT_MS;
+    this._lastIndexError = null;
     
     this.childMessageHandler = (serverName, msg) => {
       this.handleChildMessage(serverName, msg);
@@ -453,13 +470,31 @@ export class MCPMultiplexer {
   }
 
   async _ensureIndex(force = false) {
-    if (!force && this.toolIndex.isReady) return;
+    if (!force && this.toolIndex.isReady) return true;
     if (!this._indexPromise) {
-      this._indexPromise = this._rebuildIndex().finally(() => {
-        this._indexPromise = null;
+      let next = this._rebuildIndex().then(() => {
+        this._lastIndexError = null;
+        return true;
+      }).catch((error) => {
+        this._lastIndexError = error.message;
+        return false;
+      }).finally(() => {
+        if (this._indexPromise === next) this._indexPromise = null;
       });
+      this._indexPromise = next;
     }
-    await this._indexPromise;
+    try {
+      let ok = await withTimeout(
+        this._indexPromise,
+        this._indexTimeoutMs,
+        'Tool index rebuild',
+      );
+      return ok;
+    } catch (error) {
+      this._lastIndexError = error.message;
+      this._indexPromise = null;
+      return false;
+    }
   }
 
   sendToIde(msg) {
@@ -619,7 +654,7 @@ export class MCPMultiplexer {
       }
 
       if (toolName === 'get_portal_status') {
-        await this._ensureIndex();
+        let toolIndexReady = await this._ensureIndex();
         let health = this.proxyManager.getHealthStatus();
         let { publicHealth, internalHealth } = splitMcpHealthStatus(health);
         let sg = this.proxyManager.stateGraph;
@@ -628,6 +663,7 @@ export class MCPMultiplexer {
           sg = getStateGraph();
         }
         let taskState = await readInternalTaskState(this.proxyManager);
+        let developmentMap = buildDevelopmentMap({ sg, taskState });
         let status = {
           servers: this.toolIndex.getServers(),
           health: publicHealth,
@@ -635,7 +671,14 @@ export class MCPMultiplexer {
           totalTools: this.toolIndex.getPublicToolCount(),
           tags: this.toolIndex.getAvailableTags(),
           mode: process.env.PORTAL_MODE || 'standalone',
-          developmentMap: buildDevelopmentMap({ sg, taskState }),
+          toolIndex: {
+            ready: this.toolIndex.isReady,
+            current: toolIndexReady,
+            error: this._lastIndexError,
+            failures: this.toolIndex.failures || [],
+          },
+          systemLoad: developmentMap.system,
+          developmentMap,
           staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
         };
         this.sendToIde({

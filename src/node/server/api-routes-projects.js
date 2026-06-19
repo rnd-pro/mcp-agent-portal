@@ -387,9 +387,11 @@ export function createProjectRoutes(deps = {}) {
 
     'POST /api/chats/get': async (req, res) => {
       try {
-        let { id, includeMessages = true } = await parseBody(req);
+        let { chatId, id, includeMessages = true } = await parseBody(req);
+        let targetChatId = chatId || id;
+        if (!targetChatId) return json(res, { error: 'Missing chatId' }, 400);
         let sg = getGraph();
-        let chat = sg.getChat(id);
+        let chat = sg.getChat(targetChatId);
         if (!chat) return json(res, { error: 'Chat not found' }, 404);
         if (chat.activeGoalId) chat.activeGoal = sg.getChatGoal(chat.activeGoalId);
         if (includeMessages === false) {

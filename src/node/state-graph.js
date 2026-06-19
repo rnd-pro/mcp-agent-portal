@@ -982,6 +982,7 @@ export class StateGraph extends EventEmitter {
       updatedBy: source,
     };
     this.commit([{ op: 'set', path: `goals/${goalId}`, value: next }], source);
+    this.flush();
     return { id: goalId, ...next };
   }
 
@@ -1044,6 +1045,7 @@ export class StateGraph extends EventEmitter {
     }
     this.commit(ops, source);
     if (chatId && normalized.status === 'active') this._mergeChatFile(chatId, { activeGoalId: id });
+    this.flush();
     return { id, ...goal };
   }
 
@@ -1179,6 +1181,7 @@ export class StateGraph extends EventEmitter {
       let chat = this.getChat(next.chatId);
       if (chat?.activeGoalId === goalId) this._mergeChatFile(next.chatId, { activeGoalId: null });
     }
+    this.flush();
     return { id: goalId, ...next };
   }
 
@@ -1198,6 +1201,7 @@ export class StateGraph extends EventEmitter {
       let chat = this.getChat(current.chatId);
       if (chat?.activeGoalId === goalId) this._mergeChatFile(current.chatId, { activeGoalId: null });
     }
+    this.flush();
     return { id: goalId, ...current, status: 'deleted', deletedAt: now, updatedAt: now, updatedBy: source };
   }
 
@@ -1222,6 +1226,7 @@ export class StateGraph extends EventEmitter {
     }
     this.commit(ops, source);
     this._mergeChatFile(chatId, { activeGoalId: goalId || null });
+    this.flush();
     return goalId ? this.getChatGoal(goalId) : null;
   }
 

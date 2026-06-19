@@ -38,6 +38,7 @@ let WEB_DIR = path.join(ROOT_DIR, 'web');
 let DIST_WEB_DIR = path.join(ROOT_DIR, 'dist', 'web');
 let PACKAGES_DIR = path.join(ROOT_DIR, 'packages');
 let NODE_MODULE_PACKAGE_NAMES = new Set(['symbiote-ui', 'symbiote-engine']);
+const INTERNAL_TASK_STATE_TIMEOUT_MS = 5_000;
 
 function jsonTextResult(value, extra = {}) {
   return {
@@ -52,7 +53,7 @@ async function readInternalTaskState(proxyManager) {
     let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
       name: 'list_tasks',
       arguments: {},
-    }, 600_000);
+    }, INTERNAL_TASK_STATE_TIMEOUT_MS);
     return parseTaskStateResult(result);
   } catch (error) {
     return { tasks: [], staleProcesses: [], error: error.message };
@@ -520,13 +521,15 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
       sg = getStateGraph();
     }
     let taskState = await readInternalTaskState(proxyManager);
+    let developmentMap = buildDevelopmentMap({ sg, taskState });
     return jsonTextResult({
       servers: servers.map(name => ({ name })),
       health: publicHealth,
       internalHealth,
       totalTools: tools.length,
       mode: process.env.PORTAL_MODE || 'standalone',
-      developmentMap: buildDevelopmentMap({ sg, taskState }),
+      systemLoad: developmentMap.system,
+      developmentMap,
       staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });
   }

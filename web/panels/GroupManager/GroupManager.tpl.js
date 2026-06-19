@@ -7,8 +7,6 @@ export default `
     <sn-button variant="icon" title="Refresh" ref="refreshBtn"><span class="material-symbols-outlined">refresh</span></sn-button>
   </div>
   <div class="gm-unassigned" ref="unassigned" hidden></div>
-  <div class="gm-board" ref="board">
-    <sn-empty-state>Loading...</sn-empty-state>
-  </div>
+  <sn-kanban-board class="gm-board" ref="board" label="Resource groups" empty-text="Loading groups..."></sn-kanban-board>
 </div>
 `;

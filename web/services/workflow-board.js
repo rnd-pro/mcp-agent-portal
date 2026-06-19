@@ -2,7 +2,11 @@ const WORKFLOW_BOARD_ENDPOINT = '/api/workflow-board';
 const WORKFLOW_TRANSITIONS_ENDPOINT = '/api/workflow-board/transitions';
 const WORKFLOW_ORCHESTRATE_ENDPOINT = '/api/workflow-board/orchestrate';
 const WORKFLOW_CONTROL_ENDPOINT = '/api/workflow-board/control';
+const WORKFLOW_DELETE_ENDPOINT = '/api/workflow-board/delete';
+const WORKFLOW_BOARD_AUTOMATION_ENDPOINT = '/api/workflow-board/automation';
+const WORKFLOW_COLUMN_UPDATE_ENDPOINT = '/api/workflow-board/columns/update';
 const WORKFLOW_RECOVERY_RECONCILE_ENDPOINT = '/api/workflow-board/recovery/reconcile';
+const WORKFLOW_MARKDOWN_IMPORT_ENDPOINT = '/api/workflow-board/markdown/import';
 
 const DEFAULT_BOARD_ID = 'agent-workflow-default';
 const DEFAULT_BOARD_MODE = 'passive';
@@ -58,6 +62,11 @@ const RECOVERY_FLAG_KEYS = new Set([
 
 function normalizeText(value, fallback = '') {
   let text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text || fallback;
+}
+
+function normalizeBodyText(value, fallback = '') {
+  let text = String(value ?? '').trim();
   return text || fallback;
 }
 
@@ -144,6 +153,7 @@ function normalizeColumn(raw = {}, index = 0) {
     limit: Number.isFinite(Number(column.limit)) ? Number(column.limit) : null,
     order: Number.isFinite(Number(column.order)) ? Number(column.order) : index,
     policy: asObject(column.policy),
+    automation: asObject(column.automation),
     cards: [],
   };
 }
@@ -165,20 +175,92 @@ function normalizeCheck(raw = {}) {
   return {
     id: normalizeText(check.id || check.key || check.name),
     label: normalizeText(check.label || check.title || check.name || check.id, 'Check'),
-    status: normalizeText(check.status || check.state, 'pending'),
+    status: normalizeText(check.status ?? check.state, 'pending'),
     note: normalizeText(check.note || check.summary || check.message),
   };
+}
+
+function normalizeCheckEntry(key, raw) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return normalizeCheck({
+      id: key,
+      label: raw.label || raw.title || raw.name || titleFromId(key),
+      ...raw,
+    });
+  }
+  return normalizeCheck({
+    id: key,
+    label: titleFromId(key),
+    status: raw,
+  });
+}
+
+function normalizeChecks(raw) {
+  if (Array.isArray(raw)) return raw.map(normalizeCheck);
+  let checks = asObject(raw?.checks || raw);
+  return Object.entries(checks)
+    .map(([key, value]) => normalizeCheckEntry(key, value))
+    .filter(check => check.id || check.label);
 }
 
 function normalizeEvent(raw = {}) {
   let event = asObject(raw);
   return {
     id: normalizeText(event.id || event.eventId || event.transitionId),
+    eventType: normalizeText(event.eventType || event.event_type || event.type, 'transition'),
     label: normalizeText(event.label || event.title || event.type || event.status, 'Event'),
     status: normalizeText(event.status || event.result),
     actor: normalizeText(event.actor || event.owner),
     timestamp: normalizeTimestamp(event.timestamp || event.createdAt || event.updatedAt || event.time),
     note: normalizeText(event.note || event.reason || event.message || event.summary),
+  };
+}
+
+function normalizeBoardAutomation(raw = {}) {
+  let automation = asObject(raw);
+  return {
+    pickup: normalizeText(automation.pickup || automation.pickupMode || automation.pickup_mode, 'auto'),
+    recovery: normalizeText(automation.recovery || automation.recoveryMode || automation.recovery_mode, 'manual'),
+    stopPolicy: normalizeText(automation.stopPolicy || automation.stop_policy, 'drain'),
+    publishMode: normalizeText(automation.publishMode || automation.publish_mode, 'manual'),
+    defaultApprovalMode: normalizeText(automation.defaultApprovalMode || automation.default_approval_mode, 'plan'),
+    globalParallelLimit: Number.isFinite(Number(automation.globalParallelLimit ?? automation.global_parallel_limit))
+      ? Math.max(1, Math.floor(Number(automation.globalParallelLimit ?? automation.global_parallel_limit)))
+      : 8,
+    fallbackAgents: normalizeStringList(automation.fallbackAgents || automation.fallback_agents || automation.agents),
+    manualGateOverride: Boolean(automation.manualGateOverride || automation.manual_gate_override),
+    leaseTtlMs: Number.isFinite(Number(automation.leaseTtlMs ?? automation.lease_ttl_ms))
+      ? Math.max(1, Math.floor(Number(automation.leaseTtlMs ?? automation.lease_ttl_ms)))
+      : null,
+  };
+}
+
+function normalizeRun(raw = {}) {
+  let run = asObject(raw);
+  return {
+    id: normalizeText(run.id || run.runId || run.run_id),
+    boardId: normalizeText(run.boardId || run.board_id),
+    cardId: normalizeText(run.cardId || run.card_id),
+    transitionId: normalizeText(run.transitionId || run.transition_id),
+    leaseOwner: normalizeText(run.leaseOwner || run.lease_owner),
+    taskIds: normalizeStringList(run.taskIds || run.task_ids),
+    status: normalizeText(run.status || run.state),
+    startedAt: normalizeTimestamp(run.startedAt || run.started_at),
+    updatedAt: normalizeTimestamp(run.updatedAt || run.updated_at),
+    completedAt: normalizeTimestamp(run.completedAt || run.completed_at),
+    raw: run,
+  };
+}
+
+function normalizeLease(raw = {}) {
+  let lease = asObject(raw);
+  return {
+    cardId: normalizeText(lease.cardId || lease.card_id),
+    runId: normalizeText(lease.runId || lease.run_id),
+    leaseOwner: normalizeText(lease.leaseOwner || lease.lease_owner || lease.owner),
+    leaseExpiresAt: normalizeTimestamp(lease.leaseExpiresAt || lease.lease_expires_at),
+    updatedAt: normalizeTimestamp(lease.updatedAt || lease.updated_at),
+    raw: lease,
   };
 }
 
@@ -201,13 +283,16 @@ function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID
   let labels = normalizeStringList(card.labels || card.tags).slice(0, 6);
   let entityRefs = normalizeEntityRefs(card);
   let files = normalizeStringList(card.files || card.fileRefs || card.file_refs || card.paths);
-  let checks = asArray(card.checks || card.workflowChecks || card.workflow_checks).map(normalizeCheck);
+  let checks = normalizeChecks(card.checks || card.workflowChecks || card.workflow_checks);
   let events = asArray(card.events || card.eventHistory || card.event_history).map(normalizeEvent);
   let priority = normalizeText(card.priority || card.severity || card.rank);
+  let runs = asArray(card.runs || card.workflowRuns || card.workflow_runs).map(normalizeRun);
+  let run = normalizeRun(card.run || card.workflowRun || card.workflow_run || runs[0]);
 
   return {
     id,
     title,
+    body: normalizeBodyText(card.body || card.markdown || card.description || card.prompt || ''),
     summary: compactText(card.description || card.summary || card.body || card.prompt || ''),
     columnId,
     projectId: normalizeText(card.projectId || card.project_id || card.project || entityRefs.projectId),
@@ -231,9 +316,9 @@ function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID
     files,
     checks,
     events,
-    run: asObject(card.run || card.workflowRun || card.workflow_run || asArray(card.runs)[0]),
-    runs: asArray(card.runs || card.workflowRuns || card.workflow_runs),
-    lease: asObject(card.lease || card.workflowLease || card.workflow_lease),
+    run,
+    runs,
+    lease: normalizeLease(card.lease || card.workflowLease || card.workflow_lease),
     automation: asObject(card.automation),
     metadata: asObject(card.metadata),
     developmentMap: asObject(card.developmentMap || card.development_map),
@@ -284,8 +369,9 @@ function ensureColumns(columns, cards) {
         gate: '',
         limit: null,
         order: byId.size,
-        policy: {},
-        cards: [],
+    policy: {},
+    automation: {},
+    cards: [],
       });
     }
   }
@@ -350,6 +436,8 @@ export function buildWorkflowBoardUrl(filters = {}, endpoint = WORKFLOW_BOARD_EN
   let params = new URLSearchParams();
   appendParam(params, 'scope', filters.scope);
   appendParam(params, 'projectId', filters.projectId);
+  appendParam(params, 'goalId', filters.goalId);
+  appendParam(params, 'chatId', filters.chatId);
   appendParam(params, 'boardId', filters.boardId);
   appendParam(params, 'mode', filters.mode);
   let query = params.toString();
@@ -400,6 +488,7 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
   );
   let projectId = normalizeText(scopeSource.projectId || source.projectId || source.project_id || filters.projectId);
   let mode = normalizeText(source.mode || source.boardMode || source.board_mode || filters.mode, DEFAULT_BOARD_MODE);
+  let events = asArray(source.events || projection.events || root.events).map(normalizeEvent);
 
   return {
     id: boardId,
@@ -409,11 +498,16 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
     scope,
     projectId,
     mode,
+    automation: normalizeBoardAutomation(source.automation || source.policy?.automation),
+    version: Number.isFinite(Number(source.version || projection.version || root.version))
+      ? Number(source.version || projection.version || root.version)
+      : null,
     updatedAt: normalizeTimestamp(source.updatedAt || source.updated_at || root.updatedAt),
     columns,
     cards: normalizedCards,
     transitions,
     counters,
+    events,
     filters: asObject(source.filters || root.filters),
     recovery: asObject(source.recovery || root.recovery),
     raw: root,
@@ -517,8 +611,28 @@ export function controlWorkflowCard(input = {}, options = {}) {
   return postWorkflowAction(WORKFLOW_CONTROL_ENDPOINT, input, options);
 }
 
+export function updateWorkflowBoardAutomation(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_BOARD_AUTOMATION_ENDPOINT, input, options);
+}
+
+export function controlWorkflowBoard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_BOARD_AUTOMATION_ENDPOINT, input, options);
+}
+
+export function deleteWorkflowCard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_DELETE_ENDPOINT, input, options);
+}
+
+export function updateWorkflowColumn(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_COLUMN_UPDATE_ENDPOINT, input, options);
+}
+
 export function reconcileWorkflowRecovery(input = {}, options = {}) {
   return postWorkflowAction(WORKFLOW_RECOVERY_RECONCILE_ENDPOINT, input, options);
+}
+
+export function importWorkflowWorkItems(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_MARKDOWN_IMPORT_ENDPOINT, input, options);
 }
 
 export function getAdjacentColumn(board = {}, columnId = '', direction = 1) {

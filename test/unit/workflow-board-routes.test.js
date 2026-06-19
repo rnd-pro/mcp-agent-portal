@@ -38,6 +38,12 @@ function makeRes() {
   };
 }
 
+async function writeRouteWorkItemSeed(root, projectId, fileName, frontmatter) {
+  let dir = path.join(root, '.agent-portal', 'workspace', projectId, 'plans', 'work-items');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, fileName), `---\n${frontmatter.trim()}\n---\n\nRoute seed body.\n`, 'utf8');
+}
+
 describe('workflow board routes', () => {
   it('registers board, card, transition, event, and recovery handlers', async () => {
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-board-routes-'));
@@ -51,15 +57,54 @@ describe('workflow board routes', () => {
       now: () => 2000,
       makeId: (prefix) => `${prefix}-route`,
       projectRoot: tmpDir,
+      proxyManager: {
+        requestFromChild: async () => ({
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{
+                id: 'task-route-orphan',
+                kind: 'workflow-runtime-task',
+                status: 'running',
+                prompt: 'Route runtime task',
+                projectId: 'project-alpha',
+                workflowBoardId: 'agent-workflow-default',
+                workflowCardId: 'route-missing-work-item',
+                startedAt: 2100,
+                events: [{ type: 'message', text: 'route event', ts: 2101 }],
+              }, {
+                id: 'task-route-chat-only',
+                status: 'running',
+                prompt: 'Route chat exchange',
+                projectId: 'project-alpha',
+                chatId: 'chat-route',
+                startedAt: 2150,
+              }],
+            }),
+          }],
+        }),
+      },
     });
 
     try {
+      await writeRouteWorkItemSeed(tmpDir, 'project-alpha', 'work-item-route-seed.md', `
+schema: agent-workflow-card/v1
+id: work-item-route-seed
+project_id: project-alpha
+title: Route seed work item
+seed_board: agent-workflow-default
+seed_column: backlog
+`);
+
       for (let key of [
         'GET /api/workflow-board',
         'POST /api/workflow-board/cards',
         'POST /api/workflow-board/transition',
         'POST /api/workflow-board/orchestrate',
         'POST /api/workflow-board/control',
+        'POST /api/workflow-board/delete',
+        'POST /api/workflow-board/columns/update',
+        'POST /api/workflow-board/automation',
         'GET /api/workflow-board/events',
         'GET /api/workflow-board/recovery',
         'POST /api/workflow-board/recovery/reconcile',
@@ -76,6 +121,7 @@ describe('workflow board routes', () => {
           projectId: 'project-alpha',
           domain: 'backend',
           columnId: 'ideas',
+          entityRefs: { goalId: 'goal-route', chatId: 'chat-route-workflow' },
           actor: 'route-test',
         }),
         createRes,
@@ -95,7 +141,78 @@ describe('workflow board routes', () => {
 
       assert.equal(boardRes.status, 200);
       assert.equal(board.ok, true);
-      assert.deepEqual(board.projection.cards.map(card => card.id), [created.card.id]);
+      assert.deepEqual(board.projection.cards.map(card => card.id), [
+        created.card.id,
+        'work-item-route-seed',
+        'runtime-task-route-orphan',
+      ]);
+      assert.equal(
+        board.projection.cards.find(card => card.id === 'work-item-route-seed').columnId,
+        'backlog',
+      );
+      assert.equal(board.projection.cards.find(card => card.id === 'runtime-task-route-orphan').events.length, 1);
+      assert.equal(board.projection.cards.some(card => card.id === 'runtime-task-route-chat-only'), false);
+
+      let columnRes = makeRes();
+      await routes['POST /api/workflow-board/columns/update'](
+        makeReq('POST', '/api/workflow-board/columns/update', {
+          columnId: 'ready',
+          expectedVersion: board.projection.board.version,
+          patch: {
+            automation: {
+              mode: 'gated',
+              agents: ['route-agent'],
+              parallelLimit: 2,
+            },
+          },
+          actor: 'route-test',
+        }),
+        columnRes,
+      );
+      let columnUpdate = columnRes.json();
+
+      assert.equal(columnRes.status, 200);
+      assert.equal(columnUpdate.ok, true);
+      assert.equal(columnUpdate.result.column.automation.mode, 'gated');
+      assert.deepEqual(columnUpdate.result.column.automation.agents, ['route-agent']);
+
+      let boardAutomationRes = makeRes();
+      await routes['POST /api/workflow-board/automation'](
+        makeReq('POST', '/api/workflow-board/automation', {
+          boardId: 'agent-workflow-default',
+          patch: {
+            mode: 'manual',
+            automation: {
+              pickup: 'manual',
+              globalParallelLimit: 3,
+              fallbackAgents: ['route-agent'],
+            },
+          },
+          actor: 'route-test',
+          reason: 'Route board automation update',
+        }),
+        boardAutomationRes,
+      );
+      let boardAutomation = boardAutomationRes.json();
+
+      assert.equal(boardAutomationRes.status, 200);
+      assert.equal(boardAutomation.ok, true);
+      assert.equal(boardAutomation.result.board.mode, 'manual');
+      assert.equal(boardAutomation.result.board.automation.pickup, 'manual');
+      assert.equal(boardAutomation.result.board.automation.globalParallelLimit, 3);
+      assert.equal(boardAutomation.result.event.eventType, 'board_update');
+
+      let filteredBoardRes = makeRes();
+      await routes['GET /api/workflow-board'](
+        makeReq('GET', '/api/workflow-board?projectId=project-alpha&goalId=goal-route&chatId=chat-route-workflow'),
+        filteredBoardRes,
+      );
+      let filteredBoard = filteredBoardRes.json();
+
+      assert.equal(filteredBoardRes.status, 200);
+      assert.deepEqual(filteredBoard.projection.cards.map(card => card.id), [created.card.id]);
+      assert.equal(filteredBoard.projection.scope.goalId, 'goal-route');
+      assert.equal(filteredBoard.projection.scope.chatId, 'chat-route-workflow');
 
       let transitionRes = makeRes();
       await routes['POST /api/workflow-board/transition'](
@@ -138,6 +255,16 @@ describe('workflow board routes', () => {
       assert.equal(events.ok, true);
       assert.deepEqual(events.events.map(event => event.status), ['accepted']);
 
+      let boardEventsRes = makeRes();
+      await routes['GET /api/workflow-board/events'](
+        makeReq('GET', '/api/workflow-board/events?eventType=board_update'),
+        boardEventsRes,
+      );
+      let boardEvents = boardEventsRes.json();
+
+      assert.equal(boardEventsRes.status, 200);
+      assert.equal(boardEvents.events.some(event => event.eventType === 'board_update'), true);
+
       let recoveryRes = makeRes();
       await routes['GET /api/workflow-board/recovery'](
         makeReq('GET', '/api/workflow-board/recovery?projectId=project-alpha'),
@@ -177,6 +304,34 @@ describe('workflow board routes', () => {
       assert.equal(orchestrateRes.status, 200);
       assert.equal(orchestrated.ok, true);
       assert.equal(orchestrated.result.run.status, 'requested');
+
+      let boardPauseRes = makeRes();
+      await routes['POST /api/workflow-board/automation'](
+        makeReq('POST', '/api/workflow-board/automation', {
+          boardId: 'agent-workflow-default',
+          action: 'pause',
+          projectId: 'project-alpha',
+          actor: 'route-test',
+          reason: 'Route pause all active runs',
+        }),
+        boardPauseRes,
+      );
+      let boardPause = boardPauseRes.json();
+
+      assert.equal(boardPauseRes.status, 200);
+      assert.equal(boardPause.ok, true);
+      assert.equal(boardPause.result.board.mode, 'paused');
+      assert.equal(boardPause.result.affectedCardIds.includes(ready.card.id), true);
+
+      let boardControlEventsRes = makeRes();
+      await routes['GET /api/workflow-board/events'](
+        makeReq('GET', '/api/workflow-board/events?eventType=board_control'),
+        boardControlEventsRes,
+      );
+      let boardControlEvents = boardControlEventsRes.json();
+
+      assert.equal(boardControlEventsRes.status, 200);
+      assert.equal(boardControlEvents.events.some(event => event.eventType === 'board_control'), true);
 
       let controlRes = makeRes();
       await routes['POST /api/workflow-board/control'](
@@ -223,7 +378,10 @@ describe('workflow board routes', () => {
         importRes,
       );
       assert.equal(importRes.status, 200);
-      assert.equal(importRes.json().count, 1);
+      let imported = importRes.json();
+      assert.equal(imported.count, 0);
+      assert.equal(imported.skipped.some(item => item.cardId === ready.card.id), true);
+      assert.equal(imported.skipped.some(item => item.cardId === 'work-item-route-seed'), true);
     } finally {
       await sg.flushChatWrites();
       sg.flush();

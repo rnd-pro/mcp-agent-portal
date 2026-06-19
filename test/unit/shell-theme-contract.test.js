@@ -528,8 +528,6 @@ describe('portal shell theme contract', () => {
     for (let relative of [
       'web/panels/ActiveContext/ActiveContext.js',
       'web/panels/ActiveTasks/ActiveTasks.tpl.js',
-      'web/panels/GroupManager/GroupManager.js',
-      'web/panels/GroupManager/GroupManager.tpl.js',
       'web/panels/HealthPanel/HealthPanel.js',
       'web/panels/Marketplace/Marketplace.js',
       'web/panels/PeerReview/PeerReview.tpl.js',
@@ -547,6 +545,12 @@ describe('portal shell theme contract', () => {
       assert.ok(source.includes('sn-empty-state'), `${relative} must compose the library empty state`);
       assert.equal(source.includes('ui-empty-state'), false, `${relative} must not copy placeholder shell classes`);
     }
+
+    let groupTemplate = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.tpl.js'), 'utf8');
+    let groupSource = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.js'), 'utf8');
+    assert.ok(groupTemplate.includes('sn-kanban-board'), 'GroupManager must delegate board empty states to the shared Kanban board primitive');
+    assert.ok(groupSource.includes("import 'symbiote-ui/board'"), 'GroupManager must load the shared Kanban board primitive');
+    assert.equal(groupTemplate.includes('ui-empty-state'), false, 'GroupManager must not copy placeholder shell classes');
   });
 
   it('keeps active task cards off inline copied theme values', () => {
@@ -635,6 +639,86 @@ describe('portal shell theme contract', () => {
         assert.equal(source.includes(literal), false, `${relative} must not copy provider styling with ${literal}`);
       }
     }
+  });
+
+  it('keeps workflow board controls tied to shared workflow service actions', () => {
+    let template = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowBoard.tpl.js'), 'utf8');
+    let source = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowBoard.js'), 'utf8');
+    let styles = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowBoard.css.js'), 'utf8');
+    let markdownPanel = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowCardMarkdown.js'), 'utf8');
+    let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
+    let service = fs.readFileSync(path.join(ROOT, 'web/services/workflow-board.js'), 'utf8');
+
+    assert.ok(template.includes('ref="importBtn"'), 'WorkflowBoard must expose a visible work-item import control');
+    assert.ok(template.includes('ref="reconcileBtn"'), 'WorkflowBoard must expose a recovery reconcile control');
+    assert.ok(template.includes('ref="pauseBoardBtn"'), 'WorkflowBoard must expose board-level pause automation control');
+    assert.ok(template.includes('ref="resumeBoardBtn"'), 'WorkflowBoard must expose board-level resume automation control');
+    assert.ok(template.includes('ref="drainBoardBtn"'), 'WorkflowBoard must expose board-level drain automation control');
+    assert.ok(template.includes('ref="stopBoardBtn"'), 'WorkflowBoard must expose board-level stop automation control');
+    assert.ok(template.includes('ref="boardSettings"'), 'WorkflowBoard must expose compact board automation settings');
+    assert.ok(template.includes('ref="boardHistory"'), 'WorkflowBoard board automation settings must expose recent board event history');
+    assert.ok(source.includes('importWorkflowWorkItems'), 'WorkflowBoard must call the shared workflow service import action');
+    assert.ok(source.includes('updateWorkflowColumn'), 'WorkflowBoard must persist column settings through the shared workflow service');
+    assert.ok(source.includes('controlWorkflowBoard'), 'WorkflowBoard must route board-level controls through the shared workflow service');
+    assert.ok(source.includes('updateWorkflowBoardAutomation'), 'WorkflowBoard must persist board-level automation settings through the shared workflow service');
+    assert.ok(source.includes('syncBoardAutomationControls'), 'WorkflowBoard must synchronize global automation controls from board projection');
+    assert.ok(source.includes('renderBoardHistory'), 'WorkflowBoard must render board-level automation history from the board projection');
+    assert.ok(source.includes('data-column-settings'), 'WorkflowBoard column headers must expose column settings controls');
+    assert.ok(source.includes('wb-column-settings-summary'), 'WorkflowBoard column settings must live in the column header affordance');
+    assert.ok(source.includes("aria-label', 'Column settings'"), 'WorkflowBoard column settings icon must keep an accessible name');
+    assert.equal(source.includes("makeElement('span', '', 'Settings')"), false, 'WorkflowBoard column settings trigger must not render a visible text label');
+    assert.ok(styles.includes('.wb-column-settings'), 'WorkflowBoard must style inline column settings in the board layout');
+    assert.ok(styles.includes('.wb-board-history'), 'WorkflowBoard must style compact board automation history without card shells');
+    assert.match(
+      styles,
+      /\.wb-column-head\s*\{[\s\S]*position: relative;[\s\S]*grid-column: 1 \/ -1;[\s\S]*padding-inline-end: 30px;/,
+      'WorkflowBoard column header must span the shared Kanban header grid and reserve the top-right corner for the settings trigger',
+    );
+    assert.match(
+      styles,
+      /\.wb-column-settings-summary\s*\{[\s\S]*position: absolute;[\s\S]*inset-block-start: 0;[\s\S]*inset-inline-end: 0;[\s\S]*place-items: center;/,
+      'WorkflowBoard column settings trigger must sit as a compact icon in the header corner',
+    );
+    assert.ok(styles.includes('var(--sn-field-control-bg'), 'WorkflowBoard column settings must consume provider field tokens');
+    assert.ok(styles.includes('var(--sn-node-selected'), 'WorkflowBoard column settings must consume provider interaction tokens');
+    assert.ok(source.includes("id: 'control:pause'"), 'WorkflowBoard cards must expose pause as a card-level action');
+    assert.ok(source.includes("id: 'control:stop'"), 'WorkflowBoard cards must expose stop as a card-level action');
+    assert.ok(source.includes("id: 'delete'"), 'WorkflowBoard cards must expose delete as a card-level action');
+    assert.ok(source.includes('goalId'), 'WorkflowBoard must support goal-scoped workflow card filtering');
+    assert.ok(source.includes('chatId'), 'WorkflowBoard must support chat-scoped workflow card filtering');
+    assert.ok(source.includes('dashState.activeProjectId'), 'WorkflowBoard must derive project scope from the active workspace like chats');
+    assert.ok(router.includes("'workflow-card-markdown'"), 'WorkflowBoard route must include a separate markdown layout panel');
+    assert.ok(markdownPanel.includes('selectionEvents'), 'WorkflowCardMarkdown must follow shared workflow card selection state');
+    assert.ok(markdownPanel.includes('getWorkflowBoardSelection'), 'WorkflowCardMarkdown must render the last atomic workflow card selection');
+    assert.ok(service.includes("'/api/workflow-board/markdown/import'"), 'Workflow service must use the Portal markdown import endpoint');
+    assert.ok(service.includes("'/api/workflow-board/delete'"), 'Workflow service must use the Portal delete endpoint');
+    assert.ok(service.includes("'/api/workflow-board/automation'"), 'Workflow service must use the Portal board automation endpoint');
+    assert.ok(service.includes("'/api/workflow-board/columns/update'"), 'Workflow service must use the Portal column settings endpoint');
+    assert.ok(service.includes('normalizeBoardAutomation'), 'Workflow service must normalize board-level automation policy');
+    assert.ok(service.includes("appendParam(params, 'goalId', filters.goalId)"), 'Workflow service URLs must preserve goal filters');
+    assert.ok(service.includes("appendParam(params, 'chatId', filters.chatId)"), 'Workflow service URLs must preserve chat filters');
+    assert.equal(source.includes('/api/workflow-board/markdown/import'), false, 'WorkflowBoard must not hard-code HTTP workflow endpoints');
+    assert.equal(template.includes('markdownPane'), false, 'WorkflowBoard must not embed the markdown viewer inside the board component');
+    assert.equal(template.includes('ref="inspector"'), false, 'WorkflowBoard must not embed a selected-card inspector inside the board component');
+    assert.equal(template.includes('Selected workflow card'), false, 'WorkflowBoard details belong to the separate markdown layout panel');
+    assert.equal(source.includes('renderInspector'), false, 'WorkflowBoard must not keep a second inline card detail renderer');
+    assert.equal(template.includes('projectFilter'), false, 'WorkflowBoard project scope must come from the active tab or route, not a local selector');
+    assert.equal(template.includes('filterReadout'), false, 'WorkflowBoard must not expose local filter UI naming for automatic tab scope');
+    assert.ok(template.includes('ref="boardReadout"'), 'WorkflowBoard should keep only a compact board status readout');
+    assert.equal(source.includes('#projectFilter'), false, 'WorkflowBoard must not keep hidden local project filter state');
+    assert.equal(source.includes('setProjectFilter'), false, 'WorkflowBoard must not expose a second project scope control');
+  });
+
+  it('keeps chat workflow links scoped to workflow refs instead of chat messages', () => {
+    let chatSource = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/AgentChat.js'), 'utf8');
+    let summarySource = fs.readFileSync(path.join(ROOT, 'web/panels/AgentChat/workflow-summary.js'), 'utf8');
+
+    assert.ok(chatSource.includes('fetchGoalWorkflowSummary'), 'AgentChat must use the workflow summary helper');
+    assert.ok(chatSource.includes('buildGoalWorkflowBoardHash'), 'AgentChat must use the workflow board hash helper');
+    assert.match(summarySource, /card\.entityRefs/);
+    assert.ok(summarySource.includes("params.set('goal', goalId)"), 'Chat workflow deep link must carry active goal id');
+    assert.ok(summarySource.includes("params.set('chat', chatId)"), 'Chat workflow deep link must carry active chat id');
+    assert.equal(summarySource.includes('messages.length'), false, 'Workflow metrics must not derive task state from chat message count');
   });
 
   it('keeps chat sidebar status icons on CSS classes and tokens', () => {

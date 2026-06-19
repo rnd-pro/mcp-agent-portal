@@ -1,6 +1,8 @@
 // @ctx tool-index.ctx
 import { isPublicMcpToolServer } from './mcp-tool-visibility.js';
 
+export const CHILD_TOOLS_LIST_TIMEOUT_MS = 5_000;
+
 /**
  * ToolIndex — cached registry of all tools from all child MCP servers.
  * Supports keyword search, tag filtering, and server-based lookup.
@@ -24,11 +26,17 @@ export class ToolIndex {
    */
   async rebuild(proxyManager) {
     this.tools.clear();
+    this.failures = [];
 
     for (let serverName of proxyManager.servers.keys()) {
       if (!isPublicMcpToolServer(serverName)) continue;
       try {
-        let response = await proxyManager.requestFromChild(serverName, 'tools/list', {});
+        let response = await proxyManager.requestFromChild(
+          serverName,
+          'tools/list',
+          {},
+          CHILD_TOOLS_LIST_TIMEOUT_MS,
+        );
         if (response?.tools) {
           for (let tool of response.tools) {
             this.tools.set(tool.name, { tool, server: serverName });

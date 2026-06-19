@@ -12,6 +12,9 @@ export const sectionLayoutMigrations = {
     disallowedPanelTypes: new Set(['peer-review']),
     requiredPanelTypes: new Set(['agent-portal-tree', 'agent-portal-library', 'skill-meta']),
   },
+  'workflow-board': {
+    requiredPanelTypes: new Set(['workflow-card-markdown']),
+  },
   'agent-chat': {
     requiredPanelTypes: new Set(['agent-process-graph']),
   },

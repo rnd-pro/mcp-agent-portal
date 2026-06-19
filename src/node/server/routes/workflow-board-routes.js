@@ -23,7 +23,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
   let requestTransition = async (req, res) => {
     try {
       let body = await parseBody(req);
-      let result = resolveService().requestTransition(body);
+      let result = await resolveService().requestWorkflowTransition(body, { proxyManager: ctx.proxyManager });
       json(res, { ok: true, result });
     } catch (error) {
       routeError(res, error);
@@ -31,13 +31,15 @@ export function createWorkflowBoardRoutes(ctx = {}) {
   };
 
   return {
-    'GET /api/workflow-board': (req, res) => {
+    'GET /api/workflow-board': async (req, res) => {
       try {
         let service = resolveService();
-        let projection = service.getBoardProjection({
+        let projection = await service.getBoardProjectionWithRuntime({
           boardId: queryValue(req, 'boardId'),
           projectId: queryValue(req, 'projectId') ?? queryValue(req, 'project'),
-        });
+          goalId: queryValue(req, 'goalId') ?? queryValue(req, 'goal'),
+          chatId: queryValue(req, 'chatId') ?? queryValue(req, 'chat'),
+        }, { proxyManager: ctx.proxyManager });
         json(res, { ok: true, projection });
       } catch (error) {
         routeError(res, error);
@@ -47,7 +49,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/cards': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = resolveService().createOrUpdateCard(body);
+        let result = await resolveService().createWorkItem(body, { proxyManager: ctx.proxyManager });
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);
@@ -77,11 +79,46 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    'POST /api/workflow-board/delete': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().deleteWorkItem(body);
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/columns/update': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().updateWorkflowColumn(body);
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/automation': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let action = body.action ?? body.control;
+        let service = resolveService();
+        let result = action
+          ? await service.controlWorkflowBoard(body, { proxyManager: ctx.proxyManager })
+          : service.updateWorkflowBoard(body);
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'GET /api/workflow-board/events': (req, res) => {
       try {
         let events = resolveService().listEvents({
           boardId: queryValue(req, 'boardId'),
           cardId: queryValue(req, 'cardId'),
+          eventTypes: queryValue(req, 'eventType') ?? queryValue(req, 'eventTypes'),
           limit: queryValue(req, 'limit'),
         });
         json(res, { ok: true, events });

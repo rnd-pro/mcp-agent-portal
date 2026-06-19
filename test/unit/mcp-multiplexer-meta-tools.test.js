@@ -194,6 +194,27 @@ test('get_portal_status separates public servers from internal runtime health', 
             text: JSON.stringify({
               tasks: [],
               staleProcesses: [{ pid: 23456, taskId: 'task-stale', command: 'secret command' }],
+              systemLoad: {
+                total: 4,
+                ours: 2,
+                external: 1,
+                cpu: {
+                  count: 8,
+                  loadAvg1m: 3.2,
+                  loadRatio1m: 0.4,
+                },
+                memory: {
+                  totalBytes: 16000000000,
+                  freeBytes: 4000000000,
+                  usedRatio: 0.75,
+                },
+                capacity: {
+                  state: 'busy',
+                  recommendedMaxParallelTasks: 4,
+                  runningTaskCount: 0,
+                  trackedChildCount: 2,
+                },
+              },
             }),
           }],
         };
@@ -242,6 +263,11 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.equal(status.developmentMap.usage.liveness.warningTaskCount, 0);
   assert.equal(status.developmentMap.activityMap.summary.liveness.state, 'idle');
   assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
+  assert.equal(status.systemLoad.available, true);
+  assert.equal(status.systemLoad.cpu.loadRatio1m, 0.4);
+  assert.equal(status.systemLoad.memory.usedRatio, 0.75);
+  assert.equal(status.systemLoad.capacity.recommendedMaxParallelTasks, 4);
+  assert.deepEqual(status.systemLoad, status.developmentMap.system);
   assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
   assert.equal(JSON.stringify(status.staleProcesses).includes('23456'), false);
   assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
@@ -262,7 +288,10 @@ test('get_portal_status surfaces internal task-state read failures', async () =>
       'project-graph': { status: 'healthy' },
       'agent-pool': { status: 'healthy' },
     }),
-    requestFromChild: async () => {
+    requestFromChild: async (serverName, method, params, timeoutMs) => {
+      assert.equal(serverName, 'agent-pool');
+      assert.equal(params.name, 'list_tasks');
+      assert.equal(timeoutMs, 5000);
       throw new Error('list_tasks unavailable');
     },
   };
@@ -285,6 +314,58 @@ test('get_portal_status surfaces internal task-state read failures', async () =>
 
   let status = JSON.parse(ideMessages[0].result.content[0].text);
   assert.equal(status.developmentMap.stateError, 'list_tasks unavailable');
+});
+
+test('get_portal_status returns degraded status when tool index rebuild stalls', async () => {
+  let ideMessages = [];
+  let ws = { send: msg => ideMessages.push(JSON.parse(msg)) };
+  let proxyManager = {
+    servers: new Map([['project-graph', {}], ['agent-pool', {}]]),
+    broadcastMonitor() {},
+    stateGraph: {
+      listChats: () => [],
+      listChatGoals: () => [],
+      get: () => ({}),
+    },
+    getHealthStatus: () => ({
+      'project-graph': { status: 'healthy' },
+      'agent-pool': { status: 'healthy' },
+    }),
+    requestFromChild: async (serverName, method, params) => {
+      if (serverName === 'project-graph' && method === 'tools/list') {
+        return new Promise(() => {});
+      }
+      if (params?.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ tasks: [], staleProcesses: [] }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: 'ok' }] };
+    },
+  };
+  let multiplexer = new MCPMultiplexer(proxyManager, ws);
+  multiplexer._indexTimeoutMs = 25;
+
+  let started = Date.now();
+  await multiplexer._handleToolCall({
+    jsonrpc: '2.0',
+    id: 43,
+    method: 'tools/call',
+    params: {
+      name: 'get_portal_status',
+      arguments: {},
+    },
+  });
+
+  let status = JSON.parse(ideMessages[0].result.content[0].text);
+  assert.equal(Date.now() - started < 1000, true);
+  assert.equal(status.toolIndex.ready, false);
+  assert.equal(status.toolIndex.current, false);
+  assert.match(status.toolIndex.error, /Tool index rebuild timed out after 25ms/);
+  assert.equal(status.developmentMap.stateError, null);
 });
 
 test('nested agent-pool delegate_task is blocked as an external MCP tool', async () => {

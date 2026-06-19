@@ -18,6 +18,34 @@ async function waitForDead(pid, timeoutMs = 1000) {
 }
 
 describe('ops process utilities', () => {
+  it('treats EPERM pid probes as alive but inaccessible', () => {
+    let originalKill = process.kill;
+    process.kill = () => {
+      let error = new Error('operation not permitted');
+      error.code = 'EPERM';
+      throw error;
+    };
+    try {
+      assert.equal(isProcessAlive(12345), true);
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+
+  it('treats ESRCH pid probes as dead', () => {
+    let originalKill = process.kill;
+    process.kill = () => {
+      let error = new Error('no such process');
+      error.code = 'ESRCH';
+      throw error;
+    };
+    try {
+      assert.equal(isProcessAlive(12345), false);
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+
   it('runs a process and collects stdout/stderr', async () => {
     let result = await runProcessWithWatchdog(process.execPath, [
       '-e',

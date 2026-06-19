@@ -1,25 +1,46 @@
 import { Symbiote } from '@symbiotejs/symbiote';
 import { getRoute, parseQuery, sharedUiStyles as cssShared } from 'symbiote-ui/ui';
+import 'symbiote-ui/board';
+import { state as dashState } from '../../dashboard-state.js';
 import {
   fetchWorkflowBoard,
   controlWorkflowCard,
+  controlWorkflowBoard,
+  deleteWorkflowCard,
   getAdjacentColumn,
   getCardTransitions,
+  importWorkflowWorkItems,
   normalizeWorkflowBoardPayload,
   orchestrateWorkflowCard,
   reconcileWorkflowRecovery,
   requestWorkflowTransition,
+  updateWorkflowBoardAutomation,
+  updateWorkflowColumn,
 } from '../../services/workflow-board.js';
 import template from './WorkflowBoard.tpl.js';
 import cssLocal from './WorkflowBoard.css.js';
+import { setWorkflowBoardSelection } from './workflow-board-selection.js';
 
 const DEFAULT_SCOPE = 'home';
+const AUTO_REFRESH_INTERVAL_MS = 15_000;
+const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
+const ACTIVE_CONTROL_COLUMNS = new Set(['ready', 'in-progress', 'quality-audit', 'commit-publish']);
+const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
+const COLUMN_TRIGGERS = ['manual', 'on_enter', 'lease_required'];
+const COLUMN_ACTIONS = ['classify', 'scope', 'orchestrate', 'execute', 'audit', 'publish', 'close'];
+const COLUMN_MODES = ['manual', 'gated', 'auto'];
+const COLUMN_APPROVAL_MODES = ['', 'plan', 'auto_edit', 'yolo'];
+const RESUMABLE_BOARD_MODES = new Set(['paused', 'draining', 'stopped', 'maintenance', 'recovery_only']);
 const BOARD_MODE_VARIANTS = {
   autonomous: 'success',
   armed: 'warning',
+  manual: 'info',
   maintenance: 'warning',
   passive: 'info',
   paused: 'info',
+  draining: 'warning',
+  stopped: 'error',
+  recovery_only: 'warning',
 };
 
 function normalizeText(value, fallback = '') {
@@ -42,7 +63,7 @@ function formatLabel(value) {
 }
 
 function formatMode(value) {
-  return `Mode: ${formatLabel(value || 'passive')}`;
+  return formatLabel(value || 'passive');
 }
 
 function formatDateTime(value) {
@@ -55,6 +76,10 @@ function formatDateTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function eventTimestamp(event = {}) {
+  return event.timestamp || event.createdAt || event.updatedAt || '';
 }
 
 function makeElement(tagName, className = '', textContent = '') {
@@ -76,6 +101,19 @@ function makeChip(text, kind = '') {
   return chip;
 }
 
+function automationChips(automation = {}) {
+  let chips = [];
+  if (automation.trigger) chips.push({ label: formatLabel(automation.trigger), kind: automation.trigger === 'on_enter' ? 'status' : '' });
+  if (automation.action) chips.push({ label: formatLabel(automation.action), kind: automation.action === 'orchestrate' ? 'status' : '' });
+  if (automation.mode) chips.push({ label: formatLabel(automation.mode), kind: automation.mode === 'auto' ? 'warning' : '' });
+  let agents = asArray(automation.agents).map(item => normalizeText(item)).filter(Boolean);
+  if (automation.agent) agents.unshift(automation.agent);
+  let agentText = [...new Set(agents)].slice(0, 3).join(', ');
+  if (agentText) chips.push({ label: agentText, kind: 'status' });
+  if (automation.parallelLimit) chips.push({ label: `x${automation.parallelLimit}`, kind: '' });
+  return chips;
+}
+
 function flagKind(flag = '') {
   let key = normalizeText(flag).toLowerCase();
   if (key === 'blocked' || key === 'lost') return 'error';
@@ -90,6 +128,14 @@ function statusKind(status = '') {
   if (key === 'blocked' || key === 'error' || key === 'lost') return 'error';
   if (key === 'stale' || key === 'recovering' || key === 'needs_resume') return 'warning';
   return 'status';
+}
+
+function isRuntimeOnlyCard(card = {}) {
+  return Boolean(
+    card.metadata?.runtimeOnly
+    || card.raw?.metadata?.runtimeOnly
+    || card.kind === 'runtime-task'
+  );
 }
 
 function createButton(label, options = {}) {
@@ -108,10 +154,49 @@ function createButton(label, options = {}) {
   return button;
 }
 
-function appendDetail(details, label, value) {
-  let text = normalizeText(value);
-  if (!text) return;
-  details.append(makeElement('dt', '', label), makeElement('dd', '', text));
+function createField(label, control) {
+  let field = makeElement('label', 'wb-setting-field');
+  field.append(makeElement('span', '', label), control);
+  return field;
+}
+
+function createSelect(value, options, dataset = {}) {
+  let select = makeElement('select', 'wb-setting-control');
+  for (let option of options) {
+    select.append(new Option(option ? formatLabel(option) : 'Default', option));
+  }
+  select.value = options.includes(value) ? value : '';
+  for (let [key, item] of Object.entries(dataset)) select.dataset[key] = item;
+  return select;
+}
+
+function createTextInput(value, dataset = {}, options = {}) {
+  let input = document.createElement('input');
+  input.className = 'wb-setting-control';
+  input.value = value || '';
+  input.type = options.type || 'text';
+  if (options.min != null) input.min = String(options.min);
+  if (options.placeholder) input.placeholder = options.placeholder;
+  for (let [key, item] of Object.entries(dataset)) input.dataset[key] = item;
+  return input;
+}
+
+function hasRunData(run = {}) {
+  return Boolean(
+    normalizeText(run.id)
+    || normalizeText(run.status)
+    || normalizeText(run.leaseOwner)
+    || asArray(run.taskIds).length
+    || normalizeText(run.startedAt)
+    || normalizeText(run.updatedAt)
+    || normalizeText(run.completedAt)
+  );
+}
+
+function cardHasActiveRun(card = {}) {
+  let run = hasRunData(card.run) ? card.run : null;
+  let runs = [...asArray(card.runs), run].filter(Boolean);
+  return runs.some(item => RUNNING_RUN_STATUSES.has(normalizeText(item.status).toLowerCase()));
 }
 
 function eventDetail(board, card, extra = {}) {
@@ -131,36 +216,41 @@ export class WorkflowBoard extends Symbiote {
   }
 
   init$ = {
-    boardTitle: 'Workflow Board',
-    boardDescription: 'Loading workflow control plane projection.',
     modeLabel: formatMode('passive'),
     scopeLabel: 'Home board',
   };
 
   #board = null;
   #selectedCardId = '';
-  #projectFilter = '';
   #abortController = null;
   #applyingAttributes = false;
   #lastLoadKey = '';
   #routeSyncHandler = null;
+  #autoRefreshTimer = null;
+  #focusSyncHandler = null;
+  #visibilitySyncHandler = null;
 
   initCallback() {
-    this.ref.refreshBtn.onclick = () => this.loadBoard({ reason: 'manual-refresh' });
+    this.ref.pauseBoardBtn.onclick = () => this.controlBoard('pause');
+    this.ref.resumeBoardBtn.onclick = () => this.controlBoard('resume');
+    this.ref.drainBoardBtn.onclick = () => this.controlBoard('drain');
+    this.ref.stopBoardBtn.onclick = () => this.controlBoard('stop');
+    this.ref.importBtn.onclick = () => this.importWorkItems();
     this.ref.reconcileBtn.onclick = () => this.reconcileRecovery();
-    this.ref.projectFilter.onchange = () => {
-      this.#projectFilter = this.ref.projectFilter.value;
-      this.#render();
-      this.#dispatch('workflow-board-filter-change', {
-        projectId: this.#projectFilter,
-        scope: this.#scopeState().scope,
-      });
-    };
-    this.ref.columns.addEventListener('click', (event) => this.#onColumnsClick(event));
-    this.ref.inspector.addEventListener('click', (event) => this.#onInspectorClick(event));
-    this.ref.inspector.addEventListener('change', (event) => this.#onInspectorChange(event));
+    this.ref.saveBoardSettingsBtn.onclick = () => this.saveBoardSettings();
+    this.ref.boardView.addEventListener('sn-board-card-select', (event) => this.#onBoardCardSelect(event));
+    this.ref.boardView.addEventListener('sn-board-card-action', (event) => this.#onBoardCardAction(event));
+    this.ref.boardView.addEventListener('sn-board-card-drop', (event) => this.#onBoardCardDrop(event));
+    this.ref.boardView.addEventListener('click', (event) => this.#onBoardHeaderClick(event));
     this.#routeSyncHandler = () => this.loadBoard({ reason: 'route-change' });
     globalThis.addEventListener?.('hashchange', this.#routeSyncHandler);
+    this.#focusSyncHandler = () => this.loadBoard({ silent: true, reason: 'focus-sync' });
+    this.#visibilitySyncHandler = () => {
+      if (!globalThis.document?.hidden) this.loadBoard({ silent: true, reason: 'visibility-sync' });
+    };
+    globalThis.addEventListener?.('focus', this.#focusSyncHandler);
+    globalThis.document?.addEventListener?.('visibilitychange', this.#visibilitySyncHandler);
+    this.#startAutoRefresh();
     this.loadBoard();
   }
 
@@ -171,6 +261,18 @@ export class WorkflowBoard extends Symbiote {
     if (this.#routeSyncHandler) {
       globalThis.removeEventListener?.('hashchange', this.#routeSyncHandler);
       this.#routeSyncHandler = null;
+    }
+    if (this.#focusSyncHandler) {
+      globalThis.removeEventListener?.('focus', this.#focusSyncHandler);
+      this.#focusSyncHandler = null;
+    }
+    if (this.#visibilitySyncHandler) {
+      globalThis.document?.removeEventListener?.('visibilitychange', this.#visibilitySyncHandler);
+      this.#visibilitySyncHandler = null;
+    }
+    if (this.#autoRefreshTimer) {
+      globalThis.clearInterval?.(this.#autoRefreshTimer);
+      this.#autoRefreshTimer = null;
     }
   }
 
@@ -191,15 +293,11 @@ export class WorkflowBoard extends Symbiote {
     return Promise.resolve(null);
   }
 
-  setProjectFilter(projectId = '') {
-    this.#projectFilter = normalizeText(projectId);
-    this.#render();
-  }
-
   setBoardData(payload = {}) {
     this.#board = normalizeWorkflowBoardPayload(payload, this.#scopeState());
     this.#ensureSelection();
     this.#render();
+    this.#publishSelection('set-board-data');
     this.#dispatch('workflow-board-loaded', eventDetail(this.#board, this.#selectedCard()));
     return this.#board;
   }
@@ -219,6 +317,7 @@ export class WorkflowBoard extends Symbiote {
     this.#selectedCardId = id;
     this.#render();
     let card = this.#selectedCard();
+    this.#publishSelection('select-card');
     this.#dispatch('workflow-card-selected', eventDetail(this.#board, card));
     return card;
   }
@@ -237,10 +336,10 @@ export class WorkflowBoard extends Symbiote {
       });
       if (loadKey !== this.#lastLoadKey) return null;
       this.#board = board;
-      if (filters.projectId) this.#projectFilter = filters.projectId;
       this.#ensureSelection();
       this.#clearBanner();
       this.#render();
+      this.#publishSelection(options.reason || 'load');
       this.#dispatch('workflow-board-loaded', {
         ...eventDetail(this.#board, this.#selectedCard()),
         reason: options.reason || 'load',
@@ -248,9 +347,11 @@ export class WorkflowBoard extends Symbiote {
       return board;
     } catch (error) {
       if (error?.name === 'AbortError') return null;
-      this.#board = null;
-      this.#selectedCardId = '';
-      this.#renderError(error);
+      this.#setBanner('error', error?.message || String(error));
+      if (!this.#board) {
+        this.#selectedCardId = '';
+        this.#renderError(error);
+      }
       this.#dispatch('workflow-board-error', {
         error,
         message: error?.message || String(error),
@@ -258,6 +359,14 @@ export class WorkflowBoard extends Symbiote {
       });
       return null;
     }
+  }
+
+  #startAutoRefresh() {
+    if (this.#autoRefreshTimer) globalThis.clearInterval?.(this.#autoRefreshTimer);
+    this.#autoRefreshTimer = globalThis.setInterval?.(() => {
+      if (!this.isConnected || globalThis.document?.hidden) return;
+      this.loadBoard({ silent: true, reason: 'auto-sync' });
+    }, AUTO_REFRESH_INTERVAL_MS) || null;
   }
 
   async requestTransition(options = {}) {
@@ -347,18 +456,158 @@ export class WorkflowBoard extends Symbiote {
     }
   }
 
+  async deleteCard(options = {}) {
+    let card = this.#cardById(options.cardId || this.#selectedCardId);
+    if (!this.#board || !card) return null;
+    let confirmed = globalThis.confirm?.(`Delete workflow card "${card.title}" from this board?`) ?? true;
+    if (!confirmed) return null;
+    this.#setBanner('running', `Deleting ${card.title}...`);
+    try {
+      let payload = await deleteWorkflowCard({
+        boardId: this.#board.boardId,
+        cardId: card.id,
+        actor: 'human',
+        reason: 'Deleted from workflow board.',
+        expectedVersion: card.version,
+      });
+      if (this.#selectedCardId === card.id) this.#selectedCardId = '';
+      await this.loadBoard({ silent: true, reason: 'delete-result' });
+      this.#setBanner('success', `${card.title} deleted from the board.`);
+      return payload;
+    } catch (error) {
+      this.#setBanner('error', error?.message || String(error));
+      return null;
+    }
+  }
+
+  async saveColumnSettings(columnId = '') {
+    let column = this.#columnById(columnId);
+    if (!this.#board || !column) return null;
+    let form = this.ref.boardView.querySelector(`[data-column-settings-form="${column.id}"]`);
+    if (!form) return null;
+    let valueFor = (field) => form.querySelector(`[data-column-field="${field}"]`)?.value?.trim() || '';
+    let agents = valueFor('agents')
+      .split(',')
+      .map(item => normalizeText(item))
+      .filter(Boolean);
+    let parallelValue = Number(valueFor('parallelLimit'));
+    let automation = {
+      trigger: valueFor('trigger'),
+      action: valueFor('action'),
+      mode: valueFor('mode'),
+      approvalMode: valueFor('approvalMode'),
+      agents,
+      ...(Number.isFinite(parallelValue) && parallelValue > 0 ? { parallelLimit: Math.floor(parallelValue) } : {}),
+    };
+    this.#setBanner('running', `Saving ${column.title} settings...`);
+    try {
+      let payload = await updateWorkflowColumn({
+        boardId: this.#board.boardId,
+        columnId: column.id,
+        patch: { automation },
+        actor: 'human',
+        reason: 'Updated from workflow board column settings.',
+        expectedVersion: this.#board.version,
+      });
+      await this.loadBoard({ silent: true, reason: 'column-settings-save' });
+      this.#setBanner('success', `${column.title} settings saved.`);
+      return payload;
+    } catch (error) {
+      this.#setBanner('error', error?.message || String(error));
+      return null;
+    }
+  }
+
+  async saveBoardSettings() {
+    if (!this.#board) return null;
+    let agents = normalizeText(this.ref.boardAgentsInput.value)
+      .split(',')
+      .map(item => normalizeText(item))
+      .filter(Boolean);
+    let parallelValue = Number(this.ref.boardParallelInput.value);
+    let automation = {
+      pickup: this.ref.boardPickupSelect.value,
+      recovery: this.ref.boardRecoverySelect.value,
+      defaultApprovalMode: this.ref.boardApprovalSelect.value,
+      fallbackAgents: agents,
+      ...(Number.isFinite(parallelValue) && parallelValue > 0 ? { globalParallelLimit: Math.floor(parallelValue) } : {}),
+    };
+    this.#setBanner('running', 'Saving board automation...');
+    try {
+      let payload = await updateWorkflowBoardAutomation({
+        boardId: this.#board.boardId,
+        mode: this.ref.boardModeSelect.value,
+        patch: { automation },
+        actor: 'human',
+        reason: 'Updated from workflow board automation panel.',
+        expectedVersion: this.#board.version,
+      });
+      this.ref.boardSettings.open = false;
+      await this.loadBoard({ silent: true, reason: 'board-settings-save' });
+      this.#setBanner('success', 'Board automation saved.');
+      return payload;
+    } catch (error) {
+      this.#setBanner('error', error?.message || String(error));
+      return null;
+    }
+  }
+
+  async controlBoard(action = '') {
+    if (!this.#board || !action) return null;
+    if (action === 'stop') {
+      let confirmed = globalThis.confirm?.('Stop all active workflow runs in this board scope?') ?? true;
+      if (!confirmed) return null;
+    }
+    let filters = this.#scopeState();
+    this.#setBanner('running', `${formatLabel(action)} board automation...`);
+    try {
+      let payload = await controlWorkflowBoard({
+        boardId: this.#board.boardId,
+        projectId: filters.projectId,
+        action,
+        actor: 'human',
+        reason: `${formatLabel(action)} from workflow board automation panel.`,
+      });
+      await this.loadBoard({ silent: true, reason: 'board-control' });
+      this.#setBanner('success', `${formatLabel(action)} applied to board automation.`);
+      return payload;
+    } catch (error) {
+      this.#setBanner('error', error?.message || String(error));
+      return null;
+    }
+  }
+
   async reconcileRecovery() {
     let filters = this.#scopeState();
     this.#setBanner('running', 'Reconciling workflow recovery...');
     try {
       let payload = await reconcileWorkflowRecovery({
         boardId: filters.boardId || this.#board?.boardId,
-        projectId: filters.projectId || this.#projectFilter,
+        projectId: filters.projectId,
         actor: 'human',
       });
       await this.loadBoard({ silent: true, reason: 'recovery-reconcile' });
       let count = payload?.reconciled?.length ?? 0;
       this.#setBanner('success', `Recovery reconciliation updated ${count} card${count === 1 ? '' : 's'}.`);
+      return payload;
+    } catch (error) {
+      this.#setBanner('error', error?.message || String(error));
+      return null;
+    }
+  }
+
+  async importWorkItems() {
+    let filters = this.#scopeState();
+    this.#setBanner('running', 'Importing workflow work items...');
+    try {
+      let payload = await importWorkflowWorkItems({
+        boardId: filters.boardId || this.#board?.boardId,
+        projectId: filters.projectId,
+        actor: 'human',
+      });
+      await this.loadBoard({ silent: true, reason: 'markdown-import' });
+      let count = payload?.count ?? payload?.imported?.length ?? 0;
+      this.#setBanner('success', `Imported ${count} workflow work item${count === 1 ? '' : 's'}.`);
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -377,19 +626,24 @@ export class WorkflowBoard extends Symbiote {
 
   #scopeState() {
     let route = getRoute?.() || {};
-    let routeProjectId = normalizeText(parseQuery?.(route.query || '')?.project);
-    let projectId = normalizeText(this.getAttribute('project-id') || routeProjectId);
+    let query = parseQuery?.(route.query || '') || {};
+    let routeProjectId = normalizeText(query.project || query.projectId);
+    let activeProjectId = normalizeText(dashState.activeProjectId);
+    let projectId = normalizeText(this.getAttribute('project-id') || routeProjectId || activeProjectId);
     let scope = normalizeText(this.getAttribute('scope'), projectId ? 'project' : DEFAULT_SCOPE);
     let boardId = normalizeText(this.getAttribute('board-id'));
     let mode = normalizeText(this.getAttribute('mode'));
-    return { scope, projectId, boardId, mode };
+    let goalId = normalizeText(query.goal || query.goalId);
+    let chatId = normalizeText(query.chat || query.chatId);
+    return { scope, projectId, boardId, mode, goalId, chatId };
   }
 
   #visibleCards() {
     let cards = asArray(this.#board?.cards);
-    let filter = normalizeText(this.#projectFilter);
-    if (!filter) return cards;
-    return cards.filter(card => card.projectId === filter);
+    let { goalId, chatId } = this.#scopeState();
+    return cards
+      .filter(card => !goalId || card.entityRefs?.goalId === goalId)
+      .filter(card => !chatId || card.entityRefs?.chatId === chatId);
   }
 
   #columnsWithVisibleCards() {
@@ -403,7 +657,7 @@ export class WorkflowBoard extends Symbiote {
   #ensureSelection() {
     let cards = this.#visibleCards();
     if (cards.some(card => card.id === this.#selectedCardId)) return;
-    this.#selectedCardId = cards[0]?.id || this.#board?.cards?.[0]?.id || '';
+    this.#selectedCardId = cards[0]?.id || '';
   }
 
   #selectedCard() {
@@ -420,6 +674,11 @@ export class WorkflowBoard extends Symbiote {
     return column?.title || formatLabel(columnId);
   }
 
+  #columnById(columnId = '') {
+    let id = normalizeText(columnId);
+    return asArray(this.#board?.columns).find(item => item.id === id) || null;
+  }
+
   #render() {
     let board = this.#board;
     if (!board) {
@@ -427,31 +686,46 @@ export class WorkflowBoard extends Symbiote {
       return;
     }
     this.#ensureSelection();
-    this.$.boardTitle = board.title || 'Workflow Board';
-    this.$.boardDescription = board.description
-      || (board.projectId ? `Project-scoped board for ${board.projectId}.` : 'Multi-project workflow control plane.');
     this.$.modeLabel = formatMode(board.mode);
     this.$.scopeLabel = board.projectId ? `Project: ${board.projectId}` : `${formatLabel(board.scope)} scope`;
     this.ref.modeBadge.setAttribute('variant', BOARD_MODE_VARIANTS[board.mode] || 'info');
-    this.#renderCounters();
-    this.#renderProjectFilter();
+    this.#syncBoardAutomationControls();
+    this.#renderBoardHistory();
+    this.#renderStatusReadout();
     this.#renderColumns();
-    this.#renderInspector();
   }
 
   #renderEmptyShell() {
-    this.$.boardTitle = 'Workflow Board';
-    this.$.boardDescription = 'Workflow board projection is not loaded.';
     this.$.modeLabel = formatMode('passive');
     this.$.scopeLabel = 'No board data';
-    this.ref.summaryGrid.replaceChildren();
-    this.ref.columns.replaceChildren();
-    this.ref.projectFilter.replaceChildren(new Option('All projects', ''));
-    this.ref.filterReadout.textContent = '';
+    this.ref.boardView.setBoard({ columns: [] });
+    this.ref.boardReadout.textContent = '';
+    this.#syncBoardAutomationControls();
+    this.#renderBoardHistory();
     this.ref.emptyState.hidden = false;
-    this.ref.inspector.replaceChildren(
-      makeElement('sn-empty-state', 'wb-inspector-empty', 'Load the workflow board to inspect cards.'),
-    );
+    this.#publishSelection('empty-shell');
+  }
+
+  #syncBoardAutomationControls() {
+    let board = this.#board;
+    let mode = normalizeText(board?.mode, 'passive');
+    let hasBoard = Boolean(board);
+    this.ref.pauseBoardBtn.disabled = !hasBoard || mode === 'paused' || mode === 'stopped';
+    this.ref.resumeBoardBtn.disabled = !hasBoard || (!RESUMABLE_BOARD_MODES.has(mode) && mode !== 'manual' && mode !== 'passive');
+    this.ref.drainBoardBtn.disabled = !hasBoard || mode === 'draining' || mode === 'stopped';
+    this.ref.stopBoardBtn.disabled = !hasBoard || mode === 'stopped';
+    this.ref.importBtn.disabled = !hasBoard;
+    this.ref.reconcileBtn.disabled = !hasBoard;
+    if (!hasBoard || this.ref.boardSettings?.open) return;
+    let automation = board.automation || {};
+    this.ref.boardModeSelect.value = [...this.ref.boardModeSelect.options].some(option => option.value === mode)
+      ? mode
+      : 'armed';
+    this.ref.boardPickupSelect.value = automation.pickup || 'auto';
+    this.ref.boardRecoverySelect.value = automation.recovery || 'manual';
+    this.ref.boardApprovalSelect.value = automation.defaultApprovalMode || '';
+    this.ref.boardParallelInput.value = automation.globalParallelLimit || '';
+    this.ref.boardAgentsInput.value = asArray(automation.fallbackAgents).join(', ');
   }
 
   #renderError(error) {
@@ -460,395 +734,257 @@ export class WorkflowBoard extends Symbiote {
     this.ref.emptyState.textContent = 'Workflow board data is unavailable.';
   }
 
-  #renderCounters() {
-    let counters = this.#board?.counters || {};
-    let visibleCards = this.#visibleCards();
-    let visibleRecovery = visibleCards.filter(card => card.flags?.some(flag => flagKind(flag))).length;
-    let items = [
-      ['Cards', visibleCards.length],
-      ['Columns', counters.columns ?? this.#board.columns.length],
-      ['Active', counters.active ?? 0],
-      ['Blocked', counters.blocked ?? 0],
-      ['Recovery', counters.recovery ?? visibleRecovery],
-      ['Done', counters.done ?? 0],
-    ];
-    this.ref.summaryGrid.replaceChildren(...items.map(([label, value]) => {
-      let counter = makeElement('div', 'wb-counter');
-      counter.append(
-        makeElement('span', 'wb-counter-label', label),
-        makeElement('span', 'wb-counter-value', String(value ?? 0)),
-      );
-      return counter;
-    }));
-  }
-
-  #renderProjectFilter() {
+  #renderStatusReadout() {
     let scope = this.#scopeState();
-    let projects = [...new Set(asArray(this.#board?.cards)
-      .map(card => card.projectId)
-      .filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b));
-
-    if (scope.projectId) this.#projectFilter = scope.projectId;
-    let selected = normalizeText(this.#projectFilter);
-    let options = [new Option('All projects', '')];
-    for (let projectId of projects) {
-      options.push(new Option(projectId, projectId));
-    }
-    if (selected && !projects.includes(selected)) options.push(new Option(selected, selected));
-
-    this.ref.projectFilter.replaceChildren(...options);
-    this.ref.projectFilter.value = selected;
-    this.ref.projectFilter.disabled = Boolean(scope.projectId);
     let count = this.#visibleCards().length;
     let updated = formatDateTime(this.#board?.updatedAt);
-    this.ref.filterReadout.textContent = [
-      `${count} visible card${count === 1 ? '' : 's'}`,
+    let counters = this.#board?.counters || {};
+    let automation = this.#board?.automation || {};
+    let lastEvent = asArray(this.#board?.events).filter(event => normalizeText(event.eventType).startsWith('board_')).at(-1);
+    this.ref.boardReadout.textContent = [
+      `${count} visible`,
+      scope.goalId ? `goal ${scope.goalId.slice(0, 8)}` : '',
+      scope.chatId ? `chat ${scope.chatId.slice(0, 8)}` : '',
+      counters.active ? `${counters.active} active` : '',
+      counters.recovery ? `${counters.recovery} recovery` : '',
+      automation.pickup ? `pickup ${automation.pickup}` : '',
+      automation.globalParallelLimit ? `limit ${automation.globalParallelLimit}` : '',
+      lastEvent ? `last ${formatLabel(lastEvent.eventType)}` : '',
       updated ? `updated ${updated}` : '',
     ].filter(Boolean).join(' · ');
+  }
+
+  #renderBoardHistory() {
+    if (!this.ref.boardHistory) return;
+    let events = asArray(this.#board?.events)
+      .filter(event => normalizeText(event.eventType).startsWith('board_'))
+      .slice(-3)
+      .reverse();
+    if (!events.length) {
+      this.ref.boardHistory.replaceChildren(makeElement('div', 'wb-board-history-row', 'No board automation events yet.'));
+      return;
+    }
+    this.ref.boardHistory.replaceChildren(...events.map((event) => {
+      let row = makeElement('div', 'wb-board-history-row');
+      row.append(
+        makeElement('strong', '', formatLabel(event.eventType)),
+        makeElement('span', '', [
+          event.note || event.reason,
+          event.actor,
+          formatDateTime(eventTimestamp(event)),
+        ].filter(Boolean).join(' · ')),
+      );
+      return row;
+    }));
   }
 
   #renderColumns() {
     let columns = this.#columnsWithVisibleCards();
     let hasCards = columns.some(column => column.cards.length);
     this.ref.emptyState.hidden = hasCards;
-    this.ref.columns.replaceChildren(...columns.map(column => this.#renderColumn(column)));
+    this.ref.emptyState.textContent = hasCards
+      ? ''
+      : [
+        'No workflow cards in this scope.',
+        'Import markdown work items or reconcile recovery from the board controls.',
+      ].join(' ');
+    this.ref.boardView.setBoard({
+      id: this.#board?.boardId || this.#board?.id || '',
+      title: this.#board?.title || 'Workflow Board',
+      columns: columns.map(column => ({
+        id: column.id,
+        title: column.title,
+        description: column.description || column.gate || '',
+        automation: column.automation,
+        cards: column.cards.map(card => this.#toKanbanCard(card)),
+      })),
+    }, {
+      renderColumnHeader: (column) => this.#renderColumnHeader(column),
+    });
   }
 
-  #renderColumn(column) {
-    let lane = makeElement('section', 'wb-column');
-    lane.dataset.columnId = column.id;
-    lane.setAttribute('aria-label', column.title);
-
-    let header = makeElement('header', 'wb-column-header');
-    let copy = makeElement('div');
-    copy.append(
-      makeElement('div', 'wb-column-title', column.title),
-      makeElement('div', 'wb-column-description', column.description || column.gate || 'No gate metadata.'),
-    );
-    header.append(copy, makeElement('span', 'wb-column-count', String(column.cards.length)));
-
-    let list = makeElement('div', 'wb-card-list');
-    if (column.cards.length) {
-      list.replaceChildren(...column.cards.map(card => this.#renderCard(card)));
-    } else {
-      list.replaceChildren(makeElement('div', 'wb-column-empty', 'No cards in this column.'));
-    }
-    lane.append(header, list);
-    return lane;
-  }
-
-  #renderCard(card) {
-    let cardButton = makeElement('button', 'wb-card');
-    cardButton.type = 'button';
-    cardButton.dataset.cardId = card.id;
-    cardButton.setAttribute('aria-selected', String(card.id === this.#selectedCardId));
-    cardButton.setAttribute('aria-label', `Inspect ${card.title}`);
-
-    let meta = makeElement('div', 'wb-card-meta');
-    if (card.projectId) meta.append(makeChip(card.projectId));
-    if (card.kind) meta.append(makeChip(card.kind));
-    if (card.priority) meta.append(makeChip(card.priority, 'status'));
-
-    let title = makeElement('div', 'wb-card-title', card.title);
-    let summary = makeElement('div', 'wb-card-summary', card.summary || 'No summary provided.');
-    let footer = makeElement('div', 'wb-card-footer');
-    if (card.status) footer.append(makeChip(card.status, statusKind(card.status)));
-    if (card.lease?.leaseOwner) footer.append(makeChip(card.lease.leaseOwner, 'status'));
-    for (let flag of card.flags.slice(0, 3)) footer.append(makeChip(formatLabel(flag), flagKind(flag)));
-
+  #toKanbanCard(card) {
     let nextColumn = getAdjacentColumn(this.#board, card.columnId, 1);
-    if (nextColumn) {
-      footer.append(createButton('', {
-        className: 'wb-card-action',
-        title: `Move to ${nextColumn.title}`,
-        icon: 'arrow_forward',
-        dataset: {
-          cardId: card.id,
-          transitionTo: nextColumn.id,
-        },
-      }));
-    }
-
-    cardButton.append(meta, title, summary, footer);
-    return cardButton;
+    let runtimeOnly = isRuntimeOnlyCard(card);
+    return {
+      id: card.id,
+      columnId: card.columnId,
+      title: card.title,
+      summary: card.summary || 'No summary provided.',
+      meta: [
+        card.projectId ? { label: card.projectId } : null,
+        card.kind ? { label: card.kind } : null,
+        card.priority ? { label: card.priority, kind: 'status' } : null,
+      ].filter(Boolean),
+      footer: [
+        card.status ? { label: card.status, kind: statusKind(card.status) } : null,
+        card.lease?.leaseOwner ? { label: card.lease.leaseOwner, kind: 'status' } : null,
+        ...card.flags.slice(0, 3).map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) })),
+      ].filter(Boolean),
+      actions: this.#cardActions(card, nextColumn, runtimeOnly),
+      draggable: !runtimeOnly,
+      raw: card,
+    };
   }
 
-  #renderInspector() {
-    let card = this.#selectedCard();
-    if (!card) {
-      this.ref.inspector.replaceChildren(
-        makeElement('sn-empty-state', 'wb-inspector-empty', 'Select a workflow card to inspect it.'),
-      );
-      return;
-    }
-
-    let scroll = makeElement('div', 'wb-inspector-scroll');
-    scroll.append(
-      this.#renderInspectorHeader(card),
-      this.#renderInspectorDetails(card),
-      this.#renderInspectorActions(card),
-      this.#renderInspectorFlags(card),
-      this.#renderInspectorChecks(card),
-      this.#renderInspectorRefs(card),
-      this.#renderInspectorFiles(card),
-      this.#renderInspectorEvents(card),
-    );
-    this.ref.inspector.replaceChildren(scroll);
-  }
-
-  #renderInspectorHeader(card) {
-    let header = makeElement('header', 'wb-inspector-head');
-    header.append(
-      makeElement('h3', 'wb-inspector-title', card.title),
-      makeElement('p', 'wb-inspector-summary', card.summary || 'No summary provided.'),
-    );
-    return header;
-  }
-
-  #renderInspectorDetails(card) {
-    let section = this.#section('Details');
-    let details = makeElement('dl', 'wb-detail-grid');
-    appendDetail(details, 'Column', this.#columnTitle(card.columnId));
-    appendDetail(details, 'Project', card.projectId || 'Global');
-    appendDetail(details, 'Kind', card.kind);
-    appendDetail(details, 'Owner', card.owner || 'Unassigned');
-    appendDetail(details, 'Agent', card.assignedAgent);
-    appendDetail(details, 'Resource', card.resourceGroup);
-    appendDetail(details, 'Approval', card.approvalMode);
-    appendDetail(details, 'Status', card.status);
-    appendDetail(details, 'Lease', card.lease?.leaseOwner);
-    appendDetail(details, 'Run', card.run?.status);
-    appendDetail(details, 'Version', card.version == null ? '' : String(card.version));
-    appendDetail(details, 'Updated', formatDateTime(card.updatedAt));
-    appendDetail(details, 'Blocker', card.blocker);
-    section.append(details);
-    return section;
-  }
-
-  #renderInspectorActions(card) {
-    let section = this.#section('Transitions');
-    let row = makeElement('div', 'wb-action-row');
-    let previous = getAdjacentColumn(this.#board, card.columnId, -1);
-    let next = getAdjacentColumn(this.#board, card.columnId, 1);
-
-    if (previous) {
-      row.append(createButton('Previous', {
-        icon: 'arrow_back',
-        dataset: { cardId: card.id, transitionTo: previous.id },
-      }));
-    }
-    if (next) {
-      row.append(createButton('Next', {
-        variant: 'primary',
-        icon: 'arrow_forward',
-        dataset: { cardId: card.id, transitionTo: next.id },
-      }));
-    }
-
-    row.append(createButton('Orchestrate', {
-      icon: 'play_arrow',
-      dataset: { cardId: card.id, orchestrate: 'true' },
-    }));
-    row.append(createButton('Pause', {
-      icon: 'pause',
-      dataset: { cardId: card.id, controlAction: 'pause' },
-    }));
-    row.append(createButton('Stop', {
-      icon: 'stop',
-      dataset: { cardId: card.id, controlAction: 'stop' },
-    }));
-    row.append(createButton('Cancel', {
-      icon: 'cancel',
-      dataset: { cardId: card.id, controlAction: 'cancel' },
-    }));
-
-    let select = makeElement('select', 'wb-move-select');
-    select.dataset.moveSelect = card.id;
-    select.setAttribute('aria-label', 'Move selected card to column');
-    select.append(new Option('Move to...', ''));
-    for (let transition of getCardTransitions(this.#board, card)) {
-      select.append(new Option(this.#columnTitle(transition.to), transition.to));
-    }
-    row.append(select, createButton('Move', {
-      dataset: { cardId: card.id, moveSelected: 'true' },
-    }));
-
-    if (card.entityRefs?.chatId) {
-      row.append(createButton('Open chat', {
+  #cardActions(card, nextColumn, runtimeOnly) {
+    if (runtimeOnly) {
+      return card.entityRefs?.chatId ? [{
+        id: 'open:chat',
         icon: 'forum',
-        dataset: { openRef: 'chat', refId: card.entityRefs.chatId },
-      }));
-    }
-    if (card.entityRefs?.goalId) {
-      row.append(createButton('Open goal', {
-        icon: 'flag',
-        dataset: { openRef: 'goal', refId: card.entityRefs.goalId },
-      }));
+        title: 'Open workflow chat',
+      }] : [];
     }
 
-    if (!row.childElementCount) {
-      row.append(makeElement('div', 'wb-section-note', 'No transitions are available for this card.'));
+    let actions = [];
+    if (nextColumn && LAUNCH_COLUMNS.has(card.columnId)) {
+      actions.push({
+        id: `transition:${nextColumn.id}`,
+        icon: 'play_arrow',
+        title: `Launch to ${nextColumn.title}`,
+      });
+    } else if (card.columnId === 'ready') {
+      actions.push({
+        id: 'orchestrate',
+        icon: 'play_arrow',
+        title: 'Start orchestration',
+      });
+    } else if (nextColumn) {
+      actions.push({
+        id: `transition:${nextColumn.id}`,
+        icon: 'arrow_forward',
+        title: `Move to ${nextColumn.title}`,
+      });
     }
-    section.append(row);
-    return section;
-  }
 
-  #renderInspectorFlags(card) {
-    let section = this.#section('Recovery Flags');
-    let list = makeElement('div', 'wb-chip-list');
-    let flags = card.flags.length ? card.flags : ['clear'];
-    for (let flag of flags) list.append(makeChip(formatLabel(flag), flagKind(flag)));
-    section.append(list);
-    return section;
-  }
-
-  #renderInspectorChecks(card) {
-    let section = this.#section('Checks');
-    if (!card.checks.length) {
-      section.append(makeElement('div', 'wb-section-note', 'No check data reported.'));
-      return section;
-    }
-    let list = makeElement('ul', 'wb-list');
-    for (let check of card.checks) {
-      let item = makeElement('li', 'wb-list-item');
-      item.append(
-        makeElement('strong', '', check.label),
-        makeElement('span', '', [check.status, check.note].filter(Boolean).join(' · ')),
+    if (ACTIVE_CONTROL_COLUMNS.has(card.columnId)) {
+      actions.push(
+        { id: 'control:pause', icon: 'pause', title: 'Pause workflow card' },
+        { id: 'control:stop', icon: 'stop', title: 'Stop workflow card' },
+        { id: 'control:cancel', icon: 'cancel', title: 'Cancel workflow card' },
       );
-      list.append(item);
     }
-    section.append(list);
-    return section;
+    let activeRun = cardHasActiveRun(card);
+    actions.push({
+      id: 'delete',
+      icon: 'delete',
+      title: activeRun ? 'Stop or cancel before deleting this workflow card' : 'Delete workflow card',
+      kind: 'danger',
+      disabled: activeRun,
+    });
+    return actions;
   }
 
-  #renderInspectorRefs(card) {
-    let section = this.#section('Entity Refs');
-    let refs = card.entityRefs || {};
-    let details = makeElement('dl', 'wb-detail-grid');
-    appendDetail(details, 'Goal', refs.goalId);
-    appendDetail(details, 'Chat', refs.chatId);
-    appendDetail(details, 'Tasks', asArray(refs.taskIds).join(', '));
-    if (!details.childElementCount) {
-      section.append(makeElement('div', 'wb-section-note', 'No goal, chat, or task refs.'));
-    } else {
-      section.append(details);
+  #renderColumnHeader(column) {
+    let root = makeElement('div', 'wb-column-head');
+    let copy = makeElement('div', 'wb-column-copy');
+    copy.append(makeElement('div', 'sn-kanban-column-title', column.title));
+    if (column.description) {
+      copy.append(makeElement('div', 'sn-kanban-column-description', column.description));
     }
-    return section;
+    let chips = makeElement('div', 'wb-column-policy');
+    for (let chip of automationChips(column.raw?.automation || column.automation || {})) {
+      chips.append(makeChip(chip.label, chip.kind));
+    }
+    if (chips.childElementCount) copy.append(chips);
+    let tools = makeElement('div', 'wb-column-tools');
+    tools.append(
+      makeElement('span', 'sn-kanban-column-count', String(column.count)),
+    );
+    root.append(copy, tools, this.#renderColumnSettingsControl(column));
+    return root;
   }
 
-  #renderInspectorFiles(card) {
-    let section = this.#section('Files');
-    if (!card.files.length) {
-      section.append(makeElement('div', 'wb-section-note', 'No file refs reported.'));
-      return section;
-    }
-    let list = makeElement('ul', 'wb-list');
-    for (let file of card.files.slice(0, 8)) {
-      let item = makeElement('li', 'wb-list-item');
-      item.append(makeElement('strong', '', file));
-      list.append(item);
-    }
-    section.append(list);
-    return section;
+  #renderColumnSettingsControl(column) {
+    let automation = column.automation || {};
+    let details = makeElement('details', 'wb-column-settings');
+    details.dataset.columnSettingsPanel = column.id;
+    let summary = makeElement('summary', 'wb-column-settings-summary');
+    summary.title = 'Column settings';
+    summary.setAttribute('aria-label', 'Column settings');
+    summary.append(makeIcon('settings'));
+    let form = makeElement('div', 'wb-settings-form');
+    form.dataset.columnSettingsForm = column.id;
+    form.append(
+      createField('Trigger', createSelect(automation.trigger || 'manual', COLUMN_TRIGGERS, { columnField: 'trigger' })),
+      createField('Action', createSelect(automation.action || '', COLUMN_ACTIONS, { columnField: 'action' })),
+      createField('Mode', createSelect(automation.mode || 'manual', COLUMN_MODES, { columnField: 'mode' })),
+      createField('Approval', createSelect(automation.approvalMode || '', COLUMN_APPROVAL_MODES, { columnField: 'approvalMode' })),
+      createField('Agent pool', createTextInput(asArray(automation.agents).join(', '), { columnField: 'agents' }, { placeholder: 'orchestrator, reviewer' })),
+      createField('Parallel limit', createTextInput(automation.parallelLimit || '', { columnField: 'parallelLimit' }, { type: 'number', min: 1 })),
+    );
+    let actionRow = makeElement('div', 'wb-action-row');
+    actionRow.append(createButton('Save column', {
+      variant: 'primary',
+      icon: 'save',
+      dataset: { columnSettingsSave: column.id },
+    }));
+    details.append(summary, form, actionRow);
+    return details;
   }
 
-  #renderInspectorEvents(card) {
-    let section = this.#section('Event History');
-    if (!card.events.length) {
-      section.append(makeElement('div', 'wb-section-note', 'No transition events reported.'));
-      return section;
-    }
-    let list = makeElement('ul', 'wb-list');
-    for (let event of card.events.slice(0, 8)) {
-      let item = makeElement('li', 'wb-list-item');
-      item.append(
-        makeElement('strong', '', event.label),
-        makeElement('span', '', [
-          event.status,
-          event.actor,
-          formatDateTime(event.timestamp),
-          event.note,
-        ].filter(Boolean).join(' · ')),
-      );
-      list.append(item);
-    }
-    section.append(list);
-    return section;
-  }
-
-  #section(title) {
-    let section = makeElement('section', 'wb-inspector-section');
-    section.append(makeElement('div', 'wb-section-title', title));
-    return section;
-  }
-
-  #onColumnsClick(event) {
-    let action = event.target?.closest?.('[data-transition-to]');
-    if (action) {
+  #onBoardHeaderClick(event) {
+    let columnSave = event.target?.closest?.('[data-column-settings-save]');
+    if (columnSave) {
       event.preventDefault();
       event.stopPropagation();
+      this.saveColumnSettings(columnSave.dataset.columnSettingsSave);
+      return;
+    }
+    let settings = event.target?.closest?.('[data-column-settings-panel]');
+    if (!settings) return;
+    event.stopPropagation();
+  }
+
+  #onBoardCardSelect(event) {
+    let cardId = event.detail?.card?.id;
+    if (cardId) this.selectCard(cardId);
+  }
+
+  #onBoardCardAction(event) {
+    let cardId = event.detail?.card?.id;
+    let actionId = normalizeText(event.detail?.actionId);
+    if (!cardId || !actionId) return;
+    if (actionId.startsWith('transition:')) {
       this.requestTransition({
-        cardId: action.dataset.cardId,
-        toColumnId: action.dataset.transitionTo,
+        cardId,
+        toColumnId: actionId.slice('transition:'.length),
       });
       return;
     }
-
-    let cardElement = event.target?.closest?.('[data-card-id]');
-    if (!cardElement) return;
-    this.selectCard(cardElement.dataset.cardId);
+    if (actionId === 'orchestrate') {
+      this.orchestrateCard({ cardId });
+      return;
+    }
+    if (actionId.startsWith('control:')) {
+      this.controlCard(actionId.slice('control:'.length), { cardId });
+      return;
+    }
+    if (actionId === 'delete') {
+      this.deleteCard({ cardId });
+      return;
+    }
+    if (actionId === 'open:chat') {
+      let card = this.#cardById(cardId);
+      this.#dispatch('workflow-card-open', eventDetail(this.#board, card, {
+        refType: 'chat',
+        refId: card?.entityRefs?.chatId,
+      }));
+    }
   }
 
-  #onInspectorClick(event) {
-    let transition = event.target?.closest?.('[data-transition-to]');
-    if (transition) {
-      this.requestTransition({
-        cardId: transition.dataset.cardId,
-        toColumnId: transition.dataset.transitionTo,
-      });
-      return;
-    }
-
-    let moveButton = event.target?.closest?.('[data-move-selected]');
-    if (moveButton) {
-      let select = this.ref.inspector.querySelector(`[data-move-select="${moveButton.dataset.cardId}"]`);
-      if (select?.value) {
-        this.requestTransition({
-          cardId: moveButton.dataset.cardId,
-          toColumnId: select.value,
-        });
-      }
-      return;
-    }
-
-    let orchestrate = event.target?.closest?.('[data-orchestrate]');
-    if (orchestrate) {
-      this.orchestrateCard({ cardId: orchestrate.dataset.cardId });
-      return;
-    }
-
-    let control = event.target?.closest?.('[data-control-action]');
-    if (control) {
-      this.controlCard(control.dataset.controlAction, { cardId: control.dataset.cardId });
-      return;
-    }
-
-    let openRef = event.target?.closest?.('[data-open-ref]');
-    if (!openRef) return;
-    let card = this.#selectedCard();
-    this.#dispatch('workflow-card-open', eventDetail(this.#board, card, {
-      refType: openRef.dataset.openRef,
-      refId: openRef.dataset.refId,
-    }));
+  #onBoardCardDrop(event) {
+    let cardId = event.detail?.card?.id;
+    let toColumnId = event.detail?.toColumnId;
+    if (!cardId || !toColumnId) return;
+    this.requestTransition({ cardId, toColumnId });
   }
 
-  #onInspectorChange(event) {
-    let select = event.target?.closest?.('[data-move-select]');
-    if (!select?.value) return;
-    this.#dispatch('workflow-card-transition-preview', {
-      ...eventDetail(this.#board, this.#cardById(select.dataset.moveSelect)),
-      toColumnId: select.value,
+  #publishSelection(reason = '') {
+    setWorkflowBoardSelection({
+      ...eventDetail(this.#board, this.#selectedCard(), { reason }),
+    }, {
+      preserveEmpty: !['empty-shell', 'delete-result'].includes(reason),
     });
   }
 

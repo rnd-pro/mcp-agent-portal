@@ -63,6 +63,8 @@ describe('api-routes', () => {
     assert.equal(typeof routes['GET /api/workflow-board'], 'function');
     assert.equal(typeof routes['POST /api/workflow-board/transition'], 'function');
     assert.equal(typeof routes['POST /api/workflow-board/transitions'], 'function');
+    assert.equal(typeof routes['POST /api/workflow-board/delete'], 'function');
+    assert.equal(typeof routes['POST /api/workflow-board/columns/update'], 'function');
   });
 
   it('dispatch returns false for unknown routes', async () => {
@@ -331,6 +333,16 @@ Body
       assert.equal(metaRes.json().id, id);
       assert.equal(metaRes.json().messageCount, 2);
       assert.equal('messages' in metaRes.json(), false);
+
+      let aliasRes = makeRes();
+      await routes['POST /api/chats/get'](
+        makeReq('POST', '/api/chats/get', { chatId: id, includeMessages: false }),
+        aliasRes,
+      );
+
+      assert.equal(aliasRes.status, 200);
+      assert.equal(aliasRes.json().id, id);
+      assert.equal(aliasRes.json().messageCount, 2);
 
       let fullRes = makeRes();
       await routes['POST /api/chats/get'](

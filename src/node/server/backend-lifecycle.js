@@ -1,10 +1,11 @@
 // @ctx backend-lifecycle.ctx
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, resolve, dirname, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { isProcessAlive } from '../ops/process.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCAL_GATEWAY_ROOT = process.env.PORTAL_LOCAL_GATEWAY_DIR
@@ -25,14 +26,83 @@ function getPortFilePath(rootPath) {
   return join(LOCAL_GATEWAY_DIR, `portal-${hash}.json`);
 }
 
+function getLockDirPath(rootPath) {
+  const absPath = resolve(rootPath);
+  const hash = createHash('md5').update(absPath).digest('hex').slice(0, 8);
+  return join(LOCAL_GATEWAY_DIR, `portal-${hash}.lock`);
+}
+
+function processExists(pid) {
+  return isProcessAlive(pid);
+}
+
+function readLockOwner(lockDir) {
+  try {
+    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function lockAgeMs(lockDir) {
+  try {
+    return Date.now() - statSync(lockDir).mtimeMs;
+  } catch {
+    return Infinity;
+  }
+}
+
+export async function acquireBackendLock(rootPath, options = {}) {
+  mkdirSync(LOCAL_GATEWAY_DIR, { recursive: true });
+  const lockDir = getLockDirPath(rootPath);
+  const timeoutMs = options.timeoutMs ?? 10000;
+  const staleMs = options.staleMs ?? 30000;
+  const retryMs = options.retryMs ?? 100;
+  const token = randomBytes(8).toString('hex');
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      mkdirSync(lockDir);
+      try {
+        writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+          pid: process.pid,
+          token,
+          createdAt: Date.now(),
+        }));
+      } catch (error) {
+        try { rmSync(lockDir, { recursive: true, force: true }); } catch {}
+        throw error;
+      }
+      return () => {
+        let owner = readLockOwner(lockDir);
+        if (!owner || owner.token === token) {
+          try { rmSync(lockDir, { recursive: true, force: true }); } catch {}
+        }
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      let owner = readLockOwner(lockDir);
+      let staleByPid = owner?.pid && !processExists(owner.pid);
+      let staleByOwnerAge = owner?.createdAt && Date.now() - owner.createdAt > staleMs;
+      let staleByDirAge = lockAgeMs(lockDir) > staleMs;
+      if (staleByPid || staleByOwnerAge || staleByDirAge) {
+        try { rmSync(lockDir, { recursive: true, force: true }); } catch {}
+        continue;
+      }
+      await new Promise(resolve => setTimeout(resolve, retryMs));
+    }
+  }
+
+  throw new Error(`Timed out waiting for Agent Portal backend lock: ${rootPath}`);
+}
+
 function readPortFile(rootPath) {
   const file = getPortFilePath(rootPath);
   if (!existsSync(file)) return null;
   try {
     const data = JSON.parse(readFileSync(file, 'utf8'));
-    try {
-      process.kill(data.pid, 0);
-    } catch {
+    if (!processExists(data.pid)) {
       try { unlinkSync(file); } catch (e) { /* ignore cleanup error */ }
       return null;
     }
@@ -78,98 +148,111 @@ export function listBackends() {
   for (const f of files) {
     try {
       const data = JSON.parse(readFileSync(join(LOCAL_GATEWAY_DIR, f), 'utf8'));
-      try {
-        process.kill(data.pid, 0);
+      if (processExists(data.pid)) {
         active.push(data);
-      } catch (err) {
+      } else {
         try { unlinkSync(join(LOCAL_GATEWAY_DIR, f)); } catch (e) { console.debug('[portal] Cleanup error:', e.message); }
       }
     } catch (e) { console.warn('[portal] Failed to read backend file:', f, e.message); }
   }
   return active;
 }
+
+async function isBackendPortAlive(port, timeoutMs = 5000, attempts = 2) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let alive = await new Promise(resolve => {
+      const sock = createConnection({ host: '127.0.0.1', port }, () => {
+        sock.destroy();
+        resolve(true);
+      });
+      sock.on('error', () => resolve(false));
+      sock.setTimeout(timeoutMs, () => { sock.destroy(); resolve(false); });
+    });
+    if (alive) return true;
+  }
+  return false;
+}
+
+function shouldRestartBackend(existing, force) {
+  const currentVersion = _getVersion();
+  return force || (existing.version && existing.version !== currentVersion && currentVersion !== '0.0.0');
+}
+
+async function terminateBackend(existing, reason) {
+  if (!existing) return;
+  if (reason === 'version') {
+    console.error(`[portal] Version mismatch: running ${existing.version}, installed ${_getVersion()}. Restarting...`);
+  } else if (reason === 'unresponsive') {
+    console.error(`[portal] Backend PID ${existing.pid} alive but port ${existing.port} not responding, respawning...`);
+  }
+  try { process.kill(existing.pid, 'SIGTERM'); } catch (e) { console.warn('[portal] Failed to kill old backend:', e.message); }
+  try { unlinkSync(getPortFilePath(existing.project)); } catch (e) { /* ignore cleanup error */ }
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    if (!processExists(existing.pid)) break;
+  }
+}
+
 export async function ensureBackend(rootPath, { force } = {}) {
   const absPath = resolve(rootPath);
-  
+
   const existing = readPortFile(absPath);
-  
-  if (existing) {
-    const currentVersion = _getVersion();
-    // ONLY restart on explicit force or real version mismatch (npm update).
-    // NEVER restart on source changes — this is a shared singleton backend
-    // serving multiple IDE instances. Killing it disconnects ALL of them.
-    // Use `npx mcp-agent-portal restart` for manual restarts after code changes.
-    const needRestart = force || (existing.version && existing.version !== currentVersion && currentVersion !== '0.0.0');
-    
-    if (needRestart) {
-      console.error(`[portal] Version mismatch: running ${existing.version}, installed ${currentVersion}. Restarting...`);
-      try { process.kill(existing.pid, 'SIGTERM'); } catch (e) { console.warn('[portal] Failed to kill old backend:', e.message); }
-      try { unlinkSync(getPortFilePath(absPath)); } catch (e) { /* ignore cleanup error */ }
-      // Wait for old process to actually die (up to 3s)
-      for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 200));
-        try { process.kill(existing.pid, 0); } catch { break; } // process is gone
-      }
-    } else {
-      // Verify the existing backend is actually accepting connections
-      // Use multiple attempts with generous timeout — the backend may be under load
-      // from another IDE or running heavy tool calls (AST parsing, delegation, etc.)
-      let alive = false;
-      for (let attempt = 0; attempt < 2 && !alive; attempt++) {
-        alive = await new Promise(resolve => {
-          const sock = createConnection({ host: '127.0.0.1', port: existing.port }, () => {
-            sock.destroy();
-            resolve(true);
-          });
-          sock.on('error', () => resolve(false));
-          sock.setTimeout(5000, () => { sock.destroy(); resolve(false); });
-        });
-      }
-      if (alive) return existing.port;
-      // Port file exists but backend isn't accepting connections — clean up and respawn
-      console.error(`[portal] Backend PID ${existing.pid} alive but port ${existing.port} not responding, respawning...`);
-      try { process.kill(existing.pid, 'SIGTERM'); } catch (e) { console.warn('[portal] Failed to kill unresponsive backend:', e.message); }
-      try { unlinkSync(getPortFilePath(absPath)); } catch (e) { /* ignore cleanup error */ }
-      await new Promise(r => setTimeout(r, 1000));
-    }
+
+  if (existing && !shouldRestartBackend(existing, force) && await isBackendPortAlive(existing.port)) {
+    return existing.port;
   }
 
-  const backendScript = join(__dirname, 'backend.js');
-  spawn(process.execPath, [backendScript, absPath], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, PORTAL_BACKEND: '1' }
-  }).unref();
+  const releaseLock = await acquireBackendLock(absPath);
 
-  const portFile = getPortFilePath(absPath);
-  const start = Date.now();
-  
-  while (Date.now() - start < 10000) {
-    await new Promise(r => setTimeout(r, 200));
-    if (existsSync(portFile)) {
-      const b = readPortFile(absPath);
-      if (b) {
-        // Verify the port is actually accepting TCP connections
-        const alive = await new Promise(resolve => {
-          const sock = createConnection({ host: '127.0.0.1', port: b.port }, () => {
-            sock.destroy();
-            resolve(true);
-          });
-          sock.on('error', () => resolve(false));
-          sock.setTimeout(500, () => { sock.destroy(); resolve(false); });
-        });
-        if (alive) return b.port;
+  try {
+    const lockedExisting = readPortFile(absPath);
+
+    if (lockedExisting) {
+      // ONLY restart on explicit force or real version mismatch (npm update).
+      // NEVER restart on source changes — this is a shared singleton backend
+      // serving multiple IDE instances. Killing it disconnects ALL of them.
+      // Use `npx mcp-agent-portal restart` for manual restarts after code changes.
+      if (shouldRestartBackend(lockedExisting, force)) {
+        await terminateBackend(lockedExisting, 'version');
+      } else if (await isBackendPortAlive(lockedExisting.port)) {
+        return lockedExisting.port;
+      } else {
+        await terminateBackend(lockedExisting, 'unresponsive');
+        await new Promise(r => setTimeout(r, 1000));
       }
     }
+
+    const backendScript = join(__dirname, 'backend.js');
+    spawn(process.execPath, [backendScript, absPath], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, PORTAL_BACKEND: '1' }
+    }).unref();
+
+    const portFile = getPortFilePath(absPath);
+    const start = Date.now();
+
+    while (Date.now() - start < 10000) {
+      await new Promise(r => setTimeout(r, 200));
+      if (existsSync(portFile)) {
+        const b = readPortFile(absPath);
+        if (b && await isBackendPortAlive(b.port, 500, 1)) {
+          return b.port;
+        }
+      }
+    }
+
+    throw new Error('Backend failed to start within 10s');
+  } finally {
+    releaseLock();
   }
-  
-  throw new Error('Backend failed to start within 10s');
 }
 
 export function startStdioProxy(port, buffered = [], options = {}) {
   const MAX_RETRIES = options.maxRetries ?? 5;
   const retryBaseMs = options.retryBaseMs ?? 500;
   const retryMaxMs = options.retryMaxMs ?? 8000;
+  const queuedMessageTimeoutMs = options.queuedMessageTimeoutMs ?? 30000;
   const stdin = options.stdin || process.stdin;
   const stdout = options.stdout || process.stdout;
   const exit = options.exit || ((code) => process.exit(code));
@@ -189,6 +272,27 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   let shuttingDown = false;
   let retryTimer = null;
   let reconnectCurrent = null;
+
+  function getMessageId(message) {
+    try {
+      return JSON.parse(message)?.id;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeQueuedMessageTimeout(message, reason) {
+    const id = getMessageId(message);
+    if (id === null || id === undefined) return;
+    writeToClient(JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      error: {
+        code: -32000,
+        message: `Agent Portal proxy is disconnected: ${reason}`,
+      },
+    }));
+  }
 
   function maskAndFrame(str) {
     const data = Buffer.from(str, 'utf8');
@@ -248,19 +352,41 @@ export function startStdioProxy(port, buffered = [], options = {}) {
     stdout.write(body);
   }
 
+  function enqueueMessage(message, reason = 'backend disconnected') {
+    const item = { message, timer: null };
+    const id = getMessageId(message);
+    if (id !== null && id !== undefined) {
+      item.timer = setTimer(() => {
+        queue = queue.filter(entry => entry !== item);
+        writeQueuedMessageTimeout(message, reason);
+      }, queuedMessageTimeoutMs);
+    }
+    queue.push(item);
+  }
+
+  function dequeueMessage() {
+    const item = queue.shift();
+    if (!item) return null;
+    if (item.timer) {
+      try { clearTimer(item.timer); } catch {}
+      item.timer = null;
+    }
+    return item.message;
+  }
+
   function handleClientMessage(message) {
     if (connected && ws) {
       try {
         ws.write(maskAndFrame(message));
       } catch (e) {
         logger.warn('[portal] Proxy write failed:', e.message);
-        queue.push(message);
+        enqueueMessage(message, 'write failed');
         connected = false;
         if (reconnectCurrent) reconnectCurrent('write-failed');
         else scheduleRetry('write-failed');
       }
     } else {
-      queue.push(message);
+      enqueueMessage(message);
     }
   }
 
@@ -365,12 +491,13 @@ export function startStdioProxy(port, buffered = [], options = {}) {
         wsBuffer = combined.slice(idx + 4);
         // Flush queued stdin messages
         while (queue.length) {
-          const line = queue.shift();
+          const line = dequeueMessage();
+          if (!line) break;
           try {
             socket.write(maskAndFrame(line));
           } catch (e) {
             logger.warn('[portal] Proxy queued write failed:', e.message);
-            queue.unshift(line);
+            enqueueMessage(line, 'queued write failed');
             scheduleOnce('queued-write-failed');
             break;
           }

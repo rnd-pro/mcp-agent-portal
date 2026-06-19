@@ -75,9 +75,12 @@ describe('resource groups demo contract', () => {
 
   it('renders resource group metadata with scoped agent icon colors', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.js'), 'utf8');
+    let templateSource = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.tpl.js'), 'utf8');
     let cssSource = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.css.js'), 'utf8');
     let skillManagerSource = fs.readFileSync(path.join(ROOT, 'web/panels/SkillManager/SkillManager.js'), 'utf8');
 
+    assert.ok(source.includes("import 'symbiote-ui/board'"), 'GroupManager must use the shared Kanban board package export');
+    assert.ok(templateSource.includes('sn-kanban-board'), 'GroupManager must render groups through the shared Kanban board primitive');
     assert.ok(source.includes('gm-agent-list'), 'GroupManager must show group agent ownership');
     assert.ok(source.includes('gm-agent-card'), 'GroupManager must render agents as movable cards');
     assert.ok(source.includes('data-agent-drop-group'), 'GroupManager must expose group agent drop zones');
@@ -121,8 +124,10 @@ describe('resource groups demo contract', () => {
     assert.ok(source.includes("timeoutInput.dataset.field = 'timeout'"), 'GroupManager must render group timeout control');
     assert.ok(source.includes('approval_mode: group.approval_mode'), 'GroupManager must persist group approval mode');
     assert.ok(source.includes('timeout: group.timeout'), 'GroupManager must persist group timeout');
-    assert.match(cssSource, /grid-template-rows: auto auto auto minmax\(0, 1fr\) auto;/, 'GroupManager columns must share row sizing');
-    assert.match(cssSource, /grid-template-rows: subgrid;/, 'GroupManager cards must align sections through subgrid rows');
+    assert.match(cssSource, /--sn-kanban-columns-height: max-content;/, 'Resource Groups board must size its row by the tallest column content');
+    assert.match(cssSource, /--sn-kanban-columns-align: stretch;/, 'Resource Groups board must stretch shorter columns to the tallest column');
+    assert.match(cssSource, /\.gm-board \.sn-kanban-column-body\s*\{[\s\S]*grid-template-rows: auto auto minmax\(0, 1fr\) auto;/, 'GroupManager must size product-specific column content inside the shared Kanban column body');
+    assert.match(cssSource, /\.gm-profile\s*\{[\s\S]*grid-template-columns: 32px minmax\(0, 1fr\) 28px;/, 'GroupManager profile cards must keep stable icon, content, and action slots inside shared Kanban columns');
     assert.match(cssSource, /\.gm-column-delete\s*\{[\s\S]*margin-left: auto;/, 'Group delete must occupy the former header action slot');
     assert.match(cssSource, /\.gm-column-delete\[data-delete-armed="true"\]\s*\{[\s\S]*var\(--sn-danger-color\)/, 'Armed group delete must be styled in-app through theme danger tokens');
     assert.match(cssSource, /\.gm-agent-card\s*\{[\s\S]*width: 100%;[\s\S]*grid-template-columns: 32px minmax\(0, 1fr\) 28px;/, 'Agent cards must match provider card width and control slot sizing');
@@ -163,6 +168,8 @@ describe('resource groups demo contract', () => {
     assert.ok(toolDefinitionsSource.includes('approval_mode'), 'agent-pool group schema must publish group-owned approval mode');
     assert.ok(serverSource.includes('resourceGroupApprovalMode(resourceGroup)'), 'delegate_task must resolve approval mode from resource groups');
     assert.ok(serverSource.includes('resourceGroup?.timeout'), 'delegate_task must resolve timeout from resource groups');
+    assert.ok(serverSource.includes('const hasExplicitRuntimeRoute = Boolean(args.provider || args.model)'), 'explicit provider/model overrides must not inherit agent-owned resource groups');
+    assert.ok(serverSource.includes('hasExplicitRuntimeRoute ? null : agentDef?.resourceGroup'), 'agent-owned resource groups must only apply when the runtime route is not explicit');
     assert.match(serverSource, /Resource group \\`\$\{resourceGroupName\}\\` not found/, 'missing resource groups must fail instead of falling back silently');
     assert.match(serverSource, /if \(resourceGroupName && !resourceGroup\) \{[\s\S]*isError: true,[\s\S]*\}/, 'missing resource groups must return an MCP error result');
     assert.equal(serverSource.includes('agentDef?.approvalMode'), false, 'delegate_task must not use agent frontmatter approval mode');

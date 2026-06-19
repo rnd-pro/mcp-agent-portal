@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { ToolIndex } from '../../src/node/proxy/tool-index.js';
+import { CHILD_TOOLS_LIST_TIMEOUT_MS, ToolIndex } from '../../src/node/proxy/tool-index.js';
 
 describe('ToolIndex', () => {
   function makeIndex() {
@@ -100,19 +100,39 @@ describe('ToolIndex', () => {
       let requested = [];
       await index.rebuild({
         servers: new Map([['agent-pool', {}], ['broken-server', {}]]),
-        requestFromChild: async (serverName) => {
-          requested.push(serverName);
+        requestFromChild: async (serverName, method, params, timeoutMs) => {
+          requested.push({ serverName, method, params, timeoutMs });
           throw new Error('tools/list failed');
         },
       });
 
       assert.strictEqual(errorCalls, 0);
-      assert.deepStrictEqual(requested, ['broken-server']);
+      assert.deepStrictEqual(requested, [{
+        serverName: 'broken-server',
+        method: 'tools/list',
+        params: {},
+        timeoutMs: CHILD_TOOLS_LIST_TIMEOUT_MS,
+      }]);
       assert.strictEqual(index.failures.length, 1);
       assert.strictEqual(index.failures[0].server, 'broken-server');
       assert.match(index.failures[0].message, /tools\/list failed/);
     } finally {
       console.error = oldError;
     }
+  });
+
+  it('clears stale indexing failures on rebuild', async () => {
+    let index = new ToolIndex();
+    index.failures.push({ server: 'old', message: 'old failure' });
+
+    await index.rebuild({
+      servers: new Map([['project-graph', {}]]),
+      requestFromChild: async () => ({
+        tools: [{ name: 'get_skeleton', description: 'Get skeleton' }],
+      }),
+    });
+
+    assert.deepStrictEqual(index.failures, []);
+    assert.strictEqual(index.getPublicToolCount(), 1);
   });
 });

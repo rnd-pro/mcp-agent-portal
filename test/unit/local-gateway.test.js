@@ -10,6 +10,46 @@ function writeJson(filePath, value) {
 }
 
 describe('local gateway route reconciliation', () => {
+  it('routes portal.local root to agent-portal when multiple project routes are live', async () => {
+    let tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-gateway-root-'));
+    let originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+
+    try {
+      let gateway = await import(`../../src/node/server/local-gateway.js?test=${Date.now()}`);
+      let services = {
+        'portal.local': {
+          name: 'mcp-agent-portal',
+          routes: {
+            '/symbiote-workspace': {
+              port: 59936,
+              pid: process.pid,
+              projectPath: path.join(tmpHome, 'symbiote-workspace'),
+              projectName: 'symbiote-workspace',
+            },
+            '/agent-portal': {
+              port: 54370,
+              pid: process.pid,
+              projectPath: path.join(tmpHome, 'agent-portal'),
+              projectName: 'agent-portal',
+            },
+          },
+        },
+      };
+
+      let rootRoute = gateway.resolveGatewayRoute('portal.local', '/', services);
+      assert.equal(rootRoute.prefix, '/agent-portal');
+      assert.equal(rootRoute.port, 54370);
+
+      let explicitRoute = gateway.resolveGatewayRoute('portal.local', '/symbiote-workspace/#workflow-board', services);
+      assert.equal(explicitRoute.prefix, '/symbiote-workspace');
+      assert.equal(explicitRoute.port, 59936);
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
   it('rekeys old portal routes by project basename and removes dead routes', async () => {
     let tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-gateway-home-'));
     let originalHome = process.env.HOME;

@@ -39,4 +39,16 @@ describe('CLI task lifecycle contract', () => {
     assert.match(source, /remove_from_memory: flags\.remove === true/);
     assert.match(source, /npx mcp-agent-portal finish <taskId>/);
   });
+
+  it('routes CLI call through the explicit project backend when provided', () => {
+    let source = readCliSource();
+
+    assert.match(source, /async function mcpCall\(toolName, argsObj = \{\}, options = \{\}\)/);
+    assert.match(source, /findWorkspaceBackend\(options\.projectRef, \{/);
+    assert.match(source, /let \{ flags, positional \} = parseFlags\(args\);/);
+    assert.match(source, /mcpCall\(toolName, parsedArgs, \{/);
+    assert.match(source, /projectRef: flags\.project/);
+    assert.match(source, /fallbackLatest: !flags\.project/);
+    assert.match(source, /call <tool> \[json_args\] \[--project <path\|name>\]/);
+  });
 });

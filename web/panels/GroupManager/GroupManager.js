@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { mcpCall } from '../../common/mcp-call.js';
 import template from './GroupManager.tpl.js';
 import { buildHash, getRoute, parseQuery, sharedUiStyles as cssShared } from 'symbiote-ui/ui';
+import 'symbiote-ui/board';
 import cssLocal from './GroupManager.css.js';
 
 const PROVIDERS = ['codex', 'claude', 'opencode', 'antigravity'];
@@ -27,12 +28,6 @@ function makeElement(tagName, className = '', text = '') {
   let node = document.createElement(tagName);
   if (className) node.className = className;
   if (text !== '') node.textContent = text;
-  return node;
-}
-
-function makeEmptyState(message, isError = false) {
-  let node = makeElement('sn-empty-state', '', message);
-  if (isError) node.setAttribute('variant', 'error');
   return node;
 }
 
@@ -94,7 +89,7 @@ export class GroupManager extends Symbiote {
 
   async loadGroups({ retry = true } = {}) {
     try {
-      this.ref.board.replaceChildren(makeEmptyState('Loading groups...'));
+      this._renderBoardMessage('Loading groups...');
       this.ref.unassigned.hidden = true;
       let [groups, modelsInfo, agentsInfo] = await Promise.all([
         this._mcpCall('list_groups', { json: true }),
@@ -115,7 +110,7 @@ export class GroupManager extends Symbiote {
       this.renderBoard();
     } catch (err) {
       console.error('Failed to load groups:', err);
-      this.ref.board.replaceChildren(makeEmptyState(`Error: ${err.message}`, true));
+      this._renderBoardMessage(`Error: ${err.message}`);
     }
   }
 
@@ -129,13 +124,41 @@ export class GroupManager extends Symbiote {
   renderBoard() {
     let groups = this.$.groups || [];
     if (groups.length === 0) {
-      this.ref.board.replaceChildren(makeEmptyState('No groups found'));
+      this._renderBoardMessage('No groups found');
       return;
     }
 
-    this.ref.board.replaceChildren(...groups.map(group => this._renderColumn(group)));
+    this.ref.board.setBoard({
+      id: 'resource-groups',
+      title: 'Resource Groups',
+      columns: groups.map(group => ({
+        id: group.name,
+        title: group.name,
+        description: group.description || group.model_tier || 'resource group',
+        count: this._profilesFor(group).length,
+        groupName: group.name,
+      })),
+    }, {
+      renderColumnHeader: (column) => {
+        let group = this._findGroup(column.raw.groupName);
+        if (!group) return null;
+        let rendered = this._renderColumn(group);
+        return rendered.querySelector('.gm-column-head');
+      },
+      renderColumnBody: (column) => {
+        let group = this._findGroup(column.raw.groupName);
+        if (!group) return null;
+        let rendered = this._renderColumn(group);
+        return Array.from(rendered.children).slice(1);
+      },
+    });
     this._renderUnassignedAgents(groups);
     this._bindBoard();
+  }
+
+  _renderBoardMessage(message) {
+    this.ref.board.setAttribute('empty-text', message);
+    this.ref.board.setBoard({ columns: [] });
   }
 
   _groupAgents(group) {

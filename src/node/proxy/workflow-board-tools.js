@@ -1,19 +1,160 @@
-const TOOL_METHODS = {
-  list_workflow_boards: 'listWorkflowBoards',
-  get_workflow_board: 'getWorkflowBoard',
-  create_work_item: 'createWorkItem',
-  update_work_item: 'updateWorkItem',
-  request_workflow_transition: 'requestWorkflowTransition',
-  claim_work_item: 'claimWorkItem',
-  release_work_item: 'releaseWorkItem',
-  orchestrate_work_item: 'orchestrateWorkItem',
-  resume_work_item: 'resumeWorkItem',
-  control_work_item: 'controlWorkItem',
-  reconcile_workflow_recovery: 'reconcileWorkflowRecovery',
-  import_workflow_work_items: 'importWorkflowWorkItems',
-  export_workflow_work_item: 'exportWorkflowWorkItem',
-  get_workflow_recovery_state: 'getWorkflowRecoveryState',
-  list_workflow_events: 'listWorkflowEvents',
+import {
+  DEFAULT_WORKFLOW_BOARD_ID,
+  DEFAULT_WORKFLOW_COLUMN_IDS,
+} from '../../iso/workflow-board.js';
+
+const WORKFLOW_BOARD_TOOL_NAME = 'workflow_board';
+const WORKFLOW_BOARD_TOOL_SCHEMA = 'workflow-board-tool/v1';
+
+const ACTIONS = {
+  help: {
+    method: null,
+    description: 'Return this tool guide, actions, required fields, columns, and examples.',
+    required: [],
+  },
+  list_boards: {
+    method: 'listWorkflowBoards',
+    description: 'List workflow boards visible to the Portal workflow control plane.',
+    required: [],
+  },
+  get_board: {
+    method: 'getWorkflowBoard',
+    description: 'Get one board projection with columns, cards, optional events, and runtime data.',
+    required: [],
+  },
+  create_item: {
+    method: 'createWorkItem',
+    description: 'Create a workflow card/work item.',
+    required: ['title'],
+  },
+  update_item: {
+    method: 'updateWorkItem',
+    description: 'Patch a workflow card/work item.',
+    required: ['cardId', 'patch'],
+  },
+  update_board: {
+    method: 'updateWorkflowBoard',
+    description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit.',
+    required: ['patch'],
+  },
+  control_board: {
+    method: 'controlWorkflowBoard',
+    description: 'Apply a board-level automation control action such as pause, resume, drain, stop, manual, recovery_only, or maintenance.',
+    required: ['control'],
+  },
+  update_column: {
+    method: 'updateWorkflowColumn',
+    description: 'Patch column automation settings such as trigger, mode, agent pool, and parallel limit.',
+    required: ['columnId', 'patch'],
+  },
+  delete_item: {
+    method: 'deleteWorkItem',
+    description: 'Remove a workflow card from the board while preserving audited transition history.',
+    required: ['cardId'],
+  },
+  transition: {
+    method: 'requestWorkflowTransition',
+    description: 'Move a card through the shared gated transition engine. Entering auto columns can trigger orchestration.',
+    required: ['cardId', 'toColumnId'],
+  },
+  orchestrate: {
+    method: 'orchestrateWorkItem',
+    description: 'Ask the Portal orchestrator to run an eligible work item.',
+    required: ['cardId'],
+  },
+  control: {
+    method: 'controlWorkItem',
+    description: 'Pause, stop, or cancel a running/active workflow card.',
+    required: ['cardId', 'control'],
+  },
+  recovery: {
+    method: 'getWorkflowRecoveryState',
+    description: 'Read recovery state for restart and resume decisions.',
+    required: [],
+  },
+  reconcile: {
+    method: 'reconcileWorkflowRecovery',
+    description: 'Persist recovery flags and recovery run state for active workflow cards.',
+    required: [],
+  },
+  list_events: {
+    method: 'listWorkflowEvents',
+    description: 'List audited workflow events.',
+    required: [],
+  },
+};
+
+const ACTION_ORDER = Object.keys(ACTIONS);
+
+const ACTION_EXAMPLES = {
+  help: { action: 'help' },
+  get_board: { action: 'get_board', boardId: DEFAULT_WORKFLOW_BOARD_ID, projectId: 'project-id' },
+  create_item: {
+    action: 'create_item',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    title: 'Implement workflow kanban',
+    projectId: 'project-id',
+    owner: 'orchestrator',
+    acceptanceCriteria: ['Tests pass', 'Audit is clean'],
+  },
+  transition: {
+    action: 'transition',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'card-id',
+    toColumnId: 'in-progress',
+    reason: 'Starting accepted work',
+  },
+  orchestrate: {
+    action: 'orchestrate',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'card-id',
+    reason: 'Card entered the ready column',
+  },
+  delete_item: {
+    action: 'delete_item',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'card-id',
+    reason: 'Remove obsolete work item',
+  },
+  update_column: {
+    action: 'update_column',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    columnId: 'ready',
+    patch: {
+      automation: {
+        trigger: 'on_enter',
+        action: 'orchestrate',
+        mode: 'auto',
+        agents: ['orchestrator'],
+        parallelLimit: 4,
+      },
+    },
+  },
+  update_board: {
+    action: 'update_board',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    patch: {
+      mode: 'armed',
+      automation: {
+        pickup: 'auto',
+        globalParallelLimit: 8,
+        fallbackAgents: ['orchestrator'],
+      },
+    },
+  },
+  control_board: {
+    action: 'control_board',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    control: 'pause',
+    reason: 'Pause scheduling and active workflow runs',
+  },
+  control: {
+    action: 'control',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'card-id',
+    control: 'pause',
+    reason: 'Waiting for user input',
+  },
 };
 
 const SERVICE_IMPORT_ERROR = 'Workflow board service is unavailable. Provide ' +
@@ -22,382 +163,71 @@ const SERVICE_IMPORT_ERROR = 'Workflow board service is unavailable. Provide ' +
 
 export const WORKFLOW_BOARD_TOOLS = [
   {
-    name: 'list_workflow_boards',
-    description: 'List workflow boards visible to the Portal workflow control plane.',
+    name: WORKFLOW_BOARD_TOOL_NAME,
+    description: 'Single self-guiding Agent Portal workflow board command tool. Use action=help for the contract. Do not use legacy workflow-board tool names.',
     inputSchema: {
       type: 'object',
       properties: {
-        projectId: { type: 'string', description: 'Optional project filter.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        scope: { type: 'string', enum: ['home', 'project'], description: 'Optional board scope.' },
-        includeArchived: { type: 'boolean', description: 'Include archived boards.' },
-        limit: { type: 'number', description: 'Maximum number of boards to return.' },
-      },
-    },
-  },
-  {
-    name: 'get_workflow_board',
-    description: 'Get one workflow board projection, optionally scoped to a project.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        id: { type: 'string', description: 'Alias for boardId.' },
-        projectId: { type: 'string', description: 'Optional project filter.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        includeCards: { type: 'boolean', description: 'Include board cards. Defaults to true.' },
-        includeEvents: { type: 'boolean', description: 'Include recent transition events.' },
-        includeRuntime: { type: 'boolean', description: 'Include linked runtime projection.' },
-      },
-      required: ['boardId'],
-    },
-  },
-  {
-    name: 'create_work_item',
-    description: 'Create a workflow work item through the shared workflow board service.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        projectId: { type: 'string', description: 'Optional project ID.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        title: { type: 'string', description: 'Work item title.' },
-        body: { type: 'string', description: 'Optional work item body.' },
-        kind: { type: 'string', description: 'Work item kind.' },
+        action: {
+          type: 'string',
+          enum: ACTION_ORDER,
+          description: 'Workflow command. Use help when unsure.',
+        },
+        boardId: {
+          type: 'string',
+          description: `Workflow board ID. Defaults to ${DEFAULT_WORKFLOW_BOARD_ID}.`,
+        },
+        projectId: { type: 'string', description: 'Optional project scope.' },
+        goalId: { type: 'string', description: 'Optional goal-linked workflow card filter.' },
+        chatId: { type: 'string', description: 'Optional chat-linked workflow card filter.' },
+        scope: { type: 'string', enum: ['home', 'project'], description: 'Optional board scope for list_boards.' },
+        includeArchived: { type: 'boolean', description: 'Include archived boards for list_boards.' },
+        includeCards: { type: 'boolean', description: 'Include cards for get_board. Defaults to true.' },
+        includeEvents: { type: 'boolean', description: 'Include recent events for get_board.' },
+        includeRuntime: { type: 'boolean', description: 'Include linked runtime projection for get_board.' },
+        includeResolved: { type: 'boolean', description: 'Include resolved recovery records for recovery.' },
+        cardId: { type: 'string', description: 'Workflow card/work-item ID.' },
+        title: { type: 'string', description: 'Work-item title for create_item.' },
+        body: { type: 'string', description: 'Optional work-item body for create_item.' },
+        kind: { type: 'string', description: 'Optional work-item kind.' },
         priority: { type: 'string', description: 'Optional priority.' },
-        columnId: { type: 'string', description: 'Initial workflow column ID.' },
-        column_id: { type: 'string', description: 'Alias for columnId.' },
-        owner: { type: 'string', description: 'Optional owner.' },
+        columnId: { type: 'string', description: 'Initial column for create_item.' },
+        automation: { type: 'object', description: 'Column automation patch for action=update_column.' },
+        owner: { type: 'string', description: 'Optional work-item owner.' },
         acceptanceCriteria: {
           type: 'array',
           items: { type: 'string' },
           description: 'Acceptance criteria for gated transitions.',
         },
-        acceptance_criteria: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Alias for acceptanceCriteria.',
-        },
+        patch: { type: 'object', description: 'Fields to patch for update_item.' },
+        fromColumnId: { type: 'string', description: 'Expected current column for transition.' },
+        toColumnId: { type: 'string', enum: DEFAULT_WORKFLOW_COLUMN_IDS, description: 'Destination column for transition.' },
+        mode: { type: 'string', enum: ['manual', 'auto', 'gated'], description: 'Transition or orchestration mode.' },
+        boardMode: { type: 'string', enum: ['passive', 'armed', 'autonomous', 'manual', 'paused', 'draining', 'stopped', 'maintenance', 'recovery_only'], description: 'Board mode for action=control_board resume overrides.' },
+        control: { type: 'string', enum: ['pause', 'stop', 'cancel', 'resume', 'drain', 'maintenance', 'manual', 'recovery_only', 'arm'], description: 'Runtime control action for action=control or board action for action=control_board.' },
+        reason: { type: 'string', description: 'Human/audit reason.' },
+        actor: { type: 'string', description: 'Actor requesting the command.' },
         entityRefs: { type: 'object', description: 'Linked goals, chats, tasks, or files.' },
-        entity_refs: { type: 'object', description: 'Alias for entityRefs.' },
-        metadata: { type: 'object', description: 'Additional workflow metadata.' },
-      },
-      required: ['title'],
-    },
-  },
-  {
-    name: 'update_work_item',
-    description: 'Update a workflow work item through the shared workflow board service.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        id: { type: 'string', description: 'Alias for cardId.' },
-        patch: { type: 'object', description: 'Fields to update.' },
-        reason: { type: 'string', description: 'Reason for the update.' },
         expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['cardId'],
-    },
-  },
-  {
-    name: 'request_workflow_transition',
-    description: 'Request a workflow transition through the shared gate engine.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        fromColumnId: { type: 'string', description: 'Expected current column ID.' },
-        from_column_id: { type: 'string', description: 'Alias for fromColumnId.' },
-        toColumnId: { type: 'string', description: 'Requested destination column ID.' },
-        to_column_id: { type: 'string', description: 'Alias for toColumnId.' },
-        actor: { type: 'string', description: 'Actor requesting the transition.' },
-        actor_id: { type: 'string', description: 'Alias for actor.' },
-        mode: {
-          type: 'string',
-          enum: ['manual', 'auto', 'gated'],
-          description: 'Transition mode.',
-        },
-        reason: { type: 'string', description: 'Transition reason.' },
-        entityRefs: { type: 'object', description: 'Linked goals, chats, tasks, or files.' },
-        entity_refs: { type: 'object', description: 'Alias for entityRefs.' },
-        expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['boardId', 'cardId', 'fromColumnId', 'toColumnId'],
-    },
-  },
-  {
-    name: 'claim_work_item',
-    description: 'Claim a work item lease through the workflow board service.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        actor: { type: 'string', description: 'Actor claiming the work item.' },
-        actor_id: { type: 'string', description: 'Alias for actor.' },
-        leaseOwner: { type: 'string', description: 'Lease owner ID.' },
-        lease_owner: { type: 'string', description: 'Alias for leaseOwner.' },
-        ttlMs: { type: 'number', description: 'Optional lease TTL in milliseconds.' },
-        ttl_ms: { type: 'number', description: 'Alias for ttlMs.' },
-        reason: { type: 'string', description: 'Claim reason.' },
-        expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['cardId'],
-    },
-  },
-  {
-    name: 'release_work_item',
-    description: 'Release a work item lease through the workflow board service.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        actor: { type: 'string', description: 'Actor releasing the work item.' },
-        actor_id: { type: 'string', description: 'Alias for actor.' },
-        leaseOwner: { type: 'string', description: 'Lease owner ID.' },
-        lease_owner: { type: 'string', description: 'Alias for leaseOwner.' },
-        reason: { type: 'string', description: 'Release reason.' },
-        expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['cardId'],
-    },
-  },
-  {
-    name: 'orchestrate_work_item',
-    description: 'Ask the workflow service to orchestrate an eligible work item.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        actor: { type: 'string', description: 'Actor requesting orchestration.' },
-        actor_id: { type: 'string', description: 'Alias for actor.' },
-        mode: { type: 'string', enum: ['manual', 'auto', 'gated'], description: 'Orchestration mode.' },
-        reason: { type: 'string', description: 'Orchestration reason.' },
-        entityRefs: { type: 'object', description: 'Linked goals, chats, tasks, or files.' },
-        entity_refs: { type: 'object', description: 'Alias for entityRefs.' },
-        resource_group: { type: 'string', description: 'Optional resource group for execution.' },
-        approval_mode: {
-          type: 'string',
-          enum: ['yolo', 'auto_edit', 'plan'],
-          description: 'Execution approval mode.',
-        },
-        expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['cardId'],
-    },
-  },
-  {
-    name: 'resume_work_item',
-    description: 'Request explicit recovery or resume for a workflow work item.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        actor: { type: 'string', description: 'Actor requesting resume.' },
-        actor_id: { type: 'string', description: 'Alias for actor.' },
-        runId: { type: 'string', description: 'Workflow run ID to resume.' },
-        run_id: { type: 'string', description: 'Alias for runId.' },
-        taskId: { type: 'string', description: 'Linked runtime task ID.' },
-        task_id: { type: 'string', description: 'Alias for taskId.' },
-        reason: { type: 'string', description: 'Resume reason.' },
-        expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['cardId'],
-    },
-  },
-  {
-    name: 'control_work_item',
-    description: 'Pause, stop, or cancel a workflow work item through the shared control plane.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        action: {
-          type: 'string',
-          enum: ['pause', 'stop', 'cancel'],
-          description: 'Control action.',
-        },
-        actor: { type: 'string', description: 'Actor requesting the control action.' },
-        actor_id: { type: 'string', description: 'Alias for actor.' },
-        reason: { type: 'string', description: 'Control reason.' },
-        expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
-        expected_version: { type: 'number', description: 'Alias for expectedVersion.' },
-      },
-      required: ['cardId', 'action'],
-    },
-  },
-  {
-    name: 'reconcile_workflow_recovery',
-    description: 'Persist recovery flags and recovery run state for active workflow cards.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Optional workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        projectId: { type: 'string', description: 'Optional project filter.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        actor: { type: 'string', description: 'Actor requesting reconciliation.' },
-        force: { type: 'boolean', description: 'Persist recovery run records even when flags did not change.' },
-      },
-    },
-  },
-  {
-    name: 'import_workflow_work_items',
-    description: 'Import markdown work-item files into workflow board cards.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        projectId: { type: 'string', description: 'Optional project workspace ID.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        actor: { type: 'string', description: 'Actor requesting import.' },
-      },
-    },
-  },
-  {
-    name: 'export_workflow_work_item',
-    description: 'Export one workflow card to a markdown work-item file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        cardId: { type: 'string', description: 'Workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        workItemId: { type: 'string', description: 'Alias for cardId.' },
-        work_item_id: { type: 'string', description: 'Alias for cardId.' },
-        projectId: { type: 'string', description: 'Optional project workspace ID.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        markdownPath: { type: 'string', description: 'Optional workspace-relative markdown path.' },
-        markdown_path: { type: 'string', description: 'Alias for markdownPath.' },
-        actor: { type: 'string', description: 'Actor requesting export.' },
-      },
-      required: ['cardId'],
-    },
-  },
-  {
-    name: 'get_workflow_recovery_state',
-    description: 'Get workflow recovery state for restart and resume decisions.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Optional workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Optional workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        projectId: { type: 'string', description: 'Optional project filter.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
-        includeResolved: { type: 'boolean', description: 'Include resolved recovery records.' },
-        include_resolved: { type: 'boolean', description: 'Alias for includeResolved.' },
-      },
-    },
-  },
-  {
-    name: 'list_workflow_events',
-    description: 'List audited workflow events from the workflow board service.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        boardId: { type: 'string', description: 'Optional workflow board ID.' },
-        board_id: { type: 'string', description: 'Alias for boardId.' },
-        cardId: { type: 'string', description: 'Optional workflow card or work item ID.' },
-        card_id: { type: 'string', description: 'Alias for cardId.' },
-        projectId: { type: 'string', description: 'Optional project filter.' },
-        project_id: { type: 'string', description: 'Alias for projectId.' },
+        resourceGroup: { type: 'string', description: 'Optional resource group for action=orchestrate.' },
+        approvalMode: { type: 'string', enum: ['yolo', 'auto_edit', 'plan'], description: 'Approval mode for action=orchestrate.' },
         eventTypes: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional event type filter.',
-        },
-        event_types: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Alias for eventTypes.',
+          description: 'Optional event type filter for list_events.',
         },
         after: { type: 'string', description: 'Return events after this cursor or timestamp.' },
         before: { type: 'string', description: 'Return events before this cursor or timestamp.' },
-        limit: { type: 'number', description: 'Maximum number of events to return.' },
+        limit: { type: 'number', description: 'Maximum records to return.' },
+        force: { type: 'boolean', description: 'Force recovery reconciliation record persistence.' },
       },
+      required: ['action'],
     },
   },
 ];
 
-const WORKFLOW_BOARD_TOOL_NAMES = new Set(WORKFLOW_BOARD_TOOLS.map(tool => tool.name));
-
-const COMMON_ALIASES = {
-  boardId: ['board_id'],
-  projectId: ['project_id'],
-  cardId: ['card_id', 'workItemId', 'work_item_id'],
-  actor: ['actor_id', 'actorId'],
-  expectedVersion: ['expected_version'],
-  entityRefs: ['entity_refs'],
-  columnId: ['column_id'],
-  acceptanceCriteria: ['acceptance_criteria'],
-  fromColumnId: ['from_column_id', 'fromColumn', 'from_column', 'from'],
-  toColumnId: ['to_column_id', 'toColumn', 'to_column', 'to'],
-  leaseOwner: ['lease_owner'],
-  ttlMs: ['ttl_ms'],
-  runId: ['run_id'],
-  taskId: ['task_id'],
-  markdownPath: ['markdown_path'],
-  includeResolved: ['include_resolved'],
-  eventTypes: ['event_types'],
-};
-
-const ID_TARGETS = {
-  get_workflow_board: 'boardId',
-  update_work_item: 'cardId',
-  request_workflow_transition: 'cardId',
-  claim_work_item: 'cardId',
-  release_work_item: 'cardId',
-  orchestrate_work_item: 'cardId',
-  resume_work_item: 'cardId',
-  control_work_item: 'cardId',
-  export_workflow_work_item: 'cardId',
-};
-
 export function isWorkflowBoardTool(toolName = '') {
-  return WORKFLOW_BOARD_TOOL_NAMES.has(String(toolName || ''));
+  return String(toolName || '') === WORKFLOW_BOARD_TOOL_NAME;
 }
 
 function textResult(value, extra = {}) {
@@ -408,42 +238,328 @@ function textResult(value, extra = {}) {
   };
 }
 
-function errorResult(message) {
-  return textResult(message, { isError: true });
+function errorResult(message, details = {}) {
+  return textResult({
+    ok: false,
+    schemaVersion: WORKFLOW_BOARD_TOOL_SCHEMA,
+    tool: WORKFLOW_BOARD_TOOL_NAME,
+    error: message,
+    ...details,
+  }, { isError: true });
 }
 
 function isMcpResult(value) {
   return Boolean(value && typeof value === 'object' && Array.isArray(value.content));
 }
 
-function normalizeAliases(args = {}, toolName = '') {
-  let normalized = { ...args };
-  for (let [canonical, aliases] of Object.entries(COMMON_ALIASES)) {
-    if (normalized[canonical] === undefined) {
-      for (let alias of aliases) {
-        if (normalized[alias] !== undefined) {
-          normalized[canonical] = normalized[alias];
-          break;
-        }
-      }
-    }
-    for (let alias of aliases) {
-      if (alias !== canonical) delete normalized[alias];
-    }
-  }
-
-  let idTarget = ID_TARGETS[toolName];
-  if (idTarget && normalized[idTarget] === undefined && normalized.id !== undefined) {
-    normalized[idTarget] = normalized.id;
-  }
-  if (idTarget) delete normalized.id;
-
-  return normalized;
-}
-
 function missingServiceError(error) {
   return error?.code === 'ERR_MODULE_NOT_FOUND'
     && String(error.message || '').includes('workflow-board-service.js');
+}
+
+function hasValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function cleanUndefined(input = {}) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+}
+
+function helpPayload() {
+  return {
+    ok: true,
+    schemaVersion: WORKFLOW_BOARD_TOOL_SCHEMA,
+    tool: WORKFLOW_BOARD_TOOL_NAME,
+    defaultBoardId: DEFAULT_WORKFLOW_BOARD_ID,
+    columns: DEFAULT_WORKFLOW_COLUMN_IDS,
+    rule: 'Use this single workflow_board tool for board operations. Legacy per-action workflow MCP tool names are not public.',
+    actions: Object.fromEntries(
+      ACTION_ORDER.map(action => [
+        action,
+        {
+          description: ACTIONS[action].description,
+          required: ACTIONS[action].required,
+          example: ACTION_EXAMPLES[action] || { action, boardId: DEFAULT_WORKFLOW_BOARD_ID },
+        },
+      ]),
+    ),
+  };
+}
+
+function validateActionArgs(action, args = {}) {
+  let config = ACTIONS[action];
+  if (!config) {
+    return {
+      ok: false,
+      message: `Unknown workflow_board action: ${action || '(missing)'}.`,
+      details: {
+        supportedActions: ACTION_ORDER,
+        example: ACTION_EXAMPLES.help,
+      },
+    };
+  }
+
+  let missing = config.required.filter(field => !hasValue(args[field]));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message: `Missing required field${missing.length === 1 ? '' : 's'} for action=${action}: ${missing.join(', ')}.`,
+      details: {
+        action,
+        required: config.required,
+        example: ACTION_EXAMPLES[action] || { action, boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      },
+    };
+  }
+
+  if (action === 'control' && !['pause', 'stop', 'cancel'].includes(args.control)) {
+    return {
+      ok: false,
+      message: 'Invalid control value. Supported values: pause, stop, cancel.',
+      details: {
+        action,
+        required: config.required,
+        example: ACTION_EXAMPLES.control,
+      },
+    };
+  }
+
+  if (action === 'control_board' && !['pause', 'resume', 'drain', 'stop', 'maintenance', 'manual', 'recovery_only', 'arm'].includes(args.control)) {
+    return {
+      ok: false,
+      message: 'Invalid board control value. Supported values: pause, resume, drain, stop, maintenance, manual, recovery_only, arm.',
+      details: {
+        action,
+        required: config.required,
+        example: ACTION_EXAMPLES.control_board,
+      },
+    };
+  }
+
+  if (action === 'transition' && !DEFAULT_WORKFLOW_COLUMN_IDS.includes(args.toColumnId)) {
+    return {
+      ok: false,
+      message: `Invalid toColumnId. Supported columns: ${DEFAULT_WORKFLOW_COLUMN_IDS.join(', ')}.`,
+      details: {
+        action,
+        columns: DEFAULT_WORKFLOW_COLUMN_IDS,
+        example: ACTION_EXAMPLES.transition,
+      },
+    };
+  }
+
+  return { ok: true };
+}
+
+function serviceArgsForAction(action, args = {}) {
+  let common = cleanUndefined({
+    boardId: args.boardId || DEFAULT_WORKFLOW_BOARD_ID,
+    projectId: args.projectId,
+    goalId: args.goalId,
+    chatId: args.chatId,
+    cardId: args.cardId,
+    actor: args.actor,
+    reason: args.reason,
+    expectedVersion: args.expectedVersion,
+    entityRefs: args.entityRefs,
+    limit: args.limit,
+  });
+
+  if (action === 'list_boards') {
+    return cleanUndefined({
+      projectId: args.projectId,
+      scope: args.scope,
+      includeArchived: args.includeArchived,
+      limit: args.limit,
+    });
+  }
+  if (action === 'get_board') {
+    return cleanUndefined({
+      ...common,
+      includeCards: args.includeCards,
+      includeEvents: args.includeEvents,
+      includeRuntime: args.includeRuntime,
+    });
+  }
+  if (action === 'create_item') {
+    return cleanUndefined({
+      ...common,
+      title: args.title,
+      body: args.body,
+      kind: args.kind,
+      priority: args.priority,
+      columnId: args.columnId,
+      owner: args.owner,
+      acceptanceCriteria: args.acceptanceCriteria,
+      metadata: args.metadata,
+    });
+  }
+  if (action === 'update_item') {
+    return cleanUndefined({
+      ...common,
+      patch: args.patch,
+    });
+  }
+  if (action === 'update_board') {
+    return cleanUndefined({
+      ...common,
+      mode: args.boardMode,
+      automation: args.automation,
+      patch: args.patch,
+    });
+  }
+  if (action === 'control_board') {
+    return cleanUndefined({
+      ...common,
+      action: args.control,
+      mode: args.boardMode,
+    });
+  }
+  if (action === 'update_column') {
+    return cleanUndefined({
+      ...common,
+      columnId: args.columnId,
+      automation: args.automation,
+      patch: args.patch,
+    });
+  }
+  if (action === 'delete_item') {
+    return common;
+  }
+  if (action === 'transition') {
+    return cleanUndefined({
+      ...common,
+      fromColumnId: args.fromColumnId,
+      toColumnId: args.toColumnId,
+      mode: args.mode,
+    });
+  }
+  if (action === 'orchestrate') {
+    return cleanUndefined({
+      ...common,
+      mode: args.mode,
+      resource_group: args.resourceGroup,
+      approval_mode: args.approvalMode,
+    });
+  }
+  if (action === 'control') {
+    return cleanUndefined({
+      ...common,
+      action: args.control,
+    });
+  }
+  if (action === 'recovery') {
+    return cleanUndefined({
+      ...common,
+      includeResolved: args.includeResolved,
+    });
+  }
+  if (action === 'reconcile') {
+    return cleanUndefined({
+      ...common,
+      force: args.force,
+    });
+  }
+  if (action === 'list_events') {
+    return cleanUndefined({
+      ...common,
+      eventTypes: args.eventTypes,
+      after: args.after,
+      before: args.before,
+    });
+  }
+  return common;
+}
+
+function nextForAction(action, args = {}, result = {}) {
+  let boardId = args.boardId || result.boardId || result.board?.id || DEFAULT_WORKFLOW_BOARD_ID;
+  let cardId = args.cardId || result.cardId || result.card?.id || result.id || null;
+
+  if (action === 'create_item') {
+    return {
+      recommendedAction: 'transition',
+      reason: 'New work items usually need classification/scoping before orchestration.',
+      call: cleanUndefined({ action: 'transition', boardId, cardId, toColumnId: 'backlog' }),
+    };
+  }
+  if (action === 'transition') {
+    if (result.status === 'blocked') {
+      return {
+        recommendedAction: 'update_item',
+        reason: 'The transition was blocked by gates; update missing card fields or checks, then retry transition.',
+        call: cleanUndefined({ action: 'update_item', boardId, cardId, patch: {} }),
+      };
+    }
+    if (args.toColumnId === 'ready') {
+      if (result.orchestration?.ok) {
+        return {
+          recommendedAction: 'get_board',
+          reason: 'The ready column auto-started orchestration; refresh the board to inspect run and lease state.',
+          call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId, includeRuntime: true }),
+        };
+      }
+      return {
+        recommendedAction: 'orchestrate',
+        reason: 'The ready column is configured for orchestrator handoff, but no automatic run was started.',
+        call: cleanUndefined({ action: 'orchestrate', boardId, cardId }),
+      };
+    }
+    return {
+      recommendedAction: 'get_board',
+      reason: 'Refresh the board projection after a workflow transition.',
+      call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId }),
+    };
+  }
+  if (action === 'recovery') {
+    return {
+      recommendedAction: 'reconcile',
+      reason: 'Persist recovery flags before resuming or orchestrating cards after restart.',
+      call: cleanUndefined({ action: 'reconcile', boardId, projectId: args.projectId }),
+    };
+  }
+  if (action === 'reconcile') {
+    return {
+      recommendedAction: 'get_board',
+      reason: 'Refresh the board to inspect persisted recovery flags.',
+      call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId, includeRuntime: true }),
+    };
+  }
+  if (action === 'orchestrate' || action === 'control' || action === 'control_board' || action === 'update_item' || action === 'update_board' || action === 'update_column' || action === 'delete_item') {
+    return {
+      recommendedAction: 'get_board',
+      reason: 'Refresh board state after runtime or card mutation.',
+      call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId, includeRuntime: true }),
+    };
+  }
+  return null;
+}
+
+function hintsForAction(action, result = {}) {
+  let hints = [
+    'Use action=help when unsure which workflow_board command to call.',
+    'Use action=get_board to refresh current board state before deciding the next mutation.',
+  ];
+  if (action === 'get_board') {
+    hints.push('Use action=transition for column moves; do not mutate columnId directly.');
+  }
+  if (result?.status === 'blocked' || result?.ok === false) {
+    hints.push('Read gateResult/failures, then use action=update_item or checks before retrying.');
+  }
+  return hints;
+}
+
+function wrapResult(action, args, result) {
+  return {
+    ok: result?.ok === false ? false : true,
+    schemaVersion: WORKFLOW_BOARD_TOOL_SCHEMA,
+    tool: WORKFLOW_BOARD_TOOL_NAME,
+    action,
+    result,
+    next: nextForAction(action, args, result),
+    hints: hintsForAction(action, result),
+  };
 }
 
 export async function resolveWorkflowBoardService(proxyManager = null, options = {}) {
@@ -476,12 +592,12 @@ export async function resolveWorkflowBoardService(proxyManager = null, options =
   );
 }
 
-function getWorkflowServiceMethod(service, toolName) {
-  let methodName = TOOL_METHODS[toolName];
+function getWorkflowServiceMethod(service, action) {
+  let methodName = ACTIONS[action]?.method;
   if (!methodName) return null;
   if (typeof service?.[methodName] !== 'function') {
     throw new Error(
-      `Workflow board service is missing ${methodName}() required by ${toolName}.`,
+      `Workflow board service is missing ${methodName}() required by workflow_board action=${action}.`,
     );
   }
   return service[methodName].bind(service);
@@ -495,36 +611,46 @@ export async function handleWorkflowBoardTool(
   options = {},
 ) {
   if (!isWorkflowBoardTool(toolName)) {
-    return errorResult(`Unknown workflow board tool: ${toolName}`);
+    return errorResult(`Unknown workflow board tool: ${toolName}. Use ${WORKFLOW_BOARD_TOOL_NAME}.`);
   }
+
+  let action = String(args.action || '').trim();
+  if (action === 'help') return textResult(helpPayload());
+
+  let validation = validateActionArgs(action, args);
+  if (!validation.ok) return errorResult(validation.message, validation.details);
 
   let service;
   try {
     service = await resolveWorkflowBoardService(proxyManager, options);
   } catch (error) {
-    return errorResult(error.message);
+    return errorResult(error.message, { action });
   }
 
   let method;
   try {
-    method = getWorkflowServiceMethod(service, toolName);
+    method = getWorkflowServiceMethod(service, action);
   } catch (error) {
-    return errorResult(error.message);
+    return errorResult(error.message, { action });
   }
 
   let context = {
     ...(options.context || {}),
     source,
     toolName,
+    action,
     proxyManager,
   };
-  let normalizedArgs = normalizeAliases(args, toolName);
+  let serviceArgs = serviceArgsForAction(action, args);
   let result;
   try {
-    result = await method(normalizedArgs, context);
+    result = await method(serviceArgs, context);
   } catch (error) {
-    return errorResult(`Workflow board service failed for ${toolName}: ${error.message}`);
+    return errorResult(`Workflow board service failed for action=${action}: ${error.message}`, {
+      action,
+      example: ACTION_EXAMPLES[action] || ACTION_EXAMPLES.help,
+    });
   }
   if (isMcpResult(result)) return result;
-  return textResult(result ?? { ok: true });
+  return textResult(wrapResult(action, serviceArgs, result ?? { ok: true }));
 }

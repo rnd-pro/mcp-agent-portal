@@ -12,6 +12,8 @@ import {
 } from './workflow-board-tools.js';
 
 const FINAL_AGENT_MESSAGE_TEXT_LIMIT = 4000;
+const INTERNAL_TASK_TOOL_TIMEOUT_MS = 600_000;
+const INTERNAL_TASK_STATE_TIMEOUT_MS = 5_000;
 const LOCAL_PATH_RE = /\/Users\/[^\s`'")\]}]+/g;
 const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const SECRET_FIELD_RE = /\b(authorization|cookie|password|secret|session[_ -]?id|token|api[_ -]?key)\b\s*[:=]\s*([^\s,;)}\]]+)/gi;
@@ -26,7 +28,7 @@ export const ORCHESTRATOR_META_TOOLS = [
         projectId: { type: 'string', description: 'Optional project filter.' },
         parentChatId: { type: 'string', description: 'Optional parent chat filter.' },
         origin: { type: 'string', description: 'Optional origin filter: portal, mcp, or agent.' },
-        active_only: { type: 'boolean', description: 'Only return chats with a pending task.' },
+        active_only: { type: 'boolean', description: 'Only return chats with an active task.' },
         limit: { type: 'number', description: 'Maximum number of chats to return.' },
       },
     },
@@ -167,7 +169,7 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_orchestrator_status',
-    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, task liveness classification, and structured promptHintMap suggestions.',
+    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, systemLoad capacity summary, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, task liveness classification, and structured promptHintMap suggestions.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -582,14 +584,41 @@ async function getStateGraph(options = {}) {
   return mod.getStateGraph();
 }
 
-function filterChatList(chats, args = {}) {
+function runtimeTaskId(task = {}) {
+  return task.id || task.taskId || task.task_id || null;
+}
+
+function taskStateHasFreshRuntime(taskState = null) {
+  return taskState && !taskState.error;
+}
+
+function runtimeTaskForId(taskState = null, taskId = null) {
+  if (!taskId) return null;
+  return (taskState?.tasks || []).find(task => runtimeTaskId(task) === taskId) || null;
+}
+
+function isActiveChatTask(sg, taskState, chat = null) {
+  let taskId = chat?.pendingTaskId;
+  if (!taskId) return false;
+  let runtimeTask = runtimeTaskForId(taskState, taskId);
+  if (runtimeTask) return isRunningTaskStatus(runtimeTask.status);
+  if (taskStateHasFreshRuntime(taskState)) return false;
+  return isRunningTaskStatus(sg?.get?.(`tasks/${taskId}`)?.status);
+}
+
+function activeChatCount(chats = [], sg, taskState = null) {
+  return chats.filter(chat => isActiveChatTask(sg, taskState, chat)).length;
+}
+
+function filterChatList(chats, args = {}, options = {}) {
   let activeOnly = Boolean(args.active_only || args.activeOnly);
   let limit = Number(args.limit);
+  let { sg = null, taskState = null } = options;
   let result = chats
     .filter(chat => !args.projectId || chat.projectId === args.projectId)
     .filter(chat => !args.parentChatId || chat.parentChatId === args.parentChatId)
     .filter(chat => !args.origin || chat.origin === args.origin)
-    .filter(chat => !activeOnly || chat.pendingTaskId);
+    .filter(chat => !activeOnly || isActiveChatTask(sg, taskState, chat));
 
   if (Number.isFinite(limit) && limit > 0) {
     result = result.slice(0, Math.floor(limit));
@@ -617,19 +646,19 @@ function summarizeStaleProcesses(staleProcesses = []) {
   };
 }
 
-async function callInternalTaskTool(proxyManager, name, args) {
+async function callInternalTaskTool(proxyManager, name, args, timeoutMs = INTERNAL_TASK_TOOL_TIMEOUT_MS) {
   if (!proxyManager?.requestFromChild) {
     throw new Error('Agent Portal internal runtime is unavailable.');
   }
   return proxyManager.requestFromChild('agent-pool', 'tools/call', {
     name,
     arguments: args,
-  }, 600_000);
+  }, timeoutMs);
 }
 
 async function readInternalTaskState(proxyManager) {
   try {
-    let result = await callInternalTaskTool(proxyManager, 'list_tasks', {});
+    let result = await callInternalTaskTool(proxyManager, 'list_tasks', {}, INTERNAL_TASK_STATE_TIMEOUT_MS);
     return parseTaskStateResult(result);
   } catch (error) {
     return { tasks: [], staleProcesses: [], error: error.message };
@@ -678,8 +707,10 @@ export async function handlePortalOrchestratorTool(
   }
 
   if (toolName === 'list_chats') {
+    let activeOnly = Boolean(args.active_only || args.activeOnly);
+    let taskState = activeOnly ? await readInternalTaskState(proxyManager) : null;
     return textResult({
-      chats: filterChatList(sg.listChats(), args),
+      chats: filterChatList(sg.listChats(), args, { sg, taskState }),
     });
   }
 
@@ -836,13 +867,14 @@ export async function handlePortalOrchestratorTool(
     let tasks = Object.entries(sg.get('tasks') || {}).map(([id, task]) => ({ id, ...task }));
     let { publicServers, internalServers } = summarizeHealth(proxyManager);
     let taskState = await readInternalTaskState(proxyManager);
+    let developmentMap = buildDevelopmentMap({ sg, taskState });
     return textResult({
       mode: process.env.PORTAL_MODE || 'standalone',
       publicServers,
       internalServers,
       chats: {
         total: chats.length,
-        active: chats.filter(chat => chat.pendingTaskId).length,
+        active: activeChatCount(chats, sg, taskState),
       },
       goals: {
         total: goals.length,
@@ -853,7 +885,8 @@ export async function handlePortalOrchestratorTool(
         total: tasks.length,
         active: tasks.filter(task => isRunningTaskStatus(task.status)).length,
       },
-      developmentMap: buildDevelopmentMap({ sg, taskState }),
+      systemLoad: developmentMap.system,
+      developmentMap,
       staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });
   }

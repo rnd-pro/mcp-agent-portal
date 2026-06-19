@@ -33,6 +33,28 @@ describe('Task State Cache — StateGraph integration', () => {
     return graph;
   }
 
+  it('persists chat goals immediately for backend restart recovery', () => {
+    let chatDir = path.join(tmpDir, 'goal-restart-chat-files');
+    let snapshotPath = path.join(tmpDir, 'goal-restart-snap.json');
+    let walPath = path.join(tmpDir, 'goal-restart-wal.log');
+    let first = createStateGraph({ snapshotPath, walPath, chatsDir: chatDir });
+
+    let { id: chatId } = first.createChat({ name: 'Restart Goal Chat', projectId: 'project-1' }, 'test');
+    let goal = first.createChatGoal({
+      chatId,
+      projectId: 'project-1',
+      title: 'Restart durable goal',
+      description: 'Goal must survive a backend restart.',
+    }, 'test');
+
+    let second = createStateGraph({ snapshotPath, walPath, chatsDir: chatDir });
+    second.load();
+
+    assert.equal(second.getChatGoal(goal.id).title, 'Restart durable goal');
+    assert.equal(second.get(`chats/${chatId}`).activeGoalId, goal.id);
+    assert.equal(second.getChat(chatId).activeGoalId, goal.id);
+  });
+
   it('uses environment paths for default storage locations', async () => {
     let envDir = path.join(tmpDir, 'env-defaults');
     let previous = {

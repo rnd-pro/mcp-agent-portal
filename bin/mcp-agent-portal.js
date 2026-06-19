@@ -15,6 +15,7 @@ import {
 import {
   META_TOOLS as PORTAL_META_TOOLS,
 } from '../src/node/proxy/mcp-multiplexer.js';
+import { isProcessAlive } from '../src/node/ops/process.js';
 
 let __filename = fileURLToPath(import.meta.url);
 let __dirname = dirname(__filename);
@@ -53,13 +54,7 @@ ${c.gray}      /___/  Unified MCP aggregator + AI agent runtime${c.reset}
 // ── Port Discovery ──────────────────────────────────────────────────
 
 function isAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return isProcessAlive(pid);
 }
 
 function readJsonFile(filePath) {
@@ -606,8 +601,16 @@ async function apiRequest(path, method = 'GET', body = null, options = {}) {
 const META_TOOLS = new Set(PORTAL_META_TOOLS.map(tool => tool.name));
 
 // Emulates an MCP Client connecting to the Multiplexer
-async function mcpCall(toolName, argsObj = {}) {
-  let port = getBackendPort();
+async function mcpCall(toolName, argsObj = {}, options = {}) {
+  let port;
+  if (options.projectRef) {
+    let backend = findWorkspaceBackend(options.projectRef, {
+      fallbackLatest: options.fallbackLatest !== false,
+    });
+    port = backend?.port || null;
+  } else {
+    port = getBackendPort();
+  }
   if (!port) {
     console.error('Backend not running. Start it with: npx mcp-agent-portal');
     process.exit(1);
@@ -1083,13 +1086,13 @@ let CLI = {
   },
 
   call: {
-    desc: 'Call any MCP tool (usage: call <tool> [json_args])',
+    desc: 'Call any MCP tool (usage: call <tool> [json_args] [--project <path|name>])',
     async handler() {
-      let { positional } = parseFlags(args);
+      let { flags, positional } = parseFlags(args);
       let toolName = positional[0];
       let jsonArgs = positional[1] || '{}';
       if (!toolName) {
-        console.error('Usage: mcp-agent-portal call <toolName> [json_args]');
+        console.error('Usage: mcp-agent-portal call <toolName> [json_args] [--project <path|name>]');
         process.exit(1);
       }
       let parsedArgs;
@@ -1100,7 +1103,10 @@ let CLI = {
         process.exit(1);
       }
       try {
-        let res = await mcpCall(toolName, parsedArgs);
+        let res = await mcpCall(toolName, parsedArgs, {
+          projectRef: flags.project,
+          fallbackLatest: !flags.project,
+        });
         // Special case for tools returning markdown text like discover_tools
         if (res.content?.[0]?.type === 'text' && res.content.length === 1) {
           console.log(res.content[0].text);

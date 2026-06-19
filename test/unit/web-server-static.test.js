@@ -84,3 +84,13 @@ test('web server prefers built web root when production dist exists', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('web server bounds internal task state snapshots for portal status', () => {
+  let source = fs.readFileSync(new URL('../../src/node/server/web-server.js', import.meta.url), 'utf8');
+
+  assert.match(source, /const INTERNAL_TASK_STATE_TIMEOUT_MS = 5_000;/);
+  assert.match(source, /name: 'list_tasks'[\s\S]*?\}, INTERNAL_TASK_STATE_TIMEOUT_MS\);/);
+  assert.doesNotMatch(source, /name: 'list_tasks'[\s\S]{0,160}\}, 600_000\);/);
+  assert.match(source, /let developmentMap = buildDevelopmentMap\(\{ sg, taskState \}\);/);
+  assert.match(source, /systemLoad: developmentMap\.system,/);
+});

@@ -44,14 +44,17 @@ pg-group-manager {
 
 .gm-board {
   flex: 1;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(248px, 312px);
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  gap: 12px;
-  overflow: auto;
-  padding: 12px;
-  align-items: stretch;
+  min-height: 0;
+  --sn-kanban-column-width: minmax(248px, 312px);
+  --sn-kanban-columns-height: max-content;
+  --sn-kanban-columns-min-height: 100%;
+  --sn-kanban-columns-align: stretch;
+  --sn-kanban-column-min-height: 100%;
+  --sn-kanban-gap: 12px;
+  --sn-kanban-padding: 12px;
+  --sn-kanban-header-padding: 0;
+  --sn-kanban-header-min-height: 0;
+  --sn-kanban-column-bg: var(--sn-bg);
 }
 
 .gm-unassigned {
@@ -64,15 +67,13 @@ pg-group-manager {
   background: var(--sn-bg);
 }
 
-.gm-column {
-  min-height: 100%;
+.gm-board .sn-kanban-column-header {
+  display: block;
+}
+
+.gm-board .sn-kanban-column-body {
   display: grid;
-  grid-template-rows: subgrid;
-  grid-row: span 5;
-  background: var(--sn-bg);
-  border: 1px solid var(--sn-node-border);
-  border-radius: 8px;
-  overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .gm-column-head {

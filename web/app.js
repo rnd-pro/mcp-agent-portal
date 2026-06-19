@@ -31,6 +31,7 @@ import "./panels/ToolExplorer/ToolExplorer.js";
 import "./panels/ActiveTasks/ActiveTasks.js";
 import "./panels/PipelineManager/PipelineManager.js";
 import "./panels/WorkflowBoard/WorkflowBoard.js";
+import "./panels/WorkflowBoard/WorkflowCardMarkdown.js";
 import "./panels/WorkflowExplorer/WorkflowExplorer.js";
 import "./panels/GroupManager/GroupManager.js";
 import "./panels/SkillManager/AgentPortalTree.js";

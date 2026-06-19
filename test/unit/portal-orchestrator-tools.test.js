@@ -74,15 +74,26 @@ describe('portal orchestrator MCP tools', () => {
       'cancel_chat_task',
       'finish_chat_task',
       'get_orchestrator_status',
-      'list_workflow_boards',
-      'get_workflow_board',
-      'request_workflow_transition',
-      'get_workflow_recovery_state',
+      'workflow_board',
     ]) {
       assert.ok(names.includes(name), `missing ${name}`);
     }
 
-    for (let rawName of ['delegate_task', 'get_task_result', 'cancel_task', 'finish_task', 'list_tasks']) {
+    for (let rawName of [
+      'delegate_task',
+      'get_task_result',
+      'cancel_task',
+      'finish_task',
+      'list_tasks',
+      'list_workflow_boards',
+      'get_workflow_board',
+      'request_workflow_transition',
+      'claim_work_item',
+      'release_work_item',
+      'resume_work_item',
+      'import_workflow_work_items',
+      'export_workflow_work_item',
+    ]) {
       assert.equal(names.includes(rawName), false, `must not expose raw ${rawName}`);
     }
   });
@@ -113,6 +124,42 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(loaded.id, chat.id);
     assert.equal(loaded.messageCount, 1);
     assert.equal('messages' in loaded, false);
+  });
+
+  it('lists only chats with live runtime tasks when active_only is set', async () => {
+    let stale = sg.createChat({ name: 'Stale task chat' }, 'test');
+    let running = sg.createChat({ name: 'Running task chat' }, 'test');
+    let idle = sg.createChat({ name: 'Idle chat' }, 'test');
+    sg.updateChatTask(stale.id, 'task-stale');
+    sg.updateChatTask(running.id, 'task-running');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{ id: 'task-running', status: 'running', chatId: running.id }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'list_chats',
+      { active_only: true },
+      'test',
+      { stateGraph: sg },
+    );
+    let listed = JSON.parse(result.content[0].text);
+
+    assert.deepEqual(listed.chats.map(chat => chat.id), [running.id]);
+    assert.equal(listed.chats.some(chat => chat.id === stale.id), false);
+    assert.equal(listed.chats.some(chat => chat.id === idle.id), false);
   });
 
   it('sets chat sessions without echoing the session value to MCP callers', async () => {
@@ -163,7 +210,7 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(broadcasts.some(event => event.params?.path === 'chats.updated'), true);
   });
 
-  it('routes workflow board MCP tools through the workflow service', async () => {
+  it('routes the single workflow_board MCP tool through the workflow service', async () => {
     let calls = [];
     let workflowService = {
       requestWorkflowTransition: async (args, context) => {
@@ -179,13 +226,14 @@ describe('portal orchestrator MCP tools', () => {
 
     let result = await handlePortalOrchestratorTool(
       proxyManager,
-      'request_workflow_transition',
+      'workflow_board',
       {
-        board_id: 'agent-workflow-default',
-        card_id: 'card-1',
-        from_column_id: 'ready',
-        to_column_id: 'in-progress',
-        expected_version: 7,
+        action: 'transition',
+        boardId: 'agent-workflow-default',
+        cardId: 'card-1',
+        fromColumnId: 'ready',
+        toColumnId: 'in-progress',
+        expectedVersion: 7,
       },
       'test',
       { stateGraph: sg, workflowService },
@@ -193,12 +241,15 @@ describe('portal orchestrator MCP tools', () => {
     let payload = JSON.parse(result.content[0].text);
 
     assert.equal(result.isError, undefined);
-    assert.equal(payload.status, 'blocked');
-    assert.equal(payload.rollbackColumnId, 'ready');
+    assert.equal(payload.action, 'transition');
+    assert.equal(payload.result.status, 'blocked');
+    assert.equal(payload.result.rollbackColumnId, 'ready');
+    assert.equal(payload.next.recommendedAction, 'update_item');
     assert.equal(calls[0].args.boardId, 'agent-workflow-default');
     assert.equal(calls[0].args.cardId, 'card-1');
     assert.equal(calls[0].args.expectedVersion, 7);
-    assert.equal(calls[0].context.toolName, 'request_workflow_transition');
+    assert.equal(calls[0].context.toolName, 'workflow_board');
+    assert.equal(calls[0].context.action, 'transition');
   });
 
   it('updates pending chat task bindings for orchestrator recovery', async () => {
@@ -1353,8 +1404,8 @@ describe('portal orchestrator MCP tools', () => {
   });
 
   it('surfaces internal task-state read failures in orchestrator status', async () => {
-    proxyManager.requestFromChild = async (serverName, method, params) => {
-      internalCalls.push({ serverName, method, params });
+    proxyManager.requestFromChild = async (serverName, method, params, timeoutMs) => {
+      internalCalls.push({ serverName, method, params, timeoutMs });
       if (params.name === 'list_tasks') throw new Error('list_tasks unavailable');
       return { content: [{ type: 'text', text: `${params.name}:ok` }] };
     };
@@ -1370,6 +1421,7 @@ describe('portal orchestrator MCP tools', () => {
 
     assert.equal(status.developmentMap.stateError, 'list_tasks unavailable');
     assert.deepEqual(status.staleProcesses, { count: 0, taskIds: [] });
+    assert.equal(internalCalls[0].timeoutMs, 5000);
   });
 
   it('does not count unknown task status as active in orchestrator status', async () => {
@@ -1390,6 +1442,42 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(status.developmentMap.taskMap.runningIds.length, 0);
   });
 
+  it('does not count stale pending chat task bindings as active in orchestrator status', async () => {
+    let stale = sg.createChat({ name: 'Stale status chat' }, 'test');
+    let running = sg.createChat({ name: 'Running status chat' }, 'test');
+    sg.updateChatTask(stale.id, 'task-stale');
+    sg.updateChatTask(running.id, 'task-running');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{ id: 'task-running', status: 'running', chatId: running.id }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_orchestrator_status',
+      {},
+      'test',
+      { stateGraph: sg },
+    );
+    let status = JSON.parse(result.content[0].text);
+
+    assert.equal(status.chats.total, 2);
+    assert.equal(status.chats.active, 1);
+    assert.equal(status.tasks.active, 0);
+    assert.equal(status.developmentMap.usage.runningTasks, 1);
+  });
+
   it('summarizes stale processes without exposing raw process metadata', async () => {
     proxyManager.requestFromChild = async (serverName, method, params) => {
       internalCalls.push({ serverName, method, params });
@@ -1400,6 +1488,27 @@ describe('portal orchestrator MCP tools', () => {
             text: JSON.stringify({
               tasks: [],
               staleProcesses: [{ pid: 12345, taskId: 'task-stale', command: 'secret command' }],
+              systemLoad: {
+                total: 4,
+                ours: 2,
+                external: 1,
+                cpu: {
+                  count: 8,
+                  loadAvg1m: 3.2,
+                  loadRatio1m: 0.4,
+                },
+                memory: {
+                  totalBytes: 16000000000,
+                  freeBytes: 4000000000,
+                  usedRatio: 0.75,
+                },
+                capacity: {
+                  state: 'busy',
+                  recommendedMaxParallelTasks: 4,
+                  runningTaskCount: 0,
+                  trackedChildCount: 2,
+                },
+              },
             }),
           }],
         };
@@ -1417,6 +1526,11 @@ describe('portal orchestrator MCP tools', () => {
     let status = JSON.parse(result.content[0].text);
 
     assert.deepEqual(status.staleProcesses, { count: 1, taskIds: ['task-stale'] });
+    assert.equal(status.systemLoad.available, true);
+    assert.equal(status.systemLoad.cpu.loadRatio1m, 0.4);
+    assert.equal(status.systemLoad.memory.usedRatio, 0.75);
+    assert.equal(status.systemLoad.capacity.recommendedMaxParallelTasks, 4);
+    assert.deepEqual(status.systemLoad, status.developmentMap.system);
     assert.equal(JSON.stringify(status.staleProcesses).includes('12345'), false);
     assert.equal(JSON.stringify(status.staleProcesses).includes('secret command'), false);
   });

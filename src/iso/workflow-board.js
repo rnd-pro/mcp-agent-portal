@@ -21,8 +21,27 @@ export const WORKFLOW_BOARD_MODES = [
   'passive',
   'armed',
   'autonomous',
+  'manual',
   'paused',
+  'draining',
+  'stopped',
   'maintenance',
+  'recovery_only',
+];
+
+export const WORKFLOW_BOARD_PICKUP_MODES = ['auto', 'manual', 'disabled'];
+export const WORKFLOW_BOARD_RECOVERY_MODES = ['auto', 'manual', 'disabled'];
+export const WORKFLOW_BOARD_STOP_POLICIES = ['pause_scheduling', 'drain', 'stop_active', 'cancel_active'];
+export const WORKFLOW_BOARD_PUBLISH_MODES = ['manual', 'after_audit', 'disabled'];
+export const WORKFLOW_BOARD_CONTROL_ACTIONS = [
+  'pause',
+  'resume',
+  'drain',
+  'stop',
+  'maintenance',
+  'manual',
+  'recovery_only',
+  'arm',
 ];
 
 export const WORKFLOW_TRANSITION_MODES = ['manual', 'auto', 'gated'];
@@ -56,7 +75,7 @@ const DEFAULT_WORKFLOW_COLUMNS = [
   {
     id: 'backlog',
     title: 'Backlog',
-    automation: { trigger: 'manual', action: 'scope', mode: 'gated' },
+    automation: { trigger: 'manual', action: 'scope', mode: 'gated', agents: ['orchestrator'] },
   },
   {
     id: 'ready',
@@ -64,14 +83,21 @@ const DEFAULT_WORKFLOW_COLUMNS = [
     automation: {
       trigger: 'on_enter',
       action: 'orchestrate',
-      mode: 'gated',
-      agent: 'orchestrator',
+      mode: 'auto',
+      agents: ['orchestrator'],
+      parallelLimit: 4,
     },
   },
   {
     id: 'in-progress',
     title: 'In Progress',
-    automation: { trigger: 'lease_required', action: 'execute', mode: 'gated' },
+    automation: {
+      trigger: 'lease_required',
+      action: 'execute',
+      mode: 'gated',
+      agents: ['backend-engineer', 'ui-engineer', 'provider-engineer', 'tooling-engineer'],
+      parallelLimit: 4,
+    },
   },
   {
     id: 'quality-audit',
@@ -80,7 +106,8 @@ const DEFAULT_WORKFLOW_COLUMNS = [
       trigger: 'on_enter',
       action: 'audit',
       mode: 'gated',
-      agent: 'reviewer',
+      agents: ['qa-engineer', 'code-reviewer'],
+      parallelLimit: 2,
     },
   },
   {
@@ -90,7 +117,9 @@ const DEFAULT_WORKFLOW_COLUMNS = [
       trigger: 'manual',
       action: 'publish',
       mode: 'gated',
+      agents: ['release-manager'],
       approvalMode: 'plan',
+      parallelLimit: 1,
     },
   },
   {
@@ -99,6 +128,17 @@ const DEFAULT_WORKFLOW_COLUMNS = [
     automation: { trigger: 'manual', action: 'close', mode: 'manual' },
   },
 ];
+
+const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
+  pickup: 'auto',
+  recovery: 'manual',
+  stopPolicy: 'drain',
+  publishMode: 'manual',
+  defaultApprovalMode: 'plan',
+  globalParallelLimit: 8,
+  fallbackAgents: ['orchestrator'],
+  manualGateOverride: false,
+};
 
 const DEFAULT_WORKFLOW_TRANSITIONS = [
   {
@@ -191,6 +231,12 @@ function normalizeKnownValue(value, supported, fallback) {
   return supported.includes(text) ? text : fallback;
 }
 
+function positiveIntegerOrUndefined(value) {
+  let number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return undefined;
+  return Math.floor(number);
+}
+
 function checkPassed(value) {
   if (value === true) return true;
   if (value === false || value === null || value === undefined) return false;
@@ -203,17 +249,73 @@ function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function normalizeWorkflowAutomation(input = {}) {
+export function normalizeWorkflowAutomation(input = {}) {
   let automation = objectOrEmpty(input);
-  return Object.fromEntries(Object.entries({
+  let normalized = {
     trigger: textOrNull(automation.trigger),
     action: textOrNull(automation.action),
     mode: textOrNull(automation.mode),
     agent: textOrNull(automation.agent ?? automation.agentSlug ?? automation.agent_slug),
+    agents: textArray(automation.agents ?? automation.agentPool ?? automation.agent_pool),
     approvalMode: textOrNull(automation.approvalMode ?? automation.approval_mode),
     resourceGroup: textOrNull(automation.resourceGroup ?? automation.resource_group),
+    parallelLimit: Number.isFinite(Number(automation.parallelLimit ?? automation.parallel_limit))
+      ? Math.max(1, Math.floor(Number(automation.parallelLimit ?? automation.parallel_limit)))
+      : undefined,
     enabled: automation.enabled === undefined ? undefined : Boolean(automation.enabled),
-  }).filter(([, value]) => value !== undefined && value !== null));
+  };
+  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => {
+    if (value === undefined || value === null) return false;
+    if (Array.isArray(value) && value.length === 0) return false;
+    return true;
+  }));
+}
+
+export function normalizeWorkflowBoardMode(value, fallback = 'armed') {
+  return normalizeKnownValue(value, WORKFLOW_BOARD_MODES, fallback);
+}
+
+export function normalizeWorkflowBoardAutomation(input = {}) {
+  let automation = objectOrEmpty(input);
+  let fallbackAgents = textArray(
+    automation.fallbackAgents ?? automation.fallback_agents ?? automation.agents,
+  );
+  let globalParallelLimit = positiveIntegerOrUndefined(
+    automation.globalParallelLimit ?? automation.global_parallel_limit,
+  );
+  let leaseTtlMs = positiveIntegerOrUndefined(
+    automation.leaseTtlMs ?? automation.lease_ttl_ms,
+  );
+  return {
+    pickup: normalizeKnownValue(
+      automation.pickup ?? automation.pickupMode ?? automation.pickup_mode,
+      WORKFLOW_BOARD_PICKUP_MODES,
+      DEFAULT_WORKFLOW_BOARD_AUTOMATION.pickup,
+    ),
+    recovery: normalizeKnownValue(
+      automation.recovery ?? automation.recoveryMode ?? automation.recovery_mode,
+      WORKFLOW_BOARD_RECOVERY_MODES,
+      DEFAULT_WORKFLOW_BOARD_AUTOMATION.recovery,
+    ),
+    stopPolicy: normalizeKnownValue(
+      automation.stopPolicy ?? automation.stop_policy,
+      WORKFLOW_BOARD_STOP_POLICIES,
+      DEFAULT_WORKFLOW_BOARD_AUTOMATION.stopPolicy,
+    ),
+    publishMode: normalizeKnownValue(
+      automation.publishMode ?? automation.publish_mode,
+      WORKFLOW_BOARD_PUBLISH_MODES,
+      DEFAULT_WORKFLOW_BOARD_AUTOMATION.publishMode,
+    ),
+    defaultApprovalMode: textOrNull(automation.defaultApprovalMode ?? automation.default_approval_mode)
+      ?? DEFAULT_WORKFLOW_BOARD_AUTOMATION.defaultApprovalMode,
+    globalParallelLimit: globalParallelLimit ?? DEFAULT_WORKFLOW_BOARD_AUTOMATION.globalParallelLimit,
+    fallbackAgents: fallbackAgents.length
+      ? fallbackAgents
+      : [...DEFAULT_WORKFLOW_BOARD_AUTOMATION.fallbackAgents],
+    manualGateOverride: Boolean(automation.manualGateOverride ?? automation.manual_gate_override),
+    ...(leaseTtlMs ? { leaseTtlMs } : {}),
+  };
 }
 
 export function normalizeRecoveryFlags(flags = []) {
@@ -235,7 +337,8 @@ export function createDefaultWorkflowBoard(opts = {}) {
     schema: WORKFLOW_BOARD_SCHEMA,
     id,
     title: textOrNull(opts.title) ?? 'Agent Workflow',
-    mode: normalizeKnownValue(opts.mode, WORKFLOW_BOARD_MODES, 'armed'),
+    mode: normalizeWorkflowBoardMode(opts.mode, 'armed'),
+    automation: normalizeWorkflowBoardAutomation(opts.automation),
     columns: DEFAULT_WORKFLOW_COLUMNS.map(column => ({
       ...column,
       automation: { ...column.automation },
@@ -335,6 +438,7 @@ export function normalizeWorkflowTransitionEvent(input = {}, opts = {}) {
   return {
     schema: WORKFLOW_TRANSITION_SCHEMA,
     id,
+    eventType: textOrNull(input.eventType ?? input.event_type ?? input.type) ?? 'transition',
     boardId: textOrNull(input.boardId ?? input.board_id) ?? DEFAULT_WORKFLOW_BOARD_ID,
     cardId: textOrNull(input.cardId ?? input.card_id),
     fromColumnId: textOrNull(input.fromColumnId ?? input.from_column_id),

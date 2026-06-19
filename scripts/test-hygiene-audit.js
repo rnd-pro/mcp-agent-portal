@@ -261,6 +261,7 @@ function auditSymbioteImportMaps() {
 	    '"symbiote-ui/core/base-path.js":',
 	    '"symbiote-ui/ui":',
 	    '"symbiote-ui/graph":',
+	    '"symbiote-ui/board":',
 	    '"symbiote-ui/locale":',
 	    '"symbiote-ui/layout":',
 	    '"symbiote-ui/xr":',
