@@ -1010,6 +1010,18 @@ function summarizeNodeLiveness(tasks = []) {
   };
 }
 
+function shouldIncludeDevelopmentChat(chat, tasksByChat, toolsByChat, rootChatId) {
+  if (!chat?.id) return false;
+  if (rootChatId) return true;
+  if (chat.parentChatId) return true;
+  if ((tasksByChat.get(chat.id) || []).length) return true;
+  if ((toolsByChat.get(chat.id) || []).length) return true;
+  if (chat.pendingTaskId || chat.activeGoalId || chat.goalIntentActive) return true;
+  if (chat.sessionId || chat.lastTaskStatus) return true;
+  if (chat.projectId) return true;
+  return false;
+}
+
 function buildTree(nodes) {
   let byId = new Map(nodes.map((node) => [node.chatId, { ...node, children: [] }]));
   let roots = [];
@@ -1026,6 +1038,7 @@ function buildSubagentMap({ chats, scopedChatIds, rootChatId, tasks, toolUses, n
   let toolsByChat = mapByChat(toolUses);
   let nodes = chats
     .filter((chat) => chat?.id && scopedChatIds.has(chat.id))
+    .filter((chat) => shouldIncludeDevelopmentChat(chat, tasksByChat, toolsByChat, rootChatId))
     .map((chat) => summarizeChatNode(chat, tasksByChat, toolsByChat, rootChatId, now))
     .sort((a, b) => {
       if (rootChatId && a.chatId === rootChatId) return -1;

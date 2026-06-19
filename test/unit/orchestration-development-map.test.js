@@ -860,6 +860,49 @@ Available resource groups (1):
     assert.deepEqual(map.staleProcesses, { count: 0, taskIds: [] });
   });
 
+  it('omits idle root probe chats from unscoped development maps', () => {
+    let root = sg.createChat({
+      name: 'Active root',
+      agent: 'orchestrator',
+      projectId: 'project-1',
+      activeGoalId: 'goal-1',
+    }, 'test');
+    let child = sg.createChat({
+      name: 'Child scope',
+      parentChatId: root.id,
+      agent: 'tooling-engineer',
+    }, 'test');
+    let sessionRoot = sg.createChat({ name: 'Session root', agent: 'orchestrator' }, 'test');
+    sg.updateChatSession(sessionRoot.id, 'session-id');
+    let probe = sg.createChat({
+      name: 'Resource group error test',
+      agent: 'orchestrator',
+      resource_group: 'missing-group',
+    }, 'test');
+    sg.appendChatMessage(probe.id, {
+      role: 'user',
+      text: 'Try unavailable resource group',
+    });
+
+    let map = buildDevelopmentMap({ sg, taskState: { tasks: [], staleProcesses: [] } });
+    let ids = map.subagentMap.nodes.map((node) => node.chatId);
+
+    assert.equal(ids.includes(root.id), true);
+    assert.equal(ids.includes(child.id), true);
+    assert.equal(ids.includes(sessionRoot.id), true);
+    assert.equal(ids.includes(probe.id), false);
+    assert.equal(map.promptHintMap.hints.some((hint) => hint.id === 'aggregate-subagents'), true);
+    assert.equal(
+      map.promptHintMap.hints
+        .find((hint) => hint.id === 'aggregate-subagents')
+        .prompt.includes('Resource group error test'),
+      false,
+    );
+
+    let scoped = buildDevelopmentMap({ sg, chatId: probe.id, taskState: { tasks: [], staleProcesses: [] } });
+    assert.equal(scoped.subagentMap.nodes.some((node) => node.chatId === probe.id), true);
+  });
+
   it('classifies unknown task status as warning liveness instead of running', () => {
     let root = sg.createChat({ name: 'Root', agent: 'orchestrator' }, 'test');
     sg.updateChatTask(root.id, 'task-unknown');
