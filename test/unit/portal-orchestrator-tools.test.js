@@ -472,6 +472,64 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.developmentMap.requestedTask.resultUnavailableReason, 'task_terminal');
   });
 
+  it('reconciles terminal task state when the final message already exists', async () => {
+    let chat = sg.createChat({ name: 'Persisted final result chat' }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'Completed from runtime.',
+      taskId: 'task-complete',
+      streaming: false,
+    });
+    sg.updateChatTask(chat.id, 'task-new');
+    sg.set('tasks/task-complete', {
+      status: 'running',
+      chatId: chat.id,
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Completed from runtime.',
+              '',
+              '---',
+              '## Stats',
+              '- Exit code: 0',
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: '__RESULT_JSON__:{"toolCalls":[],"toolResults":[]}',
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-complete' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let messages = sg.getChat(chat.id).messages.filter(message => message.taskId === 'task-complete');
+
+    assert.equal(sg.getChat(chat.id).pendingTaskId, 'task-new');
+    assert.equal(sg.get('tasks/task-complete').status, 'done');
+    assert.equal(payload.developmentMap.requestedTask.status, 'done');
+    assert.equal(messages.filter(message => message.role === 'agent').length, 1);
+  });
+
   it('replaces short task placeholders with completed runtime results', async () => {
     let chat = sg.createChat({ name: 'Placeholder result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-placeholder');
@@ -793,7 +851,9 @@ describe('portal orchestrator MCP tools', () => {
     let repairHint = payload.developmentMap.promptHintMap.hints.find((hint) => hint.id === 'repair-final-answer');
 
     assert.equal(payload.finalAnswerReady, false);
-    assert.equal(payload.developmentMap.requestedTask.found, false);
+    assert.equal(payload.developmentMap.requestedTask.found, true);
+    assert.equal(payload.developmentMap.requestedTask.status, 'done');
+    assert.equal(sg.get('tasks/task-lost-release-packet').status, 'done');
     assert.equal(payload.finalAgentMessage.match, 'taskId');
     assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
     assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'RELEASE_AUTH_PACKET');
@@ -2166,6 +2226,7 @@ describe('portal orchestrator MCP tools', () => {
     let payload = JSON.parse(result.content[0].text);
 
     assert.equal(sg.getChat(chat.id).pendingTaskId, 'task-new');
+    assert.equal(sg.get('tasks/task-old').status, 'done');
     assert.equal(payload.finalAgentMessage.hasText, false);
   });
 

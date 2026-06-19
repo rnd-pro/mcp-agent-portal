@@ -855,29 +855,56 @@ function terminalStatusFromTaskResult(taskResult = null) {
 function reconcileCompletedChatTask(proxyManager, sg, chatId, taskId, taskResult) {
   if (!chatId || !taskId || !isTerminalTaskResult(taskResult)) return false;
   let chat = sg.getChat(chatId);
-  if (!chat || chat.pendingTaskId !== taskId) return false;
+  if (!chat) return false;
   let text = taskResultText(taskResult);
   let existing = findFinalAgentMessage(chat, taskId);
   let body = extractFinalAgentResponse(text);
-  if (existing?.match === 'taskId' && (!body || String(existing.message?.text || '').trim() === body.trim())) {
-    return false;
-  }
   let parsedResult = parseTaskResultJson(taskResult);
   let task = sg.get(`tasks/${taskId}`);
   let status = terminalStatusFromTaskResult(taskResult);
-  proxyManager?.taskRouter?.persistFinalTaskResult?.(
-    chatId,
-    taskId,
-    text,
-    task?.startedAt,
-    parsedResult,
-  );
+  let now = Date.now();
+  let pendingMatches = chat.pendingTaskId === taskId;
+  let finalAlreadyPersisted = existing?.match === 'taskId'
+    && (!body || String(existing.message?.text || '').trim() === body.trim());
+  if (finalAlreadyPersisted) {
+    sg.updateChatTask(chatId, null, { expectedTaskId: taskId });
+    if (pendingMatches) {
+      sg.updateChat(chatId, { lastTaskStatus: status === 'error' ? 'error' : 'done' });
+    }
+  } else if (pendingMatches) {
+    proxyManager?.taskRouter?.persistFinalTaskResult?.(
+      chatId,
+      taskId,
+      text,
+      task?.startedAt,
+      parsedResult,
+    );
+  }
   sg.merge(`tasks/${taskId}`, {
     status,
     type: status,
-    completedAt: Date.now(),
-    updatedAt: Date.now(),
+    completedAt: task?.completedAt ?? now,
+    updatedAt: now,
   }, 'task-result-reconcile');
+  return true;
+}
+
+function reconcileTaskScopedFinalMessage(sg, chatId, taskId, finalAgentMessage = {}, taskResult = null, taskState = null) {
+  if (!chatId || !taskId || !finalAgentMessage.hasText || finalAgentMessage.match !== 'taskId') return false;
+  if (isRunningTaskResult(taskResult)) return false;
+  let runtimeTask = runtimeTaskForId(taskState, taskId);
+  if (runtimeTask && isRunningTaskStatus(runtimeTask.status)) return false;
+  let task = sg.get(`tasks/${taskId}`);
+  if (task && isRunningTaskStatus(task.status)) return false;
+  let status = /^## (?:\[ERR\]|⚠️)?\s*Agent Failed/i.test(finalAgentMessage.text) ? 'error' : 'done';
+  let now = Date.now();
+  sg.merge(`tasks/${taskId}`, {
+    status,
+    type: status,
+    chatId,
+    completedAt: task?.completedAt ?? now,
+    updatedAt: now,
+  }, 'task-final-message-reconcile');
   return true;
 }
 
@@ -1131,6 +1158,15 @@ export async function handlePortalOrchestratorTool(
         requiredFinalMarkersForChatTask(chat, taskId),
       ),
     });
+    if (reconcileTaskScopedFinalMessage(sg, chatId, taskId, finalAgentMessage, taskResult, taskState)) {
+      developmentMap = buildDevelopmentMap({
+        sg,
+        chatId,
+        taskId,
+        taskResult,
+        taskState,
+      });
+    }
     let readiness = withFinalAnswerReadiness(developmentMap, chatId, taskId, finalAgentMessage, {
       taskResult,
       taskState,
