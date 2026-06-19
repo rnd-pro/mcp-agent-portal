@@ -868,8 +868,86 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(repairHint.arguments.entityRefs.chatId, chat.id);
     assert.equal(repairHint.arguments.entityRefs.goalId, goal.id);
     assert.deepEqual(repairHint.arguments.entityRefs.taskIds, ['task-active-goal-release-packet']);
-    assert.match(repairHint.arguments.body, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
+    assert.match(repairHint.arguments.body, /RELEASE_AUTH_PACKET:PASS or RELEASE_AUTH_PACKET:FAIL/);
+    assert.match(repairHint.arguments.body, /Final marker placement:/);
+    assert.ok(repairHint.arguments.acceptanceCriteria.some((criterion) => (
+      criterion.includes('Final response ends with RELEASE_AUTH_PACKET:PASS or RELEASE_AUTH_PACKET:FAIL')
+    )));
     assert.equal(payload.developmentMap.promptHints.some((hint) => hint.includes('resume_chat')), false);
+  });
+
+  it('does not invent proof markers for active-goal workflow repair hints', async () => {
+    let chat = sg.createChat({
+      name: 'Active goal generic repair chat',
+      projectId: 'symbiote-workspace',
+      goalIntentActive: true,
+    }, 'test');
+    let goal = sg.createChatGoal({
+      chatId: chat.id,
+      projectId: 'symbiote-workspace',
+      title: 'Generic audit gate',
+      description: 'Audit without a required marker.',
+    }, 'test');
+    sg.updateChatTask(chat.id, 'task-active-goal-generic-repair');
+    sg.set('tasks/task-active-goal-generic-repair', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Run the audit and report findings.',
+      completedAt: Date.now() - 1000,
+    }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: 'Done.',
+      taskId: 'task-active-goal-generic-repair',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: [
+                '# Task Result',
+                '## Agent Response',
+                'Done.',
+              ].join('\n'),
+            },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({ totalEvents: 3, toolCalls: [{ name: 'Bash' }] })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-active-goal-generic-repair' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let repairHint = payload.developmentMap.promptHintMap.hints.find((hint) => hint.id === 'repair-final-answer');
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-generic');
+    assert.ok(repairHint);
+    assert.equal(repairHint.tool, 'workflow_board');
+    assert.equal(repairHint.arguments.action, 'create_item');
+    assert.equal(repairHint.arguments.entityRefs.goalId, goal.id);
+    assert.doesNotMatch(repairHint.arguments.body, /PASS\/FAIL proof marker/);
+    assert.match(repairHint.arguments.body, /explicit no-blocker statement/);
+    assert.ok(repairHint.arguments.acceptanceCriteria.some((criterion) => (
+      criterion.includes('explicit no-blocker statement')
+    )));
   });
 
   it('allows release authorization packet proof before trailing workflow result marker', async () => {

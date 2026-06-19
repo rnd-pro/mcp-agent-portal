@@ -629,16 +629,23 @@ function workflowRepairBaseHint(baseHints = []) {
 function workflowRepairHintArguments(baseHint = null, chatId = null, taskId = null, markers = [], quality = {}) {
   let baseArgs = baseHint?.arguments || {};
   let markerText = markers.length
-    ? `${markers.join(', ')}:PASS or :FAIL`
+    ? markers.map(marker => `${marker}:PASS or ${marker}:FAIL`).join(' and ')
     : 'the required PASS/FAIL proof marker';
+  let markerPlacement = markers.length
+    ? `Final marker placement: the terminal response must end with ${markerText} on a final line before WORKFLOW_RESULT. Do not put narrative text after the marker.`
+    : null;
+  let requiredProof = markers.length
+    ? `Required proof: include ${markerText}, blocking issues, verification evidence, and WORKFLOW_RESULT.`
+    : 'Required proof: include a concrete closure body, blocking issues or an explicit no-blocker statement, verification evidence, and WORKFLOW_RESULT.';
   let body = [
     `Repair the terminal final answer for task ${taskId || '(unknown task)'}.`,
     '',
     'Scope: produce the concrete final closure that the previous terminal response omitted.',
-    `Required proof: include ${markerText}, blocking issues, verification evidence, and WORKFLOW_RESULT.`,
+    requiredProof,
+    markerPlacement,
     `Observed weak final state: ${quality.state || 'unknown'} (${quality.reason || 'no reason'}).`,
     'Do not end with an introduction to a report; include the report itself.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   return cleanUndefined({
     ...baseArgs,
     title: taskId ? `Repair final answer for ${taskId}` : 'Repair workflow final answer',
@@ -649,7 +656,10 @@ function workflowRepairHintArguments(baseHint = null, chatId = null, taskId = nu
     owner: baseArgs.owner || 'orchestrator',
     acceptanceCriteria: [
       'Final response includes the concrete closure body.',
-      `Final response includes ${markerText}.`,
+      markers.length
+        ? `Final response ends with ${markerText} on a final line before WORKFLOW_RESULT.`
+        : 'Final response includes blocking issues or an explicit no-blocker statement.',
+      'Final response includes verification evidence.',
       'Final response includes WORKFLOW_RESULT.',
       'Result is verified before moving past quality-audit.',
     ],
