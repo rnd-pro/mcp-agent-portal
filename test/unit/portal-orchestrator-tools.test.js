@@ -648,6 +648,119 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'COMPLETION_PROOF');
   });
 
+  it('flags missing required release authorization packet final marker', async () => {
+    let chat = sg.createChat({ name: 'Missing release packet marker result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-missing-release-packet');
+    sg.set('tasks/task-missing-release-packet', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Prepare the release packet. Final proof marker must be RELEASE_AUTH_PACKET:*.',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    let response = 'WORKFLOW_RESULT: **completed**';
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              response,
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response,
+              exitCode: 0,
+              totalEvents: 52,
+              toolCalls: [{ name: 'Bash', args: { command: 'npm test' } }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'release-auth-packet-marker-missing');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'RELEASE_AUTH_PACKET');
+  });
+
+  it('allows release authorization packet proof before trailing workflow result marker', async () => {
+    let chat = sg.createChat({ name: 'Release packet workflow result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-release-packet-workflow-result');
+    sg.set('tasks/task-release-packet-workflow-result', {
+      status: 'done',
+      chatId: chat.id,
+      prompt: 'Prepare the release packet. Final proof marker must be RELEASE_AUTH_PACKET:*.',
+    }, 'test');
+    let response = [
+      'Release authorization evidence is complete.',
+      'RELEASE_AUTH_PACKET:PASS - 1.0.0 authorization remains blocked pending user approval.',
+      'WORKFLOW_RESULT: **completed**',
+    ].join('\n');
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-release-packet-workflow-result',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: response,
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response,
+              exitCode: 0,
+              totalEvents: 52,
+              toolCalls: [{ name: 'Bash', args: { command: 'npm pack --dry-run --json' } }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-release-packet-workflow-result' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.equal(payload.finalAgentMessage.lastLine, 'WORKFLOW_RESULT: **completed**');
+  });
+
   it('uses runtime task prompt when checking required completion proof marker', async () => {
     let chat = sg.createChat({ name: 'Runtime proof marker result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-runtime-proof');
@@ -1440,6 +1553,71 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.state, 'weak-marker-only');
     assert.equal(payload.finalAgentMessage.quality.reason, 'marker-only-final');
     assert.equal(payload.finalAnswerReady, false);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      true,
+    );
+  });
+
+  it('flags workflow result only final text as not closure-ready', async () => {
+    let chat = sg.createChat({ name: 'Workflow marker-only result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-workflow-marker-only');
+    sg.set('tasks/task-workflow-marker-only', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let response = 'WORKFLOW_RESULT: **completed**';
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-workflow-marker-only',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 52,
+                toolCalls: [{
+                  name: 'TodoWrite',
+                  arguments: {
+                    todos: [
+                      { content: 'Verify evidence', status: 'completed' },
+                      { content: 'Produce release authorization packet', status: 'in_progress' },
+                    ],
+                  },
+                }],
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-workflow-marker-only' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-marker-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'marker-only-final');
     assert.equal(
       payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
       true,

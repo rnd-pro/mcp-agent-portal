@@ -354,8 +354,15 @@ function isMarkerOnlyFinalAgentText(text = '') {
   let passMarker = /^#{0,3}\s*[A-Z][A-Z0-9_]+:PASS(?:\s+-\s+.+)?$/;
   let outcome = /^#{0,3}\s*(?:workflow\s+outcome|outcome|status)\s*:\s*[\w -]+$/i;
   let separator = /^-{3,}$/;
-  return lines.some((line) => passMarker.test(line))
-    && lines.every((line) => passMarker.test(line) || outcome.test(line) || separator.test(line));
+  return lines.some((line) => passMarker.test(line) || isWorkflowResultLine(line))
+    && lines.every((line) => {
+      return passMarker.test(line) || outcome.test(line) || separator.test(line) || isWorkflowResultLine(line);
+    });
+}
+
+function isWorkflowResultLine(line = '') {
+  return /^#{0,3}\s*WORKFLOW_RESULT\s*:\s*\*{0,2}(?:completed|complete|done|failed|blocked|cancelled|canceled|pass|fail|needs_follow_up)\*{0,2}(?:\s+-\s+.+)?\s*$/i
+    .test(String(line || '').trim());
 }
 
 function parseMaybeJson(value) {
@@ -376,7 +383,7 @@ function normalizeRequiredFinalMarkers(markers = []) {
 function finalMarkerState(text = '', marker = '') {
   let lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   let safeMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  let pattern = new RegExp(`^${safeMarker}:[A-Z_][A-Z0-9_-]*(?:\\s+-\\s+.+)?$`);
+  let pattern = new RegExp(`^${safeMarker}:[A-Z_][A-Z0-9_-]*(?:\\s+[-\\u2013\\u2014]\\s+.+)?$`);
   let index = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (pattern.test(lines[i])) {
@@ -384,9 +391,13 @@ function finalMarkerState(text = '', marker = '') {
       break;
     }
   }
+  let trailingLines = index >= 0 ? lines.slice(index + 1) : [];
   return {
     found: index >= 0,
-    final: index >= 0 && index === lines.length - 1,
+    final: index >= 0 && (
+      index === lines.length - 1 ||
+      trailingLines.every(line => isWorkflowResultLine(line))
+    ),
     line: index >= 0 ? lines[index] : null,
   };
 }
@@ -692,7 +703,16 @@ function parseTaskResultJson(taskResult = null) {
 }
 
 function requiredFinalMarkersForText(text = '') {
-  return /\bCOMPLETION_PROOF\b/.test(String(text || '')) ? ['COMPLETION_PROOF'] : [];
+  let value = String(text || '');
+  let markers = new Set();
+  let explicitMarkerPattern = /\b([A-Z][A-Z0-9_]{2,})\s*:\s*(?:\*|PASS|FAIL)(?=$|[^A-Z0-9_])/g;
+  let match;
+  while ((match = explicitMarkerPattern.exec(value))) {
+    if (match[1] !== 'WORKFLOW_RESULT') markers.add(match[1]);
+  }
+  if (/\bCOMPLETION_PROOF\b/.test(value)) markers.add('COMPLETION_PROOF');
+  if (/\bRELEASE_AUTH_PACKET\b/.test(value)) markers.add('RELEASE_AUTH_PACKET');
+  return [...markers];
 }
 
 function mergeRequiredFinalMarkers(...markerLists) {
