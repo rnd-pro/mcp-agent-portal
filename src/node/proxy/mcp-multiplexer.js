@@ -28,6 +28,7 @@ import {
   buildDevelopmentMap,
   parseTaskStateResult,
 } from './orchestration-development-map.js';
+import { DEFAULT_WORKFLOW_BOARD_ID } from '../../iso/workflow-board.js';
 
 const INTERNAL_TASK_STATE_TIMEOUT_MS = 5_000;
 const TOOL_INDEX_REBUILD_TIMEOUT_MS = 10_000;
@@ -142,6 +143,8 @@ export let META_TOOLS = [
         files: { type: 'array', items: { type: 'string' }, description: 'Known relevant file paths used as structured context hints for the portal-managed orchestration run.' },
         goalMessageIds: { type: 'array', items: { type: 'string' }, description: 'Queued goal message IDs to mark applied and inject into this run.' },
         goal_message_ids: { type: 'array', items: { type: 'string' }, description: 'Alias for goalMessageIds.' },
+        workflow_bypass_reason: { type: 'string', description: 'Required to intentionally start an active goal task outside the workflow board. Normal goal work should use workflow_board create_item and transition to ready.' },
+        workflowBypassReason: { type: 'string', description: 'Alias for workflow_bypass_reason.' },
         timeout: { type: 'number', description: 'Timeout in seconds. Default: 600.' },
       },
       required: ['chatId', 'prompt'],
@@ -195,6 +198,96 @@ function normalizeIdList(value) {
 function compactText(text = '', limit = 180) {
   let value = String(text || '').replace(/\s+/g, ' ').trim();
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function normalizeFilesForRouting(files) {
+  if (!Array.isArray(files)) return [];
+  return [...new Set(files.map(file => String(file || '').trim()).filter(Boolean))];
+}
+
+function workflowBypassReason(args = {}) {
+  return String(args.workflow_bypass_reason || args.workflowBypassReason || '').replace(/\s+/g, ' ').trim();
+}
+
+function requiresWorkflowBoard(chat = null) {
+  return Boolean(chat?.activeGoalId || chat?.goalIntentActive);
+}
+
+function workflowEntityRefs(chatId, chat = {}, files = []) {
+  let refs = {};
+  if (chatId) refs.chatId = chatId;
+  if (chat?.activeGoalId) refs.goalId = chat.activeGoalId;
+  if (files.length) refs.files = files;
+  return refs;
+}
+
+function workflowBoardNextCalls({ chatId, chat = {}, prompt = '', files = [] }) {
+  let entityRefs = workflowEntityRefs(chatId, chat, files);
+  let createArguments = {
+    action: 'create_item',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    title: compactText(prompt, 80) || 'Workflow work item',
+    body: compactText(prompt, 800),
+    projectId: chat?.projectId || undefined,
+    owner: 'orchestrator',
+    acceptanceCriteria: [
+      'Scope, files, owner, and verification are explicit.',
+      'Result is verified before moving past quality-audit.',
+    ],
+    entityRefs,
+  };
+  return {
+    createItem: {
+      tool: 'workflow_board',
+      arguments: Object.fromEntries(
+        Object.entries(createArguments).filter(([, value]) => value !== undefined),
+      ),
+    },
+    transitionToReady: {
+      tool: 'workflow_board',
+      arguments: {
+        action: 'transition',
+        boardId: DEFAULT_WORKFLOW_BOARD_ID,
+        cardId: '<created-card-id>',
+        toColumnId: 'ready',
+        actor: 'orchestrator',
+        reason: 'Ready for board-governed orchestration.',
+      },
+    },
+  };
+}
+
+function blockedWorkflowRouting({ chatId, chat, prompt, files }) {
+  return {
+    required: true,
+    status: 'blocked_direct_task',
+    reason: 'active_goal_requires_workflow_board',
+    chatId,
+    goalId: chat?.activeGoalId || null,
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    next: workflowBoardNextCalls({ chatId, chat, prompt, files }),
+  };
+}
+
+function workflowRoutingForDirectTask({ chatId, chat, bypassReason = '', taskId = null }) {
+  let required = requiresWorkflowBoard(chat);
+  if (!required) {
+    return {
+      required: false,
+      status: 'direct_chat_task',
+      chatId,
+      taskId,
+    };
+  }
+  return {
+    required: true,
+    status: bypassReason ? 'bypassed' : 'blocked_direct_task',
+    bypassReason: bypassReason || null,
+    chatId,
+    taskId,
+    goalId: chat?.activeGoalId || null,
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+  };
 }
 
 export function summarizeDelegateArgs(args = {}) {
@@ -277,11 +370,26 @@ export async function resumeChatTool(proxyManager, args = {}) {
     return jsonTextResult({ ok: false, error: 'Missing required chatId or prompt.' }, { isError: true });
   }
 
-  let { getStateGraph } = await import('../state-graph.js');
-  let sg = getStateGraph();
+  let sg = proxyManager?.stateGraph;
+  if (!sg) {
+    let { getStateGraph } = await import('../state-graph.js');
+    sg = getStateGraph();
+  }
   let chat = sg.getChat(chatId);
   if (!chat) {
     return jsonTextResult({ ok: false, chatId, error: `Chat not found: ${chatId}` }, { isError: true });
+  }
+  let files = normalizeFilesForRouting(args.files);
+  let bypassReason = workflowBypassReason(args);
+  if (requiresWorkflowBoard(chat) && !bypassReason) {
+    return jsonTextResult({
+      ok: false,
+      chatId,
+      taskId: null,
+      error: 'Active goal task delegation must be routed through workflow_board. Use send_chat_message for chat-only updates, workflow_board create_item + transition ready for work, or provide workflow_bypass_reason for an audited direct task.',
+      workflowRouting: blockedWorkflowRouting({ chatId, chat, prompt, files }),
+      developmentMap: buildDevelopmentMap({ sg, chatId }),
+    }, { isError: true });
   }
 
   let cwd = args.cwd;
@@ -323,13 +431,14 @@ export async function resumeChatTool(proxyManager, args = {}) {
   if (args.agent || args.agent_slug) delegateArgs.agent_slug = args.agent || args.agent_slug;
   if (args.context_mode === 'auto' || args.context_mode === 'off') delegateArgs.context_mode = args.context_mode;
   if (goalQueueMessages.length) delegateArgs.goalQueueMessages = goalQueueMessages;
-  if (Array.isArray(args.files)) {
-    let files = [...new Set(args.files.map(file => String(file || '').trim()).filter(Boolean))];
-    if (files.length) delegateArgs.files = files;
-  }
+  if (files.length) delegateArgs.files = files;
 
-  let prepared = await prepareDelegateTaskCall(proxyManager, 'delegate_task', delegateArgs, { source: 'mcp' });
+  let prepared = await prepareDelegateTaskCall(proxyManager, 'delegate_task', delegateArgs, {
+    source: 'mcp',
+    stateGraph: sg,
+  });
   delegateArgs = prepared.args;
+  let workflowRouting = workflowRoutingForDirectTask({ chatId, chat, bypassReason });
 
   let result = await proxyManager.requestFromChild('agent-pool', 'tools/call', {
     name: 'delegate_task',
@@ -345,6 +454,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
       error: result?.content?.[0]?.text || 'Delegation failed.',
       delegateSummary: summarizeDelegateArgs(delegateArgs),
       delegationPolicy: prepared.delegationPolicy || null,
+      workflowRouting,
       resourceGroupDiagnostics,
       routing: {
         chatId: prepared.chatId || chatId,
@@ -358,6 +468,20 @@ export async function resumeChatTool(proxyManager, args = {}) {
   let taskId = extractTaskIdFromDelegateResult(result);
   if (taskId) {
     sg.updateChatTask(chatId, taskId);
+    workflowRouting = workflowRoutingForDirectTask({ chatId, chat, bypassReason, taskId });
+    if (requiresWorkflowBoard(chat) && bypassReason) {
+      sg.merge(`tasks/${taskId}`, {
+        workflowRouting: {
+          status: 'bypassed',
+          reason: bypassReason,
+          expectedRoute: 'workflow_board',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          chatId,
+          goalId: chat.activeGoalId || null,
+          recordedAt: Date.now(),
+        },
+      }, 'mcp');
+    }
     if (proxyManager.chatWsServer) {
       proxyManager.chatWsServer.taskChatMap.set(taskId, chatId);
     }
@@ -375,6 +499,7 @@ export async function resumeChatTool(proxyManager, args = {}) {
     has_session: Boolean(delegateArgs.session_id),
     delegateSummary: summarizeDelegateArgs(delegateArgs),
     delegationPolicy: prepared.delegationPolicy || null,
+    workflowRouting,
     routing: {
       chatId: prepared.chatId || chatId,
       parentChatId: prepared.parentChatId || null,

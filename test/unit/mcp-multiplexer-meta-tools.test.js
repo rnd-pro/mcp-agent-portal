@@ -14,6 +14,7 @@ import {
 import {
   parseResourceGroupDiagnostics,
 } from '../../src/node/proxy/chat-delegate-routing.js';
+import { StateGraph } from '../../src/node/state-graph.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -66,6 +67,8 @@ test('resume_chat meta-tool exposes structured context controls', () => {
   assert.equal(properties.goalMessageIds.type, 'array');
   assert.equal(properties.goalMessageIds.items.type, 'string');
   assert.equal(properties.goal_message_ids.type, 'array');
+  assert.equal(properties.workflow_bypass_reason.type, 'string');
+  assert.equal(properties.workflowBypassReason.type, 'string');
 });
 
 test('resume_chat extracts full UUID task IDs from delegate_task results', () => {
@@ -120,6 +123,129 @@ test('resume_chat injects the active chat goal into delegated prompts only', () 
   assert.match(source, /delegateSummary: summarizeDelegateArgs\(delegateArgs\)/);
   assert.match(source, /delegationPolicy: prepared\.delegationPolicy \|\| null/);
   assert.doesNotMatch(source, /\nsession_id: delegateArgs\.session_id/);
+});
+
+test('resume_chat blocks active goal task delegation until it is routed through workflow_board', async () => {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-chat-workflow-required-'));
+  let sg;
+  try {
+    sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    let chat = sg.createChat({
+      name: 'Goal workflow chat',
+      adapter: 'pool',
+      agent: 'orchestrator',
+      projectId: 'symbiote-workspace',
+      goalIntentActive: true,
+    }, 'test');
+    let goal = sg.createChatGoal({
+      chatId: chat.id,
+      projectId: 'symbiote-workspace',
+      title: 'Build through board',
+    }, 'test');
+    let proxyManager = {
+      projectRoot: ROOT,
+      stateGraph: sg,
+      broadcastMonitor() {},
+      requestFromChild: async () => {
+        throw new Error('direct delegate_task should not run');
+      },
+    };
+
+    let result = await resumeChatTool(proxyManager, {
+      chatId: chat.id,
+      prompt: 'Implement a board-governed task',
+      files: ['src/node/proxy/mcp-multiplexer.js'],
+    });
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(result.isError, true);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.taskId, null);
+    assert.match(payload.error, /workflow_board/);
+    assert.equal(payload.workflowRouting.required, true);
+    assert.equal(payload.workflowRouting.status, 'blocked_direct_task');
+    assert.equal(payload.workflowRouting.next.createItem.tool, 'workflow_board');
+    assert.equal(payload.workflowRouting.next.createItem.arguments.action, 'create_item');
+    assert.equal(payload.workflowRouting.next.createItem.arguments.projectId, 'symbiote-workspace');
+    assert.equal(payload.workflowRouting.next.createItem.arguments.entityRefs.chatId, chat.id);
+    assert.equal(payload.workflowRouting.next.createItem.arguments.entityRefs.goalId, goal.id);
+    assert.deepEqual(payload.workflowRouting.next.createItem.arguments.entityRefs.files, ['src/node/proxy/mcp-multiplexer.js']);
+    assert.equal(payload.workflowRouting.next.transitionToReady.arguments.action, 'transition');
+    assert.equal(payload.workflowRouting.next.transitionToReady.arguments.toColumnId, 'ready');
+    assert.equal(sg.getChat(chat.id).messages.length, 0);
+  } finally {
+    await sg?.flushChatWrites?.();
+    sg?.flush?.();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('resume_chat records explicit workflow bypass metadata for active goal direct tasks', async () => {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-chat-workflow-bypass-'));
+  let sg;
+  try {
+    let taskId = '33333333-3333-4333-8333-333333333333';
+    sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    let chat = sg.createChat({
+      name: 'Goal bypass chat',
+      adapter: 'pool',
+      agent: 'orchestrator',
+      projectId: 'symbiote-workspace',
+      goalIntentActive: true,
+    }, 'test');
+    let goal = sg.createChatGoal({
+      chatId: chat.id,
+      projectId: 'symbiote-workspace',
+      title: 'Bypass only with audit',
+    }, 'test');
+    let calls = [];
+    let proxyManager = {
+      projectRoot: ROOT,
+      stateGraph: sg,
+      chatWsServer: { taskChatMap: new Map() },
+      broadcastMonitor() {},
+      requestFromChild: async (_serverName, _method, params) => {
+        if (params.name === 'list_tasks') {
+          return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+        }
+        calls.push(params);
+        return { content: [{ type: 'text', text: `Task delegated: ${taskId}` }] };
+      },
+    };
+
+    let result = await resumeChatTool(proxyManager, {
+      chatId: chat.id,
+      prompt: 'Run diagnostic without a board card',
+      workflow_bypass_reason: 'One-off transport diagnostic, not project implementation work.',
+    });
+    let payload = JSON.parse(result.content[0].text);
+    let task = sg.get(`tasks/${taskId}`);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.taskId, taskId);
+    assert.equal(payload.workflowRouting.required, true);
+    assert.equal(payload.workflowRouting.status, 'bypassed');
+    assert.equal(payload.workflowRouting.bypassReason, 'One-off transport diagnostic, not project implementation work.');
+    assert.equal(payload.workflowRouting.goalId, goal.id);
+    assert.equal(calls.length, 1);
+    assert.equal(task.workflowRouting.status, 'bypassed');
+    assert.equal(task.workflowRouting.reason, 'One-off transport diagnostic, not project implementation work.');
+    assert.equal(task.workflowRouting.expectedRoute, 'workflow_board');
+    assert.equal(sg.getChat(chat.id).pendingTaskId, taskId);
+  } finally {
+    await sg?.flushChatWrites?.();
+    sg?.flush?.();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('portal chat meta-tools default pool chats to orchestrator', () => {

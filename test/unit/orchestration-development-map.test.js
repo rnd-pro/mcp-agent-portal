@@ -344,6 +344,41 @@ describe('orchestration development map', () => {
     assert.equal(JSON.stringify(map).includes('agent-pool'), false);
   });
 
+  it('routes active goal prompt hints through workflow board work items', () => {
+    let root = sg.createChat({
+      name: 'Goal Root',
+      agent: 'orchestrator',
+      projectId: 'symbiote-workspace',
+      goalIntentActive: true,
+    }, 'test');
+    let goal = sg.createChatGoal({
+      chatId: root.id,
+      projectId: 'symbiote-workspace',
+      title: 'Board governed work',
+    }, 'test');
+
+    let map = buildDevelopmentMap({
+      sg,
+      chatId: root.id,
+      taskState: { tasks: [], staleProcesses: [] },
+    });
+    let createHint = map.promptHintMap.hints.find((hint) => hint.id === 'create-workflow-item');
+    let readyHint = map.promptHintMap.hints.find((hint) => hint.id === 'start-ready-workflow-item');
+
+    assert.equal(createHint.tool, 'workflow_board');
+    assert.equal(createHint.arguments.action, 'create_item');
+    assert.equal(createHint.arguments.projectId, 'symbiote-workspace');
+    assert.equal(createHint.arguments.entityRefs.chatId, root.id);
+    assert.equal(createHint.arguments.entityRefs.goalId, goal.id);
+    assert.equal(readyHint.tool, 'workflow_board');
+    assert.equal(readyHint.arguments.action, 'transition');
+    assert.equal(readyHint.arguments.toColumnId, 'ready');
+    assert.equal(map.promptHintMap.hints.some((hint) => hint.id === 'continue-chat'), false);
+    assert.equal(map.promptHintMap.hints.some((hint) => hint.tool === 'resume_chat'), false);
+    assert.ok(map.promptHints.some((hint) => hint.includes('workflow_board')));
+    assert.equal(JSON.stringify(map).includes('agent-pool'), false);
+  });
+
   it('parses bounded runtime task state from internal list responses', () => {
     let result = {
       content: [{

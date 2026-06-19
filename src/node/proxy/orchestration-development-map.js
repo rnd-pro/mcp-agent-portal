@@ -1,4 +1,5 @@
 import { parseResourceGroupDiagnostics } from './chat-delegate-routing.js';
+import { DEFAULT_WORKFLOW_BOARD_ID } from '../../iso/workflow-board.js';
 
 const TASK_TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'lost']);
 const TASK_RUNNING_STATUSES = new Set(['running', 'pending', 'queued', 'starting', 'active', 'in_progress']);
@@ -663,6 +664,7 @@ function buildStructuredPromptHints({
   latestTools = [],
   subagents = [],
   tasks = [],
+  workflowContext = {},
 }) {
   let hints = [];
   let runtimeHint = extractRuntimeHint(runtimeText);
@@ -701,7 +703,46 @@ function buildStructuredPromptHints({
       priority: runningCount > 0 ? 'high' : 'normal',
     });
   }
-  if (chatId) {
+  if (chatId && workflowContext.required) {
+    addPromptHint(hints, {
+      id: 'create-workflow-item',
+      category: 'workflow',
+      label: 'Create workflow work item',
+      prompt: 'Create a workflow board card for the next scoped task. Include owner, files, constraints, acceptance criteria, and verification before orchestration starts.',
+      tool: 'workflow_board',
+      arguments: cleanUndefined({
+        action: 'create_item',
+        boardId: DEFAULT_WORKFLOW_BOARD_ID,
+        projectId: workflowContext.projectId || undefined,
+        title: '<scoped work item title>',
+        body: '<scope, constraints, verification, files[], expected output>',
+        owner: 'orchestrator',
+        acceptanceCriteria: ['Scope is explicit', 'Verification command is defined'],
+        entityRefs: workflowEntityRefs(workflowContext, chatId),
+      }),
+      reason: 'Active goal work must be represented as a workflow board card before a delegated task starts.',
+      chatId,
+      priority: 'high',
+    });
+    addPromptHint(hints, {
+      id: 'start-ready-workflow-item',
+      category: 'workflow',
+      label: 'Start ready workflow item',
+      prompt: 'Move the scoped card to ready so the workflow board automation can lease it, start the run, and attach subagent task metadata.',
+      tool: 'workflow_board',
+      arguments: {
+        action: 'transition',
+        boardId: DEFAULT_WORKFLOW_BOARD_ID,
+        cardId: '<card-id>',
+        toColumnId: 'ready',
+        actor: 'orchestrator',
+        reason: 'Ready for board-governed orchestration.',
+      },
+      reason: 'The ready transition is the board-owned handoff from planning to orchestration.',
+      chatId,
+      priority: 'high',
+    });
+  } else if (chatId) {
     addPromptHint(hints, {
       id: 'continue-chat',
       category: 'delegation',
@@ -838,6 +879,28 @@ function summarizeLatestTool(tool = null) {
     resultSummary: tool.resultSummary || null,
     resultUnavailableReason: tool.resultUnavailableReason || null,
   };
+}
+
+function cleanUndefined(input = {}) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+}
+
+function workflowContextForChat(chat = null) {
+  return {
+    required: Boolean(chat?.activeGoalId || chat?.goalIntentActive),
+    chatId: chat?.id || null,
+    projectId: chat?.projectId || null,
+    activeGoalId: chat?.activeGoalId || null,
+  };
+}
+
+function workflowEntityRefs(workflowContext = {}, chatId = null) {
+  return cleanUndefined({
+    chatId: chatId || workflowContext.chatId || undefined,
+    goalId: workflowContext.activeGoalId || undefined,
+  });
 }
 
 function sortToolsByActivity(toolUses = []) {
@@ -1508,6 +1571,7 @@ export function buildDevelopmentMap({
 } = {}) {
   let now = Date.now();
   let chats = sg?.listChats?.() || [];
+  let rootChat = chatId ? chats.find((chat) => chat?.id === chatId) || sg?.getChat?.(chatId) || null : null;
   let scopedChatIds = descendantChatIds(chats, chatId);
   let runtime = extractRuntimeResult(taskResult || {});
   let allTasks = applyRuntimeEventCounters(mergeTaskSnapshots(sg, taskState), runtime.events, taskId);
@@ -1561,6 +1625,7 @@ export function buildDevelopmentMap({
     latestTools,
     subagents,
     tasks: scopedTasks,
+    workflowContext: workflowContextForChat(rootChat),
     now,
   };
   let promptHintMap = buildPromptHintMap(promptHintArgs);
