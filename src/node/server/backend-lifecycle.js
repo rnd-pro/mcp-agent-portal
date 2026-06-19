@@ -258,6 +258,7 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   const exit = options.exit || ((code) => process.exit(code));
   const openConnection = options.createConnection || createConnection;
   const randomBytesFn = options.randomBytes || randomBytes;
+  const persistentStartupRetry = options.persistentStartupRetry === true;
   const setTimer = options.setTimeout || setTimeout;
   const clearTimer = options.clearTimeout || clearTimeout;
   const logger = options.logger || console;
@@ -597,13 +598,14 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   function scheduleRetry(reason = 'connection-lost') {
     if (shuttingDown) return;
     retries++;
-    if (!everConnected && retries > MAX_RETRIES) {
+    if (!everConnected && !persistentStartupRetry && retries > MAX_RETRIES) {
       logger.error(`[portal] Proxy failed after ${MAX_RETRIES} retries — giving up`);
       shutdown(1);
       return;
     }
     const delay = Math.min(retryBaseMs * Math.pow(2, retries - 1), retryMaxMs);
-    logger.error(`[portal] Retrying WS connection in ${delay}ms (attempt ${retries}/${MAX_RETRIES}, reason: ${reason})...`);
+    const retryLimit = persistentStartupRetry && !everConnected ? 'startup-persistent' : MAX_RETRIES;
+    logger.error(`[portal] Retrying WS connection in ${delay}ms (attempt ${retries}/${retryLimit}, reason: ${reason})...`);
     retryTimer = setTimer(() => {
       retryTimer = null;
       connect();

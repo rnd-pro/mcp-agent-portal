@@ -311,6 +311,25 @@ describe('backend lifecycle', () => {
     assert.deepEqual(harness.exits, [1]);
   });
 
+  it('keeps retrying before the first websocket handshake when startup persistence is enabled', async () => {
+    let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-startup-persistent`);
+    let harness = createProxyHarness(mod, { maxRetries: 2, persistentStartupRetry: true });
+
+    await Promise.resolve();
+
+    for (let i = 0; i < 5; i++) {
+      harness.sockets.at(-1).emit('close');
+      assert.equal(harness.timers.length, 1);
+      harness.timers.shift()();
+      await Promise.resolve();
+    }
+
+    assert.equal(harness.sockets.length, 6);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
   it('keeps retrying after max retries once a websocket handshake previously succeeded', async () => {
     let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-post-connect-retries`);
     let harness = createProxyHarness(mod, { maxRetries: 2 });
