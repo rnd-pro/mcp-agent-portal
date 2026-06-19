@@ -30,7 +30,7 @@ const ACTIONS = {
   update_item: {
     method: 'updateWorkItem',
     description: 'Patch a workflow card/work item.',
-    required: ['cardId', 'patch'],
+    required: ['cardId'],
   },
   update_board: {
     method: 'updateWorkflowBoard',
@@ -218,6 +218,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         },
         metadata: { type: 'object', description: 'Optional work-item metadata for create_item.' },
         patch: { type: 'object', description: 'Fields to patch for update_item.' },
+        checks: { type: 'object', description: 'Optional gate checks for update_item.' },
         fromColumnId: { type: 'string', description: 'Expected current column for transition.' },
         toColumnId: { type: 'string', enum: DEFAULT_WORKFLOW_COLUMN_IDS, description: 'Destination column for transition.' },
         mode: { type: 'string', enum: ['manual', 'auto', 'gated'], description: 'Transition or orchestration mode.' },
@@ -425,6 +426,7 @@ function serviceArgsForAction(action, args = {}) {
     return cleanUndefined({
       ...common,
       patch: args.patch,
+      checks: args.checks,
     });
   }
   if (action === 'update_board') {

@@ -84,6 +84,7 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.routingHints.items.type, 'string');
     assert.equal(schema.properties.blockers.items.type, 'string');
     assert.equal(schema.properties.metadata.type, 'object');
+    assert.equal(schema.properties.checks.type, 'object');
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {
@@ -136,7 +137,12 @@ describe('workflow board MCP tool', () => {
         blockers: ['Waiting for approval'],
         metadata: { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' },
       },
-      update_item: { action: 'update_item', cardId: 'card-1', patch: { owner: 'agent' } },
+      update_item: {
+        action: 'update_item',
+        cardId: 'card-1',
+        patch: { owner: 'agent' },
+        checks: { audit: { status: 'pass' } },
+      },
       update_board: { action: 'update_board', patch: { mode: 'manual', automation: { pickup: 'manual' } } },
       control_board: { action: 'control_board', control: 'pause', projectId: 'project-1' },
       update_column: { action: 'update_column', columnId: 'ready', patch: { automation: { mode: 'gated' } } },
@@ -181,6 +187,7 @@ describe('workflow board MCP tool', () => {
     assert.deepEqual(calls[2].args.routingHints, ['release']);
     assert.deepEqual(calls[2].args.blockers, ['Waiting for approval']);
     assert.deepEqual(calls[2].args.metadata, { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' });
+    assert.deepEqual(calls[3].args.checks, { audit: { status: 'pass' } });
     assert.equal(calls[4].args.patch.mode, 'manual');
     assert.equal(calls[5].args.action, 'pause');
     assert.equal(calls[6].args.columnId, 'ready');
