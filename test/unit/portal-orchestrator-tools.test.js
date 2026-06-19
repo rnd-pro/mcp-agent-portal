@@ -648,6 +648,133 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'COMPLETION_PROOF');
   });
 
+  it('uses runtime task prompt when checking required completion proof marker', async () => {
+    let chat = sg.createChat({ name: 'Runtime proof marker result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-runtime-proof');
+    sg.set('tasks/task-runtime-proof', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Produce release report.',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Release report complete without the proof line.',
+            ].join('\n'),
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{
+                id: 'task-runtime-proof',
+                chatId: chat.id,
+                status: 'done',
+                prompt: 'Produce release report and end with COMPLETION_PROOF:*',
+                startedAt: Date.now() - 2000,
+                completedAt: Date.now(),
+                eventCount: 8,
+              }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'completion-proof-marker-missing');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'COMPLETION_PROOF');
+  });
+
+  it('uses the preceding user task request when checking required completion proof marker', async () => {
+    let chat = sg.createChat({ name: 'User proof marker result chat' }, 'test');
+    sg.appendChatMessage(chat.id, {
+      role: 'user',
+      text: 'Produce the release report. The final line must be COMPLETION_PROOF:PASS or COMPLETION_PROOF:FAIL.',
+      streaming: false,
+    });
+    sg.updateChatTask(chat.id, 'task-user-proof');
+    sg.set('tasks/task-user-proof', {
+      status: 'running',
+      chatId: chat.id,
+      prompt: 'Produce the release report.',
+      startedAt: Date.now() - 1000,
+      events: [],
+    }, 'test');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              'Release report complete without the proof line.',
+            ].join('\n'),
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{
+                id: 'task-user-proof',
+                chatId: chat.id,
+                status: 'done',
+                prompt: 'Produce the release report.',
+                startedAt: Date.now() - 2000,
+                completedAt: Date.now(),
+                eventCount: 8,
+              }],
+              staleProcesses: [],
+            }),
+          }],
+        };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-missing-marker');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'completion-proof-marker-missing');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, 'COMPLETION_PROOF');
+  });
+
   it('flags required completion proof marker that is not the final line', async () => {
     let chat = sg.createChat({ name: 'Non-final proof marker result chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-non-final-proof');
@@ -925,6 +1052,73 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(payload.finalAgentMessage.quality.reason, 'intro-only-final-with-runtime-activity');
     assert.equal(payload.finalAgentMessage.quality.toolCallCount, 2);
     assert.equal(payload.finalAgentMessage.quality.totalEvents, 22);
+  });
+
+  it('flags sufficient-data compile preface as intro-only when task completed', async () => {
+    let chat = sg.createChat({ name: 'Sufficient data preface result chat' }, 'test');
+    sg.updateChatTask(chat.id, 'task-sufficient-data-preface');
+    sg.set('tasks/task-sufficient-data-preface', {
+      status: 'done',
+      chatId: chat.id,
+    }, 'test');
+    let response = 'Now I have sufficient data for the audit. Let me compile the findings.';
+    sg.appendChatMessage(chat.id, {
+      role: 'agent',
+      text: response,
+      taskId: 'task-sufficient-data-preface',
+      streaming: false,
+    });
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [
+            { type: 'text', text: response },
+            {
+              type: 'text',
+              text: `__RESULT_JSON__:${JSON.stringify({
+                response,
+                exitCode: 0,
+                totalEvents: 19,
+                toolCalls: [
+                  { name: 'Read', args: { file_path: 'package.json' } },
+                  { name: 'Bash', args: { command: 'npm pack --dry-run --json' } },
+                ],
+                toolResults: [],
+              })}`,
+            },
+          ],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId: 'task-sufficient-data-preface' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, false);
+    assert.equal(payload.finalAgentMessage.hasText, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'weak-intro-only');
+    assert.equal(payload.finalAgentMessage.quality.reason, 'intro-only-final-with-runtime-activity');
+    assert.equal(payload.finalAgentMessage.quality.toolCallCount, 2);
+    assert.equal(payload.finalAgentMessage.quality.totalEvents, 19);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      true,
+    );
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'close-stage'),
+      false,
+    );
   });
 
   it('flags progress-log final text when terminal tasks still describe pending work', async () => {
@@ -1426,6 +1620,54 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(runtimePayload.developmentMap.latestTools[0].usageMs, 200);
     assert.equal(runtimePayload.developmentMap.runtime.eventCount, 2);
     assert.equal(JSON.stringify(runtimePayload).includes('secret-session-id'), false);
+  });
+
+  it('hydrates development map chat metadata from chat files when graph metadata is partial', async () => {
+    let root = sg.createChat({ name: 'Root orchestration', agent: 'orchestrator' }, 'test');
+    let child = sg.createChat({
+      name: 'Release Hygiene Audit',
+      parentChatId: root.id,
+      agent: 'release-manager',
+      approval_mode: 'plan',
+      resource_group: 'implementation',
+    }, 'test');
+    sg.updateChatTask(child.id, 'task-release-audit');
+    sg.set('tasks/task-release-audit', {
+      status: 'done',
+      chatId: child.id,
+      agentSlug: 'release-manager',
+      resourceGroup: 'implementation',
+      startedAt: 1000,
+      completedAt: 2000,
+    }, 'test');
+    await sg.flushChatWrites();
+    sg.commit([{
+      op: 'set',
+      path: `chats/${child.id}`,
+      value: {
+        messageCount: 3,
+        lastMessage: '',
+        updatedAt: 3000,
+        sessionId: 'session-release-audit',
+      },
+    }], 'partial-metadata');
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_development_map',
+      { chatId: child.id, taskId: 'task-release-audit' },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+    let node = payload.developmentMap.subagentMap.nodes.find((item) => item.chatId === child.id);
+
+    assert.equal(node.name, 'Release Hygiene Audit');
+    assert.equal(node.parentChatId, root.id);
+    assert.equal(node.agent, 'release-manager');
+    assert.equal(node.resourceGroup, 'implementation');
+    assert.equal(node.approvalMode, 'plan');
+    assert.equal(node.hasSession, true);
   });
 
   it('falls back to the latest chat agent message and infers chat scope from task state', async () => {

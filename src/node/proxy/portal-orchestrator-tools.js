@@ -300,6 +300,7 @@ function isIntroOnlyFinalAgentText(text = '') {
   return [
     /^now i have all (?:the )?evidence\.? here is (?:the )?.+\.?$/,
     /^now i have all (?:the )?evidence\.? let me (?:compile|prepare|produce|write) (?:the )?.+\.?$/,
+    /^now i have sufficient (?:data|evidence|information)(?: for (?:the )?.+?)?\.? let me (?:compile|prepare|produce|write) (?:the )?.+\.?$/,
     /^i now have (?:a )?(?:complete|full) picture\.? here is (?:my|the) .+\.?$/,
     /^here is (?:my|the) .+\.?$/,
   ].some((pattern) => pattern.test(normalized));
@@ -644,9 +645,28 @@ function parseTaskResultJson(taskResult = null) {
   }
 }
 
+function requiredFinalMarkersForText(text = '') {
+  return /\bCOMPLETION_PROOF\b/.test(String(text || '')) ? ['COMPLETION_PROOF'] : [];
+}
+
+function mergeRequiredFinalMarkers(...markerLists) {
+  return [...new Set(markerLists.flat().filter(Boolean))];
+}
+
 function requiredFinalMarkersForTask(task = null) {
-  let prompt = String(task?.prompt || task?.input || '');
-  return /\bCOMPLETION_PROOF\b/.test(prompt) ? ['COMPLETION_PROOF'] : [];
+  return requiredFinalMarkersForText(`${task?.prompt || ''}\n${task?.input || ''}`);
+}
+
+function requiredFinalMarkersForChatTask(chat = null, taskId = null) {
+  if (!chat || !taskId || !Array.isArray(chat.messages)) return [];
+  let firstTaskMessageIndex = chat.messages.findIndex((message) => message?.taskId === taskId);
+  if (firstTaskMessageIndex < 0) return [];
+  for (let i = firstTaskMessageIndex - 1; i >= 0; i--) {
+    let message = chat.messages[i];
+    if (message?.role !== 'user') continue;
+    return requiredFinalMarkersForText(message.text);
+  }
+  return [];
 }
 
 function isTerminalTaskResult(taskResult = null) {
@@ -928,11 +948,23 @@ export async function handlePortalOrchestratorTool(
     });
     let parsedResult = parseTaskResultJson(taskResult);
     let allowLatestFallback = !isRunningTaskResult(taskResult) && (!hasExplicitTaskId || taskResult?.isError);
-    let task = sg.get(`tasks/${taskId}`);
+    let stateTask = sg.get(`tasks/${taskId}`);
+    let runtimeTask = runtimeTaskForId(taskState, taskId);
+    let markerPrompt = [stateTask?.prompt, runtimeTask?.prompt].filter(Boolean).join('\n');
+    let markerInput = [stateTask?.input, runtimeTask?.input].filter(Boolean).join('\n');
+    let taskForMarkers = {
+      ...(runtimeTask || {}),
+      ...(stateTask || {}),
+      prompt: markerPrompt || undefined,
+      input: markerInput || undefined,
+    };
     let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId, {
       allowLatestFallback,
       parsedResult,
-      requiredFinalMarkers: requiredFinalMarkersForTask(task),
+      requiredFinalMarkers: mergeRequiredFinalMarkers(
+        requiredFinalMarkersForTask(taskForMarkers),
+        requiredFinalMarkersForChatTask(chat, taskId),
+      ),
     });
     let readiness = withFinalAnswerReadiness(developmentMap, chatId, taskId, finalAgentMessage);
     return textResult({

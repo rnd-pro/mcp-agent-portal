@@ -86,6 +86,12 @@ function normalizeChatOrigin(origin) {
   return 'portal';
 }
 
+function metadataValue(value, fallback, defaultValue = null) {
+  if (value !== undefined) return value;
+  if (fallback !== undefined) return fallback;
+  return defaultValue;
+}
+
 // ── Op Helpers ───────────────────────────────────────────
 
 /**
@@ -624,6 +630,50 @@ export class StateGraph extends EventEmitter {
     return JSON.parse(JSON.stringify(chat));
   }
 
+  _chatMetadata(chat = {}, fallback = {}) {
+    let messages = Array.isArray(chat.messages) ? chat.messages : [];
+    let lastMessage = messages.length
+      ? String(messages[messages.length - 1].text || '').slice(0, 80)
+      : fallback.lastMessage || '';
+    return {
+      name: chat.name ?? fallback.name ?? 'Untitled',
+      projectId: metadataValue(chat.projectId, fallback.projectId),
+      parentChatId: metadataValue(chat.parentChatId, fallback.parentChatId),
+      adapter: metadataValue(chat.adapter, fallback.adapter, 'pool'),
+      agent: chat.agent || chat.agent_slug || fallback.agent || null,
+      provider: metadataValue(chat.provider, fallback.provider),
+      model: metadataValue(chat.model, fallback.model),
+      approval_mode: metadataValue(chat.approval_mode, fallback.approval_mode),
+      resource_group: metadataValue(chat.resource_group, fallback.resource_group),
+      chatType: metadataValue(chat.chatType, fallback.chatType),
+      agentIcon: metadataValue(chat.agentIcon, fallback.agentIcon),
+      agentColor: metadataValue(chat.agentColor, fallback.agentColor),
+      origin: normalizeChatOrigin(chat.origin ?? fallback.origin),
+      messageCount: messages.length || fallback.messageCount || 0,
+      lastMessage,
+      updatedAt: chat.updatedAt ?? fallback.updatedAt ?? 0,
+      createdAt: chat.createdAt ?? fallback.createdAt ?? 0,
+      pendingTaskId: metadataValue(chat.pendingTaskId, fallback.pendingTaskId),
+      activeGoalId: metadataValue(chat.activeGoalId, fallback.activeGoalId),
+      goalIntentActive: Boolean(metadataValue(chat.goalIntentActive, fallback.goalIntentActive, false)),
+      goalQueueMode: metadataValue(chat.goalQueueMode, fallback.goalQueueMode),
+      sessionId: metadataValue(chat.sessionId, fallback.sessionId),
+    };
+  }
+
+  _completeChatMetadata(id, metadata = {}) {
+    if (
+      metadata.name
+      && Object.prototype.hasOwnProperty.call(metadata, 'parentChatId')
+      && Object.prototype.hasOwnProperty.call(metadata, 'agent')
+      && Object.prototype.hasOwnProperty.call(metadata, 'origin')
+    ) {
+      return metadata;
+    }
+    let chat = this.getChat(id);
+    return chat ? this._chatMetadata(chat, metadata) : metadata;
+  }
+
   _rememberChat(chatId, chat) {
     if (this._chatCache.has(chatId)) this._chatCache.delete(chatId);
     this._chatCache.set(chatId, this._cloneChat(chat));
@@ -764,7 +814,8 @@ export class StateGraph extends EventEmitter {
 
   // List chat metadata (sorted by updatedAt).
   listChats() {
-    return Object.entries(this._state.chats || {}).map(([id, c]) => ({ id, ...c }))
+    return Object.entries(this._state.chats || {})
+      .map(([id, c]) => ({ id, ...this._completeChatMetadata(id, c) }))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }
 
@@ -903,11 +954,11 @@ export class StateGraph extends EventEmitter {
     chat.updatedAt = Date.now();
     this._queueChatWrite(chatId, chat);
 
-    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
-      messageCount: chat.messages.length,
-      lastMessage: (msg.text || '').slice(0, 80),
-      updatedAt: chat.updatedAt,
-    }}], 'chat');
+    this.commit([{
+      op: 'merge',
+      path: `chats/${chatId}`,
+      value: this._chatMetadata(chat, this.get(`chats/${chatId}`) || {}),
+    }], 'chat');
   }
 
   // Replace all messages in a chat.
@@ -918,11 +969,11 @@ export class StateGraph extends EventEmitter {
     chat.updatedAt = Date.now();
     this._queueChatWrite(chatId, chat);
 
-    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
-      messageCount: messages.length,
-      lastMessage: messages.length ? (messages[messages.length - 1].text || '').slice(0, 80) : '',
-      updatedAt: chat.updatedAt,
-    }}], 'chat');
+    this.commit([{
+      op: 'merge',
+      path: `chats/${chatId}`,
+      value: this._chatMetadata(chat, this.get(`chats/${chatId}`) || {}),
+    }], 'chat');
   }
 
   appendChatProjectTransactions(chatId, transactions) {
@@ -1272,10 +1323,11 @@ export class StateGraph extends EventEmitter {
     chat.sessionId = sessionId;
     chat.updatedAt = Date.now();
     this._queueChatWrite(chatId, chat);
-    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
-      sessionId,
-      updatedAt: chat.updatedAt,
-    }}], 'chat');
+    this.commit([{
+      op: 'merge',
+      path: `chats/${chatId}`,
+      value: this._chatMetadata(chat, this.get(`chats/${chatId}`) || {}),
+    }], 'chat');
   }
 
   // Set or clear pending task ID.
@@ -1290,10 +1342,13 @@ export class StateGraph extends EventEmitter {
     chat.updatedAt = Date.now();
     this._queueChatWrite(chatId, chat);
 
-    this.commit([{ op: 'merge', path: `chats/${chatId}`, value: {
-      pendingTaskId: taskId || null,
-      updatedAt: chat.updatedAt,
-    }}], 'chat');
+    let current = this.get(`chats/${chatId}`) || {};
+    let fallback = taskId ? current : { ...current, pendingTaskId: null };
+    this.commit([{
+      op: 'merge',
+      path: `chats/${chatId}`,
+      value: this._chatMetadata(chat, fallback),
+    }], 'chat');
   }
 
   // ── Project Mutation Helpers ───────────────────────────
