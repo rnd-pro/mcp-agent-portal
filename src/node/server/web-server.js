@@ -25,6 +25,7 @@ import {
 } from '../proxy/mcp-tool-visibility.js';
 import {
   buildDevelopmentMap,
+  compactDevelopmentMap,
   parseTaskStateResult,
 } from '../proxy/orchestration-development-map.js';
 import { createAnthropicGatewayHandler } from './anthropic-gateway.js';
@@ -529,7 +530,7 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
       totalTools: tools.length,
       mode: process.env.PORTAL_MODE || 'standalone',
       systemLoad: developmentMap.system,
-      developmentMap,
+      developmentMap: args?.detail === 'full' ? developmentMap : compactDevelopmentMap(developmentMap),
       staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });
   }

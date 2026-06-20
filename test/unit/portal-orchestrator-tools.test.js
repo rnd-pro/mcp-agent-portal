@@ -2969,8 +2969,24 @@ describe('portal orchestrator MCP tools', () => {
 
     assert.equal(status.tasks.total, 1);
     assert.equal(status.tasks.active, 0);
+    assert.equal(status.developmentMap.compact, true);
     assert.equal(status.developmentMap.usage.runningTasks, 0);
-    assert.equal(status.developmentMap.taskMap.runningIds.length, 0);
+    assert.equal(status.developmentMap.counts.runningTasks, 0);
+  });
+
+  it('exposes the full development map when detail is "full"', async () => {
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_orchestrator_status',
+      { detail: 'full' },
+      'test',
+      { stateGraph: sg },
+    );
+    let status = JSON.parse(result.content[0].text);
+
+    assert.equal(status.developmentMap.compact, undefined);
+    assert.ok(status.developmentMap.taskMap);
+    assert.ok(status.developmentMap.subagentMap);
   });
 
   it('does not count stale pending chat task bindings as active in orchestrator status', async () => {

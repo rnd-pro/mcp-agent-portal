@@ -26,6 +26,7 @@ import {
 } from './mcp-tool-visibility.js';
 import {
   buildDevelopmentMap,
+  compactDevelopmentMap,
   parseTaskStateResult,
 } from './orchestration-development-map.js';
 import { DEFAULT_WORKFLOW_BOARD_ID } from '../../iso/workflow-board.js';
@@ -81,10 +82,12 @@ export let META_TOOLS = [
   },
   {
     name: 'get_portal_status',
-    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, systemLoad capacity summary, active MCP client/proxy telemetry, and the current developmentMap with activityMap, subagentMap, taskMap, toolMap, latestTools timing, usage totals, liveness, compatibility promptHints, and promptHintMap suggestions.',
+    description: 'Get the status of the mcp-agent-portal: connected public MCP servers, internal runtime health, total public tool count, available tags for discover_tools filtering, systemLoad capacity summary, active MCP client/proxy telemetry, and a development map. Returns a bounded compact development map by default; pass detail:"full" for the complete map (subagentMap, taskMap, toolMap, activityMap, promptHintMap) — large, may exceed an agent context budget.',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        detail: { type: 'string', enum: ['compact', 'full'], description: 'Development map detail. "compact" (default) returns a bounded summary; "full" returns the complete map.' },
+      },
     },
   },
   {
@@ -810,7 +813,7 @@ export class MCPMultiplexer {
           },
           systemLoad: developmentMap.system,
           mcpClients: this.proxyManager.getMcpClientSummary?.() || null,
-          developmentMap,
+          developmentMap: args?.detail === 'full' ? developmentMap : compactDevelopmentMap(developmentMap),
           staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
         };
         this.sendToIde({
