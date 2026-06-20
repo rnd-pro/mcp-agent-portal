@@ -907,15 +907,16 @@ export function createWorkflowBoardService(opts = {}) {
 
   function compactLoadSummary(projection, runtimeState = {}) {
     let cards = Array.isArray(projection.cards) ? projection.cards : [];
-    let activeRuns = cards.flatMap(card => Array.isArray(card.runs) ? card.runs : [])
+    let activeCards = cards.filter(card => COMPACT_ACTIVE_COLUMN_IDS.has(card.columnId));
+    let activeRuns = activeCards.flatMap(card => Array.isArray(card.runs) ? card.runs : [])
       .filter(run => RUNNING_RUN_STATUSES.has(String(run?.status || '').toLowerCase()));
-    let activeLeases = cards.filter(card => Boolean(card.lease));
+    let activeLeases = activeCards.filter(card => Boolean(card.lease));
     let runningTaskCount = runtimeState.runtime?.runningTaskCount
       ?? compactRuntimeSummary(runtimeState.tasks).runningTaskCount;
     return {
       boardMode: projection.board.mode,
       globalParallelLimit: finiteNumber(projection.board.automation?.globalParallelLimit),
-      activeCardCount: cards.filter(card => COMPACT_ACTIVE_COLUMN_IDS.has(card.columnId)).length,
+      activeCardCount: activeCards.length,
       blockedCardCount: cards.filter(card => (card.blockers || []).length > 0).length,
       activeRunCount: activeRuns.length,
       activeLeaseCount: activeLeases.length,

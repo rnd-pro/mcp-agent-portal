@@ -460,6 +460,31 @@ describe('workflow board model and service', () => {
       acceptanceCriteria: ['Already closed'],
       actor: 'test',
     });
+    sg.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-done-stale',
+        value: {
+          id: 'run-done-stale',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId: 'card-done',
+          status: 'running',
+          taskIds: [],
+          startedAt: 900,
+          updatedAt: 901,
+        },
+      },
+      {
+        op: 'set',
+        path: 'workflowLeases/card-done',
+        value: {
+          cardId: 'card-done',
+          runId: 'run-done-stale',
+          leaseOwner: 'orchestrator',
+          leaseExpiresAt: 2000,
+        },
+      },
+    ], 'test');
     service.updateWorkItem({
       cardId: active.card.id,
       actor: 'test',
@@ -481,6 +506,9 @@ describe('workflow board model and service', () => {
     assert.equal(compactColumn.count, 1);
     assert.equal(compactColumn.cards, undefined);
     assert.deepEqual(compact.cards.map(card => card.id), [active.card.id]);
+    assert.equal(compact.load.activeCardCount, 1);
+    assert.equal(compact.load.activeRunCount, 0);
+    assert.equal(compact.load.activeLeaseCount, 0);
     assert.equal(compactCard.events, undefined);
     assert.deepEqual(compactCard.checks, { audit: 'fail' });
     assert.equal(compact.systemLoad.available, true);
