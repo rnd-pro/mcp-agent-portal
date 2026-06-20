@@ -1563,6 +1563,12 @@ export function createWorkflowBoardService(opts = {}) {
     let outputContract = [
       '',
       '',
+      'Board-first orchestration requirements:',
+      '- Treat the workflow card and workflow run as the task source of truth; the chat is only the execution channel.',
+      '- For broad work with independent scopes, use `workflow_board` action `decompose` to create child cards with owners and acceptance criteria before doing or delegating the child work.',
+      '- Move ready child cards through the workflow board so their runs, chats, task ids, checks, and transitions remain visible in board state and development maps.',
+      '- Aggregate child-card results only after verifying their evidence against current files and runtime state.',
+      '',
       'Final response contract:',
       '- Start with the workflow outcome: completed, blocked, or needs_follow_up.',
       '- Address every acceptance criterion explicitly.',

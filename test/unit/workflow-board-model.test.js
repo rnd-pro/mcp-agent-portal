@@ -561,6 +561,10 @@ links:
     assert.equal(calls.length, 1);
     assert.match(calls[0].arguments.prompt, /Final response contract:/);
     assert.match(calls[0].arguments.prompt, /WORKFLOW_RESULT:/);
+    assert.match(calls[0].arguments.prompt, /Board-first orchestration requirements:/);
+    assert.match(calls[0].arguments.prompt, /workflow card and workflow run as the task source of truth/);
+    assert.match(calls[0].arguments.prompt, /workflow_board` action `decompose`/);
+    assert.match(calls[0].arguments.prompt, /Move ready child cards through the workflow board/);
     assert.equal(calls[0].arguments.resource_group, 'implementation');
     assert.equal(calls[0].arguments.approval_mode, 'auto_edit');
     assert.equal(sg.getChat(first.card.entityRefs.chatId)?.pendingTaskId, taskId);
