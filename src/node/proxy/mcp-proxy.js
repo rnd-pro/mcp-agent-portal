@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AdapterPool } from '../adapters/pool.js';
 import { PluginLoader } from '../plugins/plugin-loader.js';
 import { getStateGraph } from '../state-graph.js';
+import { getWorkflowBoardService } from '../workflow-board-service.js';
 import { logTrajectory } from '../mlops/flywheel.js';
 import { findInRegistry } from '../server/marketplace-registry.js';
 import { ChatWsServer } from './chat-ws-server.js';
@@ -261,6 +262,12 @@ export class MCPProxyManager {
     }
     this.pluginLoader.initAll().catch(err => console.error('[MCPProxy] Plugin init error:', err));
     this.startHealthCheck();
+    try {
+      this.workflowBoardService = getWorkflowBoardService(this);
+      this.workflowBoardService.reconcileTick.start();
+    } catch (err) {
+      console.error('[MCPProxy] workflow reconcile tick start error:', err);
+    }
 
     // Set up persistent roots/list handler for all child servers
     this.#installRootsHandler();
@@ -1007,6 +1014,9 @@ export class MCPProxyManager {
   /** Stop all servers and adapters. */
   stopAll() {
     this.stopHealthCheck();
+    if (this.workflowBoardService?.reconcileTick) {
+      try { this.workflowBoardService.reconcileTick.stop(); } catch {}
+    }
     for (let name of this.servers.keys()) {
       this.stopServer(name);
     }
