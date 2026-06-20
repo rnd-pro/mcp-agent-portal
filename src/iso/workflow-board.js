@@ -337,6 +337,7 @@ export function normalizeWorkflowEntityRefs(input = {}) {
     goalId: textOrNull(input.goalId ?? input.goal_id),
     chatId: textOrNull(input.chatId ?? input.chat_id),
     taskIds: textArray(input.taskIds ?? input.task_ids),
+    files: textArray(input.files ?? input.filePaths ?? input.file_paths),
   };
 }
 
@@ -407,6 +408,14 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
     context: textArray(input.context),
     routingHints: textArray(input.routingHints ?? input.routing_hints),
     blockers: textArray(input.blockers),
+    files: textArray(
+      input.files
+        ?? input.filePaths
+        ?? input.file_paths
+        ?? input.entityRefs?.files
+        ?? input.entity_refs?.files
+        ?? input.metadata?.files,
+    ),
     automation: normalizeWorkflowAutomation(input.automation),
     entityRefs: normalizeWorkflowEntityRefs(input.entityRefs ?? input.entity_refs ?? {}),
     metadata: objectOrEmpty(input.metadata),

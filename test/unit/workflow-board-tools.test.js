@@ -85,6 +85,7 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.context.items.type, 'string');
     assert.equal(schema.properties.routingHints.items.type, 'string');
     assert.equal(schema.properties.blockers.items.type, 'string');
+    assert.equal(schema.properties.files.items.type, 'string');
     assert.equal(schema.properties.metadata.type, 'object');
     assert.equal(schema.properties.checks.type, 'object');
     assert.equal(schema.properties.parentCardId.type, 'string');
@@ -150,6 +151,7 @@ describe('workflow board MCP tool', () => {
         context: ['Use current release packet'],
         routingHints: ['release'],
         blockers: ['Waiting for approval'],
+        files: ['src/node/workflow-board-service.js'],
         metadata: { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' },
       },
       decompose: {
@@ -169,7 +171,7 @@ describe('workflow board MCP tool', () => {
       update_column: { action: 'update_column', columnId: 'ready', patch: { automation: { mode: 'gated' } } },
       delete_item: { action: 'delete_item', cardId: 'card-1' },
       transition: { action: 'transition', cardId: 'card-1', toColumnId: 'ready', expectedVersion: 7 },
-      orchestrate: { action: 'orchestrate', cardId: 'card-1', resourceGroup: 'codex' },
+      orchestrate: { action: 'orchestrate', cardId: 'card-1', resourceGroup: 'codex', files: ['src/node/workflow-board-service.js'] },
       control: { action: 'control', cardId: 'card-1', control: 'pause' },
       recovery: { action: 'recovery', includeResolved: true },
       reconcile: { action: 'reconcile', force: true },

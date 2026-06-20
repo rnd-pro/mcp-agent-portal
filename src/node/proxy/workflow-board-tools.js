@@ -242,6 +242,11 @@ export const WORKFLOW_BOARD_TOOLS = [
           items: { type: 'string' },
           description: 'Known work-item blockers for create_item.',
         },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Structured file ownership scope for create_item, childItems, and orchestration.',
+        },
         metadata: { type: 'object', description: 'Optional work-item metadata for create_item.' },
         patch: { type: 'object', description: 'Fields to patch for update_item.' },
         checks: { type: 'object', description: 'Optional gate checks for update_item.' },
@@ -448,6 +453,7 @@ function serviceArgsForAction(action, args = {}) {
       context: args.context,
       routingHints: args.routingHints,
       blockers: args.blockers,
+      files: args.files,
       metadata: args.metadata,
     });
   }
@@ -464,6 +470,7 @@ function serviceArgsForAction(action, args = {}) {
       childItems: args.childItems,
       childColumnId: args.childColumnId,
       columnId: args.columnId,
+      files: args.files,
     });
   }
   if (action === 'update_board') {
@@ -506,6 +513,7 @@ function serviceArgsForAction(action, args = {}) {
       mode: args.mode,
       resource_group: args.resourceGroup,
       approval_mode: args.approvalMode,
+      files: args.files,
     });
   }
   if (action === 'control') {

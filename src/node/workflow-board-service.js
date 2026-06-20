@@ -134,6 +134,29 @@ function uniqueArray(items = []) {
   return [...new Set(items.map(textOrNull).filter(Boolean))];
 }
 
+function cardFileScope(card = {}, args = {}) {
+  return uniqueArray([
+    ...textArray(args.files ?? args.filePaths ?? args.file_paths),
+    ...textArray(card.files),
+    ...textArray(card.entityRefs?.files),
+    ...textArray(card.metadata?.files),
+  ]);
+}
+
+function normalizeScopePath(value) {
+  let text = textOrNull(value);
+  if (!text) return null;
+  let normalized = text.replace(/\\/g, '/').replace(/\/+$/g, '');
+  return normalized.replace(/^\.\//, '');
+}
+
+function fileScopesOverlap(left = '', right = '') {
+  let a = normalizeScopePath(left);
+  let b = normalizeScopePath(right);
+  if (!a || !b) return false;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
 function firstText(value) {
   return textArray(value)[0] ?? null;
 }
@@ -636,6 +659,36 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
+  function activeFileScopeConflicts(board, card, args = {}) {
+    let files = cardFileScope(card, args);
+    if (!files.length) return [];
+    return Object.values(getCollection(stateGraph, 'workflowCards'))
+      .filter(candidate => candidate.id !== card.id)
+      .filter(candidate => candidate.boardId === board.id)
+      .filter(candidate => !card.projectId || candidate.projectId === card.projectId)
+      .filter(candidate => ACTIVE_RECOVERY_COLUMN_IDS.includes(candidate.columnId))
+      .map((candidate) => {
+        let candidateFiles = cardFileScope(candidate);
+        let overlappingFiles = files.filter(file => candidateFiles.some(candidateFile => fileScopesOverlap(file, candidateFile)));
+        return overlappingFiles.length
+          ? {
+              cardId: candidate.id,
+              title: candidate.title,
+              columnId: candidate.columnId,
+              files: overlappingFiles,
+            }
+          : null;
+      })
+      .filter(Boolean);
+  }
+
+  function fileScopeConflictReason(conflicts = []) {
+    let first = conflicts[0];
+    if (!first) return '';
+    let suffix = conflicts.length > 1 ? ` and ${conflicts.length - 1} more active card(s)` : '';
+    return `Workflow file scope overlaps active card ${first.cardId} (${first.columnId}): ${first.files.join(', ')}${suffix}.`;
+  }
+
   function stageAgentCandidates(automation = {}) {
     return uniqueArray([
       ...textArray(automation.agents ?? automation.agentPool ?? automation.agent_pool),
@@ -684,7 +737,18 @@ export function createWorkflowBoardService(opts = {}) {
     if (!boardCapacity.ok && !args.force) {
       return { ok: false, reason: boardCapacity.reason, automation, capacity, boardCapacity };
     }
-    return { ok: true, automation, capacity, boardCapacity };
+    let fileConflicts = activeFileScopeConflicts(board, card, args);
+    if (fileConflicts.length && !args.force) {
+      return {
+        ok: false,
+        reason: fileScopeConflictReason(fileConflicts),
+        automation,
+        capacity,
+        boardCapacity,
+        fileConflicts,
+      };
+    }
+    return { ok: true, automation, capacity, boardCapacity, fileConflicts };
   }
 
   async function maybeAutoOrchestrateCard(board, card, args = {}, context = {}) {
@@ -697,6 +761,7 @@ export function createWorkflowBoardService(opts = {}) {
         automation: candidate.automation,
         capacity: candidate.capacity,
         boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
         sideEffects: [],
       };
     }
@@ -720,6 +785,7 @@ export function createWorkflowBoardService(opts = {}) {
       automation,
       capacity: candidate.capacity,
       boardCapacity: candidate.boardCapacity,
+      fileConflicts: candidate.fileConflicts,
       agent,
       result,
       sideEffects: result.sideEffects || [],
@@ -1843,6 +1909,10 @@ export function createWorkflowBoardService(opts = {}) {
       : '';
     let markdownPath = textOrNull(card.metadata?.markdownPath);
     let fileHint = markdownPath ? `\n\nWorkflow work-item file: ${markdownPath}` : '';
+    let fileScope = cardFileScope(card, args);
+    let fileScopeHint = fileScope.length
+      ? `\n\nFile ownership scope:\n${fileScope.map(file => `- ${file}`).join('\n')}`
+      : '';
     let preferredAgent = textOrNull(args.agent ?? args.agent_slug ?? card.assignedAgent);
     let proofMarkers = requiredProofMarkersForWorkItem(card, args);
     let proofMarkerContract = proofMarkers.length
@@ -1883,6 +1953,7 @@ export function createWorkflowBoardService(opts = {}) {
       criteria,
       context,
       fileHint,
+      fileScopeHint,
       args.reason ? `\n\nTrigger reason: ${args.reason}` : '',
       outputContract,
     ].join('').trim();
@@ -1955,7 +2026,8 @@ export function createWorkflowBoardService(opts = {}) {
     if (approvalMode) delegateArgs.approval_mode = approvalMode;
     let resourceGroup = textOrNull(args.resource_group ?? card.resourceGroup);
     if (resourceGroup) delegateArgs.resource_group = resourceGroup;
-    if (Array.isArray(args.files)) delegateArgs.files = args.files;
+    let files = cardFileScope(card, args);
+    if (files.length) delegateArgs.files = files;
 
     let prepared = await prepareDelegateTaskCall(pm, 'delegate_task', delegateArgs, {
       source: WORKFLOW_SOURCE,
@@ -2037,6 +2109,10 @@ export function createWorkflowBoardService(opts = {}) {
     let boardCapacity = boardCapacityAvailable(board, card);
     if (!boardCapacity.ok && !args.force) {
       throw new Error(boardCapacity.reason);
+    }
+    let fileConflicts = activeFileScopeConflicts(board, card, effectiveArgs);
+    if (fileConflicts.length && !args.force) {
+      throw new Error(fileScopeConflictReason(fileConflicts));
     }
     let existingRun = activeRunForCard(card.id);
     if (existingRun && !args.force) {

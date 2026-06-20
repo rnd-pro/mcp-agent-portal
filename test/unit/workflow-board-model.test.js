@@ -57,7 +57,7 @@ describe('workflow board model and service', () => {
       boardId: DEFAULT_WORKFLOW_BOARD_ID,
       columnId: 'ideas',
       projectId: 'agent-portal',
-      entityRefs: { goalId: 'goal-1', taskIds: 'task-1' },
+      entityRefs: { goalId: 'goal-1', taskIds: 'task-1', files: 'src/node/workflow-board-service.js' },
       acceptanceCriteria: 'Backend foundation exists',
       blockers: [{ reason: 'Waiting for workflow approval' }],
     }, { id: 'card-1', now: 456 });
@@ -96,6 +96,8 @@ describe('workflow board model and service', () => {
     assert.equal(card.id, 'card-1');
     assert.equal(card.columnId, 'ideas');
     assert.deepEqual(card.entityRefs.taskIds, ['task-1']);
+    assert.deepEqual(card.entityRefs.files, ['src/node/workflow-board-service.js']);
+    assert.deepEqual(card.files, ['src/node/workflow-board-service.js']);
     assert.deepEqual(card.acceptanceCriteria, ['Backend foundation exists']);
     assert.deepEqual(card.blockers, ['Waiting for workflow approval']);
     assert.ok(RECOVERY_FLAGS.includes('needs_resume'));
@@ -607,8 +609,11 @@ links:
     let calls = [];
     let proxyManager = {
       projectRoot: tmpDir,
-      requestFromChild: async (_server, _method, payload) => {
-        calls.push(payload);
+      requestFromChild: async (server, method, payload) => {
+        calls.push({ server, method, payload });
+        if (server === 'project-graph') {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, skeleton: {}, files: [] }) }] };
+        }
         return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
       },
       chatWsServer: { taskChatMap: new Map() },
@@ -631,6 +636,7 @@ links:
       resourceGroup: 'implementation',
       approvalMode: 'auto_edit',
       acceptanceCriteria: ['Runtime task is linked'],
+      files: ['src/node/workflow-board-service.js'],
       actor: 'test',
     });
 
@@ -654,21 +660,25 @@ links:
     assert.ok(first.card.entityRefs.chatId);
     assert.ok(first.card.entityRefs.goalId);
     assert.equal(second.idempotent, true);
-    assert.equal(calls.length, 1);
-    assert.match(calls[0].arguments.prompt, /Final response contract:/);
-    assert.match(calls[0].arguments.prompt, /WORKFLOW_RESULT:/);
-    assert.match(calls[0].arguments.prompt, /Board-first orchestration requirements:/);
-    assert.match(calls[0].arguments.prompt, /workflow card and workflow run as the task source of truth/);
-    assert.match(calls[0].arguments.prompt, /workflow_board` action `decompose`/);
-    assert.match(calls[0].arguments.prompt, /Do not ask the user to approve workflow tool calls/);
-    assert.match(calls[0].arguments.prompt, /mcp-agent-portal\.js" call workflow_board/);
-    assert.ok(calls[0].arguments.prompt.includes(`--project ${JSON.stringify(tmpDir)}`));
-    assert.match(calls[0].arguments.prompt, /user cancelled MCP tool call/);
-    assert.match(calls[0].arguments.prompt, /empty_result/);
-    assert.match(calls[0].arguments.prompt, /permission-blocked, approval-blocked/);
-    assert.match(calls[0].arguments.prompt, /Move ready child cards through the workflow board/);
-    assert.equal(calls[0].arguments.resource_group, 'implementation');
-    assert.equal(calls[0].arguments.approval_mode, 'auto_edit');
+    let delegateCalls = calls.filter(call => call.server === 'agent-pool' && call.payload.name === 'delegate_task');
+    assert.equal(delegateCalls.length, 1);
+    let delegateArgs = delegateCalls[0].payload.arguments;
+    assert.match(delegateArgs.prompt, /Final response contract:/);
+    assert.match(delegateArgs.prompt, /WORKFLOW_RESULT:/);
+    assert.match(delegateArgs.prompt, /Board-first orchestration requirements:/);
+    assert.match(delegateArgs.prompt, /workflow card and workflow run as the task source of truth/);
+    assert.match(delegateArgs.prompt, /workflow_board` action `decompose`/);
+    assert.match(delegateArgs.prompt, /Do not ask the user to approve workflow tool calls/);
+    assert.match(delegateArgs.prompt, /mcp-agent-portal\.js" call workflow_board/);
+    assert.ok(delegateArgs.prompt.includes(`--project ${JSON.stringify(tmpDir)}`));
+    assert.match(delegateArgs.prompt, /user cancelled MCP tool call/);
+    assert.match(delegateArgs.prompt, /empty_result/);
+    assert.match(delegateArgs.prompt, /permission-blocked, approval-blocked/);
+    assert.match(delegateArgs.prompt, /Move ready child cards through the workflow board/);
+    assert.match(delegateArgs.prompt, /File ownership scope:/);
+    assert.deepEqual(delegateArgs.files, ['src/node/workflow-board-service.js']);
+    assert.equal(delegateArgs.resource_group, 'implementation');
+    assert.equal(delegateArgs.approval_mode, 'auto_edit');
     assert.equal(sg.getChat(first.card.entityRefs.chatId)?.pendingTaskId, taskId);
     assert.equal(proxyManager.chatWsServer.taskChatMap.get(taskId), first.card.entityRefs.chatId);
     assert.equal(sg.get(`tasks/${taskId}`)?.kind, 'workflow-runtime-task');
@@ -681,8 +691,11 @@ links:
     let calls = [];
     let proxyManager = {
       projectRoot: tmpDir,
-      requestFromChild: async (_server, _method, payload) => {
-        calls.push(payload);
+      requestFromChild: async (server, method, payload) => {
+        calls.push({ server, method, payload });
+        if (server === 'project-graph') {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, skeleton: {}, files: [] }) }] };
+        }
         return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
       },
       chatWsServer: { taskChatMap: new Map() },
@@ -703,6 +716,7 @@ links:
       owner: 'orchestrator',
       assignedAgent: 'outside-stage-pool',
       acceptanceCriteria: ['Auto run is leased'],
+      files: ['src/node/ready-auto-start.js'],
       actor: 'test',
     });
 
@@ -722,12 +736,78 @@ links:
     assert.equal(moved.orchestration.result.run.status, 'running');
     assert.equal(moved.orchestration.result.lease.leaseOwner, 'orchestrator');
     assert.deepEqual(moved.orchestration.result.run.taskIds, [taskId]);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].arguments.agent_slug, 'orchestrator');
-    assert.match(calls[0].arguments.prompt, /Preferred agent: orchestrator/);
-    assert.doesNotMatch(calls[0].arguments.prompt, /outside-stage-pool/);
+    let delegateCalls = calls.filter(call => call.server === 'agent-pool' && call.payload.name === 'delegate_task');
+    assert.equal(delegateCalls.length, 1);
+    let delegateArgs = delegateCalls[0].payload.arguments;
+    assert.equal(delegateArgs.agent_slug, 'orchestrator');
+    assert.deepEqual(delegateArgs.files, ['src/node/ready-auto-start.js']);
+    assert.match(delegateArgs.prompt, /Preferred agent: orchestrator/);
+    assert.doesNotMatch(delegateArgs.prompt, /outside-stage-pool/);
     assert.equal(sg.get(`tasks/${taskId}`).workflowCardId, created.card.id);
     assert.equal(service.listEvents({ cardId: created.card.id }).some(event => event.eventType === 'orchestration'), true);
+  });
+
+  it('blocks workflow orchestration when active file ownership scopes overlap', async () => {
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
+        return { content: [{ type: 'text', text: 'Started task 33333333-3333-4333-8333-333333333333' }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    service.createOrUpdateCard({
+      title: 'Parent implementation',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'l1-codex',
+      acceptanceCriteria: ['Own workflow board service edits'],
+      files: ['src/node/workflow-board-service.js'],
+      actor: 'test',
+    });
+    let child = service.createOrUpdateCard({
+      title: 'Child overlapping implementation',
+      columnId: 'backlog',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Should wait for file ownership'],
+      files: ['src/node'],
+      actor: 'test',
+    });
+
+    let moved = await service.requestWorkflowTransition({
+      cardId: child.card.id,
+      fromColumnId: 'backlog',
+      toColumnId: 'ready',
+      expectedVersion: child.card.version,
+      actor: 'orchestrator',
+      reason: 'Ready for orchestrator pickup',
+    });
+
+    assert.equal(moved.status, 'accepted');
+    assert.equal(moved.card.columnId, 'ready');
+    assert.equal(moved.orchestration.ok, false);
+    assert.equal(moved.orchestration.skipped, true);
+    assert.match(moved.orchestration.reason, /file scope overlaps active card/);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(Object.keys(sg.get('workflowRuns') ?? {}), []);
+    await assert.rejects(
+      service.orchestrateWorkItem({
+        cardId: child.card.id,
+        actor: 'orchestrator',
+      }),
+      /file scope overlaps active card/,
+    );
   });
 
   it('adds required proof marker instructions when a workflow card names one', async () => {
