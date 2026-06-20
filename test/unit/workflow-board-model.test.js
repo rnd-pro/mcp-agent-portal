@@ -592,7 +592,7 @@ describe('workflow board model and service', () => {
     assert.equal(compact.systemLoad.process.trackedChildren, 2);
   });
 
-  it('imports missing durable work-item seeds during live projection without owning live status', async () => {
+  it('keeps live projection read-only unless markdown seed import is explicit', async () => {
     service = createWorkflowBoardService({
       stateGraph: sg,
       now: () => now++,
@@ -617,7 +617,14 @@ links:
     - task-seed
 `, 'Seed body must become card body only at import time.');
 
-    let first = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
+    let readOnly = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
+    assert.equal(readOnly.cards.some(card => card.id === 'work-item-2026-06-18-agent-workflow-kanban-mvp'), false);
+    assert.equal(Object.keys(sg.get('workflowCards') ?? {}).length, 0);
+
+    let first = await service.getBoardProjectionWithRuntime({
+      projectId: 'agent-portal',
+      importMarkdown: true,
+    });
     let seeded = first.cards.find(card => card.id === 'work-item-2026-06-18-agent-workflow-kanban-mvp');
 
     assert.ok(seeded);
@@ -925,6 +932,185 @@ links:
     assert.equal(calls.filter(call => call.server === 'agent-pool').length, 1);
   });
 
+  it('does not orchestrate blocked ready cards through auto or direct paths', async () => {
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
+        return { content: [{ type: 'text', text: 'Started task 88888888-8888-4888-8888-888888888888' }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Blocked ready card',
+      columnId: 'backlog',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Must not bypass blockers'],
+      blockers: ['Waiting for audit owner'],
+      actor: 'test',
+    });
+
+    let moved = await service.requestWorkflowTransition({
+      cardId: created.card.id,
+      fromColumnId: 'backlog',
+      toColumnId: 'ready',
+      expectedVersion: created.card.version,
+      actor: 'test',
+      reason: 'Ready but blocked',
+    });
+
+    assert.equal(moved.status, 'accepted');
+    assert.equal(moved.card.columnId, 'ready');
+    assert.equal(moved.orchestration.ok, false);
+    assert.match(moved.orchestration.reason, /active blocker/);
+    assert.equal(calls.length, 0);
+    assert.deepEqual(Object.keys(sg.get('workflowRuns') ?? {}), []);
+    await assert.rejects(
+      service.orchestrateWorkItem({
+        cardId: created.card.id,
+        actor: 'test',
+      }),
+      /active blocker/,
+    );
+    assert.deepEqual(Object.keys(sg.get('workflowRuns') ?? {}), []);
+    assert.equal(sg.get(`workflowLeases/${created.card.id}`), undefined);
+  });
+
+  it('rejects stale direct orchestration before creating a run or lease', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Stale direct orchestration',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Stale version is rejected'],
+      actor: 'test',
+    });
+    let updated = service.updateWorkItem({
+      cardId: created.card.id,
+      expectedVersion: created.card.version,
+      patch: { priority: 'high' },
+      actor: 'test',
+    });
+
+    assert.equal(updated.card.version, created.card.version + 1);
+    await assert.rejects(
+      service.orchestrateWorkItem({
+        cardId: created.card.id,
+        expectedVersion: created.card.version,
+        actor: 'test',
+      }),
+      /version conflict/,
+    );
+    assert.deepEqual(Object.keys(sg.get('workflowRuns') ?? {}), []);
+    assert.equal(sg.get(`workflowLeases/${created.card.id}`), undefined);
+  });
+
+  it('fails and audits thrown delegation errors after run and lease creation', async () => {
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (server) => {
+        if (server === 'project-graph') {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, skeleton: {}, files: [] }) }] };
+        }
+        throw new Error('transport disconnected');
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Thrown delegate error',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Transport failure is audited'],
+      actor: 'test',
+    });
+
+    let result = await service.orchestrateWorkItem({
+      cardId: created.card.id,
+      expectedVersion: created.card.version,
+      actor: 'test',
+    });
+    let run = Object.values(sg.get('workflowRuns') || {}).find(item => item.cardId === created.card.id);
+    let event = service.listEvents({ cardId: created.card.id })
+      .find(item => item.eventType === 'orchestration');
+
+    assert.equal(result.run.status, 'failed');
+    assert.equal(run.status, 'failed');
+    assert.equal(sg.get(`workflowLeases/${created.card.id}`), undefined);
+    assert.equal(service.getCard(created.card.id).columnId, 'ready');
+    assert.equal(service.getCard(created.card.id).recoveryFlags.includes('needs_audit'), true);
+    assert.equal(event.status, 'blocked');
+    assert.equal(event.sideEffects[0].status, 'failed');
+    assert.match(event.sideEffects[0].error, /transport disconnected/);
+  });
+
+  it('cleans stale pause recovery after a resumed run completes successfully', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Paused then resumed',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Resume does not leave stale pause blockers'],
+      actor: 'test',
+    });
+    service.resumeWorkItem({
+      cardId: created.card.id,
+      actor: 'test',
+      reason: 'Resume from workflow board automation.',
+    });
+    let paused = await service.controlWorkItem({
+      cardId: created.card.id,
+      action: 'pause',
+      actor: 'test',
+      reason: 'Pause for regression',
+    });
+    let resumed = service.resumeWorkItem({
+      cardId: paused.card.id,
+      actor: 'test',
+      reason: 'Pause for regression',
+    });
+    let recoveringRun = Object.values(sg.get('workflowRuns') || {})
+      .filter(run => run.cardId === created.card.id && run.status === 'recovering')
+      .at(-1);
+
+    sg.commit([{
+      op: 'set',
+      path: `workflowRuns/${recoveringRun.id}`,
+      value: { ...recoveringRun, status: 'completed', completedAt: 5000 },
+    }], 'test');
+    let reconciled = await service.reconcileWorkflowRecovery({
+      projectId: 'agent-portal',
+      actor: 'test',
+      force: true,
+    });
+    let card = reconciled.reconciled.find(item => item.card.id === created.card.id).card;
+
+    assert.equal(resumed.card.blockers.includes('Pause for regression'), false);
+    assert.equal(card.recoveryFlags.includes('blocked'), false);
+    assert.equal(card.recoveryFlags.includes('needs_resume'), false);
+    assert.equal(card.recoveryFlags.includes('recovering'), false);
+  });
+
   it('blocks workflow orchestration when active file ownership scopes overlap', async () => {
     let calls = [];
     let proxyManager = {
@@ -1115,7 +1301,10 @@ links:
       completedAt: 9000,
     }, 'test');
 
-    let projection = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
+    let projection = await service.getBoardProjectionWithRuntime({
+      projectId: 'agent-portal',
+      reconcileRuntime: true,
+    });
     let card = projection.cards.find(item => item.id === created.card.id);
     let run = card.runs.find(item => item.id === started.run.id);
 
@@ -1224,6 +1413,7 @@ links:
       actor: 'test',
       reason: 'Pause all active runs',
     });
+    assert.equal(service.getCard(created.card.id).recoveryFlags.includes('blocked'), true);
     let resumed = await service.controlWorkflowBoard({
       action: 'resume',
       actor: 'test',
@@ -1239,7 +1429,6 @@ links:
     assert.equal(run.run.status, 'requested');
     assert.equal(paused.board.mode, 'paused');
     assert.deepEqual(paused.affectedCardIds, [created.card.id]);
-    assert.equal(service.getCard(created.card.id).recoveryFlags.includes('blocked'), true);
     assert.equal(sg.get(`workflowRuns/${run.run.id}`).status, 'paused');
     assert.equal(resumed.board.mode, 'armed');
     assert.deepEqual(resumed.affectedCardIds, [created.card.id]);

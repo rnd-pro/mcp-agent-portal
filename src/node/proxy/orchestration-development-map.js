@@ -1445,7 +1445,14 @@ function summarizeSystemLoad(systemLoad = null, tasks = [], now = Date.now()) {
     memory: {
       totalBytes: finiteNumber(memory.totalBytes),
       freeBytes: finiteNumber(memory.freeBytes),
+      availableBytes: finiteNumber(memory.availableBytes),
       usedRatio: finiteNumber(memory.usedRatio),
+      estimatedNewTaskBytes: finiteNumber(memory.estimatedNewTaskBytes),
+      reserveBytes: finiteNumber(memory.reserveBytes),
+      availableForNewTasksBytes: finiteNumber(memory.availableForNewTasksBytes),
+      requiredForNextTaskBytes: finiteNumber(memory.requiredForNextTaskBytes),
+      deficitForNextTaskBytes: finiteNumber(memory.deficitForNextTaskBytes),
+      estimatedAdditionalTaskSlots: finiteNumber(memory.estimatedAdditionalTaskSlots),
     },
     process: {
       trackedChildren: finiteNumber(systemLoad.process?.trackedChildren) ?? finiteNumber(systemLoad.ours) ?? 0,
@@ -1457,6 +1464,7 @@ function summarizeSystemLoad(systemLoad = null, tasks = [], now = Date.now()) {
       recommendedMaxParallelTasks: finiteNumber(capacity.recommendedMaxParallelTasks),
       runningTaskCount,
       trackedChildCount: finiteNumber(capacity.trackedChildCount) ?? finiteNumber(systemLoad.ours) ?? 0,
+      estimatedAdditionalTaskSlots: finiteNumber(capacity.estimatedAdditionalTaskSlots),
     },
     warning: typeof systemLoad.warning === 'string' ? compactResultSummary(systemLoad.warning) : null,
   };

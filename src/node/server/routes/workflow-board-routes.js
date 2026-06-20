@@ -11,6 +11,12 @@ function queryValue(req, name) {
   return url.searchParams.get(name);
 }
 
+function queryBoolean(req, name, fallback = false) {
+  let value = queryValue(req, name);
+  if (value === null) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 export function createWorkflowBoardRoutes(ctx = {}) {
   let resolveService = () => createWorkflowBoardService({
     stateGraph: ctx.stateGraph ?? ctx.proxyManager?.stateGraph ?? getStateGraph(),
@@ -39,8 +45,30 @@ export function createWorkflowBoardRoutes(ctx = {}) {
           projectId: queryValue(req, 'projectId') ?? queryValue(req, 'project'),
           goalId: queryValue(req, 'goalId') ?? queryValue(req, 'goal'),
           chatId: queryValue(req, 'chatId') ?? queryValue(req, 'chat'),
+          includeCards: queryBoolean(req, 'includeCards', true),
+          includeEvents: queryBoolean(req, 'includeEvents', false),
+          includeRuntime: queryBoolean(req, 'includeRuntime', false),
+          compact: queryBoolean(req, 'compact', false),
+          view: queryValue(req, 'view'),
+          mode: queryValue(req, 'mode'),
+          importMarkdown: queryBoolean(req, 'importMarkdown', false),
+          reconcileRuntime: queryBoolean(req, 'reconcileRuntime', false),
         }, { proxyManager: ctx.proxyManager });
         json(res, { ok: true, projection });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'GET /api/workflow-board/boards': (req, res) => {
+      try {
+        let result = resolveService().listWorkflowBoards({
+          projectId: queryValue(req, 'projectId') ?? queryValue(req, 'project'),
+          scope: queryValue(req, 'scope'),
+          includeArchived: queryBoolean(req, 'includeArchived', false),
+          limit: queryValue(req, 'limit'),
+        });
+        json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);
       }
@@ -50,6 +78,16 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       try {
         let body = await parseBody(req);
         let result = await resolveService().createWorkItem(body, { proxyManager: ctx.proxyManager });
+        json(res, { ok: true, ...result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/cards/update': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().updateWorkItem(body);
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);

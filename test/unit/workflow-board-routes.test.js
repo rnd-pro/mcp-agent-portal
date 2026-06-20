@@ -98,7 +98,9 @@ seed_column: backlog
 
       for (let key of [
         'GET /api/workflow-board',
+        'GET /api/workflow-board/boards',
         'POST /api/workflow-board/cards',
+        'POST /api/workflow-board/cards/update',
         'POST /api/workflow-board/decompose',
         'POST /api/workflow-board/transition',
         'POST /api/workflow-board/orchestrate',
@@ -133,11 +135,39 @@ seed_column: backlog
       assert.equal(created.ok, true);
       assert.equal(created.card.columnId, 'ideas');
 
+      let boardsRes = makeRes();
+      await routes['GET /api/workflow-board/boards'](
+        makeReq('GET', '/api/workflow-board/boards?projectId=project-alpha'),
+        boardsRes,
+      );
+      let boards = boardsRes.json();
+
+      assert.equal(boardsRes.status, 200);
+      assert.equal(boards.ok, true);
+      assert.equal(boards.boards.some(board => board.id === 'agent-workflow-default'), true);
+
+      let updateRes = makeRes();
+      await routes['POST /api/workflow-board/cards/update'](
+        makeReq('POST', '/api/workflow-board/cards/update', {
+          cardId: created.card.id,
+          expectedVersion: created.card.version,
+          patch: { priority: 'high' },
+          actor: 'route-test',
+        }),
+        updateRes,
+      );
+      let updated = updateRes.json();
+
+      assert.equal(updateRes.status, 200);
+      assert.equal(updated.ok, true);
+      assert.equal(updated.card.priority, 'high');
+      assert.equal(updated.card.version, created.card.version + 1);
+
       let decomposeRes = makeRes();
       await routes['POST /api/workflow-board/decompose'](
         makeReq('POST', '/api/workflow-board/decompose', {
           cardId: created.card.id,
-          expectedVersion: created.card.version,
+          expectedVersion: updated.card.version,
           childItems: [{
             id: 'card-route-child',
             title: 'Route child card',
@@ -168,7 +198,6 @@ seed_column: backlog
       assert.deepEqual(board.projection.cards.map(card => card.id), [
         created.card.id,
         'card-route-child',
-        'work-item-route-seed',
         'runtime-task-route-orphan',
       ]);
       assert.deepEqual(
@@ -176,11 +205,23 @@ seed_column: backlog
         ['card-route-child'],
       );
       assert.equal(
-        board.projection.cards.find(card => card.id === 'work-item-route-seed').columnId,
-        'backlog',
+        board.projection.cards.some(card => card.id === 'work-item-route-seed'),
+        false,
       );
       assert.equal(board.projection.cards.find(card => card.id === 'runtime-task-route-orphan').events.length, 1);
       assert.equal(board.projection.cards.some(card => card.id === 'runtime-task-route-chat-only'), false);
+
+      let importingBoardRes = makeRes();
+      await routes['GET /api/workflow-board'](
+        makeReq('GET', '/api/workflow-board?projectId=project-alpha&importMarkdown=true'),
+        importingBoardRes,
+      );
+      let importingBoard = importingBoardRes.json();
+      assert.equal(importingBoardRes.status, 200);
+      assert.equal(
+        importingBoard.projection.cards.find(card => card.id === 'work-item-route-seed').columnId,
+        'backlog',
+      );
 
       let columnRes = makeRes();
       await routes['POST /api/workflow-board/columns/update'](
@@ -249,7 +290,7 @@ seed_column: backlog
           cardId: created.card.id,
           fromColumnId: 'ideas',
           toColumnId: 'backlog',
-          expectedVersion: created.card.version,
+          expectedVersion: filteredBoard.projection.cards[0].version,
           actor: 'route-test',
           reason: 'Classified',
         }),

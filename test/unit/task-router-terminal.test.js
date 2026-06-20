@@ -206,11 +206,11 @@ describe('TaskRouter terminal lifecycle handling', () => {
   it('formats provider fallback events as persistent chat messages', () => {
     assert.equal(
       formatProviderFallbackMessage({
-        from: { provider: 'claude', model: 'deepseek/deepseek-v4-pro' },
+        from: { provider: 'opencode', model: 'deepseek/deepseek-v4-pro' },
         to: { provider: 'codex', model: 'default' },
         reason: 'exit code 1',
       }),
-      'Provider fallback: claude/deepseek/deepseek-v4-pro -> codex/default. Reason: exit code 1',
+      'Provider fallback: opencode/deepseek/deepseek-v4-pro -> codex/default. Reason: exit code 1',
     );
 
     let source = fs.readFileSync(TASK_ROUTER_PATH, 'utf8');

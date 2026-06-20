@@ -135,7 +135,7 @@ describe('chat delegate routing', () => {
     let parent = sg.createChat({
       name: 'Parent',
       agent: 'orchestrator',
-      provider: 'claude',
+      provider: 'opencode',
       model: 'deepseek/deepseek-v4-pro',
       resource_group: 'reasoning-heavy',
       approval_mode: 'yolo',
@@ -158,7 +158,7 @@ describe('chat delegate routing', () => {
       name: 'Main',
       agent: 'orchestrator',
       provider: 'claude',
-      model: 'deepseek/deepseek-v4-pro',
+      model: 'claude-sonnet-4-6',
       resource_group: 'implementation',
     }, 'test');
     sg.updateChatSession(chat.id, 'claude-session');
@@ -187,7 +187,7 @@ describe('chat delegate routing', () => {
       name: 'Main',
       agent: 'orchestrator',
       provider: 'claude',
-      model: 'deepseek/deepseek-v4-pro',
+      model: 'claude-sonnet-4-6',
       resource_group: 'reasoning-heavy',
     }, 'test');
     sg.updateChatSession(chat.id, 'claude-session');
@@ -346,7 +346,7 @@ describe('parse resource group diagnostics', () => {
 
 Available resource groups (2):
   - \`orchestration-readonly\` (provider: codex, model: gpt-5, capacity: 0/3)
-  - \`reasoning-heavy\` (provider: claude, model: deepseek/deepseek-v4-pro, capacity: 1/2, fallback: codex/gpt-5)`;
+  - \`reasoning-heavy\` (provider: opencode, model: deepseek/deepseek-v4-pro, capacity: 1/2, fallback: codex/gpt-5)`;
 
     let diagnostics = parseResourceGroupDiagnostics(errorText);
 
@@ -361,7 +361,7 @@ Available resource groups (2):
     assert.deepEqual(diagnostics.availableGroups[0].capacity, { active: 0, max: 3 });
 
     assert.equal(diagnostics.availableGroups[1].name, 'reasoning-heavy');
-    assert.equal(diagnostics.availableGroups[1].provider, 'claude');
+    assert.equal(diagnostics.availableGroups[1].provider, 'opencode');
     assert.equal(diagnostics.availableGroups[1].model, 'deepseek/deepseek-v4-pro');
     assert.deepEqual(diagnostics.availableGroups[1].capacity, { active: 1, max: 2 });
     assert.deepEqual(diagnostics.availableGroups[1].fallbackProfiles, ['codex/gpt-5']);

@@ -443,6 +443,8 @@ export function buildWorkflowBoardUrl(filters = {}, endpoint = WORKFLOW_BOARD_EN
   appendParam(params, 'chatId', filters.chatId);
   appendParam(params, 'boardId', filters.boardId);
   appendParam(params, 'mode', filters.mode);
+  if (filters.importMarkdown === true) params.set('importMarkdown', 'true');
+  if (filters.reconcileRuntime === true) params.set('reconcileRuntime', 'true');
   let query = params.toString();
   return query ? `${endpoint}?${query}` : endpoint;
 }
