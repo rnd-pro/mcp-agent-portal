@@ -86,6 +86,7 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.routingHints.items.type, 'string');
     assert.equal(schema.properties.blockers.items.type, 'string');
     assert.equal(schema.properties.files.items.type, 'string');
+    assert.equal(schema.properties.cwd.type, 'string');
     assert.equal(schema.properties.metadata.type, 'object');
     assert.equal(schema.properties.checks.type, 'object');
     assert.equal(schema.properties.parentCardId.type, 'string');
@@ -151,6 +152,7 @@ describe('workflow board MCP tool', () => {
         context: ['Use current release packet'],
         routingHints: ['release'],
         blockers: ['Waiting for approval'],
+        cwd: '/workspace/agent-portal',
         files: ['src/node/workflow-board-service.js'],
         metadata: { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' },
       },
@@ -158,6 +160,7 @@ describe('workflow board MCP tool', () => {
         action: 'decompose',
         cardId: 'card-parent',
         childColumnId: 'ready',
+        cwd: '/workspace/agent-portal',
         childItems: [{ title: 'Child task', owner: 'agent', acceptanceCriteria: ['Done'] }],
       },
       update_item: {
@@ -171,7 +174,7 @@ describe('workflow board MCP tool', () => {
       update_column: { action: 'update_column', columnId: 'ready', patch: { automation: { mode: 'gated' } } },
       delete_item: { action: 'delete_item', cardId: 'card-1' },
       transition: { action: 'transition', cardId: 'card-1', toColumnId: 'ready', expectedVersion: 7 },
-      orchestrate: { action: 'orchestrate', cardId: 'card-1', resourceGroup: 'codex', files: ['src/node/workflow-board-service.js'] },
+      orchestrate: { action: 'orchestrate', cardId: 'card-1', resourceGroup: 'codex', cwd: '/workspace/agent-portal', files: ['src/node/workflow-board-service.js'] },
       control: { action: 'control', cardId: 'card-1', control: 'pause' },
       recovery: { action: 'recovery', includeResolved: true },
       reconcile: { action: 'reconcile', force: true },
@@ -211,9 +214,12 @@ describe('workflow board MCP tool', () => {
     assert.deepEqual(calls[2].args.context, ['Use current release packet']);
     assert.deepEqual(calls[2].args.routingHints, ['release']);
     assert.deepEqual(calls[2].args.blockers, ['Waiting for approval']);
+    assert.equal(calls[2].args.cwd, '/workspace/agent-portal');
+    assert.deepEqual(calls[2].args.files, ['src/node/workflow-board-service.js']);
     assert.deepEqual(calls[2].args.metadata, { requiredFinalMarker: 'RELEASE_APPROVAL_REVALIDATION' });
     assert.equal(calls[3].args.cardId, 'card-parent');
     assert.equal(calls[3].args.childColumnId, 'ready');
+    assert.equal(calls[3].args.cwd, '/workspace/agent-portal');
     assert.deepEqual(calls[3].args.childItems, [{ title: 'Child task', owner: 'agent', acceptanceCriteria: ['Done'] }]);
     assert.deepEqual(calls[4].args.checks, { audit: { status: 'pass' } });
     assert.equal(calls[5].args.patch.mode, 'manual');
@@ -221,6 +227,8 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[7].args.columnId, 'ready');
     assert.equal(calls[9].args.expectedVersion, 7);
     assert.equal(calls[10].args.resource_group, 'codex');
+    assert.equal(calls[10].args.cwd, '/workspace/agent-portal');
+    assert.deepEqual(calls[10].args.files, ['src/node/workflow-board-service.js']);
     assert.equal(calls[11].args.action, 'pause');
   });
 

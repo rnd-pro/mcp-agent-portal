@@ -57,6 +57,7 @@ describe('workflow board model and service', () => {
       boardId: DEFAULT_WORKFLOW_BOARD_ID,
       columnId: 'ideas',
       projectId: 'agent-portal',
+      cwd: '/workspace/agent-portal',
       entityRefs: { goalId: 'goal-1', taskIds: 'task-1', files: 'src/node/workflow-board-service.js' },
       acceptanceCriteria: 'Backend foundation exists',
       blockers: [{ reason: 'Waiting for workflow approval' }],
@@ -95,6 +96,7 @@ describe('workflow board model and service', () => {
     assert.equal(card.schema, 'workflow-card/v1');
     assert.equal(card.id, 'card-1');
     assert.equal(card.columnId, 'ideas');
+    assert.equal(card.cwd, '/workspace/agent-portal');
     assert.deepEqual(card.entityRefs.taskIds, ['task-1']);
     assert.deepEqual(card.entityRefs.files, ['src/node/workflow-board-service.js']);
     assert.deepEqual(card.files, ['src/node/workflow-board-service.js']);
@@ -280,6 +282,7 @@ describe('workflow board model and service', () => {
       domain: 'orchestration',
       columnId: 'backlog',
       owner: 'orchestrator',
+      cwd: '/workspace/agent-portal',
       acceptanceCriteria: ['Children own scoped work'],
       context: ['Parent context'],
       actor: 'test',
@@ -301,6 +304,7 @@ describe('workflow board model and service', () => {
           owner: 'backend-engineer',
           assignedAgent: 'backend-engineer',
           domain: 'backend',
+          cwd: '/workspace/agent-portal/packages/backend',
           acceptanceCriteria: ['Regression tests pass'],
           context: ['Child-specific context'],
         },
@@ -315,6 +319,10 @@ describe('workflow board model and service', () => {
     assert.deepEqual(result.children.map(card => card.columnId), ['backlog', 'backlog']);
     assert.deepEqual(result.children.map(card => card.projectId), ['agent-portal', 'agent-portal']);
     assert.deepEqual(result.children.map(card => card.domain), ['orchestration', 'backend']);
+    assert.deepEqual(result.children.map(card => card.cwd), [
+      '/workspace/agent-portal',
+      '/workspace/agent-portal/packages/backend',
+    ]);
     assert.deepEqual(projectedParent.childCardIds, result.children.map(card => card.id));
     assert.equal(projection.cards.find(card => card.id === result.children[0].id).parentCardId, parent.card.id);
     assert.equal(result.event.eventType, 'decomposition');
@@ -636,6 +644,7 @@ links:
       resourceGroup: 'implementation',
       approvalMode: 'auto_edit',
       acceptanceCriteria: ['Runtime task is linked'],
+      cwd: '/workspace/agent-portal',
       files: ['src/node/workflow-board-service.js'],
       actor: 'test',
     });
@@ -675,7 +684,9 @@ links:
     assert.match(delegateArgs.prompt, /empty_result/);
     assert.match(delegateArgs.prompt, /permission-blocked, approval-blocked/);
     assert.match(delegateArgs.prompt, /Move ready child cards through the workflow board/);
+    assert.equal(delegateArgs.prompt.includes('Working directory: /workspace/agent-portal'), true);
     assert.match(delegateArgs.prompt, /File ownership scope:/);
+    assert.equal(delegateArgs.cwd, '/workspace/agent-portal');
     assert.deepEqual(delegateArgs.files, ['src/node/workflow-board-service.js']);
     assert.equal(delegateArgs.resource_group, 'implementation');
     assert.equal(delegateArgs.approval_mode, 'auto_edit');

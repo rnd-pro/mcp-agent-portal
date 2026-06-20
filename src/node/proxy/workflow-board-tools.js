@@ -219,6 +219,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         domain: { type: 'string', description: 'Optional work-item domain for classification gates.' },
         columnId: { type: 'string', description: 'Initial column for create_item.' },
         childColumnId: { type: 'string', description: 'Initial column for child cards created by action=decompose.' },
+        cwd: { type: 'string', description: 'Optional working directory for delegated workflow execution.' },
         automation: { type: 'object', description: 'Column automation patch for action=update_column.' },
         owner: { type: 'string', description: 'Optional work-item owner.' },
         assignedAgent: { type: 'string', description: 'Optional preferred agent for create_item routing.' },
@@ -445,6 +446,7 @@ function serviceArgsForAction(action, args = {}) {
       domain: args.domain,
       columnId: args.columnId,
       parentCardId: args.parentCardId,
+      cwd: args.cwd,
       owner: args.owner,
       assignedAgent: args.assignedAgent,
       resourceGroup: args.resourceGroup,
@@ -470,6 +472,7 @@ function serviceArgsForAction(action, args = {}) {
       childItems: args.childItems,
       childColumnId: args.childColumnId,
       columnId: args.columnId,
+      cwd: args.cwd,
       files: args.files,
     });
   }
@@ -513,6 +516,7 @@ function serviceArgsForAction(action, args = {}) {
       mode: args.mode,
       resource_group: args.resourceGroup,
       approval_mode: args.approvalMode,
+      cwd: args.cwd,
       files: args.files,
     });
   }

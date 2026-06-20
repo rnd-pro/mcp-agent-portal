@@ -400,6 +400,7 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
     parentCardId: textOrNull(input.parentCardId ?? input.parent_card_id),
     projectId: textOrNull(input.projectId ?? input.project_id),
     domain: textOrNull(input.domain),
+    cwd: textOrNull(input.cwd ?? input.workingDirectory ?? input.working_directory ?? input.metadata?.cwd),
     owner: textOrNull(input.owner),
     assignedAgent: textOrNull(input.assignedAgent ?? input.assigned_agent ?? input.agent ?? input.agentSlug ?? input.agent_slug),
     resourceGroup: textOrNull(input.resourceGroup ?? input.resource_group),

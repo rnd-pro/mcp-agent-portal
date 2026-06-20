@@ -1484,6 +1484,7 @@ export function createWorkflowBoardService(opts = {}) {
         parentCardId: parent.id,
         projectId: textOrNull(item.projectId ?? item.project_id) ?? parent.projectId,
         domain: textOrNull(item.domain) ?? parent.domain,
+        cwd: textOrNull(item.cwd ?? item.workingDirectory ?? item.working_directory) ?? parent.cwd,
         kind: textOrNull(item.kind) ?? 'task',
         priority: textOrNull(item.priority) ?? parent.priority,
         owner: textOrNull(item.owner) ?? parent.owner,
@@ -1909,6 +1910,7 @@ export function createWorkflowBoardService(opts = {}) {
       : '';
     let markdownPath = textOrNull(card.metadata?.markdownPath);
     let fileHint = markdownPath ? `\n\nWorkflow work-item file: ${markdownPath}` : '';
+    let cwdHint = card.cwd ? `\n\nWorking directory: ${card.cwd}` : '';
     let fileScope = cardFileScope(card, args);
     let fileScopeHint = fileScope.length
       ? `\n\nFile ownership scope:\n${fileScope.map(file => `- ${file}`).join('\n')}`
@@ -1953,6 +1955,7 @@ export function createWorkflowBoardService(opts = {}) {
       criteria,
       context,
       fileHint,
+      cwdHint,
       fileScopeHint,
       args.reason ? `\n\nTrigger reason: ${args.reason}` : '',
       outputContract,
@@ -2017,7 +2020,7 @@ export function createWorkflowBoardService(opts = {}) {
     let delegateArgs = {
       prompt,
       timeout: args.timeout || 600,
-      cwd: args.cwd || projectRoot,
+      cwd: textOrNull(args.cwd ?? card.cwd) || projectRoot,
       chat_id: chatId,
       agent_slug: desiredAgent,
       context_mode: args.context_mode === 'off' ? 'off' : 'auto',
