@@ -114,11 +114,13 @@ describe('resource groups demo contract', () => {
     assert.ok(source.includes('profile.label || provider'), 'GroupManager must render profile labels when demo data provides them');
     assert.ok(source.includes('DEFAULT_CODEX_MODELS'), 'GroupManager must publish Codex CLI model choices for resource profiles');
     assert.ok(source.includes('gpt-5.5'), 'GroupManager must include the top Codex CLI model option');
-    assert.ok(source.includes('CODEX_REASONING_LEVELS'), 'GroupManager must expose Codex reasoning effort choices');
-    assert.ok(source.includes('xhigh'), 'GroupManager must include the top Codex reasoning effort option');
-    assert.ok(source.includes('data-add-reasoning'), 'GroupManager must render a Codex reasoning selector in add-profile controls');
-    assert.ok(source.includes('reasoningEffort'), 'GroupManager must persist Codex reasoning effort on profiles');
-    assert.ok(source.includes('gm-profile-meta-line'), 'GroupManager must show profile-level Codex reasoning metadata');
+    assert.ok(source.includes('PROVIDER_REASONING_LEVELS'), 'GroupManager must expose provider reasoning effort choices');
+    assert.ok(source.includes('max'), 'GroupManager must include the top Claude reasoning effort option');
+    assert.ok(source.includes('data-add-reasoning'), 'GroupManager must render a provider reasoning selector in add-profile controls');
+    assert.match(cssSource, /\.gm-add-profile\[data-provider="codex"\] \[data-add-reasoning\],\s*\.gm-add-profile\[data-provider="claude"\] \[data-add-reasoning\]/, 'Codex and Claude add-profile controls must both show provider reasoning selector');
+    assert.match(cssSource, /\.gm-add-profile:not\(\[data-provider="codex"\]\):not\(\[data-provider="claude"\]\) \[data-add-reasoning\]/, 'Providers without reasoning support must keep the add-profile reasoning selector hidden');
+    assert.ok(source.includes('reasoningEffort'), 'GroupManager must persist provider reasoning effort on profiles');
+    assert.ok(source.includes('gm-profile-meta-line'), 'GroupManager must show profile-level reasoning metadata');
     assert.ok(source.includes('APPROVAL_MODES'), 'GroupManager must publish approval-mode choices as group config');
     assert.ok(source.includes("approvalSelect.dataset.field = 'approval_mode'"), 'GroupManager must render group approval-mode control');
     assert.ok(source.includes("timeoutInput.dataset.field = 'timeout'"), 'GroupManager must render group timeout control');
@@ -145,6 +147,8 @@ describe('resource groups demo contract', () => {
   it('routes error_fallback resource group profiles through runtime provider fallback', () => {
     let serverSource = fs.readFileSync(path.join(ROOT, 'packages/agent-pool-mcp/src/server.js'), 'utf8');
     let codexRunnerSource = fs.readFileSync(path.join(ROOT, 'packages/agent-pool-mcp/src/runner/codex-runner.js'), 'utf8');
+    let claudeRunnerSource = fs.readFileSync(path.join(ROOT, 'packages/agent-pool-mcp/src/runner/claude-runner.js'), 'utf8');
+    let schedulerSource = fs.readFileSync(path.join(ROOT, 'packages/agent-pool-mcp/src/scheduler/daemon.js'), 'utf8');
     let routerSource = fs.readFileSync(path.join(ROOT, 'src/node/proxy/task-router.js'), 'utf8');
     let toolDefinitionsSource = fs.readFileSync(path.join(ROOT, 'packages/agent-pool-mcp/src/tool-definitions.js'), 'utf8');
     let toolRouterSource = fs.readFileSync(path.join(ROOT, 'packages/agent-pool-mcp/src/tools/toolRouter.js'), 'utf8');
@@ -160,10 +164,13 @@ describe('resource groups demo contract', () => {
     assert.ok(serverSource.includes('deleteGroup(cwd, args.name)'), 'group deletion handler must use the durable group store');
     assert.ok(toolDefinitionsSource.includes("name: 'delete_group'"), 'agent-pool tool definitions must publish delete_group');
     assert.ok(toolRouterSource.includes('delete_group: handlers.handleDeleteGroup'), 'agent-pool tool router must dispatch delete_group');
-    assert.ok(serverSource.includes('reasoningEffort: profile.reasoningEffort'), 'agent-pool must pass selected Codex reasoning effort to provider attempts');
+    assert.ok(serverSource.includes('reasoningEffort: profile.reasoningEffort'), 'agent-pool must pass selected provider reasoning effort to provider attempts');
+    assert.ok(serverSource.includes('PROVIDER_REASONING_EFFORTS'), 'agent-pool must normalize reasoning effort by provider');
     assert.ok(serverSource.includes("provider === 'opencode' && effectiveModel"), 'agent-pool model validation must not reject Codex model IDs through the OpenCode catalog');
     assert.ok(codexRunnerSource.includes('model_reasoning_effort'), 'Codex runner must map reasoningEffort to Codex CLI config');
-    assert.ok(toolDefinitionsSource.includes('reasoningEffort'), 'agent-pool tool definitions must publish Codex reasoning effort metadata');
+    assert.ok(claudeRunnerSource.includes('--effort'), 'Claude runner must map reasoningEffort to Claude Code --effort');
+    assert.ok(schedulerSource.includes('--effort'), 'Claude scheduler runs must map reasoningEffort to Claude Code --effort');
+    assert.ok(toolDefinitionsSource.includes('reasoningEffort'), 'agent-pool tool definitions must publish provider reasoning effort metadata');
     assert.equal(toolDefinitionsSource.includes('fallback_profiles'), false, 'agent-pool group schema must not publish legacy fallback_profiles');
     assert.ok(toolDefinitionsSource.includes('approval_mode'), 'agent-pool group schema must publish group-owned approval mode');
     assert.ok(serverSource.includes('resourceGroupApprovalMode(resourceGroup)'), 'delegate_task must resolve approval mode from resource groups');

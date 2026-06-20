@@ -387,16 +387,18 @@ pg-group-manager {
   background: var(--sn-node-bg);
 }
 
-.gm-add-profile[data-provider="codex"] [data-add-reasoning] {
+.gm-add-profile[data-provider="codex"] [data-add-reasoning],
+.gm-add-profile[data-provider="claude"] [data-add-reasoning] {
   grid-column: 2;
 }
 
-.gm-add-profile[data-provider="codex"] [data-add-profile] {
+.gm-add-profile[data-provider="codex"] [data-add-profile],
+.gm-add-profile[data-provider="claude"] [data-add-profile] {
   grid-column: 3;
   grid-row: 1 / span 2;
 }
 
-.gm-add-profile:not([data-provider="codex"]) [data-add-reasoning] {
+.gm-add-profile:not([data-provider="codex"]):not([data-provider="claude"]) [data-add-reasoning] {
   display: none;
 }
 `;

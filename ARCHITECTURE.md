@@ -169,7 +169,7 @@ Agent Portal runs multiple CLI agents **in parallel** through its internal `agen
 ### Execution Architecture
 
 > [!NOTE]
-> The portal owns the public orchestration path. `agent-pool-mcp` is the primary internal execution server for providers such as Antigravity, Claude, Codex, OpenCode, and OpenRouter. Direct adapters under `src/node/adapters/` are fallback/diagnostic runners and are not a public MCP delegation surface.
+> The portal owns the public orchestration path. `agent-pool-mcp` is the primary internal execution server for providers such as Antigravity, Claude Code, Codex, and OpenCode. Claude Code model selection stays on native aliases and current Claude IDs surfaced by Claude Code, while DeepSeek V4 lanes run through OpenCode provider models such as `deepseek/deepseek-v4-pro`. Direct adapters under `src/node/adapters/` are fallback/diagnostic runners and are not a public MCP delegation surface.
 
 ## Three Operating Modes
 
@@ -423,7 +423,7 @@ mcp-agent-portal/
 │   │   ├── antigravity.js            # Antigravity CLI adapter
 │   │   ├── claude.js                 # Claude Code CLI adapter (stream-json)
 │   │   ├── codex.js                  # OpenAI Codex CLI adapter (exec --json)
-│   │   ├── opencode.js               # OpenCode/Crush adapter
+│   │   ├── opencode.js               # OpenCode CLI adapter
 │   │   └── pool.js                   # AdapterPool (acquire/release)
 │   ├── gateways/
 │   │   └── telegram.js               # Telegram bot gateway (deep integration)

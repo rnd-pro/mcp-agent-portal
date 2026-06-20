@@ -91,14 +91,14 @@ describe('Agent Portal CLI E2E', { skip: !process.env.RUN_CLI_E2E }, () => {
     assert.ok(out2.includes('test_val'));
   });
 
-  test('run command (real agent orchestration with deepseek-v3.2)', () => {
-    // We use opencode provider and deepseek-v3.2 model for a simple task
+  test('run command (real agent orchestration with DeepSeek V4 Pro)', () => {
+    // We use OpenCode provider and DeepSeek V4 Pro for a simple task.
     const out = execFileSync('node', [
       CLI_PATH, 
       'run', 
       'Output exactly the word "SUCCESS" and nothing else.', 
       '--provider', 'opencode', 
-      '--model', 'openrouter/deepseek/deepseek-v3.2', 
+      '--model', 'deepseek/deepseek-v4-pro',
       '--sync'
     ], { encoding: 'utf-8' });
     

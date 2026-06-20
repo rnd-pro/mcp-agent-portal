@@ -29,13 +29,26 @@ export function resolveAdapter(type) {
   return factory;
 }
 
+const CLAUDE_CODE_MODEL_CATALOG = Object.freeze([
+  { id: 'default', name: 'Default', description: 'Claude Code tier default' },
+  { id: 'fable', name: 'Fable alias', description: 'Claude Code alias for Claude Fable' },
+  { id: 'opus', name: 'Opus alias', description: 'Claude Code alias for Claude Opus' },
+  { id: 'sonnet', name: 'Sonnet alias', description: 'Claude Code alias for Claude Sonnet' },
+  { id: 'haiku', name: 'Haiku alias', description: 'Claude Code alias for Claude Haiku' },
+  { id: 'claude-fable-5', name: 'Claude Fable 5', description: 'Most capable widely released Claude model' },
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', description: 'Opus-tier model for complex reasoning and agentic coding' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', description: 'Balanced model for coding, agents, and enterprise workflows' },
+  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', description: 'Fastest current Claude model' },
+]);
+
 // Default (fallback) models per provider — used only if no CLI / user config
 const DEFAULT_MODELS = {
   antigravity: ['default', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)', 'Claude Sonnet 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)', 'GPT-OSS 120B (Medium)'],
-  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  claude: CLAUDE_CODE_MODEL_CATALOG.map(model => model.id),
   codex: ['default', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
-  opencode: ['default'],
+  opencode: ['default', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
 };
+const CLAUDE_CODE_MODEL_NAMES = new Map(CLAUDE_CODE_MODEL_CATALOG.map(model => [model.id, model.name]));
 
 // Cached CLI-discovered models (populated by discoverOpenCodeModels)
 /** @type {any[]} */
@@ -139,6 +152,12 @@ export function getCLIModels() {
   return _cliModels;
 }
 
+export function getDefaultProviderModels() {
+  return {
+    claude: CLAUDE_CODE_MODEL_CATALOG.map(model => ({ ...model })),
+  };
+}
+
 // Build the effective model list for a provider.
 // Priority: user-configured → CLI-discovered → defaults.
 /**
@@ -150,7 +169,12 @@ function getEffectiveModels(provider) {
   try { userModels = getStateGraph().getAllProviderModels(); } catch {}
   let models = [];
   
-  if (userModels[provider]?.length > 0) {
+  if (provider === 'claude') {
+    models = [
+      ...DEFAULT_MODELS.claude,
+      ...(userModels.claude || []),
+    ];
+  } else if (userModels[provider]?.length > 0) {
     models = userModels[provider];
   } else if (provider === 'opencode' && _cliModels.length > 0) {
     models = _cliModels.map(m => m.id);
@@ -160,10 +184,14 @@ function getEffectiveModels(provider) {
     models = DEFAULT_MODELS[provider] || ['default'];
   }
   
+  models = [...new Set(models)];
+
   return models.map(id => {
     let text = id;
     let lookupId = id.replace('openrouter/', '');
-    if (_openRouterMetadata.has(lookupId)) {
+    if (provider === 'claude' && CLAUDE_CODE_MODEL_NAMES.has(id)) {
+      text = CLAUDE_CODE_MODEL_NAMES.get(id);
+    } else if (_openRouterMetadata.has(lookupId)) {
       text = _openRouterMetadata.get(lookupId).name || id;
     }
     return { val: id, text };
