@@ -1900,4 +1900,51 @@ links:
     assert.equal(service.getCard(passed.card.id).recoveryFlags.includes('needs_audit'), false, 'passed audit clears needs_audit');
     assert.equal(service.getCard(pending.card.id).recoveryFlags.includes('needs_audit'), true, 'un-audited error run keeps needs_audit');
   });
+
+  it('reconcileTick.tickOnce heals an unread board', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Stranded', columnId: 'in-progress', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    });
+    sg.commit([{
+      op: 'set', path: `workflowLeases/${created.card.id}`,
+      value: { cardId: created.card.id, runId: 'run-gone', leaseOwner: 'tooling-engineer', leaseExpiresAt: 1 },
+    }], 'test');
+
+    let result = await service.reconcileTick.tickOnce();
+
+    assert.equal(result.ok, true);
+    assert.ok(result.boards >= 1);
+    assert.ok(service.getCard(created.card.id).recoveryFlags.includes('needs_resume'), 'tick flags the stranded card');
+  });
+
+  it('reconcileTick.tickOnce is a no-op on an idle board', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Just an idea', columnId: 'ideas', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    });
+    let result = await service.reconcileTick.tickOnce();
+    assert.equal(result.ok, true);
+    assert.deepEqual(service.getCard(created.card.id).recoveryFlags, []);
+  });
+
+  it('reconcileTick start/stop is idempotent and tracks the active flag', () => {
+    let ticked = createWorkflowBoardService({
+      stateGraph: sg, now: () => now++, makeId: (prefix) => `${prefix}-tick-${++idSeq}`, projectRoot: tmpDir, reconcileTickMs: 10_000_000,
+    });
+    assert.equal(ticked.reconcileTick.active, false);
+    ticked.reconcileTick.start();
+    assert.equal(ticked.reconcileTick.active, true);
+    ticked.reconcileTick.start();
+    assert.equal(ticked.reconcileTick.active, true);
+    ticked.reconcileTick.stop();
+    assert.equal(ticked.reconcileTick.active, false);
+    ticked.reconcileTick.stop();
+  });
+
+  it('reconcileTick.tickOnce skips a concurrent re-entrant run', async () => {
+    let results = await Promise.all([
+      service.reconcileTick.tickOnce(),
+      service.reconcileTick.tickOnce(),
+    ]);
+    assert.equal(results.filter(r => r.skipped).length, 1, 'exactly one concurrent tick is skipped');
+  });
 });

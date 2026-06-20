@@ -36,6 +36,7 @@ const COMPACT_ACTIVE_COLUMN_IDS = new Set([
 ]);
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
+const DEFAULT_RECONCILE_TICK_MS = 60 * 1000;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
@@ -368,6 +369,8 @@ export function createWorkflowBoardService(opts = {}) {
     makeId = null,
     projectRoot = process.cwd(),
     proxyManager = null,
+    reconcileTickMs = DEFAULT_RECONCILE_TICK_MS,
+    onReconcileTickError = () => {},
   } = opts;
   if (!stateGraph) {
     throw new Error('Workflow board service requires a StateGraph instance.');
@@ -2873,6 +2876,45 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, events: listEvents(args) };
   }
 
+  // Periodic self-healing: run reconcile on a timer so a board that is never read still has its
+  // leases/recovery flags reconciled. Heals via the shared StateGraph; not auto-started.
+  function createReconcileTick({ intervalMs = DEFAULT_RECONCILE_TICK_MS, onError = () => {} } = {}) {
+    let timer = null;
+    let running = false;
+    async function tickOnce() {
+      if (running) return { ok: true, skipped: true };
+      running = true;
+      try {
+        let { boards } = listWorkflowBoards({ includeArchived: false });
+        for (let board of boards) {
+          try {
+            reconcileWorkflowRuntimeTasks({ boardId: board.id });
+            await reconcileWorkflowRecovery({ boardId: board.id });
+          } catch (err) {
+            onError(err, board.id);
+          }
+        }
+        return { ok: true, boards: boards.length };
+      } finally {
+        running = false;
+      }
+    }
+    return {
+      tickOnce,
+      start() {
+        if (timer) return;
+        timer = setInterval(() => { tickOnce().catch(onError); }, intervalMs);
+        if (typeof timer.unref === 'function') timer.unref();
+      },
+      stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+      },
+      get active() { return timer !== null; },
+    };
+  }
+
+  let reconcileTick = createReconcileTick({ intervalMs: reconcileTickMs, onError: onReconcileTickError });
+
   return {
     ensureBoard,
     getCard,
@@ -2902,6 +2944,7 @@ export function createWorkflowBoardService(opts = {}) {
     exportWorkflowWorkItem,
     getWorkflowRecoveryState,
     listWorkflowEvents,
+    reconcileTick,
   };
 }
 
