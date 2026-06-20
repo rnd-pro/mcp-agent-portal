@@ -232,6 +232,37 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[11].args.action, 'pause');
   });
 
+  it('recommends compact status refreshes after workflow mutations', async () => {
+    let workflowService = {
+      updateWorkItem: async args => ({ ok: true, boardId: args.boardId, card: { id: args.cardId } }),
+    };
+
+    let result = await handleWorkflowBoardTool(
+      {},
+      'workflow_board',
+      {
+        action: 'update_item',
+        boardId: 'board-1',
+        projectId: 'project-1',
+        cardId: 'card-1',
+        checks: { audit: { status: 'pass' } },
+      },
+      'mcp-test',
+      { workflowService },
+    );
+
+    let payload = parseResult(result);
+    assert.equal(payload.next.recommendedAction, 'get_board');
+    assert.deepEqual(payload.next.call, {
+      action: 'get_board',
+      boardId: 'board-1',
+      projectId: 'project-1',
+      includeRuntime: true,
+      compact: true,
+      view: 'status',
+    });
+  });
+
   it('preserves blocked transition gate semantics and suggests the next action', async () => {
     let calls = [];
     let workflowService = {

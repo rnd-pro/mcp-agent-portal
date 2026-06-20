@@ -552,6 +552,15 @@ function serviceArgsForAction(action, args = {}) {
 function nextForAction(action, args = {}, result = {}) {
   let boardId = args.boardId || result.boardId || result.board?.id || DEFAULT_WORKFLOW_BOARD_ID;
   let cardId = args.cardId || result.cardId || result.card?.id || result.id || null;
+  let statusRefreshCall = (extra = {}) => cleanUndefined({
+    action: 'get_board',
+    boardId,
+    projectId: args.projectId,
+    includeRuntime: true,
+    compact: true,
+    view: 'status',
+    ...extra,
+  });
 
   if (action === 'create_item') {
     return {
@@ -573,7 +582,7 @@ function nextForAction(action, args = {}, result = {}) {
         return {
           recommendedAction: 'get_board',
           reason: 'The ready column auto-started orchestration; refresh the board to inspect run and lease state.',
-          call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId, includeRuntime: true }),
+          call: statusRefreshCall(),
         };
       }
       return {
@@ -585,7 +594,7 @@ function nextForAction(action, args = {}, result = {}) {
     return {
       recommendedAction: 'get_board',
       reason: 'Refresh the board projection after a workflow transition.',
-      call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId }),
+      call: statusRefreshCall(),
     };
   }
   if (action === 'recovery') {
@@ -599,14 +608,14 @@ function nextForAction(action, args = {}, result = {}) {
     return {
       recommendedAction: 'get_board',
       reason: 'Refresh the board to inspect persisted recovery flags.',
-      call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId, includeRuntime: true }),
+      call: statusRefreshCall(),
     };
   }
   if (action === 'orchestrate' || action === 'control' || action === 'control_board' || action === 'update_item' || action === 'update_board' || action === 'update_column' || action === 'delete_item') {
     return {
       recommendedAction: 'get_board',
       reason: 'Refresh board state after runtime or card mutation.',
-      call: cleanUndefined({ action: 'get_board', boardId, projectId: args.projectId, includeRuntime: true }),
+      call: statusRefreshCall(),
     };
   }
   return null;

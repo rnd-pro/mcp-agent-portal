@@ -939,12 +939,13 @@ export function createWorkflowBoardService(opts = {}) {
       };
     }
     let capacity = asObject(systemLoad.capacity);
+    let agents = asObject(systemLoad.agents);
     return {
       available: true,
       agents: {
-        total: finiteNumber(systemLoad.total) ?? 0,
-        ours: finiteNumber(systemLoad.ours) ?? 0,
-        external: finiteNumber(systemLoad.external) ?? 0,
+        total: finiteNumber(agents.total) ?? finiteNumber(systemLoad.total) ?? 0,
+        ours: finiteNumber(agents.ours) ?? finiteNumber(systemLoad.ours) ?? 0,
+        external: finiteNumber(agents.external) ?? finiteNumber(systemLoad.external) ?? 0,
       },
       cpu: {
         count: finiteNumber(systemLoad.cpu?.count),
@@ -954,7 +955,10 @@ export function createWorkflowBoardService(opts = {}) {
         usedRatio: finiteNumber(systemLoad.memory?.usedRatio),
       },
       process: {
-        trackedChildren: finiteNumber(systemLoad.process?.trackedChildren) ?? finiteNumber(systemLoad.ours) ?? 0,
+        trackedChildren: finiteNumber(systemLoad.process?.trackedChildren)
+          ?? finiteNumber(agents.ours)
+          ?? finiteNumber(systemLoad.ours)
+          ?? 0,
         staleProcessCount: finiteNumber(capacity.staleProcessCount) ?? 0,
       },
       capacity: {
@@ -962,7 +966,10 @@ export function createWorkflowBoardService(opts = {}) {
         reason: capacity.reason || null,
         runningTaskCount: finiteNumber(capacity.runningTaskCount) ?? runningTaskCount,
         recommendedMaxParallelTasks: finiteNumber(capacity.recommendedMaxParallelTasks),
-        trackedChildCount: finiteNumber(capacity.trackedChildCount) ?? finiteNumber(systemLoad.ours) ?? 0,
+        trackedChildCount: finiteNumber(capacity.trackedChildCount)
+          ?? finiteNumber(agents.ours)
+          ?? finiteNumber(systemLoad.ours)
+          ?? 0,
       },
     };
   }
@@ -2306,6 +2313,52 @@ export function createWorkflowBoardService(opts = {}) {
     ]));
   }
 
+  function parseToolJsonResult(result = {}) {
+    let text = result?.content?.[0]?.text || '';
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function extractRuntimeSystemLoad(value = null) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    let candidates = [
+      value.systemLoad,
+      value.system,
+      value.developmentMap?.system,
+      value.developmentMap?.systemLoad,
+    ];
+    return candidates.find(candidate => (
+      candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+    )) ?? null;
+  }
+
+  async function resolveRuntimeSystemLoad(context = {}, pm = null, parsed = null) {
+    return extractRuntimeSystemLoad(parsed)
+      ?? extractRuntimeSystemLoad(context)
+      ?? await readPortalSystemLoad(pm);
+  }
+
+  async function readPortalSystemLoad(pm) {
+    if (!pm?.requestFromChild) return null;
+    for (let name of ['get_portal_status', 'get_development_map']) {
+      try {
+        let result = await pm.requestFromChild('agent-pool', 'tools/call', {
+          name,
+          arguments: {},
+        }, 60_000);
+        let systemLoad = extractRuntimeSystemLoad(parseToolJsonResult(result));
+        if (systemLoad) return systemLoad;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
   async function readRuntimeState(context = {}) {
     let tasksById = readStateGraphRuntimeTasks();
     let pm = context.proxyManager ?? proxyManager;
@@ -2322,20 +2375,27 @@ export function createWorkflowBoardService(opts = {}) {
           let id = task?.id || task?.taskId;
           if (id) tasksById.set(id, { id, ...task, runtimeSource: 'agent_pool' });
         }
+        let systemLoad = await resolveRuntimeSystemLoad(context, pm, parsed);
         return {
           tasks: tasksById,
-          systemLoad: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-            ? parsed.systemLoad ?? null
-            : null,
+          systemLoad,
           staleProcesses: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
             ? parsed.staleProcesses ?? []
             : [],
         };
       } catch {
-        return { tasks: tasksById, systemLoad: null, staleProcesses: [] };
+        return {
+          tasks: tasksById,
+          systemLoad: await resolveRuntimeSystemLoad(context, pm),
+          staleProcesses: [],
+        };
       }
     }
-    return { tasks: tasksById, systemLoad: null, staleProcesses: [] };
+    return {
+      tasks: tasksById,
+      systemLoad: await resolveRuntimeSystemLoad(context, pm),
+      staleProcesses: [],
+    };
   }
 
   async function readRuntimeTasks(context = {}) {

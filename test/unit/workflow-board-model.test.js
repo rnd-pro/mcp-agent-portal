@@ -489,6 +489,81 @@ describe('workflow board model and service', () => {
     assert.equal(compact.activity.latestEventAt >= 1000, true);
   });
 
+  it('uses orchestrator context system load when task runtime omits capacity data', async () => {
+    let calls = [];
+    let proxyManager = {
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload.name);
+        if (payload.name === 'list_tasks') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                tasks: [{
+                  id: 'task-active',
+                  kind: 'workflow-runtime-task',
+                  status: 'running',
+                  workflowBoardId: DEFAULT_WORKFLOW_BOARD_ID,
+                  workflowCardId: 'card-active',
+                  workflowRunId: 'run-active',
+                  startedAt: 1800,
+                  updatedAt: 1900,
+                }],
+              }),
+            }],
+          };
+        }
+        throw new Error(`unexpected tool ${payload.name}`);
+      },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    service.createOrUpdateCard({
+      id: 'card-active',
+      title: 'Active workflow repair',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Expose system load'],
+      entityRefs: { taskIds: ['task-active'] },
+      actor: 'test',
+    });
+
+    let compact = await service.getBoardProjectionWithRuntime({
+      projectId: 'agent-portal',
+      compact: true,
+    }, {
+      systemLoad: {
+        agents: {
+          total: 5,
+          ours: 2,
+          external: 1,
+        },
+        cpu: { count: 8, loadRatio1m: 0.4 },
+        memory: { usedRatio: 0.71 },
+        capacity: {
+          state: 'available',
+          runningTaskCount: 1,
+          recommendedMaxParallelTasks: 3,
+        },
+      },
+    });
+
+    assert.deepEqual(calls, ['list_tasks']);
+    assert.equal(compact.systemLoad.available, true);
+    assert.equal(compact.systemLoad.capacity.state, 'available');
+    assert.equal(compact.systemLoad.capacity.runningTaskCount, 1);
+    assert.equal(compact.systemLoad.capacity.recommendedMaxParallelTasks, 3);
+    assert.equal(compact.systemLoad.cpu.loadRatio1m, 0.4);
+    assert.equal(compact.systemLoad.process.trackedChildren, 2);
+  });
+
   it('imports missing durable work-item seeds during live projection without owning live status', async () => {
     service = createWorkflowBoardService({
       stateGraph: sg,

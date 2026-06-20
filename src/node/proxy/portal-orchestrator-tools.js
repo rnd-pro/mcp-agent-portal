@@ -1163,8 +1163,20 @@ export async function handlePortalOrchestratorTool(
   let sg = await getStateGraph(options);
 
   if (isWorkflowBoardTool(toolName)) {
+    let workflowContext = options.context || {};
+    if (
+      args.action === 'get_board'
+      && (args.includeRuntime || args.compact || args.view === 'status')
+    ) {
+      let taskState = await readInternalTaskState(proxyManager);
+      workflowContext = {
+        ...workflowContext,
+        systemLoad: taskState.systemLoad || null,
+      };
+    }
     return handleWorkflowBoardTool(proxyManager, toolName, args, source, {
       ...options,
+      context: workflowContext,
       stateGraph: sg,
     });
   }

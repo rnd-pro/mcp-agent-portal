@@ -270,6 +270,64 @@ describe('portal orchestrator MCP tools', () => {
     assert.equal(calls[0].context.action, 'transition');
   });
 
+  it('passes internal runtime system load into compact workflow_board status reads', async () => {
+    let calls = [];
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'list_tasks') {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [],
+              staleProcesses: [],
+              systemLoad: {
+                agents: { total: 4, ours: 2, external: 1 },
+                cpu: { count: 8, loadRatio1m: 0.32 },
+                memory: { usedRatio: 0.62 },
+                capacity: {
+                  state: 'available',
+                  runningTaskCount: 1,
+                  recommendedMaxParallelTasks: 3,
+                },
+              },
+            }),
+          }],
+        };
+      }
+      throw new Error(`unexpected internal call: ${params.name}`);
+    };
+    let workflowService = {
+      getWorkflowBoard: async (args, context) => {
+        calls.push({ args, context });
+        return { ok: true, systemLoad: context.systemLoad };
+      },
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'workflow_board',
+      {
+        action: 'get_board',
+        boardId: 'agent-workflow-default',
+        projectId: 'agent-portal',
+        includeRuntime: true,
+        compact: true,
+        view: 'status',
+      },
+      'test',
+      { stateGraph: sg, workflowService },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(internalCalls.length, 1);
+    assert.equal(internalCalls[0].params.name, 'list_tasks');
+    assert.equal(calls[0].context.systemLoad.capacity.state, 'available');
+    assert.equal(calls[0].context.systemLoad.capacity.recommendedMaxParallelTasks, 3);
+    assert.equal(payload.result.systemLoad.agents.ours, 2);
+  });
+
   it('updates pending chat task bindings for orchestrator recovery', async () => {
     let chat = sg.createChat({ name: 'Recovered task chat' }, 'test');
 
