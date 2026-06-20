@@ -151,8 +151,39 @@ describe('project scoped frontend data loading', () => {
 
     assert.match(indexSource, /<base href="\$\{basePath \|\| '\/'\}">/);
     assert.ok(indexSource.indexOf('<base href=') < indexSource.indexOf('<script type="importmap">'));
-    assert.match(indexSource, /src="app\.js\?v=workspace-router-theme-widget-agent-groups-overlay-tool-card-agent-process-v9"/);
+    assert.match(indexSource, /src="app\.js\?v=workspace-router-theme-widget-agent-groups-overlay-tool-card-agent-process-v14"/);
     assert.ok(appSource.includes('import "./common/base-path.js";'));
+  });
+
+  it('keeps Settings focused on current provider auth and model configuration', () => {
+    let templateSource = readSource('web/panels/SettingsPanel/SettingsPanel.tpl.js');
+    let source = readSource('web/panels/SettingsPanel/SettingsPanel.js');
+    let cssSource = readSource('web/panels/SettingsPanel/SettingsPanel.css.js');
+    let localeSource = readSource('web/common/portal-locales.js');
+    let buttonCssSource = readSource('node_modules/symbiote-ui/control/Button/Button.css.js');
+    let themeSource = readSource('node_modules/symbiote-ui/themes/cascade-theme.js');
+
+    assert.ok(templateSource.includes('Provider Models'));
+    assert.ok(source.includes('claudeCodeModels'));
+    assert.ok(source.includes('claudeCodeNotLoggedIn'));
+    assert.ok(source.includes('claudeCodeLoginAction'));
+    assert.ok(source.includes('/api/settings/provider-auth/claude/login'));
+    assert.ok(source.includes('/api/settings/provider-auth'));
+    assert.ok(source.includes('_startProviderAuthPolling'));
+    assert.ok(source.includes('claudeCodeLoginComplete'));
+    assert.ok(cssSource.includes('pm-auth-action'));
+    assert.match(cssSource, /\.pm-auth-action\s*\{\s*margin-left: auto;\s*\}/);
+    assert.ok(buttonCssSource.includes('sn-button[variant="primary"]'));
+    assert.ok(buttonCssSource.includes('background: var(--sn-button-primary-bg);'));
+    assert.ok(themeSource.includes("'--sn-button-primary-bg': 'var(--sn-node-selected)'"));
+    assert.doesNotMatch(cssSource, /\.pm-auth-action\s*\{[^}]*\b(background|color|border-color)\s*:/s);
+    assert.equal(templateSource.includes('Anthropic Gateway'), false);
+    assert.equal(templateSource.includes('gateway'), false);
+    assert.equal(source.includes('DEFAULT_GATEWAY'), false);
+    assert.equal(source.includes('anthropicGateway'), false);
+    assert.equal(source.includes('/anthropic/'), false);
+    assert.equal(cssSource.includes('pg-gateway'), false);
+    assert.equal(localeSource.includes('gatewayModels'), false);
   });
 
   it('clears legacy layout cache through the safe cache helper during startup', () => {

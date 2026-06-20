@@ -141,9 +141,9 @@ Optionally create `~/.agent-portal/agent-portal.json` to customize child servers
 }
 ```
 
-### Claude Gateway
+### Anthropic-Compatible Gateway
 
-Agent Portal can expose an Anthropic-compatible gateway for Claude Code at `/anthropic`. This lets Claude Code run against OpenAI-compatible backends such as DeepSeek V4 while keeping Claude Code's local tools in Claude Code.
+Agent Portal can expose an Anthropic-compatible gateway endpoint at `/anthropic` for clients that explicitly point Anthropic-compatible traffic at the portal. This endpoint is independent from Agent Pool's `provider: "claude"` runner.
 
 ```json
 {
@@ -164,7 +164,7 @@ Agent Portal can expose an Anthropic-compatible gateway for Claude Code at `/ant
 }
 ```
 
-Then set `DEEPSEEK_API_KEY`. When this gateway is enabled, Agent Pool's `provider: "claude"` runner injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` automatically for spawned Claude Code workers.
+Then set `DEEPSEEK_API_KEY` for clients that use this endpoint directly. Agent Pool's `provider: "claude"` runner keeps Claude Code on native Claude auth and does not inject `ANTHROPIC_BASE_URL` or `ANTHROPIC_AUTH_TOKEN`; its UI catalog exposes Claude Code aliases (`default`, `fable`, `opus`, `sonnet`, `haiku`) plus current pinned Claude IDs such as `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, and `claude-haiku-4-5`. DeepSeek V4 lanes should use `provider: "opencode"` with models such as `deepseek/deepseek-v4-pro`.
 
 ### XR Diagnostics
 

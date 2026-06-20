@@ -7,7 +7,7 @@
 import WebSocket from 'ws';
 
 const HOST = process.env.PORTAL_HOST || 'portal.local';
-const MODEL = process.env.TEST_MODEL || 'openrouter/deepseek/deepseek-v3.2';
+const MODEL = process.env.TEST_MODEL || 'deepseek/deepseek-v4-pro';
 const WS_URL = `ws://${HOST}/ws/chat`;
 const CHAT_ID = 'test-e2e-' + Date.now();
 const TIMEOUT_S = 60;

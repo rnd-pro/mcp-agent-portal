@@ -22,7 +22,8 @@ pg-settings-panel {
 .stg-status[data-status="warning"],
 .pg-language-status[data-status="warning"],
 .pg-network-status[data-status="warning"],
-.pg-gateway-status[data-status="warning"],
+.pm-auth-banner[data-status="warning"],
+.pm-auth-card[data-status="warning"],
 .pm-status[data-status="warning"] {
   color: var(--sn-warning-color);
 }
@@ -30,7 +31,8 @@ pg-settings-panel {
 .stg-status[data-status="success"],
 .pg-language-status[data-status="success"],
 .pg-network-status[data-status="success"],
-.pg-gateway-status[data-status="success"],
+.pm-auth-banner[data-status="success"],
+.pm-auth-card[data-status="success"],
 .pm-status[data-status="success"] {
   color: var(--sn-success-color);
 }
@@ -38,7 +40,8 @@ pg-settings-panel {
 .stg-status[data-status="error"],
 .pg-language-status[data-status="error"],
 .pg-network-status[data-status="error"],
-.pg-gateway-status[data-status="error"],
+.pm-auth-banner[data-status="error"],
+.pm-auth-card[data-status="error"],
 .pm-status[data-status="error"] {
   color: var(--sn-danger-color);
 }
@@ -84,12 +87,10 @@ pg-settings-panel {
   50% { opacity: 0.4; }
 }
 
-/* Claude Gateway */
 .pg-library-settings,
 .pg-language-settings,
 .pg-voice-settings,
-.pg-network-settings,
-.pg-gateway {
+.pg-network-settings {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -119,9 +120,7 @@ pg-settings-panel {
   }
 }
 
-.pg-library-settings input,
-.pg-gateway-grid input,
-.pg-gateway-grid select {
+.pg-library-settings input {
   font-family: var(--sn-font-mono);
 }
 
@@ -132,13 +131,6 @@ pg-settings-panel {
   font-size: 11px;
   line-height: 1.4;
   color: var(--sn-text-dim);
-}
-
-.pg-gateway-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
 }
 
 .pg-settings-toggle {
@@ -219,22 +211,6 @@ pg-settings-panel {
   text-decoration: underline;
 }
 
-.pg-gateway-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 8px 12px;
-}
-
-.pg-gateway-wide {
-  grid-column: 1 / -1;
-}
-
-.pg-gateway-status {
-  min-height: 16px;
-  font-size: 11px;
-  color: var(--sn-text-dim);
-}
-
 .pm-model-suggestions {
   display: flex;
   flex-wrap: wrap;
@@ -251,12 +227,6 @@ pg-settings-panel {
   font: 11px var(--sn-font-mono);
 }
 
-@media (max-width: 620px) {
-  .pg-gateway-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Provider Models Section */
 .pm-provider-tabs {
   display: flex;
@@ -266,6 +236,66 @@ pg-settings-panel {
 
 .pm-provider-tab {
   flex: 0 0 auto;
+}
+
+.pm-auth-status {
+  margin-bottom: 10px;
+}
+
+.pm-auth-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pm-auth-summary[hidden] {
+  display: none;
+}
+
+.pm-auth-banner,
+.pm-auth-card {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 8px;
+  background: var(--sn-bg);
+  color: var(--sn-text-dim);
+}
+
+.pm-auth-banner {
+  background: var(--sn-node-bg);
+}
+
+.pm-auth-banner .material-symbols-outlined,
+.pm-auth-card .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.pm-auth-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.pm-auth-copy strong {
+  color: var(--sn-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pm-auth-copy span {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.pm-auth-action {
+  margin-left: auto;
 }
 
 .pm-model-list {

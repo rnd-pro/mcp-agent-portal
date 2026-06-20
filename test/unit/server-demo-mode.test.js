@@ -8,6 +8,11 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 
 import { createServerDemoMode, isServerDemoMode } from '../../src/node/server/demo-mode.js';
+import {
+  createSettingsRoutes,
+  getProviderAuthStatus,
+  startClaudeAuthLogin,
+} from '../../src/node/server/routes/settings-routes.js';
 
 function makeReq(method, url, body) {
   let req = new EventEmitter();
@@ -423,7 +428,26 @@ describe('server demo mode', () => {
 
     let modelsRes = makeRes();
     demo.routes['GET /api/settings/models'](makeReq('GET', '/api/settings/models'), modelsRes);
-    assert.ok(modelsRes.json().cliModels.length > 0);
+    let modelsBody = modelsRes.json();
+    assert.ok(modelsBody.cliModels.length > 0);
+    assert.equal(modelsBody.providerAuth.providers.opencode.deepseekConfigured, true);
+    assert.ok(modelsBody.defaultModels.claude.some(model => model.id === 'fable'));
+    assert.ok(modelsBody.defaultModels.claude.some(model => model.id === 'claude-fable-5'));
+
+    let authRes = makeRes();
+    demo.routes['GET /api/settings/provider-auth'](
+      makeReq('GET', '/api/settings/provider-auth'),
+      authRes,
+    );
+    assert.equal(authRes.json().providerAuth.providers.claude.installed, true);
+
+    let loginRes = makeRes();
+    await demo.routes['POST /api/settings/provider-auth/claude/login'](
+      makeReq('POST', '/api/settings/provider-auth/claude/login'),
+      loginRes,
+    );
+    assert.equal(loginRes.json().ok, true);
+    assert.equal(loginRes.json().demoMode, true);
 
     let metadataRes = makeRes();
     demo.routes['GET /api/project-graph-metadata'](makeReq('GET', '/api/project-graph-metadata'), metadataRes);
@@ -799,5 +823,215 @@ describe('server demo mode', () => {
     assert.ok(Object.keys(parsed.I).length > 0);
     assert.ok(Object.keys(parsed.L).length > 0);
     assert.equal(Object.keys(parsed.f).some((key) => key.startsWith('tmp/')), false);
+  });
+});
+
+describe('provider auth status', () => {
+  it('reports safe CLI auth state without secrets', () => {
+    let homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-auth-status-'));
+    try {
+      let openCodeDir = path.join(homeDir, '.local', 'share', 'opencode');
+      fs.mkdirSync(openCodeDir, { recursive: true });
+      fs.writeFileSync(path.join(openCodeDir, 'auth.json'), JSON.stringify({
+        deepseek: { token: 'deepseek-secret' },
+        openrouter: { token: 'openrouter-secret' },
+      }));
+
+      fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
+      fs.writeFileSync(path.join(homeDir, '.claude', '.credentials.json'), JSON.stringify({
+        token: 'claude-secret',
+      }));
+
+      let status = getProviderAuthStatus({
+        homeDir,
+        env: {
+          CLAUDE_CODE_OAUTH_TOKEN: 'oauth-secret',
+          ANTHROPIC_BASE_URL: 'http://proxy.local/anthropic',
+          ANTHROPIC_AUTH_TOKEN: 'proxy-secret',
+          OPENROUTER_API_KEY: 'openrouter-env-secret',
+        },
+        commandVersion(command) {
+          if (command === 'opencode') return '1.17.8';
+          if (command === 'claude') return 'Claude Code 2.0.0';
+          return null;
+        },
+      });
+
+      assert.equal(status.providers.opencode.installed, true);
+      assert.equal(status.providers.opencode.version, '1.17.8');
+      assert.equal(status.providers.opencode.deepseekConfigured, true);
+      assert.deepEqual(status.providers.opencode.credentialProviders, ['deepseek', 'openrouter']);
+      assert.deepEqual(status.providers.opencode.environmentProviders, ['openrouter']);
+
+      assert.equal(status.providers.claude.installed, true);
+      assert.equal(status.providers.claude.authenticated, true);
+      assert.equal(status.providers.claude.authSource, 'oauth-env');
+      assert.equal(status.providers.claude.localCredentialsPresent, true);
+      assert.equal(status.providers.claude.ignoredProxyEnvPresent, true);
+      assert.deepEqual(status.providers.claude.ignoredEnvKeys, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
+
+      let serialized = JSON.stringify(status);
+      assert.equal(serialized.includes('secret'), false);
+      assert.equal(serialized.includes(homeDir), false);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports Claude Code logged out when auth status rejects local credentials', () => {
+    let homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-auth-logged-out-'));
+    try {
+      fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
+      fs.writeFileSync(path.join(homeDir, '.claude', '.credentials.json'), JSON.stringify({
+        token: 'stale-claude-secret',
+      }));
+
+      let status = getProviderAuthStatus({
+        homeDir,
+        env: {},
+        commandVersion(command) {
+          if (command === 'claude') return '2.1.183 (Claude Code)';
+          return null;
+        },
+        commandJson(command, args) {
+          if (command === 'claude' && args.join(' ') === 'auth status') {
+            return { loggedIn: false, authMethod: 'none', apiProvider: 'firstParty' };
+          }
+          return null;
+        },
+      });
+
+      assert.equal(status.providers.claude.installed, true);
+      assert.equal(status.providers.claude.authenticated, false);
+      assert.equal(status.providers.claude.authStatusAvailable, true);
+      assert.equal(status.providers.claude.loggedIn, false);
+      assert.equal(status.providers.claude.authMethod, 'none');
+      assert.equal(status.providers.claude.apiProvider, 'firstParty');
+      assert.equal(status.providers.claude.localCredentialsPresent, true);
+      assert.equal(status.providers.claude.authSource, null);
+      assert.equal(JSON.stringify(status).includes('stale-claude-secret'), false);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('checks Claude Code native auth without inherited proxy env', () => {
+    let capturedEnv = null;
+    let status = getProviderAuthStatus({
+      env: {
+        ANTHROPIC_BASE_URL: 'http://proxy.local/anthropic',
+        ANTHROPIC_AUTH_TOKEN: 'proxy-secret',
+        OPENROUTER_API_KEY: 'openrouter-env-secret',
+      },
+      commandVersion(command) {
+        if (command === 'claude') return '2.1.183 (Claude Code)';
+        return null;
+      },
+      commandJson(command, args, env) {
+        if (command === 'claude' && args.join(' ') === 'auth status') {
+          capturedEnv = env;
+          return { loggedIn: true, authMethod: 'claudeai', apiProvider: 'firstParty' };
+        }
+        return null;
+      },
+    });
+
+    assert.equal(status.providers.claude.authenticated, true);
+    assert.equal(capturedEnv.ANTHROPIC_BASE_URL, undefined);
+    assert.equal(capturedEnv.ANTHROPIC_AUTH_TOKEN, undefined);
+    assert.equal(capturedEnv.OPENROUTER_API_KEY, 'openrouter-env-secret');
+  });
+
+  it('starts Claude Code browser login with the direct subscription flow', () => {
+    let spawnCall = null;
+    let unrefCalled = false;
+    let result = startClaudeAuthLogin({
+      cwd: os.tmpdir(),
+      env: {
+        PATH: '/usr/bin',
+        ANTHROPIC_BASE_URL: 'http://proxy.local/anthropic',
+        ANTHROPIC_AUTH_TOKEN: 'proxy-secret',
+      },
+      spawnFn(command, args, options) {
+        spawnCall = { command, args, options };
+        return {
+          pid: 12345,
+          unref() {
+            unrefCalled = true;
+          },
+        };
+      },
+    });
+
+    assert.equal(result.pid, 12345);
+    assert.equal(unrefCalled, true);
+    assert.equal(spawnCall.command, 'claude');
+    assert.deepEqual(spawnCall.args, ['auth', 'login', '--claudeai']);
+    assert.equal(spawnCall.options.cwd, os.tmpdir());
+    assert.equal(spawnCall.options.detached, true);
+    assert.equal(spawnCall.options.stdio, 'ignore');
+    assert.equal(spawnCall.options.env.PATH, '/usr/bin');
+    assert.equal(spawnCall.options.env.ANTHROPIC_BASE_URL, undefined);
+    assert.equal(spawnCall.options.env.ANTHROPIC_AUTH_TOKEN, undefined);
+  });
+
+  it('wires the Settings Claude login route to the safe starter', async () => {
+    let starterOptions = null;
+    let routes = createSettingsRoutes({
+      projectRoot: '/tmp/agent-portal-route-test',
+      getProviderAuthStatus() {
+        return {
+          providers: {
+            claude: {
+              installed: true,
+            },
+          },
+        };
+      },
+      startClaudeAuthLogin(options) {
+        starterOptions = options;
+        return { pid: 23456 };
+      },
+    });
+
+    let res = makeRes();
+    await routes['POST /api/settings/provider-auth/claude/login'](
+      makeReq('POST', '/api/settings/provider-auth/claude/login'),
+      res,
+    );
+    let body = res.json();
+
+    assert.equal(body.ok, true);
+    assert.equal(body.provider, 'claude');
+    assert.equal(body.authFlow, 'claudeai');
+    assert.equal(body.pid, 23456);
+    assert.equal(starterOptions.cwd, '/tmp/agent-portal-route-test');
+  });
+
+  it('serves a provider auth refresh route without touching model discovery', async () => {
+    let routes = createSettingsRoutes({
+      getProviderAuthStatus() {
+        return {
+          providers: {
+            claude: {
+              installed: true,
+              authenticated: true,
+              loggedIn: true,
+            },
+          },
+        };
+      },
+    });
+
+    let res = makeRes();
+    await routes['GET /api/settings/provider-auth'](
+      makeReq('GET', '/api/settings/provider-auth'),
+      res,
+    );
+    let body = res.json();
+
+    assert.equal(body.providerAuth.providers.claude.authenticated, true);
+    assert.equal('defaultModels' in body, false);
+    assert.equal('cliModels' in body, false);
   });
 });

@@ -8,6 +8,7 @@ export default`
   </div>
 </sn-card>
 <div ref="restartStatus" class="stg-status"></div>
+<div ref="providerAuthSummary" class="pm-auth-summary" hidden></div>
 
 <sn-card class="pg-language-settings" ref="languageCard">
   <span slot="title">Interface Language</span>
@@ -157,60 +158,10 @@ export default`
   <div class="pg-library-note">Public items are installed into the private team library before project use. Secrets and runtime state stay outside .agent-portal.</div>
 </sn-card>
 
-<sn-card class="pg-gateway" ref="gatewayCard">
-  <span slot="title">Claude Gateway</span>
-  <div class="pg-gateway-head">
-    <label class="pg-settings-toggle">
-      <input type="checkbox" ref="gatewayEnabledInput">
-      <span>Enable Gateway</span>
-    </label>
-    <sn-button ref="gatewayTestBtn">Test</sn-button>
-  </div>
-  <div class="pg-gateway-grid">
-    <sn-field variant="compact">
-      <span slot="label">Provider</span>
-      <select ref="gatewayProviderInput">
-        <option value="deepseek">DeepSeek</option>
-      </select>
-    </sn-field>
-    <sn-field variant="compact">
-      <span slot="label">Type</span>
-      <select ref="gatewayProviderTypeInput">
-        <option value="anthropic-compatible">Anthropic compatible</option>
-        <option value="openai-compatible">OpenAI compatible</option>
-      </select>
-    </sn-field>
-    <sn-field variant="compact">
-      <span slot="label">Base URL</span>
-      <input type="url" ref="gatewayBaseUrlInput" placeholder="https://api.deepseek.com/anthropic">
-    </sn-field>
-    <sn-field variant="compact">
-      <span slot="label">API Key Env</span>
-      <input type="text" ref="gatewayApiKeyEnvInput" placeholder="DEEPSEEK_API_KEY">
-    </sn-field>
-    <sn-field variant="compact">
-      <span slot="label">Default Model</span>
-      <input type="text" ref="gatewayDefaultModelInput" list="gatewayModelHints" placeholder="deepseek-v4-flash">
-    </sn-field>
-    <sn-field variant="compact">
-      <span slot="label">Planner Model</span>
-      <input type="text" ref="gatewayPlannerModelInput" list="gatewayModelHints" placeholder="deepseek-v4-pro">
-    </sn-field>
-    <sn-field variant="compact" class="pg-gateway-wide">
-      <span slot="label">Auth Token</span>
-      <input type="password" ref="gatewayAuthTokenInput" placeholder="Optional gateway bearer token">
-    </sn-field>
-  </div>
-  <datalist id="gatewayModelHints">
-    <option value="deepseek-v4-flash"></option>
-    <option value="deepseek-v4-pro"></option>
-  </datalist>
-  <div class="pg-gateway-status" ref="gatewayStatus">Only the environment variable name is saved for provider API keys.</div>
-</sn-card>
-
 <sn-card ref="modelsCard">
   <span slot="title">Provider Models</span>
   <div class="pm-provider-tabs" ref="providerTabs"></div>
+  <div class="pm-auth-status" ref="providerAuthStatus"></div>
   <div class="pm-model-list" ref="modelList"></div>
   <div class="pm-actions">
     <sn-button ref="syncCliBtn"><span class="material-symbols-outlined">sync</span>Discover & Update</sn-button>

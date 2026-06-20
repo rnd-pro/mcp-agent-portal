@@ -1,5 +1,6 @@
 // @ctx claude.ctx
 import { spawn } from 'node:child_process';
+import { createClaudeDirectEnv } from '../../../packages/agent-pool-mcp/src/runner/provider-config.js';
 
 let DEFAULT_TIMEOUT_SEC = 300;
 
@@ -73,12 +74,12 @@ export function createClaudeAdapter(config = {}) {
 
           let spawnOpts = {
             cwd: cwd || process.env.HOME,
-            env: {
+            env: createClaudeDirectEnv({
               ...process.env,
               TERM: 'dumb',
               CI: '1',
               ...(effectiveModel ? { ANTHROPIC_SMALL_FAST_MODEL: effectiveModel } : {}),
-            },
+            }),
             stdio: ['pipe', 'pipe', 'pipe'],
             detached: true,
           };

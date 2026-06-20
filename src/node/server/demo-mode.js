@@ -464,14 +464,49 @@ function demoSettings(overrides = {}) {
 function demoModels() {
   return {
     userModels: {
-      opencode: ['openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
+      opencode: ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
       antigravity: ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)'],
-      claude: ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash', 'claude-sonnet-4-6'],
+      claude: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
       codex: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+    },
+    defaultModels: {
+      claude: [
+        { id: 'default', name: 'Default', description: 'Claude Code tier default' },
+        { id: 'fable', name: 'Fable alias', description: 'Claude Code alias for Claude Fable' },
+        { id: 'opus', name: 'Opus alias', description: 'Claude Code alias for Claude Opus' },
+        { id: 'sonnet', name: 'Sonnet alias', description: 'Claude Code alias for Claude Sonnet' },
+        { id: 'haiku', name: 'Haiku alias', description: 'Claude Code alias for Claude Haiku' },
+        { id: 'claude-fable-5', name: 'Claude Fable 5', description: 'Most capable widely released Claude model' },
+        { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', description: 'Opus-tier model for complex reasoning and agentic coding' },
+        { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', description: 'Balanced model for coding, agents, and enterprise workflows' },
+        { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', description: 'Fastest current Claude model' },
+      ],
+    },
+    providerAuth: {
+      providers: {
+        opencode: {
+          installed: true,
+          version: '1.17.8',
+          authenticated: true,
+          credentialStorePresent: true,
+          credentialStoreUnreadable: false,
+          credentialProviders: ['deepseek'],
+          environmentProviders: [],
+          deepseekConfigured: true,
+        },
+        claude: {
+          installed: true,
+          version: 'Claude Code',
+          authenticated: true,
+          authSource: 'local-store',
+          ignoredProxyEnvPresent: false,
+          ignoredEnvKeys: [],
+        },
+      },
     },
     cliModels: [
       {
-        id: 'openrouter/deepseek/deepseek-v4-pro',
+        id: 'deepseek/deepseek-v4-pro',
         name: 'DeepSeek V4 Pro',
         context: 128000,
         maxOutput: 8192,
@@ -483,7 +518,7 @@ function demoModels() {
         created: 1764547200,
       },
       {
-        id: 'openrouter/deepseek/deepseek-v4-flash',
+        id: 'deepseek/deepseek-v4-flash',
         name: 'DeepSeek V4 Flash',
         context: 128000,
         maxOutput: 8192,
@@ -1239,6 +1274,16 @@ export function createServerDemoMode({ projectRoot, env = process.env } = {}) {
         json(res, { ok: true, demoMode: true, settings: demoSettings(settingsState) });
       },
       'GET /api/settings/models': (_req, res) => json(res, demoModels()),
+      'GET /api/settings/provider-auth': (_req, res) => json(res, {
+        providerAuth: demoModels().providerAuth,
+      }),
+      'POST /api/settings/provider-auth/claude/login': async (_req, res) => json(res, {
+        ok: true,
+        demoMode: true,
+        provider: 'claude',
+        authFlow: 'claudeai',
+        pid: null,
+      }),
       'POST /api/settings/models': async (_req, res) => json(res, { ok: true, demoMode: true }),
       'POST /api/settings/models/refresh': async (_req, res) => json(res, { ...demoModels(), models: demoModels().cliModels, count: demoModels().cliModels.length }),
       'GET /api/adapter/types': (_req, res) => json(res, adapterTypes),

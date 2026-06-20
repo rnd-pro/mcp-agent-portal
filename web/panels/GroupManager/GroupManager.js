@@ -9,11 +9,14 @@ const PROVIDERS = ['codex', 'claude', 'opencode', 'antigravity'];
 const DEFAULT_CHAT_AGENT = 'orchestrator';
 const APPROVAL_MODES = ['yolo', 'auto_edit', 'plan'];
 const DEFAULT_CODEX_MODELS = ['default', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'];
-const CODEX_REASONING_LEVELS = ['default', 'low', 'medium', 'high', 'xhigh'];
+const PROVIDER_REASONING_LEVELS = {
+  codex: ['default', 'low', 'medium', 'high', 'xhigh'],
+  claude: ['default', 'low', 'medium', 'high', 'xhigh', 'max'],
+};
 const DEFAULT_MODELS = {
   codex: DEFAULT_CODEX_MODELS,
-  claude: ['default', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro', 'claude-sonnet-4-6'],
-  opencode: ['default', 'openrouter/deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'],
+  claude: ['default', 'fable', 'opus', 'sonnet', 'haiku', 'claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  opencode: ['default', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
   antigravity: ['default', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)'],
 };
 
@@ -55,14 +58,18 @@ function makeOption(value, selected = false) {
   return option;
 }
 
-function normalizeCodexReasoning(value) {
-  let normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized || normalized === 'default') return '';
-  return CODEX_REASONING_LEVELS.includes(normalized) ? normalized : '';
+function providerReasoningLevels(provider) {
+  return PROVIDER_REASONING_LEVELS[provider] || [];
 }
 
-function profileCodexReasoning(profile) {
-  return normalizeCodexReasoning(profile?.reasoningEffort ?? profile?.reasoning_effort);
+function normalizeProviderReasoning(provider, value) {
+  let normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized === 'default') return '';
+  return providerReasoningLevels(provider).includes(normalized) ? normalized : '';
+}
+
+function profileReasoning(provider, profile) {
+  return normalizeProviderReasoning(provider, profile?.reasoningEffort ?? profile?.reasoning_effort);
 }
 
 export class GroupManager extends Symbiote {
@@ -72,6 +79,7 @@ export class GroupManager extends Symbiote {
   };
 
   _modelsByProvider = {};
+  _defaultModelsByProvider = {};
   _dragProfile = null;
   _dragAgent = null;
   _pendingDeleteGroup = null;
@@ -102,6 +110,7 @@ export class GroupManager extends Symbiote {
         try { groups = JSON.parse(groups); } catch { groups = []; }
       }
       this._modelsByProvider = modelsInfo.userModels || {};
+      this._defaultModelsByProvider = modelsInfo.defaultModels || {};
       this.$.groups = Array.isArray(groups) ? groups.map(cloneGroup) : [];
       this.$.agents = Array.isArray(agentsInfo.agents) ? agentsInfo.agents.map(agent => ({ ...agent })) : [];
       if (retry && this.$.groups.length === 0) {
@@ -115,7 +124,11 @@ export class GroupManager extends Symbiote {
   }
 
   _modelsFor(provider) {
+    let apiDefaults = (this._defaultModelsByProvider[provider] || [])
+      .map(model => typeof model === 'string' ? model : model?.id)
+      .filter(Boolean);
     return Array.from(new Set([
+      ...apiDefaults,
       ...(DEFAULT_MODELS[provider] || ['default']),
       ...(this._modelsByProvider[provider] || []),
     ]));
@@ -305,10 +318,11 @@ export class GroupManager extends Symbiote {
 
     let reasoningSelect = document.createElement('select');
     reasoningSelect.dataset.addReasoning = group.name;
-    reasoningSelect.title = 'Codex reasoning effort';
-    reasoningSelect.replaceChildren(...CODEX_REASONING_LEVELS.map(level => makeOption(level)));
-    reasoningSelect.hidden = provider !== 'codex';
-    reasoningSelect.disabled = provider !== 'codex';
+    reasoningSelect.title = 'Provider reasoning effort';
+    let reasoningLevels = providerReasoningLevels(provider);
+    reasoningSelect.replaceChildren(...reasoningLevels.map(level => makeOption(level)));
+    reasoningSelect.hidden = reasoningLevels.length === 0;
+    reasoningSelect.disabled = reasoningLevels.length === 0;
 
     let addButton = makeIconButton();
     addButton.title = 'Add profile';
@@ -374,8 +388,8 @@ export class GroupManager extends Symbiote {
     let modelNode = makeElement('div', 'gm-profile-model', model);
     modelNode.title = model;
     let details = [];
-    let reasoning = provider === 'codex' ? profileCodexReasoning(profile) : '';
-    if (reasoning) details.push(`reasoning ${reasoning}`);
+    let reasoning = profileReasoning(provider, profile);
+    if (reasoning) details.push(`effort ${reasoning}`);
     let detailNode = details.length ? makeElement('div', 'gm-profile-meta-line', details.join(' · ')) : null;
     main.replaceChildren(...[providerNode, modelNode, detailNode].filter(Boolean));
 
@@ -534,9 +548,10 @@ export class GroupManager extends Symbiote {
     let addProfile = providerEl.closest?.('.gm-add-profile');
     if (addProfile) addProfile.dataset.provider = provider;
     if (!reasoningEl) return;
-    let isCodex = provider === 'codex';
-    reasoningEl.hidden = !isCodex;
-    reasoningEl.disabled = !isCodex;
+    let reasoningLevels = providerReasoningLevels(provider);
+    reasoningEl.replaceChildren(...reasoningLevels.map(level => makeOption(level)));
+    reasoningEl.hidden = reasoningLevels.length === 0;
+    reasoningEl.disabled = reasoningLevels.length === 0;
     reasoningEl.value = 'default';
   }
 
@@ -584,7 +599,7 @@ export class GroupManager extends Symbiote {
     let previousProfiles = this._normalProfiles(group).map(profile => ({ ...profile }));
     let provider = providerEl?.value || group.provider || 'codex';
     let nextProfile = { provider, model: modelEl?.value || 'default' };
-    let reasoningEffort = provider === 'codex' ? normalizeCodexReasoning(reasoningEl?.value) : '';
+    let reasoningEffort = normalizeProviderReasoning(provider, reasoningEl?.value);
     if (reasoningEffort) nextProfile.reasoningEffort = reasoningEffort;
     group.profiles = this._normalProfiles(group);
     group.profiles.push(nextProfile);

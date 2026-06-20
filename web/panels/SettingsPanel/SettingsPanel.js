@@ -64,25 +64,15 @@ function _fmtTime(s) {
   return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
 
-const DEFAULT_GATEWAY = {
-  enabled: false,
-  authToken: '',
-  defaultModel: 'deepseek-v4-flash',
-  plannerModel: 'deepseek-v4-pro',
-  providers: {
-    deepseek: {
-      type: 'anthropic-compatible',
-      baseUrl: 'https://api.deepseek.com/anthropic',
-      apiKeyEnv: 'DEEPSEEK_API_KEY',
-      models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-    },
-  },
-};
-
 export class SettingsPanel extends Symbiote {
   init$ = {};
   _statusInterval = null;
   _approvalInterval = null;
+  _providerAuthInterval = null;
+  _providerAuthRefreshInFlight = null;
+  _onProviderAuthVisibilityChange = () => {
+    if (!globalThis.document?.hidden) this._refreshProviderAuth({ notify: true });
+  };
   _settings = {};
 
   renderCallback() {
@@ -92,12 +82,12 @@ export class SettingsPanel extends Symbiote {
     this.ref.stopBtn.onclick = () => this.stopServer();
     this.ref.saveSettingsBtn.onclick = () => this.saveSettings();
     this.ref.lanAccessInput.onchange = () => this.saveNetworkAccessSettings();
-    this.ref.gatewayTestBtn.onclick = () => this.testGateway();
     this.ref.localeModeInput.onchange = () => this.saveLocalizationSettings();
     this._renderLocaleModeOptions();
     this.fetchInfo();
     this.fetchSettings();
     this._startStatusPolling();
+    this._startProviderAuthPolling();
   }
 
   async fetchSettings() {
@@ -114,7 +104,6 @@ export class SettingsPanel extends Symbiote {
       this._applyVoiceInputSettings(r.voiceInput || {});
       this._applyAgentPortalSettings(r.agentPortal || {});
       if (this._lastNetworkAccess) this._renderNetworkAccess(this._lastNetworkAccess);
-      this._applyGatewaySettings(r.anthropicGateway || {});
     } catch (e) {
       console.error('Failed to fetch settings:', e);
     }
@@ -127,13 +116,12 @@ export class SettingsPanel extends Symbiote {
       let agentPortal = this._readAgentPortalSettings();
       let localization = this._readLocalizationSettings();
       let voiceInput = this._readVoiceInputSettings();
-      let anthropicGateway = this._readGatewaySettings();
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramToken, telegramChatId, localization, voiceInput, agentPortal, anthropicGateway })
+        body: JSON.stringify({ telegramToken, telegramChatId, localization, voiceInput, agentPortal })
       });
-      this._settings = { ...this._settings, telegramToken, telegramChatId, localization, voiceInput, agentPortal, anthropicGateway };
+      this._settings = { ...this._settings, telegramToken, telegramChatId, localization, voiceInput, agentPortal };
       let btn = this.ref.saveSettingsBtn;
       btn.textContent = tPortal('text.savedRestart');
       setTimeout(() => {
@@ -281,76 +269,6 @@ export class SettingsPanel extends Symbiote {
     };
   }
 
-  _applyGatewaySettings(raw) {
-    let gateway = {
-      ...DEFAULT_GATEWAY,
-      ...raw,
-      providers: {
-        ...DEFAULT_GATEWAY.providers,
-        ...(raw.providers || {}),
-      },
-    };
-    let providerId = gateway.providers.deepseek ? 'deepseek' : Object.keys(gateway.providers)[0] || 'deepseek';
-    let provider = {
-      ...DEFAULT_GATEWAY.providers.deepseek,
-      ...(gateway.providers[providerId] || {}),
-    };
-
-    this.ref.gatewayEnabledInput.checked = gateway.enabled === true;
-    this.ref.gatewayProviderInput.value = providerId;
-    this.ref.gatewayProviderTypeInput.value = provider.type || 'openai-compatible';
-    this.ref.gatewayBaseUrlInput.value = provider.baseUrl || '';
-    this.ref.gatewayApiKeyEnvInput.value = provider.apiKeyEnv || '';
-    this.ref.gatewayDefaultModelInput.value = gateway.defaultModel || '';
-    this.ref.gatewayPlannerModelInput.value = gateway.plannerModel || '';
-    this.ref.gatewayAuthTokenInput.value = gateway.authToken || '';
-  }
-
-  _readGatewaySettings() {
-    let providerId = this.ref.gatewayProviderInput.value || 'deepseek';
-    let defaultModel = this.ref.gatewayDefaultModelInput.value.trim() || DEFAULT_GATEWAY.defaultModel;
-    let plannerModel = this.ref.gatewayPlannerModelInput.value.trim() || DEFAULT_GATEWAY.plannerModel;
-    return {
-      enabled: this.ref.gatewayEnabledInput.checked,
-      authToken: this.ref.gatewayAuthTokenInput.value.trim(),
-      defaultModel,
-      plannerModel,
-      providers: {
-        [providerId]: {
-          type: this.ref.gatewayProviderTypeInput.value || 'openai-compatible',
-          baseUrl: this.ref.gatewayBaseUrlInput.value.trim() || DEFAULT_GATEWAY.providers.deepseek.baseUrl,
-          apiKeyEnv: this.ref.gatewayApiKeyEnvInput.value.trim() || DEFAULT_GATEWAY.providers.deepseek.apiKeyEnv,
-          models: Array.from(new Set([defaultModel, plannerModel, ...DEFAULT_GATEWAY.providers.deepseek.models])),
-        },
-      },
-    };
-  }
-
-  async testGateway() {
-    let t = this.ref.gatewayStatus;
-    let gateway = this._readGatewaySettings();
-    if (!gateway.enabled) {
-      setStatus(t, tPortal('text.gatewayEnableBeforeTesting'), 'warning');
-      return;
-    }
-    setStatus(t, tPortal('text.testingGateway'), 'muted');
-    let headers = gateway.authToken ? { Authorization: `Bearer ${gateway.authToken}` } : {};
-    try {
-      let [healthRes, modelsRes] = await Promise.all([
-        fetch('/anthropic/health', { headers }),
-        fetch('/anthropic/v1/models', { headers }),
-      ]);
-      if (!healthRes.ok) throw new Error(`health ${healthRes.status}`);
-      if (!modelsRes.ok) throw new Error(`models ${modelsRes.status}`);
-      let health = await healthRes.json();
-      let models = await modelsRes.json();
-      let count = Array.isArray(models.data) ? models.data.length : 0;
-      setStatus(t, `OK: ${health.defaultModel || gateway.defaultModel}; ${count} model${count === 1 ? '' : 's'}`, 'success');
-    } catch (e) {
-      setStatus(t, `Test failed: ${e.message}`, 'error');
-    }
-  }
-
   disconnectedCallback() {
     super.disconnectedCallback && super.disconnectedCallback();
     if (this._statusInterval) {
@@ -361,6 +279,11 @@ export class SettingsPanel extends Symbiote {
       clearInterval(this._approvalInterval);
       this._approvalInterval = null;
     }
+    if (this._providerAuthInterval) {
+      clearInterval(this._providerAuthInterval);
+      this._providerAuthInterval = null;
+    }
+    globalThis.document?.removeEventListener?.('visibilitychange', this._onProviderAuthVisibilityChange);
   }
 
   _startStatusPolling() {
@@ -368,6 +291,61 @@ export class SettingsPanel extends Symbiote {
     this._fetchNetworkApprovals();
     this._statusInterval = setInterval(() => this._fetchStatus(), 5000);
     this._approvalInterval = setInterval(() => this._fetchNetworkApprovals(), 3000);
+  }
+
+  _startProviderAuthPolling() {
+    if (this._providerAuthInterval) clearInterval(this._providerAuthInterval);
+    this._providerAuthInterval = setInterval(() => {
+      this._refreshProviderAuth({ notify: true });
+    }, 5000);
+    globalThis.document?.removeEventListener?.('visibilitychange', this._onProviderAuthVisibilityChange);
+    globalThis.document?.addEventListener?.('visibilitychange', this._onProviderAuthVisibilityChange);
+  }
+
+  _applyProviderAuth(providerAuth, { render = true, notify = true } = {}) {
+    let previousClaude = this._providerAuth?.providers?.claude;
+    this._providerAuth = providerAuth || { providers: {} };
+    let currentClaude = this._providerAuth?.providers?.claude;
+    if (render) {
+      this._renderProviderAuthSummary();
+      this._renderProviderAuth();
+    }
+    if (notify && previousClaude?.authenticated === false && currentClaude?.authenticated === true) {
+      let message = tPortal('text.claudeCodeLoginComplete');
+      setStatus(this.ref.restartStatus, message, 'success');
+      setTimeout(() => {
+        if (this.ref.restartStatus.textContent === message) {
+          setStatus(this.ref.restartStatus, '', 'muted');
+        }
+      }, 5000);
+    }
+  }
+
+  async _refreshProviderAuth({ notify = true, quiet = true } = {}) {
+    if (this._providerAuthRefreshInFlight) return this._providerAuthRefreshInFlight;
+    this._providerAuthRefreshInFlight = (async () => {
+      let res = await fetch('/api/settings/provider-auth');
+      let body = await res.json().catch(() => ({}));
+      if (!res.ok || body.error) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      this._applyProviderAuth(body.providerAuth || { providers: {} }, { notify });
+      return body.providerAuth;
+    })();
+    try {
+      return await this._providerAuthRefreshInFlight;
+    } catch (e) {
+      if (!quiet) {
+        setStatus(
+          this.ref.restartStatus,
+          tPortal('text.claudeCodeAuthRefreshFailed', { message: e.message }),
+          'error',
+        );
+      }
+      return null;
+    } finally {
+      this._providerAuthRefreshInFlight = null;
+    }
   }
 
   async _fetchStatus() {
@@ -517,6 +495,8 @@ export class SettingsPanel extends Symbiote {
       
       this._userModels = modelsInfo.userModels || {};
       this._cliModels = modelsInfo.cliModels || [];
+      this._defaultModels = modelsInfo.defaultModels || {};
+      this._applyProviderAuth(modelsInfo.providerAuth || { providers: {} }, { render: false, notify: true });
       this._renderProviderTabs();
       
       this.ref.backendCard.replaceChildren(
@@ -588,6 +568,8 @@ export class SettingsPanel extends Symbiote {
   _activeProvider = 'opencode';
   _userModels = {};
   _cliModels = [];
+  _defaultModels = {};
+  _providerAuth = { providers: {} };
   
   _initProviderModels() {
     this.ref.syncCliBtn.onclick = () => this._syncFromCli();
@@ -629,29 +611,191 @@ export class SettingsPanel extends Symbiote {
       this._renderDirectory();
     }
     
+    this._renderProviderAuthSummary();
+    this._renderProviderAuth();
     this._renderModelList();
+  }
+
+  _renderProviderAuthSummary() {
+    let host = this.ref.providerAuthSummary;
+    if (!host) return;
+
+    let claude = this._providerAuth?.providers?.claude;
+    let banners = [];
+    if (claude?.installed && claude.authenticated === false) {
+      let detail = claude.localCredentialsPresent
+        ? tPortal('text.claudeCodeLocalCredentialsRejected')
+        : tPortal('text.claudeCodeLoginHint');
+      banners.push(this._renderProviderAuthBanner({
+        status: 'warning',
+        icon: 'warning',
+        title: tPortal('text.claudeCodeNotLoggedIn'),
+        detail,
+        actionLabel: tPortal('text.claudeCodeLoginAction'),
+        actionIcon: 'login',
+        onAction: (button) => this._startClaudeLogin(button),
+      }));
+    }
+
+    host.hidden = banners.length === 0;
+    host.replaceChildren(...banners);
+  }
+
+  _renderProviderAuthBanner({ status, icon, title, detail, actionLabel, actionIcon, onAction }) {
+    let card = document.createElement('div');
+    card.className = 'pm-auth-banner';
+    card.dataset.status = status;
+
+    let iconEl = document.createElement('span');
+    iconEl.className = 'material-symbols-outlined';
+    iconEl.textContent = icon;
+
+    let copy = document.createElement('div');
+    copy.className = 'pm-auth-copy';
+
+    let titleEl = document.createElement('strong');
+    titleEl.textContent = title;
+
+    let detailEl = document.createElement('span');
+    detailEl.textContent = detail;
+
+    copy.append(titleEl, detailEl);
+    card.append(iconEl, copy);
+    if (actionLabel && typeof onAction === 'function') {
+      let action = document.createElement('sn-button');
+      action.className = 'pm-auth-action';
+      action.setAttribute('variant', 'primary');
+      renderIconTextButton(action, actionIcon || 'login', actionLabel);
+      action.onclick = () => onAction(action);
+      card.append(action);
+    }
+    return card;
+  }
+
+  async _startClaudeLogin(button) {
+    if (button) {
+      renderIconTextButton(button, 'progress_activity', tPortal('text.claudeCodeLoginStarting'), true);
+      button.disabled = true;
+    }
+    try {
+      let res = await fetch('/api/settings/provider-auth/claude/login', { method: 'POST' });
+      let body = await res.json().catch(() => ({}));
+      if (!res.ok || body.error) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      setStatus(this.ref.restartStatus, tPortal('text.claudeCodeLoginStarted'), 'warning');
+      setTimeout(() => this._refreshProviderAuth({ notify: true, quiet: false }), 3000);
+    } catch (e) {
+      setStatus(
+        this.ref.restartStatus,
+        tPortal('text.claudeCodeLoginFailed', { message: e.message }),
+        'error',
+      );
+    } finally {
+      if (button) {
+        renderIconTextButton(button, 'login', tPortal('text.claudeCodeLoginAction'));
+        button.disabled = false;
+      }
+    }
+  }
+
+  _renderProviderAuth() {
+    let auth = this._providerAuth?.providers?.[this._activeProvider];
+    if (!auth) {
+      this.ref.providerAuthStatus.replaceChildren();
+      return;
+    }
+
+    let status = 'muted';
+    let title = this._activeProvider;
+    let details = [];
+
+    if (this._activeProvider === 'opencode') {
+      title = auth.installed ? `OpenCode ${auth.version || ''}`.trim() : 'OpenCode not installed';
+      if (!auth.installed) {
+        status = 'error';
+      } else if (auth.deepseekConfigured) {
+        status = 'success';
+        details.push('DeepSeek connected');
+      } else {
+        status = 'warning';
+        details.push('DeepSeek not connected');
+      }
+      if (auth.environmentProviders?.length) details.push(`Env: ${auth.environmentProviders.join(', ')}`);
+      if (auth.credentialProviders?.length) details.push(`Credentials: ${auth.credentialProviders.join(', ')}`);
+      if (auth.credentialStoreUnreadable) details.push('Credential store unreadable');
+    } else if (this._activeProvider === 'claude') {
+      title = auth.installed ? `Claude Code ${auth.version || ''}`.trim() : 'Claude Code not installed';
+      if (!auth.installed) {
+        status = 'error';
+      } else if (auth.authenticated) {
+        status = 'success';
+        if (auth.authSource === 'oauth-env') {
+          details.push('OAuth env present');
+        } else if (auth.loggedIn === true) {
+          details.push(`Logged in${auth.authMethod && auth.authMethod !== 'none' ? ` via ${auth.authMethod}` : ''}`);
+        } else {
+          details.push('Local auth detected');
+        }
+      } else {
+        status = 'warning';
+        details.push(auth.loggedIn === false ? 'Claude Code not logged in' : 'Native auth not verified');
+        details.push('Run claude auth login');
+      }
+      if (auth.localCredentialsPresent && auth.loggedIn !== true) {
+        details.push(auth.loggedIn === false ? 'Local credentials not accepted by current CLI' : 'Local credentials present but not verified');
+      }
+      if (auth.ignoredProxyEnvPresent) details.push('Anthropic proxy/API env ignored');
+    } else {
+      title = `${this._activeProvider} auth`;
+      details.push('Status not probed');
+    }
+
+    let card = document.createElement('div');
+    card.className = 'pm-auth-card';
+    card.dataset.status = status;
+
+    let icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = status === 'success' ? 'verified' : status === 'warning' ? 'warning' : status === 'error' ? 'error' : 'info';
+
+    let text = document.createElement('div');
+    text.className = 'pm-auth-copy';
+
+    let name = document.createElement('strong');
+    name.textContent = title;
+
+    let detail = document.createElement('span');
+    detail.textContent = details.join(' · ') || '—';
+
+    text.append(name, detail);
+    card.append(icon, text);
+    this.ref.providerAuthStatus.replaceChildren(card);
   }
 
   _renderModelList() {
     let models = this._userModels[this._activeProvider] || [];
     let children = [];
-    let showGatewaySuggestions = this._activeProvider === 'claude'
-      && this._settings?.anthropicGateway?.enabled;
-    if (showGatewaySuggestions) {
-      let suggestions = document.createElement('div');
-      suggestions.className = 'pm-model-suggestions';
-      let label = document.createElement('span');
-      label.textContent = tPortal('text.gatewayModels');
-      suggestions.append(label);
-      for (let defaultModel of DEFAULT_GATEWAY.providers.deepseek.models) {
-        let model = `deepseek/${defaultModel}`;
-        let button = document.createElement('sn-button');
-        button.className = 'pm-suggest-model';
-        button.dataset.m = model;
-        button.textContent = model;
-        suggestions.append(button);
+    if (this._activeProvider === 'claude') {
+      let claudeModels = this._defaultModels.claude || [];
+      if (claudeModels.length > 0) {
+        let suggestions = document.createElement('div');
+        suggestions.className = 'pm-model-suggestions';
+        let label = document.createElement('span');
+        label.textContent = tPortal('text.claudeCodeModels');
+        suggestions.append(label);
+        for (let entry of claudeModels) {
+          let id = typeof entry === 'string' ? entry : entry?.id;
+          if (!id) continue;
+          let button = document.createElement('sn-button');
+          button.className = 'pm-suggest-model';
+          button.dataset.m = id;
+          button.textContent = typeof entry === 'string' ? entry : (entry.name || id);
+          if (entry?.description) button.title = `${id} · ${entry.description}`;
+          suggestions.append(button);
+        }
+        children.push(suggestions);
       }
-      children.push(suggestions);
     }
 
     if (models.length === 0) {
@@ -894,6 +1038,9 @@ export class SettingsPanel extends Symbiote {
     try {
       let r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
       this._cliModels = r.models || [];
+      this._defaultModels = r.defaultModels || this._defaultModels;
+      this._providerAuth = r.providerAuth || this._providerAuth;
+      this._renderProviderAuth();
       this._renderDirectory();
       this._setModelStatus(`Discovered ${r.count} models`, "accent");
     } catch (e) {
