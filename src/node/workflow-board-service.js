@@ -25,6 +25,14 @@ import { getStateGraph } from './state-graph.js';
 const WORKFLOW_SOURCE = 'workflow-board';
 const DEFAULT_EVENT_LIMIT = 50;
 const MAX_EVENT_LIMIT = 200;
+const COMPACT_CARD_LIMIT = 20;
+const COMPACT_EVENT_LIMIT = 8;
+const COMPACT_ACTIVE_COLUMN_IDS = new Set([
+  'ready',
+  'in-progress',
+  'quality-audit',
+  'commit-publish',
+]);
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
@@ -60,6 +68,24 @@ function resolveLimit(value) {
   let limit = Number(value);
   if (!Number.isFinite(limit) || limit < 1) return DEFAULT_EVENT_LIMIT;
   return Math.min(MAX_EVENT_LIMIT, Math.floor(limit));
+}
+
+function finiteNumber(value) {
+  let number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function latestTimestamp(values = []) {
+  let timestamps = values
+    .map(value => Number(value))
+    .filter(Number.isFinite);
+  return timestamps.length ? Math.max(...timestamps) : null;
+}
+
+function compactText(value, max = 220) {
+  let text = textOrNull(value);
+  if (!text || text.length <= max) return text;
+  return `${text.slice(0, max - 3)}...`;
 }
 
 function nextId(makeId, prefix) {
@@ -713,6 +739,245 @@ export function createWorkflowBoardService(opts = {}) {
       .slice(-limit);
   }
 
+  function wantsCompactProjection(filter = {}) {
+    let view = String(filter.view ?? filter.projection ?? '').trim().toLowerCase();
+    return Boolean(filter.compact) || ['compact', 'status', 'summary'].includes(view);
+  }
+
+  function checkStatusSummary(checks = {}) {
+    return Object.fromEntries(
+      Object.entries(checks)
+        .map(([key, value]) => [key, textOrNull(value?.status) ?? 'unknown']),
+    );
+  }
+
+  function latestCardRun(card = {}) {
+    let runs = Array.isArray(card.runs) ? card.runs : [];
+    return runs
+      .slice()
+      .sort((a, b) => ((b.updatedAt ?? b.startedAt ?? 0) - (a.updatedAt ?? a.startedAt ?? 0)))
+      .map(run => ({
+        id: run.id,
+        status: run.status,
+        taskIds: uniqueArray(run.taskIds),
+        startedAt: run.startedAt ?? null,
+        updatedAt: run.updatedAt ?? null,
+        completedAt: run.completedAt ?? null,
+      }))[0] ?? null;
+  }
+
+  function latestCardEvent(card = {}) {
+    let events = Array.isArray(card.events) ? card.events : [];
+    return events
+      .slice()
+      .sort((a, b) => ((b.createdAt ?? 0) - (a.createdAt ?? 0)))
+      .map(event => ({
+        id: event.id,
+        eventType: event.eventType ?? event.type ?? null,
+        status: event.status ?? null,
+        actor: event.actor ?? null,
+        reason: compactText(event.reason) ?? '',
+        createdAt: event.createdAt ?? null,
+      }))[0] ?? null;
+  }
+
+  function hasFailedCheck(card = {}) {
+    return Object.values(card.checks || {})
+      .some(check => String(check?.status || '').toLowerCase() === 'fail');
+  }
+
+  function isCompactRelevantCard(card = {}) {
+    if (card.columnId !== 'done') return true;
+    if ((card.blockers || []).length > 0) return true;
+    if ((card.recoveryFlags || []).length > 0) return true;
+    return hasFailedCheck(card);
+  }
+
+  function compactWorkflowCard(card = {}) {
+    return {
+      id: card.id,
+      title: card.title,
+      columnId: card.columnId,
+      kind: card.kind,
+      priority: card.priority,
+      projectId: card.projectId,
+      domain: card.domain,
+      owner: card.owner,
+      assignedAgent: card.assignedAgent,
+      resourceGroup: card.resourceGroup,
+      approvalMode: card.approvalMode,
+      blockers: card.blockers || [],
+      recoveryFlags: card.recoveryFlags || [],
+      checks: checkStatusSummary(card.checks),
+      entityRefs: {
+        goalId: card.entityRefs?.goalId ?? null,
+        chatId: card.entityRefs?.chatId ?? null,
+        taskIds: uniqueArray(card.entityRefs?.taskIds),
+      },
+      latestRun: latestCardRun(card),
+      latestEvent: latestCardEvent(card),
+      childCardIds: uniqueArray(card.childCardIds),
+      updatedAt: card.updatedAt ?? null,
+      version: card.version ?? null,
+    };
+  }
+
+  function compactEvent(event = {}) {
+    return {
+      id: event.id,
+      eventType: event.eventType ?? 'transition',
+      cardId: event.cardId ?? null,
+      fromColumnId: event.fromColumnId ?? null,
+      toColumnId: event.toColumnId ?? null,
+      actor: event.actor ?? null,
+      status: event.status ?? null,
+      reason: compactText(event.reason) ?? '',
+      sideEffectTypes: Array.isArray(event.sideEffects)
+        ? event.sideEffects.map(item => textOrNull(item?.type)).filter(Boolean)
+        : [],
+      createdAt: event.createdAt ?? null,
+    };
+  }
+
+  function compactLoadSummary(projection, runtimeState = {}) {
+    let cards = Array.isArray(projection.cards) ? projection.cards : [];
+    let activeRuns = cards.flatMap(card => Array.isArray(card.runs) ? card.runs : [])
+      .filter(run => RUNNING_RUN_STATUSES.has(String(run?.status || '').toLowerCase()));
+    let activeLeases = cards.filter(card => Boolean(card.lease));
+    let runningTaskCount = runtimeState.runtime?.runningTaskCount
+      ?? compactRuntimeSummary(runtimeState.tasks).runningTaskCount;
+    return {
+      boardMode: projection.board.mode,
+      globalParallelLimit: finiteNumber(projection.board.automation?.globalParallelLimit),
+      activeCardCount: cards.filter(card => COMPACT_ACTIVE_COLUMN_IDS.has(card.columnId)).length,
+      blockedCardCount: cards.filter(card => (card.blockers || []).length > 0).length,
+      activeRunCount: activeRuns.length,
+      activeLeaseCount: activeLeases.length,
+      runningTaskCount,
+    };
+  }
+
+  function compactSystemLoad(systemLoad = null, runtimeTasks = null) {
+    let tasks = runtimeTasks instanceof Map ? [...runtimeTasks.values()] : [];
+    let runningTaskCount = tasks
+      .filter(task => RUNTIME_RUNNING_STATUSES.has(String(task?.status ?? task?.state ?? '').toLowerCase()))
+      .length;
+    if (!systemLoad || typeof systemLoad !== 'object') {
+      return {
+        available: false,
+        capacity: {
+          state: 'unknown',
+          runningTaskCount,
+          reason: 'runtime_system_load_unavailable',
+        },
+      };
+    }
+    let capacity = asObject(systemLoad.capacity);
+    return {
+      available: true,
+      agents: {
+        total: finiteNumber(systemLoad.total) ?? 0,
+        ours: finiteNumber(systemLoad.ours) ?? 0,
+        external: finiteNumber(systemLoad.external) ?? 0,
+      },
+      cpu: {
+        count: finiteNumber(systemLoad.cpu?.count),
+        loadRatio1m: finiteNumber(systemLoad.cpu?.loadRatio1m),
+      },
+      memory: {
+        usedRatio: finiteNumber(systemLoad.memory?.usedRatio),
+      },
+      process: {
+        trackedChildren: finiteNumber(systemLoad.process?.trackedChildren) ?? finiteNumber(systemLoad.ours) ?? 0,
+        staleProcessCount: finiteNumber(capacity.staleProcessCount) ?? 0,
+      },
+      capacity: {
+        state: capacity.state || 'unknown',
+        reason: capacity.reason || null,
+        runningTaskCount: finiteNumber(capacity.runningTaskCount) ?? runningTaskCount,
+        recommendedMaxParallelTasks: finiteNumber(capacity.recommendedMaxParallelTasks),
+        trackedChildCount: finiteNumber(capacity.trackedChildCount) ?? finiteNumber(systemLoad.ours) ?? 0,
+      },
+    };
+  }
+
+  function compactRuntimeSummary(runtimeTasks = null) {
+    let tasks = runtimeTasks instanceof Map ? [...runtimeTasks.values()] : [];
+    let running = tasks.filter(task => (
+      RUNTIME_RUNNING_STATUSES.has(String(task?.status ?? task?.state ?? '').toLowerCase())
+    ));
+    return {
+      taskCount: tasks.length,
+      runningTaskCount: running.length,
+      latestTaskAt: latestTimestamp(tasks.flatMap(task => [
+        task.updatedAt,
+        task.completedAt,
+        task.startedAt,
+      ])),
+      runningTaskIds: running.map(task => task.id).filter(Boolean).slice(0, COMPACT_CARD_LIMIT),
+    };
+  }
+
+  function compactBoardProjection(projection, runtimeState = {}) {
+    let cards = projection.cards
+      .filter(isCompactRelevantCard)
+      .slice(-COMPACT_CARD_LIMIT)
+      .map(compactWorkflowCard);
+    let activeCards = cards.filter(card => COMPACT_ACTIVE_COLUMN_IDS.has(card.columnId));
+    let blockedCards = cards.filter(card => card.blockers.length > 0 || card.recoveryFlags.length > 0);
+    let latestEvents = projection.events
+      .slice(-COMPACT_EVENT_LIMIT)
+      .map(compactEvent);
+    let latestCardEventAt = latestTimestamp(cards.flatMap(card => [
+      card.updatedAt,
+      card.latestEvent?.createdAt,
+      card.latestRun?.updatedAt,
+      card.latestRun?.completedAt,
+      card.latestRun?.startedAt,
+    ]));
+    let latestEventAt = latestTimestamp([
+      latestCardEventAt,
+      ...latestEvents.map(event => event.createdAt),
+      runtimeState.runtime?.latestTaskAt,
+    ]);
+
+    return {
+      schema: 'workflow-board-compact-projection/v1',
+      view: 'status',
+      board: {
+        id: projection.board.id,
+        title: projection.board.title,
+        mode: projection.board.mode,
+        version: projection.board.version,
+        automation: projection.board.automation,
+      },
+      boardId: projection.boardId,
+      scope: projection.scope,
+      columns: projection.columns.map(column => ({
+        id: column.id,
+        title: column.title,
+        automation: column.automation,
+        count: column.cards.length,
+        activeCount: column.cards.filter(card => card.columnId !== 'done').length,
+        blockedCount: column.cards.filter(card => (card.blockers || []).length > 0).length,
+        recoveryCount: column.cards.filter(card => (card.recoveryFlags || []).length > 0).length,
+      })),
+      counts: projection.counts,
+      cards,
+      activeCards,
+      blockedCards,
+      events: latestEvents,
+      runtime: runtimeState.runtime ?? compactRuntimeSummary(runtimeState.tasks),
+      load: compactLoadSummary(projection, runtimeState),
+      systemLoad: compactSystemLoad(runtimeState.systemLoad, runtimeState.tasks),
+      activity: {
+        latestEventAt,
+        latestWorkflowEventAt: latestTimestamp(latestEvents.map(event => event.createdAt)),
+      },
+      version: projection.version,
+    };
+  }
+
   function getBoardProjection(filter = {}, runtimeTasks = null) {
     let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let projectId = textOrNull(filter.projectId ?? filter.project_id);
@@ -755,24 +1020,45 @@ export function createWorkflowBoardService(opts = {}) {
       cards: cards.filter(card => card.columnId === column.id),
     }));
 
-    return {
+    let includeCards = filter.includeCards ?? filter.include_cards;
+    let includeEvents = filter.includeEvents ?? filter.include_events;
+    let projection = {
       schema: 'workflow-board-projection/v1',
       board,
       boardId: board.id,
       scope: { projectId, goalId, chatId },
-      columns,
-      cards,
+      columns: includeCards === false
+        ? columns.map(column => ({ ...column, cards: [] }))
+        : columns,
+      cards: includeCards === false ? [] : cards,
       counts: Object.fromEntries(columns.map(column => [column.id, column.cards.length])),
-      events: listEvents({ boardId: board.id, limit: filter.eventLimit ?? filter.event_limit ?? 20 }),
+      events: includeEvents === false
+        ? []
+        : listEvents({ boardId: board.id, limit: filter.eventLimit ?? filter.event_limit ?? 20 }),
       version: stateGraph.version,
     };
+    return wantsCompactProjection(filter)
+      ? compactBoardProjection(projection, { tasks: runtimeTasks })
+      : projection;
   }
 
   async function getBoardProjectionWithRuntime(filter = {}, context = {}) {
     await seedWorkflowWorkItemsForProjection(filter);
-    let runtimeTasks = await readRuntimeTasks(context);
-    reconcileWorkflowRuntimeTasks(filter, runtimeTasks);
-    return getBoardProjection(filter, runtimeTasks);
+    let runtimeState = await readRuntimeState(context);
+    reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
+    let projection = getBoardProjection({
+      ...filter,
+      compact: false,
+      view: undefined,
+      projection: undefined,
+    }, runtimeState.tasks);
+    return wantsCompactProjection(filter)
+      ? compactBoardProjection(projection, {
+          tasks: runtimeState.tasks,
+          systemLoad: runtimeState.systemLoad,
+          runtime: compactRuntimeSummary(runtimeState.tasks),
+        })
+      : projection;
   }
 
   function runtimeTaskProjectionCards(board, projectId, linkedTaskIds = new Set(), runtimeTasks = null) {
@@ -1941,7 +2227,7 @@ export function createWorkflowBoardService(opts = {}) {
     ]));
   }
 
-  async function readRuntimeTasks(context = {}) {
+  async function readRuntimeState(context = {}) {
     let tasksById = readStateGraphRuntimeTasks();
     let pm = context.proxyManager ?? proxyManager;
     if (pm?.requestFromChild) {
@@ -1957,12 +2243,25 @@ export function createWorkflowBoardService(opts = {}) {
           let id = task?.id || task?.taskId;
           if (id) tasksById.set(id, { id, ...task, runtimeSource: 'agent_pool' });
         }
-        return tasksById;
+        return {
+          tasks: tasksById,
+          systemLoad: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? parsed.systemLoad ?? null
+            : null,
+          staleProcesses: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? parsed.staleProcesses ?? []
+            : [],
+        };
       } catch {
-        return tasksById;
+        return { tasks: tasksById, systemLoad: null, staleProcesses: [] };
       }
     }
-    return tasksById;
+    return { tasks: tasksById, systemLoad: null, staleProcesses: [] };
+  }
+
+  async function readRuntimeTasks(context = {}) {
+    let runtimeState = await readRuntimeState(context);
+    return runtimeState.tasks;
   }
 
   function derivePersistentRecoveryFlags(card, runtimeTasks, currentNow) {

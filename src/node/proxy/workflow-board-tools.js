@@ -19,7 +19,7 @@ const ACTIONS = {
   },
   get_board: {
     method: 'getWorkflowBoard',
-    description: 'Get one board projection with columns, cards, optional events, and runtime data.',
+    description: 'Get one board projection with columns, cards, optional events, runtime data, or a compact status view.',
     required: [],
   },
   create_item: {
@@ -202,6 +202,8 @@ export const WORKFLOW_BOARD_TOOLS = [
         includeCards: { type: 'boolean', description: 'Include cards for get_board. Defaults to true.' },
         includeEvents: { type: 'boolean', description: 'Include recent events for get_board.' },
         includeRuntime: { type: 'boolean', description: 'Include linked runtime projection for get_board.' },
+        compact: { type: 'boolean', description: 'Return a bounded status projection for L1 monitoring instead of full card history.' },
+        view: { type: 'string', enum: ['status'], description: 'Projection view for get_board. Use status for compact monitoring.' },
         includeResolved: { type: 'boolean', description: 'Include resolved recovery records for recovery.' },
         cardId: { type: 'string', description: 'Workflow card/work-item ID.' },
         parentCardId: { type: 'string', description: 'Parent workflow card ID for child cards.' },
@@ -424,6 +426,8 @@ function serviceArgsForAction(action, args = {}) {
       includeCards: args.includeCards,
       includeEvents: args.includeEvents,
       includeRuntime: args.includeRuntime,
+      compact: args.compact,
+      view: args.view,
     });
   }
   if (action === 'create_item') {

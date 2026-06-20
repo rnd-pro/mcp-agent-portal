@@ -90,6 +90,8 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.parentCardId.type, 'string');
     assert.equal(schema.properties.childItems.type, 'array');
     assert.equal(schema.properties.childColumnId.type, 'string');
+    assert.equal(schema.properties.compact.type, 'boolean');
+    assert.deepEqual(schema.properties.view.enum, ['status']);
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {
@@ -127,7 +129,15 @@ describe('workflow board MCP tool', () => {
 
     let argsByAction = {
       list_boards: { action: 'list_boards', projectId: 'project-1' },
-      get_board: { action: 'get_board', boardId: 'board-1', goalId: 'goal-1', chatId: 'chat-1', includeRuntime: true },
+      get_board: {
+        action: 'get_board',
+        boardId: 'board-1',
+        goalId: 'goal-1',
+        chatId: 'chat-1',
+        includeRuntime: true,
+        compact: true,
+        view: 'status',
+      },
       create_item: {
         action: 'create_item',
         title: 'Task',
@@ -188,6 +198,8 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[1].args.boardId, 'board-1');
     assert.equal(calls[1].args.goalId, 'goal-1');
     assert.equal(calls[1].args.chatId, 'chat-1');
+    assert.equal(calls[1].args.compact, true);
+    assert.equal(calls[1].args.view, 'status');
     assert.equal(calls[2].args.boardId, 'agent-workflow-default');
     assert.equal(calls[2].args.domain, 'orchestration');
     assert.equal(calls[2].args.assignedAgent, 'release-manager');

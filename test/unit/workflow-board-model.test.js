@@ -385,6 +385,100 @@ describe('workflow board model and service', () => {
     assert.equal(scoped.columns.find(column => column.id === 'ideas').cards.length, 0);
   });
 
+  it('returns a compact status projection for workflow control without bulky history', async () => {
+    let proxyManager = {
+      requestFromChild: async (_server, _method, payload) => {
+        assert.equal(payload.name, 'list_tasks');
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              tasks: [{
+                id: 'task-active',
+                kind: 'workflow-runtime-task',
+                status: 'running',
+                workflowBoardId: DEFAULT_WORKFLOW_BOARD_ID,
+                workflowCardId: 'card-active',
+                workflowRunId: 'run-active',
+                startedAt: 1800,
+                updatedAt: 1900,
+                eventCount: 12,
+              }],
+              systemLoad: {
+                total: 6,
+                ours: 2,
+                external: 1,
+                cpu: { count: 8, loadRatio1m: 0.5 },
+                memory: { usedRatio: 0.62 },
+                capacity: {
+                  state: 'available',
+                  runningTaskCount: 1,
+                  recommendedMaxParallelTasks: 4,
+                  staleProcessCount: 0,
+                },
+              },
+            }),
+          }],
+        };
+      },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    let active = service.createOrUpdateCard({
+      id: 'card-active',
+      title: 'Active workflow repair',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Keep control response bounded'],
+      entityRefs: { taskIds: ['task-active'] },
+      actor: 'test',
+    });
+    service.createOrUpdateCard({
+      id: 'card-done',
+      title: 'Done with long history',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'done',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Already closed'],
+      actor: 'test',
+    });
+    service.updateWorkItem({
+      cardId: active.card.id,
+      actor: 'test',
+      checks: { audit: { status: 'fail', evidence: 'Needs compact response.' } },
+    });
+
+    let detailed = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
+    let compact = await service.getBoardProjectionWithRuntime({
+      projectId: 'agent-portal',
+      compact: true,
+    });
+    let compactColumn = compact.columns.find(column => column.id === 'in-progress');
+    let compactCard = compact.cards.find(card => card.id === active.card.id);
+
+    assert.equal(detailed.columns.find(column => column.id === 'done').cards.length, 1);
+    assert.equal(compact.view, 'status');
+    assert.equal(compact.board.mode, 'armed');
+    assert.equal(compact.counts.done, 1);
+    assert.equal(compactColumn.count, 1);
+    assert.equal(compactColumn.cards, undefined);
+    assert.deepEqual(compact.cards.map(card => card.id), [active.card.id]);
+    assert.equal(compactCard.events, undefined);
+    assert.deepEqual(compactCard.checks, { audit: 'fail' });
+    assert.equal(compact.systemLoad.available, true);
+    assert.equal(compact.systemLoad.capacity.runningTaskCount, 1);
+    assert.equal(compact.systemLoad.capacity.recommendedMaxParallelTasks, 4);
+    assert.equal(compact.activity.latestEventAt >= 1000, true);
+  });
+
   it('imports missing durable work-item seeds during live projection without owning live status', async () => {
     service = createWorkflowBoardService({
       stateGraph: sg,
