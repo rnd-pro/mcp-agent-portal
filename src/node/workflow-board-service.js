@@ -2153,16 +2153,20 @@ export function createWorkflowBoardService(opts = {}) {
     let delegated = args.delegate === false
       ? { ok: false, sideEffects: [], taskIds: [], chatId: card.entityRefs.chatId, goalId: card.entityRefs.goalId }
       : await delegateWorkItem(card, run, effectiveArgs, context);
+    let delegationFailed = args.delegate !== false && !delegated.ok;
     let taskIds = uniqueArray([...run.taskIds, ...delegated.taskIds]);
     let nextRun = normalizeWorkflowRunInput({
       ...run,
-      status: delegated.ok ? 'running' : run.status,
+      status: delegated.ok ? 'running' : delegationFailed ? 'failed' : run.status,
       taskIds,
     }, { id: run.id, now: ts, updatedAt: now() });
-    let nextColumnId = card.columnId === 'ready' ? 'in-progress' : card.columnId;
+    let nextColumnId = delegated.ok && card.columnId === 'ready' ? 'in-progress' : card.columnId;
     let nextCard = normalizeWorkflowCardInput({
       ...card,
       columnId: nextColumnId,
+      recoveryFlags: delegationFailed
+        ? uniqueArray([...normalizeRecoveryFlags(card.recoveryFlags), 'needs_audit'])
+        : card.recoveryFlags,
       entityRefs: {
         ...card.entityRefs,
         chatId: delegated.chatId,
@@ -2184,7 +2188,10 @@ export function createWorkflowBoardService(opts = {}) {
       { op: 'set', path: `workflowRuns/${run.id}`, value: nextRun },
       { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
     ];
-    if (nextColumnId !== card.columnId) {
+    if (delegationFailed) {
+      ops.push({ op: 'delete', path: `workflowLeases/${card.id}` });
+    }
+    if (nextColumnId !== card.columnId || delegated.sideEffects.length > 0) {
       let eventId = nextId(makeId, 'orchestration');
       let event = normalizeWorkflowTransitionEvent({
         id: eventId,
@@ -2195,7 +2202,9 @@ export function createWorkflowBoardService(opts = {}) {
         toColumnId: nextColumnId,
         actor,
         mode: 'auto',
-        reason: `Workflow orchestration started run ${run.id}.`,
+        reason: delegated.ok
+          ? `Workflow orchestration started run ${run.id}.`
+          : `Workflow orchestration did not start a task for run ${run.id}.`,
         status: 'accepted',
         sideEffects: delegated.sideEffects,
       }, { id: eventId, now: ts });

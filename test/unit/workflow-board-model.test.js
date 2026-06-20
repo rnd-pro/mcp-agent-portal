@@ -833,6 +833,70 @@ links:
     assert.equal(service.listEvents({ cardId: created.card.id }).some(event => event.eventType === 'orchestration'), true);
   });
 
+  it('keeps failed delegation out of active workflow runs', async () => {
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (server, method, payload) => {
+        calls.push({ server, method, payload });
+        if (server === 'project-graph') {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, skeleton: {}, files: [] }) }] };
+        }
+        return {
+          isError: true,
+          content: [{ type: 'text', text: 'Resource group `audit` not found.' }],
+        };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Ready invalid resource group',
+      body: 'Should not get stuck in progress when delegation fails.',
+      columnId: 'backlog',
+      projectId: 'agent-portal',
+      domain: 'release',
+      owner: 'orchestrator',
+      assignedAgent: 'release-manager',
+      resourceGroup: 'audit',
+      acceptanceCriteria: ['Delegate failure is recoverable'],
+      files: ['package.json'],
+      actor: 'test',
+    });
+
+    let moved = await service.requestWorkflowTransition({
+      cardId: created.card.id,
+      fromColumnId: 'backlog',
+      toColumnId: 'ready',
+      expectedVersion: created.card.version,
+      actor: 'orchestrator',
+      reason: 'Ready for invalid resource group regression',
+    });
+    let run = Object.values(sg.get('workflowRuns') || {}).find(item => item.cardId === created.card.id);
+    let event = service.listEvents({ cardId: created.card.id })
+      .find(item => item.eventType === 'orchestration');
+
+    assert.equal(moved.status, 'accepted');
+    assert.equal(moved.card.columnId, 'ready');
+    assert.equal(moved.orchestration.ok, true);
+    assert.equal(moved.orchestration.result.run.status, 'failed');
+    assert.equal(run.status, 'failed');
+    assert.deepEqual(run.taskIds, []);
+    assert.equal(sg.get(`workflowLeases/${created.card.id}`), undefined);
+    assert.equal(service.getCard(created.card.id).recoveryFlags.includes('needs_audit'), true);
+    assert.equal(event.fromColumnId, 'ready');
+    assert.equal(event.toColumnId, 'ready');
+    assert.equal(event.sideEffects[0].status, 'failed');
+    assert.match(event.sideEffects[0].error, /Resource group `audit` not found/);
+    assert.equal(calls.filter(call => call.server === 'agent-pool').length, 1);
+  });
+
   it('blocks workflow orchestration when active file ownership scopes overlap', async () => {
     let calls = [];
     let proxyManager = {
