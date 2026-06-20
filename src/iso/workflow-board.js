@@ -446,6 +446,7 @@ export function normalizeWorkflowTransitionRequest(input = {}) {
     actor: textOrNull(input.actor) ?? 'system',
     mode: normalizeKnownValue(input.mode, WORKFLOW_TRANSITION_MODES, 'manual'),
     reason: textOrNull(input.reason),
+    force: Boolean(input.force ?? input.finalize),
     entityRefs: normalizeWorkflowEntityRefs(input.entityRefs ?? input.entity_refs ?? {}),
     expectedVersion: version,
   };

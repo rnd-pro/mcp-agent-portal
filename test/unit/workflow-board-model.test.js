@@ -1799,4 +1799,52 @@ links:
 
     assert.equal(sg.get(`workflowLeases/${cardId}`), undefined, 'terminal run should release, not extend, the lease');
   });
+
+  it('updateWorkItem rejects an out-of-gate column move', () => {
+    let created = service.createOrUpdateCard({
+      title: 'Move me', columnId: 'ready', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    });
+    assert.throws(
+      () => service.updateWorkItem({ cardId: created.card.id, actor: 'test', patch: { columnId: 'in-progress' } }),
+      /cannot change column via update/i,
+    );
+    assert.equal(service.getCard(created.card.id).columnId, 'ready');
+  });
+
+  it('updateWorkItem applies content patches and ignores a same-column echo', () => {
+    let created = service.createOrUpdateCard({
+      title: 'Patch me', columnId: 'quality-audit', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    });
+    let updated = service.updateWorkItem({
+      cardId: created.card.id, actor: 'test', patch: { columnId: 'quality-audit', priority: 'high' },
+    });
+    assert.equal(updated.card.priority, 'high');
+    assert.equal(updated.card.columnId, 'quality-audit');
+  });
+
+  it('blocks a destructive move out of in-progress while a run is active', () => {
+    let created = service.createOrUpdateCard({
+      title: 'Active', columnId: 'in-progress', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    });
+    sg.commit([{
+      op: 'set', path: 'workflowRuns/run-active-x',
+      value: { id: 'run-active-x', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: created.card.id, status: 'running', taskIds: [], startedAt: 1, updatedAt: 2 },
+    }], 'test');
+    let blocked = service.requestTransition({ cardId: created.card.id, toColumnId: 'ready', reason: 'reset', actor: 'test' });
+    assert.equal(blocked.status, 'blocked');
+    assert.ok(blocked.gateResult.failures.some(f => f.gate === 'active_run_blocks_move'));
+    assert.equal(service.getCard(created.card.id).columnId, 'in-progress');
+  });
+
+  it('lets force override the active-run block on a destructive move', () => {
+    let created = service.createOrUpdateCard({
+      title: 'Forced', columnId: 'in-progress', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    });
+    sg.commit([{
+      op: 'set', path: 'workflowRuns/run-active-y',
+      value: { id: 'run-active-y', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: created.card.id, status: 'running', taskIds: [], startedAt: 1, updatedAt: 2 },
+    }], 'test');
+    let forced = service.requestTransition({ cardId: created.card.id, toColumnId: 'ready', reason: 'reset', force: true, actor: 'test' });
+    assert.equal(forced.gateResult.failures.some(f => f.gate === 'active_run_blocks_move'), false);
+  });
 });
