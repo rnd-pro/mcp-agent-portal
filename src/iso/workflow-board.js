@@ -207,6 +207,16 @@ function hasText(value) {
 
 function textOrNull(value) {
   if (value === null || value === undefined) return null;
+  if (typeof value === 'object') {
+    let preferred = value.reason ?? value.message ?? value.title ?? value.description ?? value.code ?? value.status;
+    if (preferred !== undefined && preferred !== null) return textOrNull(preferred);
+    try {
+      let text = JSON.stringify(value);
+      return text && text !== '{}' ? text : null;
+    } catch {
+      return null;
+    }
+  }
   let text = String(value).trim();
   return text.length > 0 ? text : null;
 }

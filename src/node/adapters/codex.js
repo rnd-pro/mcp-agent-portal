@@ -118,7 +118,7 @@ function filteredStderrErrors(stderrData) {
 
 /**
  * Create an OpenAI Codex CLI adapter instance.
- * Uses `codex exec --json -s danger-full-access "prompt"`
+ * Uses `codex -a never exec --json -s danger-full-access "prompt"`
  *
  * @param {object} [config]
  * @param {string} [config.model]
@@ -144,6 +144,7 @@ export function createCodexAdapter(config = {}) {
 
         return await new Promise((resolve) => {
           let args = [
+            '-a', 'never',
             'exec',
             '--json',
             '-s', 'danger-full-access',

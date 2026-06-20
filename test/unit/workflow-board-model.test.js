@@ -59,6 +59,7 @@ describe('workflow board model and service', () => {
       projectId: 'agent-portal',
       entityRefs: { goalId: 'goal-1', taskIds: 'task-1' },
       acceptanceCriteria: 'Backend foundation exists',
+      blockers: [{ reason: 'Waiting for workflow approval' }],
     }, { id: 'card-1', now: 456 });
 
     assert.equal(board.id, DEFAULT_WORKFLOW_BOARD_ID);
@@ -96,6 +97,7 @@ describe('workflow board model and service', () => {
     assert.equal(card.columnId, 'ideas');
     assert.deepEqual(card.entityRefs.taskIds, ['task-1']);
     assert.deepEqual(card.acceptanceCriteria, ['Backend foundation exists']);
+    assert.deepEqual(card.blockers, ['Waiting for workflow approval']);
     assert.ok(RECOVERY_FLAGS.includes('needs_resume'));
     assert.deepEqual(sg.get('workflowBoards'), {});
     assert.deepEqual(sg.get('workflowCards'), {});
@@ -564,6 +566,12 @@ links:
     assert.match(calls[0].arguments.prompt, /Board-first orchestration requirements:/);
     assert.match(calls[0].arguments.prompt, /workflow card and workflow run as the task source of truth/);
     assert.match(calls[0].arguments.prompt, /workflow_board` action `decompose`/);
+    assert.match(calls[0].arguments.prompt, /Do not ask the user to approve workflow tool calls/);
+    assert.match(calls[0].arguments.prompt, /mcp-agent-portal\.js" call workflow_board/);
+    assert.ok(calls[0].arguments.prompt.includes(`--project ${JSON.stringify(tmpDir)}`));
+    assert.match(calls[0].arguments.prompt, /user cancelled MCP tool call/);
+    assert.match(calls[0].arguments.prompt, /empty_result/);
+    assert.match(calls[0].arguments.prompt, /permission-blocked, approval-blocked/);
     assert.match(calls[0].arguments.prompt, /Move ready child cards through the workflow board/);
     assert.equal(calls[0].arguments.resource_group, 'implementation');
     assert.equal(calls[0].arguments.approval_mode, 'auto_edit');

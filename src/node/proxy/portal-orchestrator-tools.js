@@ -343,6 +343,21 @@ function isProgressLogFinalAgentText(text = '') {
   return progressLineCount >= 2 && hasPendingWork;
 }
 
+function isApprovalRequestFinalAgentText(text = '') {
+  let normalized = String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  return [
+    /\b(?:i\s+)?need approval\b/,
+    /\b(?:requires?|needs?) (?:shell execution |tool call |workflow tool )?approval\b/,
+    /\bplease approve\b/,
+    /\bapprove (?:the )?(?:pending )?(?:tool calls?|bash command|workflow tools?)\b/,
+    /\btool categor(?:y|ies) need your approval\b/,
+  ].some(pattern => pattern.test(normalized));
+}
+
 function isHeadingOnlyFinalAgentText(text = '') {
   let lines = String(text || '')
     .split(/\r?\n/)
@@ -505,6 +520,14 @@ function finalAgentMessageQuality(text = '', parsedResult = null, options = {}) 
     return {
       state: 'weak-marker-only',
       reason: 'marker-only-final',
+      toolCallCount,
+      totalEvents,
+    };
+  }
+  if (isApprovalRequestFinalAgentText(text)) {
+    return {
+      state: 'weak-approval-request',
+      reason: 'approval-request-final',
       toolCallCount,
       totalEvents,
     };
