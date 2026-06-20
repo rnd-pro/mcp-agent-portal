@@ -7,6 +7,7 @@ import path from 'node:path';
 import { StateGraph } from '../../src/node/state-graph.js';
 import {
   buildDevelopmentMap,
+  compactDevelopmentMap,
   parseTaskStateResult,
 } from '../../src/node/proxy/orchestration-development-map.js';
 
@@ -1022,5 +1023,86 @@ Available resource groups (1):
     assert.equal(map.staleProcesses.taskIds[19], 'task-stale-19');
     assert.equal(JSON.stringify(map.staleProcesses).includes('secret command'), false);
     assert.equal(JSON.stringify(map.staleProcesses).includes('1000'), false);
+  });
+});
+
+describe('compactDevelopmentMap', () => {
+  function bigMap() {
+    let tasks = Array.from({ length: 30 }, (_, i) => ({
+      id: `task-${i}`,
+      chatId: `chat-${i}`,
+      status: i < 3 ? 'running' : 'completed',
+      title: `Task ${i}`,
+      startedAt: i,
+      updatedAt: i,
+      completedAt: i,
+      durationMs: i,
+      bulky: 'x'.repeat(5000),
+    }));
+    return {
+      schemaVersion: 1,
+      stateError: null,
+      rootChatId: null,
+      primaryTaskId: null,
+      subagents: Array.from({ length: 25 }, (_, i) => ({ id: `sub-${i}` })),
+      subagentMap: { nodes: [], tree: { huge: 'y'.repeat(20000) }, edges: [] },
+      tasks,
+      taskMap: { huge: 'z'.repeat(20000) },
+      latestTools: [{ name: 'navigate' }, { name: 'analyze' }],
+      toolMap: { huge: 'w'.repeat(20000) },
+      delegationGraph: { huge: 'd'.repeat(20000) },
+      activityTimeline: Array.from({ length: 100 }, (_, i) => ({ i })),
+      activityMap: { huge: 'a'.repeat(20000) },
+      system: { state: 'ok' },
+      usage: { totalTasks: 30 },
+      promptHintMap: { huge: 'p'.repeat(20000) },
+      promptHints: Array.from({ length: 12 }, (_, i) => `hint ${i}`),
+      runtime: { running: 3 },
+      resourceGroups: { review: { state: 'available' } },
+    };
+  }
+
+  it('drops heavy nested structures and keeps small summaries', () => {
+    let compact = compactDevelopmentMap(bigMap());
+    assert.equal(compact.compact, true);
+    assert.equal(compact.subagentMap, undefined);
+    assert.equal(compact.taskMap, undefined);
+    assert.equal(compact.toolMap, undefined);
+    assert.equal(compact.activityMap, undefined);
+    assert.equal(compact.delegationGraph, undefined);
+    assert.equal(compact.activityTimeline, undefined);
+    assert.equal(compact.promptHintMap, undefined);
+    assert.deepEqual(compact.system, { state: 'ok' });
+    assert.deepEqual(compact.usage, { totalTasks: 30 });
+    assert.deepEqual(compact.runtime, { running: 3 });
+    assert.deepEqual(compact.resourceGroups, { review: { state: 'available' } });
+  });
+
+  it('caps task list, exposes accurate counts, and bounds prompt hints', () => {
+    let compact = compactDevelopmentMap(bigMap());
+    assert.equal(compact.tasks.length, 12);
+    assert.equal(compact.counts.tasks, 30);
+    assert.equal(compact.counts.subagents, 25);
+    assert.equal(compact.counts.runningTasks, 3);
+    assert.equal(compact.counts.latestTools, 2);
+    assert.equal(compact.promptHints.length, 6);
+    assert.equal('bulky' in compact.tasks[0], false);
+    assert.equal(typeof compact.detailHint, 'string');
+  });
+
+  it('produces output far smaller than the full map', () => {
+    let full = bigMap();
+    let compact = compactDevelopmentMap(full);
+    let fullSize = JSON.stringify(full).length;
+    let compactSize = JSON.stringify(compact).length;
+    assert.ok(compactSize < fullSize / 10, `expected heavy reduction, got ${compactSize} vs ${fullSize}`);
+  });
+
+  it('is null-safe for malformed input', () => {
+    assert.deepEqual(compactDevelopmentMap(null), null);
+    let compact = compactDevelopmentMap({});
+    assert.equal(compact.compact, true);
+    assert.equal(compact.tasks.length, 0);
+    assert.equal(compact.counts.tasks, 0);
   });
 });

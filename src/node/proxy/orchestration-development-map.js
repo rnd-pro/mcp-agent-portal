@@ -1737,6 +1737,54 @@ export function buildDevelopmentMap({
   };
 }
 
+const COMPACT_TASK_LIMIT = 12;
+const COMPACT_HINT_LIMIT = 6;
+
+/**
+ * Bounded projection of a development map for status surfaces (get_portal_status,
+ * get_orchestrator_status). Drops the heavy nested structures (subagentMap tree/edges,
+ * taskMap, toolMap, activityMap, delegationGraph, activityTimeline, promptHintMap) and
+ * keeps small summaries plus a capped task list, so a global status call stays within
+ * an agent's context budget. Callers expose the full map behind an explicit detail flag.
+ */
+export function compactDevelopmentMap(map = {}) {
+  if (!map || typeof map !== 'object') return map;
+  let tasks = Array.isArray(map.tasks) ? map.tasks : [];
+  let latestTools = Array.isArray(map.latestTools) ? map.latestTools : [];
+  let subagents = Array.isArray(map.subagents) ? map.subagents : [];
+  let runningTasks = tasks.filter((task) => isRunningTaskStatus(task?.status)).length;
+  return {
+    schemaVersion: map.schemaVersion ?? 1,
+    compact: true,
+    stateError: map.stateError ?? null,
+    rootChatId: map.rootChatId ?? null,
+    primaryTaskId: map.primaryTaskId ?? null,
+    counts: {
+      subagents: subagents.length,
+      tasks: tasks.length,
+      runningTasks,
+      latestTools: latestTools.length,
+    },
+    system: map.system ?? null,
+    usage: map.usage ?? null,
+    runtime: map.runtime ?? null,
+    resourceGroups: map.resourceGroups ?? null,
+    tasks: tasks.slice(0, COMPACT_TASK_LIMIT).map((task) => ({
+      id: task?.id ?? null,
+      chatId: task?.chatId ?? null,
+      status: task?.status ?? null,
+      title: task?.title ?? task?.label ?? null,
+      startedAt: task?.startedAt ?? null,
+      updatedAt: task?.updatedAt ?? null,
+      completedAt: task?.completedAt ?? null,
+      durationMs: task?.durationMs ?? null,
+    })),
+    latestTools,
+    promptHints: Array.isArray(map.promptHints) ? map.promptHints.slice(0, COMPACT_HINT_LIMIT) : [],
+    detailHint: 'Pass detail:"full" for the complete development map (subagentMap, taskMap, toolMap, activityMap, promptHintMap).',
+  };
+}
+
 export function parseTaskStateResult(result = {}) {
   let parsed = parseJson(resultText(result));
   if (!parsed || typeof parsed !== 'object') return { tasks: [], staleProcesses: [] };

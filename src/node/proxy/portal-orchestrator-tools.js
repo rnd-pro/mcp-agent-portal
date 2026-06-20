@@ -1,6 +1,7 @@
 import { isPublicMcpToolServer } from './mcp-tool-visibility.js';
 import {
   buildDevelopmentMap,
+  compactDevelopmentMap,
   isRunningTaskStatus,
   parseTaskStateResult,
 } from './orchestration-development-map.js';
@@ -175,10 +176,12 @@ export const ORCHESTRATOR_META_TOOLS = [
   },
   {
     name: 'get_orchestrator_status',
-    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, systemLoad capacity summary, MCP client/proxy telemetry, and the current development map with activityMap, subagentMap, taskMap, toolMap timing telemetry, task liveness classification, and structured promptHintMap suggestions.',
+    description: 'Get Agent Portal orchestrator state, public MCP surface, internal runtime health, active chat counts, systemLoad capacity summary, MCP client/proxy telemetry, and a development map. Returns a bounded compact development map by default; pass detail:"full" for the complete map (subagentMap, taskMap, toolMap, activityMap, promptHintMap) — large, may exceed an agent context budget.',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        detail: { type: 'string', enum: ['compact', 'full'], description: 'Development map detail. "compact" (default) returns a bounded summary; "full" returns the complete map.' },
+      },
     },
   },
   ...WORKFLOW_BOARD_TOOLS,
@@ -1391,7 +1394,7 @@ export async function handlePortalOrchestratorTool(
       },
       systemLoad: developmentMap.system,
       mcpClients: proxyManager.getMcpClientSummary?.() || null,
-      developmentMap,
+      developmentMap: args?.detail === 'full' ? developmentMap : compactDevelopmentMap(developmentMap),
       staleProcesses: summarizeStaleProcesses(taskState.staleProcesses),
     });
   }

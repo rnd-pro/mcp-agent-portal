@@ -431,21 +431,19 @@ test('get_portal_status separates public servers from internal runtime health', 
   assert.deepEqual(status.health, { 'project-graph': { status: 'healthy' } });
   assert.deepEqual(status.internalHealth, { 'agent-pool': { status: 'healthy' } });
   assert.equal(status.totalTools, 1);
+  // get_portal_status returns a bounded compact development map by default
+  assert.equal(status.developmentMap.compact, true);
   assert.equal(status.developmentMap.schemaVersion, 1);
-  assert.equal(status.developmentMap.activityMap.schemaVersion, 1);
-  assert.deepEqual(status.developmentMap.activityMap.nodes, []);
-  assert.deepEqual(status.developmentMap.activityMap.latestTools, []);
-  assert.equal(status.developmentMap.subagentMap.schemaVersion, 1);
-  assert.deepEqual(status.developmentMap.subagentMap.nodes, []);
-  assert.equal(status.developmentMap.taskMap.schemaVersion, 1);
-  assert.equal(status.developmentMap.toolMap.schemaVersion, 1);
+  assert.equal(status.developmentMap.subagentMap, undefined);
+  assert.equal(status.developmentMap.taskMap, undefined);
+  assert.equal(status.developmentMap.toolMap, undefined);
+  assert.equal(status.developmentMap.activityMap, undefined);
   assert.equal(Array.isArray(status.developmentMap.latestTools), true);
   assert.equal(status.developmentMap.usage.runningTasks, 0);
   assert.equal(status.developmentMap.usage.toolUses, 0);
+  assert.equal(status.developmentMap.counts.runningTasks, 0);
   assert.equal(status.developmentMap.usage.liveness.state, 'idle');
   assert.equal(status.developmentMap.usage.liveness.warningTaskCount, 0);
-  assert.equal(status.developmentMap.activityMap.summary.liveness.state, 'idle');
-  assert.equal(status.developmentMap.promptHintMap.schemaVersion, 1);
   assert.equal(status.systemLoad.available, true);
   assert.equal(status.systemLoad.cpu.loadRatio1m, 0.4);
   assert.equal(status.systemLoad.memory.usedRatio, 0.75);
