@@ -1667,6 +1667,98 @@ links:
     );
   });
 
+  it('does not extend the lease when a running task is frozen/stale (zombie, fail-closed)', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Frozen task',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      owner: 'tooling-engineer',
+      actor: 'test',
+    });
+    let cardId = created.card.id;
+    let taskId = 'task-zombie';
+    sg.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-zombie',
+        value: {
+          id: 'run-zombie',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId,
+          status: 'running',
+          taskIds: [taskId],
+          startedAt: 1,
+          updatedAt: 2,
+        },
+      },
+      {
+        op: 'set',
+        path: `workflowLeases/${cardId}`,
+        value: { cardId, runId: 'run-zombie', leaseOwner: 'tooling-engineer', leaseExpiresAt: 2000 },
+      },
+      // Runtime task is still "running" but carries NO activity timestamp — a frozen zombie.
+      { op: 'set', path: `tasks/${taskId}`, value: { id: taskId, status: 'running' } },
+    ], 'test');
+
+    await service.getBoardProjectionWithRuntime({ reconcileRuntime: true });
+
+    let lease = sg.get(`workflowLeases/${cardId}`);
+    assert.equal(Number(lease.leaseExpiresAt), 2000, 'a frozen running task must NOT refresh the lease');
+  });
+
+  it('does not extend the lease when the task activity is older than the freshness window', async () => {
+    let bigNow = 2_000_000_000_000;
+    let localGraph = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'wallclock.json'),
+      walPath: path.join(tmpDir, 'wallclock.wal'),
+      chatsDir: path.join(tmpDir, 'wallclock-chats'),
+    });
+    let localService = createWorkflowBoardService({
+      stateGraph: localGraph,
+      now: () => bigNow++,
+      makeId: (prefix) => `${prefix}-wc-${++idSeq}`,
+      projectRoot: tmpDir,
+    });
+    let created = localService.createOrUpdateCard({
+      title: 'Idle task',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      owner: 'tooling-engineer',
+      actor: 'test',
+    });
+    let cardId = created.card.id;
+    let taskId = 'task-stale-wc';
+    localGraph.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-stale-wc',
+        value: {
+          id: 'run-stale-wc',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId,
+          status: 'running',
+          taskIds: [taskId],
+          startedAt: 1,
+          updatedAt: 2,
+        },
+      },
+      {
+        op: 'set',
+        path: `workflowLeases/${cardId}`,
+        value: { cardId, runId: 'run-stale-wc', leaseOwner: 'tooling-engineer', leaseExpiresAt: 2000 },
+      },
+      // Activity timestamp far in the past relative to the wall-clock now -> outside the window.
+      { op: 'set', path: `tasks/${taskId}`, value: { id: taskId, status: 'running', updatedAt: 1500 } },
+    ], 'test');
+
+    await localService.getBoardProjectionWithRuntime({ reconcileRuntime: true });
+
+    let lease = localGraph.get(`workflowLeases/${cardId}`);
+    assert.equal(Number(lease.leaseExpiresAt), 2000, 'stale activity (outside window) must NOT refresh the lease');
+    await localGraph.flushChatWrites();
+    localGraph.flush();
+  });
+
   it('does not extend (and releases) the lease when the linked task is terminal', async () => {
     let created = service.createOrUpdateCard({
       title: 'Finished task',

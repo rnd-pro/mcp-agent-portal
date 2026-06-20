@@ -34,6 +34,7 @@ const COMPACT_ACTIVE_COLUMN_IDS = new Set([
   'commit-publish',
 ]);
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
@@ -1284,6 +1285,15 @@ export function createWorkflowBoardService(opts = {}) {
     return numeric.length ? Math.max(...numeric) : fallback;
   }
 
+  function latestRuntimeTaskTimestamp(run, runtimeTasks) {
+    let stamps = uniqueArray(run.taskIds)
+      .map(taskId => runtimeTaskTimestamp(runtimeTasks instanceof Map ? runtimeTasks.get(taskId) : undefined))
+      .filter(value => value !== null && value !== undefined)
+      .map(Number)
+      .filter(Number.isFinite);
+    return stamps.length ? Math.max(...stamps) : null;
+  }
+
   function runtimeColumnForCard(card, runStatus) {
     if (runStatus === 'running' && card.columnId === 'ready') return 'in-progress';
     if (TERMINAL_RUN_STATUSES.has(runStatus) && ['ready', 'in-progress'].includes(card.columnId)) {
@@ -1316,15 +1326,19 @@ export function createWorkflowBoardService(opts = {}) {
       for (let run of runs) {
         let nextStatus = workflowRunStatusFromRuntime(run, runtimeTasks);
 
-        // Lease heartbeat: a run the runtime still reports as "running" is genuinely alive — the
-        // runtime's sliding soft-timeout would have resolved an idle task out of the running state.
-        // Slide the card lease forward so a legitimately long task does not get a false
-        // needs_resume. Only extend forward, only for the lease this run owns.
+        // Lease heartbeat: slide the lease forward only while the linked runtime task is
+        // demonstrably ALIVE — gated on activity freshness, not the status string alone. A task
+        // frozen in "running" (agent-pool crashed/restarted, stale snapshot) has a stale or absent
+        // activity timestamp; we then leave the lease to expire so recovery can see it (fail-closed).
+        // Only extend forward, only for the lease this run owns.
         if (nextStatus === 'running') {
           let lease = stateGraph.get(`workflowLeases/${card.id}`);
           if (lease && (!lease.runId || lease.runId === run.id)) {
+            let lastActivityAt = latestRuntimeTaskTimestamp(run, runtimeTasks);
+            let fresh = lastActivityAt !== null
+              && (currentNow - lastActivityAt) <= DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS;
             let refreshed = currentNow + DEFAULT_LEASE_TTL_MS;
-            if (refreshed > Number(lease.leaseExpiresAt ?? 0)) {
+            if (fresh && refreshed > Number(lease.leaseExpiresAt ?? 0)) {
               let nextLease = normalizeWorkflowLeaseInput(
                 { ...lease, leaseExpiresAt: refreshed },
                 { cardId: card.id, updatedAt: currentNow },
