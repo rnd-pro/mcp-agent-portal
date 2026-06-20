@@ -872,6 +872,57 @@ function requiredFinalMarkersForTask(task = null) {
   return requiredFinalMarkersForText(`${task?.prompt || ''}\n${task?.input || ''}`);
 }
 
+function requiredFinalMarkersFromWorkflowCard(card = null) {
+  let metadata = card?.metadata && typeof card.metadata === 'object' ? card.metadata : {};
+  return normalizeRequiredFinalMarkers([
+    metadata.requiredFinalMarker,
+    metadata.required_final_marker,
+    ...(Array.isArray(metadata.requiredFinalMarkers) ? metadata.requiredFinalMarkers : []),
+    ...(Array.isArray(metadata.required_final_markers) ? metadata.required_final_markers : []),
+  ]);
+}
+
+function workflowCardTaskIds(card = null) {
+  return [
+    ...(Array.isArray(card?.entityRefs?.taskIds) ? card.entityRefs.taskIds : []),
+    ...(Array.isArray(card?.runs) ? card.runs.flatMap(run => Array.isArray(run?.taskIds) ? run.taskIds : []) : []),
+  ].filter(Boolean).map(String);
+}
+
+function workflowCardIdForTask(task = null) {
+  return String(
+    task?.workflowCardId
+    ?? task?.workflow_card_id
+    ?? task?.workItemId
+    ?? task?.work_item_id
+    ?? task?.workflow?.cardId
+    ?? task?.workflow?.card_id
+    ?? ''
+  ).trim();
+}
+
+function requiredFinalMarkersForWorkflowTask(sg = null, chatId = null, taskId = null, task = null) {
+  if (!sg?.get) return [];
+  let cardsById = sg.get('workflowCards') || {};
+  let candidates = [];
+  let explicitCardId = workflowCardIdForTask(task);
+  if (explicitCardId && cardsById[explicitCardId]) {
+    candidates.push(cardsById[explicitCardId]);
+  }
+  for (let card of Object.values(cardsById)) {
+    if (!card || card.id === explicitCardId) continue;
+    let taskIds = workflowCardTaskIds(card);
+    if (taskId && taskIds.includes(String(taskId))) {
+      candidates.push(card);
+      continue;
+    }
+    if (!taskId && chatId && card.entityRefs?.chatId === chatId) {
+      candidates.push(card);
+    }
+  }
+  return mergeRequiredFinalMarkers(...candidates.map(requiredFinalMarkersFromWorkflowCard));
+}
+
 function requiredFinalMarkersForChatTask(chat = null, taskId = null) {
   if (!chat || !taskId || !Array.isArray(chat.messages)) return [];
   let firstTaskMessageIndex = chat.messages.findIndex((message) => message?.taskId === taskId);
@@ -1200,13 +1251,16 @@ export async function handlePortalOrchestratorTool(
       prompt: markerPrompt || undefined,
       input: markerInput || undefined,
     };
+    let workflowMarkers = requiredFinalMarkersForWorkflowTask(sg, chatId, taskId, taskForMarkers);
     let finalAgentMessage = summarizeFinalAgentMessage(chat, taskId, {
       allowLatestFallback,
       parsedResult,
-      requiredFinalMarkers: mergeRequiredFinalMarkers(
-        requiredFinalMarkersForTask(taskForMarkers),
-        requiredFinalMarkersForChatTask(chat, taskId),
-      ),
+      requiredFinalMarkers: workflowMarkers.length
+        ? workflowMarkers
+        : mergeRequiredFinalMarkers(
+          requiredFinalMarkersForTask(taskForMarkers),
+          requiredFinalMarkersForChatTask(chat, taskId),
+        ),
     });
     if (reconcileTaskScopedFinalMessage(sg, chatId, taskId, finalAgentMessage, taskResult, taskState)) {
       developmentMap = buildDevelopmentMap({

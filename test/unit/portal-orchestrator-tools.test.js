@@ -765,6 +765,91 @@ describe('portal orchestrator MCP tools', () => {
     assert.match(repairHint.arguments.prompt, /RELEASE_AUTH_PACKET:PASS or :FAIL/);
   });
 
+  it('uses workflow card metadata marker instead of incidental child markers in the prompt', async () => {
+    let chat = sg.createChat({
+      name: 'Workflow parent marker result chat',
+      projectId: 'symbiote-workspace',
+    }, 'test');
+    let taskId = 'task-release-freshness-wave';
+    let prompt = [
+      'Aggregate the child-card revalidation wave.',
+      'Child result: RELEASE_STATE_REVALIDATION:FAIL.',
+      'Required final marker: RELEASE_FRESHNESS_REVALIDATION_WAVE:*.',
+    ].join('\n');
+    sg.updateChatTask(chat.id, taskId);
+    sg.set('workflowCards/card-release-freshness-wave', {
+      id: 'card-release-freshness-wave',
+      entityRefs: {
+        chatId: chat.id,
+        taskIds: [taskId],
+      },
+      metadata: {
+        requiredFinalMarker: 'RELEASE_FRESHNESS_REVALIDATION_WAVE',
+      },
+      runs: [{ taskIds: [taskId] }],
+    }, 'test');
+    sg.set(`tasks/${taskId}`, {
+      status: 'done',
+      chatId: chat.id,
+      prompt,
+      workflowCardId: 'card-release-freshness-wave',
+      completedAt: Date.now() - 1000,
+    }, 'test');
+    let response = [
+      'Release freshness revalidation wave complete.',
+      'RELEASE_STATE_REVALIDATION:FAIL',
+      'DEMO_FRESHNESS_REVALIDATION:PASS',
+      'PACKAGE_HYGIENE_REVALIDATION:PASS',
+      'RELEASE_FRESHNESS_REVALIDATION_WAVE:FAIL',
+      'WORKFLOW_RESULT: completed',
+    ].join('\n');
+    proxyManager.requestFromChild = async (serverName, method, params) => {
+      internalCalls.push({ serverName, method, params });
+      if (params.name === 'get_task_result') {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              '# Task Result',
+              '## Agent Response',
+              response,
+            ].join('\n'),
+          }, {
+            type: 'text',
+            text: `__RESULT_JSON__:${JSON.stringify({
+              response,
+              exitCode: 0,
+              totalEvents: 18,
+              toolCalls: [{ name: 'Bash', args: { command: 'npm test' } }],
+              toolResults: [{ status: 'ok' }],
+            })}`,
+          }],
+        };
+      }
+      if (params.name === 'list_tasks') {
+        return { content: [{ type: 'text', text: JSON.stringify({ tasks: [], staleProcesses: [] }) }] };
+      }
+      return { content: [{ type: 'text', text: `${params.name}:ok` }] };
+    };
+
+    let result = await handlePortalOrchestratorTool(
+      proxyManager,
+      'get_chat_task_result',
+      { chatId: chat.id, taskId },
+      'test',
+      { stateGraph: sg },
+    );
+    let payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.finalAnswerReady, true);
+    assert.equal(payload.finalAgentMessage.quality.state, 'ok');
+    assert.equal(payload.finalAgentMessage.quality.requiredMarker, undefined);
+    assert.equal(
+      payload.developmentMap.promptHintMap.hints.some((hint) => hint.id === 'repair-final-answer'),
+      false,
+    );
+  });
+
   it('keeps repair hint for terminal missing-marker chat results when runtime result is unavailable', async () => {
     let chat = sg.createChat({ name: 'Restarted release packet repair chat' }, 'test');
     sg.updateChatTask(chat.id, 'task-restarted-release-packet');
