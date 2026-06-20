@@ -546,6 +546,18 @@ export function createWorkflowBoardService(opts = {}) {
     if (hasDestructiveMove(card.columnId, request.toColumnId) && !request.reason) {
       failures.push(createFailure('reason_required', 'Destructive workflow moves require a reason.'));
     }
+    // A destructive move must not strand an active run. activeRunForCard is a hoisted function
+    // declaration (do not refactor it to a const arrow — that would TDZ here). Pass force to
+    // override (the caller is expected to finalize/stop the run first).
+    if (hasDestructiveMove(card.columnId, request.toColumnId) && !request.force) {
+      let liveRun = activeRunForCard(card.id);
+      if (liveRun) {
+        failures.push(createFailure(
+          'active_run_blocks_move',
+          `Card ${card.id} has active run ${liveRun.id} (${liveRun.status}). Stop or cancel the run (action=control) before moving out of ${card.columnId}, or pass force to override.`,
+        ));
+      }
+    }
 
     let gateResult = evaluateWorkflowTransitionGates({ board, card, checks, request });
     return {
@@ -1508,10 +1520,18 @@ export function createWorkflowBoardService(opts = {}) {
     let cardId = normalizeCardId(args);
     let patch = args.patch && typeof args.patch === 'object' ? args.patch : {};
     let current = getCard(cardId);
+    let requestedColumnId = textOrNull(patch.columnId ?? patch.column_id);
+    if (requestedColumnId && requestedColumnId !== current.columnId) {
+      throw new Error(
+        `Workflow card ${cardId} cannot change column via update. Use action=transition to move columns through the gate.`,
+      );
+    }
+    let { columnId: _ignoredColumn, column_id: _ignoredColumnSnake, ...contentPatch } = patch;
     let result = createOrUpdateCard({
       ...current,
-      ...patch,
+      ...contentPatch,
       id: cardId,
+      columnId: current.columnId,
       actor: args.actor,
       expectedVersion: args.expectedVersion ?? args.expected_version,
       checks: args.checks,
