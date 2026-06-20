@@ -262,6 +262,8 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   const setTimer = options.setTimeout || setTimeout;
   const clearTimer = options.clearTimeout || clearTimeout;
   const logger = options.logger || console;
+  const resolvePort = typeof options.resolvePort === 'function' ? options.resolvePort : null;
+  let currentPort = Number(port);
   let retries = 0;
   let connected = false;
   let queue = [];
@@ -277,6 +279,24 @@ export function startStdioProxy(port, buffered = [], options = {}) {
   let replayInitialized = null;
   let deliveredResponseIds = new Set();
   let suppressedReplayResponseIds = new Set();
+
+  async function refreshPort(reason) {
+    if (!resolvePort) return currentPort;
+    try {
+      let nextPort = Number(await resolvePort({
+        reason,
+        port: currentPort,
+        initialPort: Number(port),
+        everConnected,
+      }));
+      if (Number.isFinite(nextPort) && nextPort > 0) {
+        currentPort = nextPort;
+      }
+    } catch (error) {
+      logger.warn('[portal] Backend port rediscovery failed:', error.message);
+    }
+    return currentPort;
+  }
 
   function getMessageId(message) {
     try {
@@ -509,9 +529,10 @@ export function startStdioProxy(port, buffered = [], options = {}) {
     let retryScheduled = false; // Guard: prevent double-retry from error+close
     const key = randomBytesFn(16).toString('base64');
 
-    const socket = openConnection({ host: '127.0.0.1', port }, () => {
+    const targetPort = currentPort;
+    const socket = openConnection({ host: '127.0.0.1', port: targetPort }, () => {
       if (shuttingDown) return;
-      socket.write(`GET /mcp-ws HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+      socket.write(`GET /mcp-ws HTTP/1.1\r\nHost: 127.0.0.1:${targetPort}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
     });
     ws = socket;
 
@@ -608,7 +629,11 @@ export function startStdioProxy(port, buffered = [], options = {}) {
     logger.error(`[portal] Retrying WS connection in ${delay}ms (attempt ${retries}/${retryLimit}, reason: ${reason})...`);
     retryTimer = setTimer(() => {
       retryTimer = null;
-      connect();
+      if (!resolvePort) {
+        connect();
+        return;
+      }
+      refreshPort(reason).then(() => connect());
     }, delay);
   }
 

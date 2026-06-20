@@ -92,14 +92,16 @@ function createProxyHarness(mod, options = {}) {
   let stdin = new FakeStream();
   let stdout = new FakeStream();
   let sockets = [];
+  let connectionOptions = [];
   let timers = [];
   let exits = [];
   let proxy = mod.startStdioProxy(12345, buffered, {
     stdin,
     stdout,
     exit: code => exits.push(code),
-    createConnection: (_options, onConnect) => {
+    createConnection: (socketOptions, onConnect) => {
       let socket = new FakeSocket();
+      connectionOptions.push(socketOptions);
       sockets.push(socket);
       queueMicrotask(onConnect);
       return socket;
@@ -118,7 +120,7 @@ function createProxyHarness(mod, options = {}) {
     retryMaxMs: 1,
     ...proxyOptions,
   });
-  return { stdin, stdout, sockets, timers, exits, proxy };
+  return { stdin, stdout, sockets, connectionOptions, timers, exits, proxy };
 }
 
 describe('backend lifecycle', () => {
@@ -348,6 +350,40 @@ describe('backend lifecycle', () => {
     }
 
     assert.equal(harness.sockets.length, 6);
+    assert.deepEqual(harness.exits, []);
+
+    harness.proxy.stop();
+  });
+
+  it('rediscovers the backend port before retrying after a connected backend restarts', async () => {
+    let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-rediscover-port`);
+    let resolvedPorts = [];
+    let harness = createProxyHarness(mod, {
+      resolvePort: async (state) => {
+        resolvedPorts.push(state);
+        return 23456;
+      },
+    });
+
+    await Promise.resolve();
+    assert.equal(harness.connectionOptions[0].port, 12345);
+    harness.sockets[0].emit(
+      'data',
+      Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n'),
+    );
+    harness.sockets[0].emit('close');
+
+    assert.equal(harness.timers.length, 1);
+    harness.timers.shift()();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(harness.sockets.length, 2);
+    assert.equal(harness.connectionOptions[1].port, 23456);
+    assert.equal(resolvedPorts[0].reason, 'socket-closed-after-connect');
+    assert.equal(resolvedPorts[0].port, 12345);
+    assert.equal(resolvedPorts[0].initialPort, 12345);
+    assert.equal(resolvedPorts[0].everConnected, true);
     assert.deepEqual(harness.exits, []);
 
     harness.proxy.stop();

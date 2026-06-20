@@ -107,7 +107,10 @@ async function main() {
       console.error(`✅ [portal] Connected to singleton backend on port ${port}`);
       console.error('✅ mcp-agent-portal aggregator started. Web UI available at http://portal.local/');
       process.stdin.off('data', bufferEarlyChunk);
-      startStdioProxy(port, earlyChunks, { persistentStartupRetry: true });
+      startStdioProxy(port, earlyChunks, {
+        persistentStartupRetry: true,
+        resolvePort: () => ensureBackend(projectRoot),
+      });
     } catch (err) {
       process.stdin.off('data', bufferEarlyChunk);
       console.error(`🔴 [portal] Failed to connect to backend:`, err.message);
