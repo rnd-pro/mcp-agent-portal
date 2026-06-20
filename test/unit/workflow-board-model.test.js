@@ -1620,4 +1620,91 @@ links:
       secondGraph.flush();
     }
   });
+
+  it('refreshes the lease while the linked runtime task is still running (heartbeat)', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Long running task',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      owner: 'tooling-engineer',
+      actor: 'test',
+    });
+    let cardId = created.card.id;
+    let taskId = 'task-live-1';
+    sg.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-live-1',
+        value: {
+          id: 'run-live-1',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId,
+          status: 'running',
+          taskIds: [taskId],
+          startedAt: 1,
+          updatedAt: 2,
+        },
+      },
+      {
+        op: 'set',
+        path: `workflowLeases/${cardId}`,
+        value: { cardId, runId: 'run-live-1', leaseOwner: 'tooling-engineer', leaseExpiresAt: 2000 },
+      },
+      {
+        op: 'set',
+        path: `tasks/${taskId}`,
+        value: { id: taskId, status: 'running', updatedAt: 1500 },
+      },
+    ], 'test');
+
+    await service.getBoardProjectionWithRuntime({ reconcileRuntime: true });
+
+    let lease = sg.get(`workflowLeases/${cardId}`);
+    assert.ok(lease, 'lease should remain while the task is alive');
+    assert.ok(
+      Number(lease.leaseExpiresAt) > 1_700_000,
+      `expected the lease to slide forward by the TTL, got ${lease.leaseExpiresAt}`,
+    );
+  });
+
+  it('does not extend (and releases) the lease when the linked task is terminal', async () => {
+    let created = service.createOrUpdateCard({
+      title: 'Finished task',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      owner: 'tooling-engineer',
+      actor: 'test',
+    });
+    let cardId = created.card.id;
+    let taskId = 'task-done-1';
+    sg.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-done-1',
+        value: {
+          id: 'run-done-1',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId,
+          status: 'running',
+          taskIds: [taskId],
+          startedAt: 1,
+          updatedAt: 2,
+        },
+      },
+      {
+        op: 'set',
+        path: `workflowLeases/${cardId}`,
+        value: { cardId, runId: 'run-done-1', leaseOwner: 'tooling-engineer', leaseExpiresAt: 2000 },
+      },
+      {
+        op: 'set',
+        path: `tasks/${taskId}`,
+        value: { id: taskId, status: 'done', updatedAt: 1500 },
+      },
+    ], 'test');
+
+    await service.getBoardProjectionWithRuntime({ reconcileRuntime: true });
+
+    assert.equal(sg.get(`workflowLeases/${cardId}`), undefined, 'terminal run should release, not extend, the lease');
+  });
 });

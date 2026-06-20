@@ -1315,6 +1315,25 @@ export function createWorkflowBoardService(opts = {}) {
 
       for (let run of runs) {
         let nextStatus = workflowRunStatusFromRuntime(run, runtimeTasks);
+
+        // Lease heartbeat: a run the runtime still reports as "running" is genuinely alive — the
+        // runtime's sliding soft-timeout would have resolved an idle task out of the running state.
+        // Slide the card lease forward so a legitimately long task does not get a false
+        // needs_resume. Only extend forward, only for the lease this run owns.
+        if (nextStatus === 'running') {
+          let lease = stateGraph.get(`workflowLeases/${card.id}`);
+          if (lease && (!lease.runId || lease.runId === run.id)) {
+            let refreshed = currentNow + DEFAULT_LEASE_TTL_MS;
+            if (refreshed > Number(lease.leaseExpiresAt ?? 0)) {
+              let nextLease = normalizeWorkflowLeaseInput(
+                { ...lease, leaseExpiresAt: refreshed },
+                { cardId: card.id, updatedAt: currentNow },
+              );
+              ops.push({ op: 'set', path: `workflowLeases/${card.id}`, value: nextLease });
+            }
+          }
+        }
+
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
