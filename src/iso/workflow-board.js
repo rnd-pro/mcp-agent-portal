@@ -247,7 +247,7 @@ function positiveIntegerOrUndefined(value) {
   return Math.floor(number);
 }
 
-function checkPassed(value) {
+export function checkPassed(value) {
   if (value === true) return true;
   if (value === false || value === null || value === undefined) return false;
   if (typeof value === 'object') return checkPassed(value.status);
