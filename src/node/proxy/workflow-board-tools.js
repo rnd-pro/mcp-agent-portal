@@ -1,7 +1,10 @@
+import path from 'node:path';
+
 import {
   DEFAULT_WORKFLOW_BOARD_ID,
   DEFAULT_WORKFLOW_COLUMN_IDS,
 } from '../../iso/workflow-board.js';
+import { listBackends } from '../server/backend-lifecycle.js';
 
 const WORKFLOW_BOARD_TOOL_NAME = 'workflow_board';
 const WORKFLOW_BOARD_TOOL_SCHEMA = 'workflow-board-tool/v1';
@@ -177,6 +180,109 @@ const ACTION_EXAMPLES = {
 const SERVICE_IMPORT_ERROR = 'Workflow board service is unavailable. Provide ' +
   'options.workflowService, proxyManager.workflowBoardService, or implement ' +
   'src/node/workflow-board-service.js with getWorkflowBoardService().';
+
+function appendParam(params, key, value) {
+  if (value === undefined || value === null || value === '') return;
+  if (Array.isArray(value)) {
+    for (let item of value) appendParam(params, key, item);
+    return;
+  }
+  params.append(key, String(value));
+}
+
+function queryString(args = {}) {
+  let params = new URLSearchParams();
+  for (let [key, value] of Object.entries(args)) {
+    appendParam(params, key, value);
+  }
+  let query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+function liveWorkflowBackend(proxyManager = null, options = {}) {
+  if (options.disableLiveWorkflowBackend === true) return null;
+  if (options.workflowService || proxyManager?.workflowBoardService) return null;
+  let projectRoot = options.projectRoot ?? proxyManager?.projectRoot;
+  if (!projectRoot || projectRoot === '/') return null;
+  let resolvedRoot = path.resolve(projectRoot);
+  let discover = typeof options.backendDiscovery === 'function'
+    ? options.backendDiscovery
+    : listBackends;
+  let backends = discover() || [];
+  return backends.find(entry => (
+    entry?.port
+    && entry?.project
+    && path.resolve(entry.project) === resolvedRoot
+    && Number(entry.pid) !== process.pid
+  )) ?? null;
+}
+
+function workflowBackendUrl(backend, routePath, args = null) {
+  let base = backend.webDirect || backend.localUrl || `http://127.0.0.1:${backend.port}/`;
+  let url = new URL(routePath, base);
+  if (args) {
+    let params = new URLSearchParams(queryString(args).slice(1));
+    url.search = params.toString();
+  }
+  return url;
+}
+
+async function readWorkflowBackendPayload(response, url) {
+  let text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(`Live workflow board backend returned non-JSON response from ${url.pathname}.`);
+  }
+  if (!response.ok || payload?.ok === false) {
+    let detail = payload?.error || response.statusText || `HTTP ${response.status}`;
+    throw new Error(`Live workflow board backend failed ${url.pathname}: ${detail}`);
+  }
+  return payload;
+}
+
+function unwrapResult(payload) {
+  return payload && typeof payload === 'object' && 'result' in payload
+    ? payload.result
+    : payload;
+}
+
+function createRemoteWorkflowBoardService(backend) {
+  let get = async (routePath, args = {}, unwrap = false) => {
+    let url = workflowBackendUrl(backend, routePath, args);
+    let response = await fetch(url, { headers: { Accept: 'application/json' } });
+    let payload = await readWorkflowBackendPayload(response, url);
+    return unwrap ? unwrapResult(payload) : payload;
+  };
+  let post = async (routePath, args = {}, unwrap = false) => {
+    let url = workflowBackendUrl(backend, routePath);
+    let response = await fetch(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    });
+    let payload = await readWorkflowBackendPayload(response, url);
+    return unwrap ? unwrapResult(payload) : payload;
+  };
+  return {
+    listWorkflowBoards: args => get('/api/workflow-board/boards', args),
+    getWorkflowBoard: args => get('/api/workflow-board', args),
+    createWorkItem: args => post('/api/workflow-board/cards', args),
+    updateWorkItem: args => post('/api/workflow-board/cards/update', args),
+    decomposeWorkItem: args => post('/api/workflow-board/decompose', args, true),
+    updateWorkflowBoard: args => post('/api/workflow-board/automation', args, true),
+    controlWorkflowBoard: args => post('/api/workflow-board/automation', args, true),
+    updateWorkflowColumn: args => post('/api/workflow-board/columns/update', args, true),
+    deleteWorkItem: args => post('/api/workflow-board/delete', args, true),
+    requestWorkflowTransition: args => post('/api/workflow-board/transition', args, true),
+    orchestrateWorkItem: args => post('/api/workflow-board/orchestrate', args, true),
+    controlWorkItem: args => post('/api/workflow-board/control', args, true),
+    getWorkflowRecoveryState: args => get('/api/workflow-board/recovery', args),
+    reconcileWorkflowRecovery: args => post('/api/workflow-board/recovery/reconcile', args),
+    listWorkflowEvents: args => get('/api/workflow-board/events', args),
+  };
+}
 
 export const WORKFLOW_BOARD_TOOLS = [
   {
@@ -650,6 +756,8 @@ function wrapResult(action, args, result) {
 export async function resolveWorkflowBoardService(proxyManager = null, options = {}) {
   if (options.workflowService) return options.workflowService;
   if (proxyManager?.workflowBoardService) return proxyManager.workflowBoardService;
+  let backend = liveWorkflowBackend(proxyManager, options);
+  if (backend) return createRemoteWorkflowBoardService(backend);
 
   let mod;
   try {

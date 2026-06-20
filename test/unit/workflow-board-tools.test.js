@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 
 import {
   WORKFLOW_BOARD_TOOLS,
@@ -52,6 +53,28 @@ function createFakeWorkflowService(calls) {
     };
   }
   return service;
+}
+
+function listen(server) {
+  return new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+}
+
+function close(server) {
+  return new Promise((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve());
+  });
+}
+
+async function readJsonBody(req) {
+  let chunks = [];
+  for await (let chunk of req) chunks.push(chunk);
+  let text = Buffer.concat(chunks).toString('utf8');
+  return text ? JSON.parse(text) : {};
+}
+
+function sendJson(res, value) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(value));
 }
 
 describe('workflow board MCP tool', () => {
@@ -230,6 +253,94 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[10].args.cwd, '/workspace/agent-portal');
     assert.deepEqual(calls[10].args.files, ['src/node/workflow-board-service.js']);
     assert.equal(calls[11].args.action, 'pause');
+  });
+
+  it('forwards workflow_board calls to the live project backend owner', async () => {
+    let requests = [];
+    let projectRoot = '/workspace/agent-portal';
+    let server = http.createServer(async (req, res) => {
+      let url = new URL(req.url, 'http://127.0.0.1');
+      if (req.method === 'GET' && url.pathname === '/api/workflow-board') {
+        requests.push({
+          method: req.method,
+          path: url.pathname,
+          query: Object.fromEntries(url.searchParams.entries()),
+        });
+        sendJson(res, {
+          ok: true,
+          projection: {
+            boardId: 'agent-workflow-default',
+            cards: [{ id: 'live-card', columnId: 'quality-audit' }],
+          },
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workflow-board/transition') {
+        let body = await readJsonBody(req);
+        requests.push({ method: req.method, path: url.pathname, body });
+        sendJson(res, {
+          ok: true,
+          result: {
+            ok: true,
+            status: 'accepted',
+            card: { id: body.cardId, columnId: body.toColumnId },
+          },
+        });
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'not found' }));
+    });
+    await listen(server);
+
+    try {
+      let { port } = server.address();
+      let backend = {
+        project: projectRoot,
+        port,
+        pid: process.pid + 1000,
+        webDirect: `http://127.0.0.1:${port}/`,
+      };
+      let proxyManager = { projectRoot };
+      let options = { backendDiscovery: () => [backend] };
+
+      let boardResult = await handleWorkflowBoardTool(
+        proxyManager,
+        'workflow_board',
+        { action: 'get_board', projectId: 'agent-portal', compact: true },
+        'test-source',
+        options,
+      );
+      let boardPayload = parseResult(boardResult);
+
+      assert.equal(boardPayload.result.projection.cards[0].id, 'live-card');
+      assert.equal(requests[0].path, '/api/workflow-board');
+      assert.equal(requests[0].query.projectId, 'agent-portal');
+      assert.equal(requests[0].query.compact, 'true');
+
+      let transitionResult = await handleWorkflowBoardTool(
+        proxyManager,
+        'workflow_board',
+        {
+          action: 'transition',
+          cardId: 'live-card',
+          fromColumnId: 'in-progress',
+          toColumnId: 'quality-audit',
+          expectedVersion: 3,
+        },
+        'test-source',
+        options,
+      );
+      let transitionPayload = parseResult(transitionResult);
+
+      assert.equal(transitionPayload.result.status, 'accepted');
+      assert.equal(transitionPayload.result.card.columnId, 'quality-audit');
+      assert.equal(requests[1].path, '/api/workflow-board/transition');
+      assert.equal(requests[1].body.cardId, 'live-card');
+      assert.equal(requests[1].body.expectedVersion, 3);
+    } finally {
+      await close(server);
+    }
   });
 
   it('recommends compact status refreshes after workflow mutations', async () => {

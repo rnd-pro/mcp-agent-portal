@@ -712,7 +712,7 @@ test('parseResourceGroupDiagnostics surfaces sanitized not_found group capacity 
 
 Available resource groups (2):
   - \`orchestration-readonly\` (provider: codex, model: gpt-5, capacity: 0/3)
-  - \`reasoning-heavy\` (provider: claude, model: deepseek/deepseek-v4-pro, capacity: 1/2)`;
+  - \`reasoning-heavy\` (provider: opencode, model: deepseek/deepseek-v4-pro, capacity: 1/2)`;
 
   let diagnostics = parseResourceGroupDiagnostics(errorText);
 

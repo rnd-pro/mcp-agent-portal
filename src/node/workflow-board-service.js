@@ -711,6 +711,21 @@ export function createWorkflowBoardService(opts = {}) {
     return Boolean(textOrNull(card.owner) && Array.isArray(card.acceptanceCriteria) && card.acceptanceCriteria.length);
   }
 
+  function readyOrchestrationGate(board, card, actor = 'workflow-board') {
+    if (card.columnId !== 'ready') return { ok: true, checks: [], failures: [] };
+    return evaluateRequest(board, card, getChecks(card.id), {
+      boardId: board.id,
+      cardId: card.id,
+      fromColumnId: 'ready',
+      toColumnId: 'in-progress',
+      actor,
+      mode: 'auto',
+      reason: 'Evaluate ready card orchestration gates.',
+      expectedVersion: null,
+      entityRefs: {},
+    });
+  }
+
   function autoOrchestrationCandidate(board, card, args = {}) {
     let automation = cardAutomation(board, card);
     let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
@@ -728,6 +743,15 @@ export function createWorkflowBoardService(opts = {}) {
     }
     if (card.columnId === 'ready' && !readyCardHasExecutionContract(card)) {
       return { ok: false, reason: 'ready cards require owner and acceptance criteria before orchestration', automation };
+    }
+    let gateResult = readyOrchestrationGate(board, card, textOrNull(args.actor) ?? 'workflow-board');
+    if (!gateResult.ok) {
+      return {
+        ok: false,
+        reason: gateResult.failures[0]?.reason ?? 'ready card orchestration gate failed',
+        automation,
+        gateResult,
+      };
     }
     let capacity = stageCapacityAvailable(board, card, automation);
     if (!capacity.ok && !args.force) {
@@ -771,6 +795,8 @@ export function createWorkflowBoardService(opts = {}) {
       ...args,
       boardId: board.id,
       cardId: card.id,
+      expectedVersion: undefined,
+      expected_version: undefined,
       actor: textOrNull(args.actor) ?? 'workflow-board',
       mode: automation.mode ?? 'auto',
       agent,
@@ -953,7 +979,16 @@ export function createWorkflowBoardService(opts = {}) {
         loadRatio1m: finiteNumber(systemLoad.cpu?.loadRatio1m),
       },
       memory: {
+        totalBytes: finiteNumber(systemLoad.memory?.totalBytes),
+        freeBytes: finiteNumber(systemLoad.memory?.freeBytes),
+        availableBytes: finiteNumber(systemLoad.memory?.availableBytes),
         usedRatio: finiteNumber(systemLoad.memory?.usedRatio),
+        estimatedNewTaskBytes: finiteNumber(systemLoad.memory?.estimatedNewTaskBytes),
+        reserveBytes: finiteNumber(systemLoad.memory?.reserveBytes),
+        availableForNewTasksBytes: finiteNumber(systemLoad.memory?.availableForNewTasksBytes),
+        requiredForNextTaskBytes: finiteNumber(systemLoad.memory?.requiredForNextTaskBytes),
+        deficitForNextTaskBytes: finiteNumber(systemLoad.memory?.deficitForNextTaskBytes),
+        estimatedAdditionalTaskSlots: finiteNumber(systemLoad.memory?.estimatedAdditionalTaskSlots),
       },
       process: {
         trackedChildren: finiteNumber(systemLoad.process?.trackedChildren)
@@ -967,6 +1002,7 @@ export function createWorkflowBoardService(opts = {}) {
         reason: capacity.reason || null,
         runningTaskCount: finiteNumber(capacity.runningTaskCount) ?? runningTaskCount,
         recommendedMaxParallelTasks: finiteNumber(capacity.recommendedMaxParallelTasks),
+        estimatedAdditionalTaskSlots: finiteNumber(capacity.estimatedAdditionalTaskSlots),
         trackedChildCount: finiteNumber(capacity.trackedChildCount)
           ?? finiteNumber(agents.ours)
           ?? finiteNumber(systemLoad.ours)
@@ -1119,7 +1155,9 @@ export function createWorkflowBoardService(opts = {}) {
   async function getBoardProjectionWithRuntime(filter = {}, context = {}) {
     await seedWorkflowWorkItemsForProjection(filter);
     let runtimeState = await readRuntimeState(context);
-    reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
+    if (filter.reconcileRuntime === true || filter.reconcile_runtime === true) {
+      reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
+    }
     let projection = getBoardProjection({
       ...filter,
       compact: false,
@@ -2091,6 +2129,13 @@ export function createWorkflowBoardService(opts = {}) {
     let actor = textOrNull(args.actor) ?? 'system';
     let card = getCard(cardId);
     let board = ensureBoard(args.boardId ?? args.board_id ?? card.boardId);
+    let expectedVersion = args.expectedVersion ?? args.expected_version;
+    if (expectedVersion !== undefined && expectedVersion !== null) {
+      let version = Number(expectedVersion);
+      if (!Number.isFinite(version) || card.version !== Math.floor(version)) {
+        throw new Error(`Workflow card version conflict for ${cardId}. Reload the card and retry.`);
+      }
+    }
     if (['paused', 'draining', 'stopped', 'maintenance', 'recovery_only'].includes(board.mode)) {
       throw new Error(`Workflow board ${board.id} is not accepting orchestration while mode is ${board.mode}.`);
     }
@@ -2112,6 +2157,10 @@ export function createWorkflowBoardService(opts = {}) {
     }
     if (card.columnId === 'ready' && !readyCardHasExecutionContract(card) && !args.force) {
       throw new Error(`Workflow card ${card.id} requires owner and acceptance criteria before orchestration.`);
+    }
+    let gateResult = readyOrchestrationGate(board, card, actor);
+    if (!gateResult.ok) {
+      throw new Error(gateResult.failures[0]?.reason ?? `Workflow card ${card.id} failed ready orchestration gates.`);
     }
     let capacity = stageCapacityAvailable(board, card, automation);
     if (!capacity.ok && !args.force) {
@@ -2153,7 +2202,28 @@ export function createWorkflowBoardService(opts = {}) {
 
     let delegated = args.delegate === false
       ? { ok: false, sideEffects: [], taskIds: [], chatId: card.entityRefs.chatId, goalId: card.entityRefs.goalId }
-      : await delegateWorkItem(card, run, effectiveArgs, context);
+      : null;
+    if (args.delegate !== false) {
+      try {
+        delegated = await delegateWorkItem(card, run, effectiveArgs, context);
+      } catch (error) {
+        delegated = {
+          ok: false,
+          sideEffects: [{
+            type: 'delegate_task',
+            status: 'failed',
+            chatId: card.entityRefs.chatId,
+            goalId: card.entityRefs.goalId,
+            taskId: null,
+            runId: run.id,
+            error: error.message,
+          }],
+          taskIds: [],
+          chatId: card.entityRefs.chatId,
+          goalId: card.entityRefs.goalId,
+        };
+      }
+    }
     let delegationFailed = args.delegate !== false && !delegated.ok;
     let taskIds = uniqueArray([...run.taskIds, ...delegated.taskIds]);
     let nextRun = normalizeWorkflowRunInput({
@@ -2206,7 +2276,7 @@ export function createWorkflowBoardService(opts = {}) {
         reason: delegated.ok
           ? `Workflow orchestration started run ${run.id}.`
           : `Workflow orchestration did not start a task for run ${run.id}.`,
-        status: 'accepted',
+        status: delegated.ok ? 'accepted' : 'blocked',
         sideEffects: delegated.sideEffects,
       }, { id: eventId, now: ts });
       ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
@@ -2228,9 +2298,17 @@ export function createWorkflowBoardService(opts = {}) {
       status: 'recovering',
       taskIds: args.taskId ?? args.task_id ? [args.taskId ?? args.task_id] : [],
     }, { id: runId, now: ts, updatedAt: ts });
+    let pauseBlockers = new Set([
+      'Paused by workflow control.',
+      textOrNull(args.reason) ?? '',
+    ].filter(Boolean));
     let nextCard = normalizeWorkflowCardInput({
       ...card,
-      recoveryFlags: [...new Set([...normalizeRecoveryFlags(card.recoveryFlags), 'recovering'])],
+      blockers: card.blockers.filter(blocker => !pauseBlockers.has(blocker)),
+      recoveryFlags: [...new Set([
+        ...normalizeRecoveryFlags(card.recoveryFlags).filter(flag => flag !== 'blocked' && flag !== 'needs_resume'),
+        'recovering',
+      ])],
       version: card.version + 1,
       updatedAt: ts,
       updatedBy: actor,
@@ -2457,6 +2535,11 @@ export function createWorkflowBoardService(opts = {}) {
     for (let card of projection.cards.filter(item => ACTIVE_RECOVERY_COLUMN_IDS.includes(item.columnId))) {
       let current = getCard(card.id);
       let flags = derivePersistentRecoveryFlags(current, runtimeTasks, currentNow);
+      let runs = getRunsForCard(current.id);
+      let latestRun = runs[runs.length - 1] ?? null;
+      if (latestRun && TERMINAL_RUN_STATUSES.has(latestRun.status) && current.blockers.length === 0) {
+        flags = flags.filter(flag => flag !== 'blocked' && flag !== 'needs_resume' && flag !== 'recovering');
+      }
       let currentFlags = normalizeRecoveryFlags(current.recoveryFlags);
       let changed = flags.join('|') !== currentFlags.join('|');
       if (!changed && !args.force) continue;
@@ -2480,7 +2563,7 @@ export function createWorkflowBoardService(opts = {}) {
         boardId: current.boardId,
         cardId: current.id,
         status: flags.length ? 'recovery_detected' : 'clear',
-        taskIds: uniqueArray([...current.entityRefs.taskIds, ...getRunsForCard(current.id).flatMap(item => item.taskIds)]),
+        taskIds: uniqueArray([...current.entityRefs.taskIds, ...runs.flatMap(item => item.taskIds)]),
       }, { id: runId, now: currentNow, updatedAt: currentNow });
       ops.push(
         { op: 'set', path: `workflowCards/${current.id}`, value: nextCard },
@@ -2588,9 +2671,9 @@ export function createWorkflowBoardService(opts = {}) {
 
   async function seedWorkflowWorkItemsForProjection(filter = {}) {
     if (
-      filter.includeMarkdownSeed === false
-      || filter.includeMarkdownSeeds === false
-      || filter.importMarkdown === false
+      filter.includeMarkdownSeed !== true
+      && filter.includeMarkdownSeeds !== true
+      && filter.importMarkdown !== true
     ) {
       return { ok: true, imported: [], skipped: [], count: 0 };
     }

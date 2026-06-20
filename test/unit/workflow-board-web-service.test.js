@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildWorkflowBoardUrl,
   decomposeWorkflowCard,
   normalizeWorkflowBoardPayload,
 } from '../../web/services/workflow-board.js';
@@ -51,5 +52,16 @@ describe('workflow board web service', () => {
     assert.equal(calls[0].url, '/api/workflow-board/decompose');
     assert.equal(calls[0].options.method, 'POST');
     assert.deepEqual(JSON.parse(calls[0].options.body).childItems[0].title, 'Child');
+  });
+
+  it('keeps mutating projection work behind explicit fetch flags', () => {
+    assert.equal(
+      buildWorkflowBoardUrl({ projectId: 'agent-portal' }),
+      '/api/workflow-board?projectId=agent-portal',
+    );
+    assert.equal(
+      buildWorkflowBoardUrl({ projectId: 'agent-portal', importMarkdown: true, reconcileRuntime: true }),
+      '/api/workflow-board?projectId=agent-portal&importMarkdown=true&reconcileRuntime=true',
+    );
   });
 });
