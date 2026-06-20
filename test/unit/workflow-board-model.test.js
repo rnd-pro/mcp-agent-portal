@@ -1847,4 +1847,57 @@ links:
     let forced = service.requestTransition({ cardId: created.card.id, toColumnId: 'ready', reason: 'reset', force: true, actor: 'test' });
     assert.equal(forced.gateResult.failures.some(f => f.gate === 'active_run_blocks_move'), false);
   });
+
+  it('runs the quality-audit on_enter audit action through the gate', async () => {
+    let auditTaskId = '33333333-3333-4333-8333-333333333333';
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (server, method, payload) => {
+        calls.push({ server, method, payload });
+        if (server === 'project-graph') {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, skeleton: {}, files: [] }) }] };
+        }
+        return { content: [{ type: 'text', text: `Started task ${auditTaskId}` }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg, now: () => now++, makeId: (prefix) => `${prefix}-${++idSeq}`, projectRoot: tmpDir, proxyManager,
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Audit me', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'code-reviewer', acceptanceCriteria: ['Reviewed against criteria'], files: ['src/node/x.js'], actor: 'test',
+    });
+    let moved = await service.requestWorkflowTransition({
+      cardId: created.card.id, fromColumnId: 'in-progress', toColumnId: 'quality-audit',
+      expectedVersion: created.card.version, actor: 'human', reason: 'ready for audit',
+    });
+
+    assert.equal(moved.status, 'accepted');
+    assert.equal(moved.orchestration.ok, true);
+    let delegateCalls = calls.filter(call => call.server === 'agent-pool' && call.payload.name === 'delegate_task');
+    assert.equal(delegateCalls.length, 1);
+    assert.match(delegateCalls[0].payload.arguments.prompt, /Quality audit task:/);
+    assert.match(delegateCalls[0].payload.arguments.prompt, /Act as a reviewer/);
+  });
+
+  it('clears needs_audit on reconcile when the audit check passes', async () => {
+    let passed = service.createOrUpdateCard({
+      title: 'Audited ok', columnId: 'quality-audit', projectId: 'agent-portal', owner: 'code-reviewer', actor: 'test',
+    });
+    let pending = service.createOrUpdateCard({
+      title: 'Not audited', columnId: 'quality-audit', projectId: 'agent-portal', owner: 'code-reviewer', actor: 'test',
+    });
+    sg.commit([
+      { op: 'set', path: 'workflowRuns/run-err-pass', value: { id: 'run-err-pass', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: passed.card.id, status: 'error', taskIds: [], startedAt: 1, updatedAt: 2 } },
+      { op: 'set', path: 'workflowRuns/run-err-pend', value: { id: 'run-err-pend', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: pending.card.id, status: 'error', taskIds: [], startedAt: 1, updatedAt: 2 } },
+    ], 'test');
+    service.updateWorkItem({ cardId: passed.card.id, actor: 'test', checks: { audit: { status: 'passed' } } });
+
+    await service.reconcileWorkflowRecovery({ boardId: DEFAULT_WORKFLOW_BOARD_ID, force: true });
+
+    assert.equal(service.getCard(passed.card.id).recoveryFlags.includes('needs_audit'), false, 'passed audit clears needs_audit');
+    assert.equal(service.getCard(pending.card.id).recoveryFlags.includes('needs_audit'), true, 'un-audited error run keeps needs_audit');
+  });
 });

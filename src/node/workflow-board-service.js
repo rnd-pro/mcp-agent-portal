@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   ACTIVE_RECOVERY_COLUMN_IDS,
+  checkPassed,
   DEFAULT_WORKFLOW_BOARD_ID,
   DEFAULT_WORKFLOW_COLUMN_IDS,
   createDefaultWorkflowBoard,
@@ -748,8 +749,13 @@ export function createWorkflowBoardService(opts = {}) {
     if (automation.enabled === false) {
       return { ok: false, reason: 'column automation is disabled', automation };
     }
-    if (automation.trigger !== 'on_enter' || automation.action !== 'orchestrate') {
-      return { ok: false, reason: 'column is not configured for on-enter orchestration', automation };
+    if (automation.trigger !== 'on_enter' || !['orchestrate', 'audit'].includes(automation.action)) {
+      return { ok: false, reason: 'column is not configured for on-enter orchestration or audit', automation };
+    }
+    // Idempotency: do not re-run the audit action on a card that already has a passing audit
+    // (re-entry, reconcile, or duplicate transition must not loop the auditor).
+    if (automation.action === 'audit' && checkPassed(getChecks(card.id).audit)) {
+      return { ok: false, reason: 'audit already passed for this card', automation };
     }
     if (board.mode !== 'armed' && board.mode !== 'autonomous') {
       return { ok: false, reason: `board mode ${board.mode} does not allow automatic orchestration`, automation };
@@ -2015,6 +2021,18 @@ export function createWorkflowBoardService(opts = {}) {
       ? `\n\nFile ownership scope:\n${fileScope.map(file => `- ${file}`).join('\n')}`
       : '';
     let preferredAgent = textOrNull(args.agent ?? args.agent_slug ?? card.assignedAgent);
+    let isAudit = card.columnId === 'quality-audit' || textOrNull(args.action) === 'audit';
+    let auditBlock = isAudit
+      ? [
+          '',
+          '',
+          'Quality audit task:',
+          '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
+          '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
+          '- Record the verdict via the public `workflow_board` action `update_item` with a `checks` object: set `audit` to `passed` or `failed` (use `auditWaiver` only for an explicit human waiver).',
+          '- Do not advance the card yourself; the gate moves it once the audit check passes.',
+        ].join('\n')
+      : '';
     let proofMarkers = requiredProofMarkersForWorkItem(card, args);
     let proofMarkerContract = proofMarkers.length
       ? [
@@ -2056,6 +2074,7 @@ export function createWorkflowBoardService(opts = {}) {
       fileHint,
       cwdHint,
       fileScopeHint,
+      auditBlock,
       args.reason ? `\n\nTrigger reason: ${args.reason}` : '',
       outputContract,
     ].join('').trim();
@@ -2573,6 +2592,9 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     if (runs.some(run => run.status === 'recovering')) flags.add('recovering');
+    // A real audit pass (or explicit waiver) clears needs_audit — the column action is done.
+    let checks = getChecks(card.id);
+    if (checkPassed(checks.audit) || checkPassed(checks.auditWaiver)) flags.delete('needs_audit');
     return [...flags].filter(flag => normalizeRecoveryFlags([flag]).length > 0);
   }
 
