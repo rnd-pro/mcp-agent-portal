@@ -870,7 +870,7 @@ export function classifyWorkflowGraph(board) {
     return { from: edge.from, to: edge.to, gates: edge.gates, edgeClass, backward, destructive };
   });
 
-  let edgeClassIndex = new Map(edges.map(edge => [`${edge.from} ${edge.to}`, edge.edgeClass]));
+  let edgeClassIndex = new Map(edges.map(edge => [`${edge.from}\x00${edge.to}`, edge.edgeClass]));
 
   return {
     stageRank,
@@ -878,7 +878,7 @@ export function classifyWorkflowGraph(board) {
     edges,
     rankOf,
     isTerminal: (columnId) => terminals.has(columnId),
-    edgeClass: (from, to) => edgeClassIndex.get(`${from} ${to}`) ?? null,
+    edgeClass: (from, to) => edgeClassIndex.get(`${from}\x00${to}`) ?? null,
   };
 }
 
@@ -987,7 +987,7 @@ function auditDominatesTerminal(terminal, sources, adjacency, inbound) {
   let auditEdgeTargets = new Set();
   for (let [, edges] of inbound) {
     for (let edge of edges) {
-      if (edgeIsAuditGated(edge.gates)) auditEdgeTargets.add(`${edge.from} ${edge.to}`);
+      if (edgeIsAuditGated(edge.gates)) auditEdgeTargets.add(`${edge.from}\x00${edge.to}`);
     }
   }
   let reachedWithoutAudit = new Set();
@@ -999,7 +999,7 @@ function auditDominatesTerminal(terminal, sources, adjacency, inbound) {
     if (node === terminal) return false;
     for (let next of adjacency.get(node) ?? []) {
       // Crossing an audit-gated edge satisfies domination on this path; do not descend through it.
-      if (auditEdgeTargets.has(`${node} ${next}`)) continue;
+      if (auditEdgeTargets.has(`${node}\x00${next}`)) continue;
       stack.push(next);
     }
   }
