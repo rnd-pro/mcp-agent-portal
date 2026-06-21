@@ -2,10 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  ACTIVE_RECOVERY_COLUMN_IDS,
   checkPassed,
+  classifyWorkflowGraph,
   DEFAULT_WORKFLOW_BOARD_ID,
-  DEFAULT_WORKFLOW_COLUMN_IDS,
   createDefaultWorkflowBoard,
   evaluateWorkflowTransitionGates,
   hasActiveEscalation,
@@ -23,6 +22,7 @@ import {
   normalizeWorkflowAutomation,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
+  validateWorkflowTransitionGraph,
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
@@ -57,6 +57,10 @@ const ESCALATION_SUGGESTION_PATTERN = /ESCALATION_SUGGESTION:\s*(.+)/i;
 const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
+// Execution-class column actions: a card in a column with one of these actions can carry an
+// in-flight run that needs recovery (orchestrate/execute/audit/publish each spawn or require a
+// run). The passive intake/close actions (classify/scope/close) never strand a run.
+const EXECUTION_COLUMN_ACTIONS = new Set(['orchestrate', 'execute', 'audit', 'publish']);
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
 const RUNTIME_DONE_STATUSES = new Set(['done', 'finished', 'complete', 'completed', 'success']);
 const RUNTIME_READY_STATUSES = new Set(['queued', 'pending', 'requested', 'created']);
@@ -192,11 +196,6 @@ function fileScopesOverlap(left = '', right = '') {
 
 function firstText(value) {
   return textArray(value)[0] ?? null;
-}
-
-function hasDestructiveMove(fromColumnId, toColumnId) {
-  if (toColumnId === 'done') return true;
-  return fromColumnId === 'in-progress' && ['ideas', 'backlog', 'ready'].includes(toColumnId);
 }
 
 function slugSegment(value, fallback = 'item') {
@@ -554,9 +553,71 @@ export function createWorkflowBoardService(opts = {}) {
     return { gate, reason };
   }
 
+  // Classifier + validator are pure over (columns, transitions); memoize per board id+version so a
+  // single evaluateRequest (or any hot path) classifies once. The cache holds one entry per board id
+  // and is invalidated by version, so a board edit (which bumps version) recomputes on next use.
+  let graphCache = new Map();
+  function boardGraph(board) {
+    let id = textOrNull(board?.id) ?? DEFAULT_WORKFLOW_BOARD_ID;
+    let version = Number(board?.version);
+    let key = Number.isFinite(version) ? version : 'unversioned';
+    let cached = graphCache.get(id);
+    if (cached && cached.key === key) return cached.value;
+    let value = {
+      classifier: classifyWorkflowGraph(board),
+      validation: validateWorkflowTransitionGraph(board),
+    };
+    graphCache.set(id, { key, value });
+    return value;
+  }
+
+  // Board-aware destructive-move detection (replaces the former hardcoded set). A move is destructive
+  // when it (1) enters a terminal column, (2) is flagged destructive by the classifier for an existing
+  // graph edge (a backward move out of a terminal stage), or (3) — the not-an-edge fallback — is a
+  // rank-decreasing backward move out of the execution stage (`automation.action === 'execute'`).
+  // Anything backward into/out of a terminal that the classifier does not already cover is caught by
+  // the rank/terminal fallback, so an unknown move is never silently treated as non-destructive.
+  function hasDestructiveMove(board, fromColumnId, toColumnId) {
+    let classifier = board?.classifier ?? boardGraph(board).classifier;
+    if (classifier.isTerminal(toColumnId)) return true;
+    let edgeDestructive = classifier.edges.some(
+      edge => edge.from === fromColumnId && edge.to === toColumnId && edge.destructive,
+    );
+    if (edgeDestructive) return true;
+    let fromRank = classifier.rankOf(fromColumnId);
+    let toRank = classifier.rankOf(toColumnId);
+    let backward = fromRank >= 0 && toRank >= 0 && toRank < fromRank;
+    if (!backward) return false;
+    let fromAction = textOrNull(columnAutomation(board, fromColumnId).action);
+    return fromAction === 'execute' || classifier.isTerminal(fromColumnId);
+  }
+
+  // Board-derived active/recovery columns (inv 18, replaces the former hardcoded id list): a column is
+  // active/recovery iff it is NON-terminal and its automation action is an execution-class action — a
+  // card there can have an in-flight run needing recovery.
+  function activeRecoveryColumnIds(board) {
+    let classifier = boardGraph(board).classifier;
+    return (Array.isArray(board?.columns) ? board.columns : [])
+      .filter(column => !classifier.isTerminal(column.id))
+      .filter(column => EXECUTION_COLUMN_ACTIONS.has(textOrNull(column?.automation?.action)))
+      .map(column => column.id);
+  }
+
   function evaluateRequest(board, card, checks, request) {
     let failures = [];
-    if (!DEFAULT_WORKFLOW_COLUMN_IDS.includes(request.toColumnId)) {
+    let { classifier, validation } = boardGraph(board);
+    // inv 11: a structurally-invalid custom board cannot be operated. The shipped default board is
+    // verified valid, so this never fires for it. Surface the first validator error code + detail.
+    if (!validation.ok) {
+      let first = validation.errors[0];
+      failures.push(createFailure(
+        'invalid_board_graph',
+        `Board ${board.id} transition graph is invalid (${first.code}): ${first.detail}`,
+      ));
+    }
+    // Data-driven column existence: a custom board accepts its own column ids; the default set is no
+    // longer the authority.
+    if (!board.columns.some(column => column.id === request.toColumnId)) {
       failures.push(createFailure(
         'known_column',
         `Unknown workflow column "${request.toColumnId}".`,
@@ -577,13 +638,14 @@ export function createWorkflowBoardService(opts = {}) {
     if (board.mode === 'paused') {
       failures.push(createFailure('board_mode', 'Board is paused.'));
     }
-    if (hasDestructiveMove(card.columnId, request.toColumnId) && !request.reason) {
+    let destructive = hasDestructiveMove({ ...board, classifier }, card.columnId, request.toColumnId);
+    if (destructive && !request.reason) {
       failures.push(createFailure('reason_required', 'Destructive workflow moves require a reason.'));
     }
     // A destructive move must not strand an active run. activeRunForCard is a hoisted function
     // declaration (do not refactor it to a const arrow — that would TDZ here). Pass force to
     // override (the caller is expected to finalize/stop the run first).
-    if (hasDestructiveMove(card.columnId, request.toColumnId) && !request.force) {
+    if (destructive && !request.force) {
       let liveRun = activeRunForCard(card.id);
       if (liveRun) {
         failures.push(createFailure(
@@ -710,11 +772,12 @@ export function createWorkflowBoardService(opts = {}) {
   function activeFileScopeConflicts(board, card, args = {}) {
     let files = cardFileScope(card, args);
     if (!files.length) return [];
+    let activeColumnIds = new Set(activeRecoveryColumnIds(board));
     return Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(candidate => candidate.id !== card.id)
       .filter(candidate => candidate.boardId === board.id)
       .filter(candidate => !card.projectId || candidate.projectId === card.projectId)
-      .filter(candidate => ACTIVE_RECOVERY_COLUMN_IDS.includes(candidate.columnId))
+      .filter(candidate => activeColumnIds.has(candidate.columnId))
       .map((candidate) => {
         let candidateFiles = cardFileScope(candidate);
         let overlappingFiles = files.filter(file => candidateFiles.some(candidateFile => fileScopesOverlap(file, candidateFile)));
@@ -1702,15 +1765,17 @@ export function createWorkflowBoardService(opts = {}) {
   function getRecoveryState(filter = {}) {
     let projection = getBoardProjection(filter);
     let currentNow = now();
+    let activeColumnIds = activeRecoveryColumnIds(projection.board);
+    let activeColumnIdSet = new Set(activeColumnIds);
     let cards = projection.cards
-      .filter(card => ACTIVE_RECOVERY_COLUMN_IDS.includes(card.columnId))
+      .filter(card => activeColumnIdSet.has(card.columnId))
       .map(card => deriveRecoveryCard(card, currentNow))
       .filter(card => card.recoveryFlags.length > 0);
     return {
       schema: 'workflow-recovery/v1',
       boardId: projection.boardId,
       scope: projection.scope,
-      activeColumnIds: ACTIVE_RECOVERY_COLUMN_IDS,
+      activeColumnIds,
       cards,
       summary: recoverySummary(cards),
       checkedAt: currentNow,
@@ -2872,8 +2937,9 @@ export function createWorkflowBoardService(opts = {}) {
     let currentNow = now();
     let reconciled = [];
     let ops = [];
+    let activeColumnIds = new Set(activeRecoveryColumnIds(projection.board));
 
-    for (let card of projection.cards.filter(item => ACTIVE_RECOVERY_COLUMN_IDS.includes(item.columnId))) {
+    for (let card of projection.cards.filter(item => activeColumnIds.has(item.columnId))) {
       let current = getCard(card.id);
       let flags = derivePersistentRecoveryFlags(current, runtimeTasks, currentNow);
       let runs = getRunsForCard(current.id);

@@ -2197,6 +2197,115 @@ links:
     assert.equal(afterCap.reengaged.length, 0, 'human-escalated card stays put');
     assert.equal(afterCap.escalatedToHuman.length, 0, 'no repeated human handoff');
   });
+
+  // S5 (WS-B3): the service derives the closed column set, destructive moves, the active/recovery
+  // columns, and the structural-graph gate from the board itself — not a hardcoded constant. These
+  // three default-board anchors must hold so the generalization does not change shipped behavior.
+  function commitBoard(board) {
+    sg.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: board }], 'test');
+    return board;
+  }
+  function commitCard(card) {
+    let value = { schema: 'workflow-card/v2', version: 1, lifecycle: 'idle', dependsOn: [], blockers: [], recoveryFlags: [], acceptanceCriteria: [], owner: 'tester', ...card };
+    sg.commit([{ op: 'set', path: `workflowCards/${value.id}`, value }], 'test');
+    return value;
+  }
+
+  it('S5 anchor: default-board destructive set is into-done plus in-progress->ready/backlog/ideas', () => {
+    let card = service.createOrUpdateCard({
+      title: 'Destructive anchor', columnId: 'in-progress', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    }).card;
+    // Backward moves out of the execute stage are destructive (need a reason).
+    for (let to of ['ready', 'backlog', 'ideas']) {
+      let blocked = service.requestTransition({ cardId: card.id, fromColumnId: 'in-progress', toColumnId: to, actor: 'test' });
+      assert.ok(
+        blocked.gateResult.failures.some(f => f.gate === 'reason_required'),
+        `in-progress -> ${to} must require a reason (destructive)`,
+      );
+    }
+    // A backward rework out of quality-audit (audit action, not execute) is NOT destructive — it is
+    // governed by rework_authorized instead, exactly as before.
+    let auditCard = service.createOrUpdateCard({
+      title: 'Audit rework', columnId: 'quality-audit', projectId: 'agent-portal', owner: 'qa-engineer', actor: 'test',
+    }).card;
+    let auditRework = service.requestTransition({ cardId: auditCard.id, fromColumnId: 'quality-audit', toColumnId: 'ready', actor: 'test' });
+    assert.equal(
+      auditRework.gateResult.failures.some(f => f.gate === 'reason_required'), false,
+      'quality-audit -> ready is not a destructive move',
+    );
+    // Entering the terminal column is destructive regardless of source.
+    let publishCard = service.createOrUpdateCard({
+      title: 'Publish anchor', columnId: 'commit-publish', projectId: 'agent-portal', owner: 'release-manager', actor: 'test',
+    }).card;
+    let toDone = service.requestTransition({ cardId: publishCard.id, fromColumnId: 'commit-publish', toColumnId: 'done', actor: 'test' });
+    assert.ok(toDone.gateResult.failures.some(f => f.gate === 'reason_required'), 'commit-publish -> done is destructive');
+  });
+
+  it('S5 anchor: default-board active/recovery columns are exactly the four execution columns', () => {
+    let recovery = service.getRecoveryState({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    assert.deepEqual(
+      [...recovery.activeColumnIds].sort(),
+      ['commit-publish', 'in-progress', 'quality-audit', 'ready'],
+    );
+  });
+
+  it('S5 anchor: the default board is structurally valid, so a normal transition is not graph-blocked', () => {
+    let card = service.createOrUpdateCard({
+      title: 'Classify intake', columnId: 'ideas', projectId: 'agent-portal', domain: 'backend', actor: 'test',
+    }).card;
+    let accepted = service.requestTransition({
+      cardId: card.id, fromColumnId: 'ideas', toColumnId: 'backlog', expectedVersion: card.version, actor: 'test', reason: 'Classified.',
+    });
+    assert.equal(accepted.status, 'accepted');
+    assert.equal(accepted.gateResult.failures.some(f => f.gate === 'invalid_board_graph'), false);
+  });
+
+  it('S5 data-driven: a custom board accepts a transition into its own column but rejects an unknown one', () => {
+    let board = createDefaultWorkflowBoard({ id: 'custom-board' });
+    board.columns = [...board.columns, { id: 'staging', title: 'Staging', automation: { trigger: 'manual', action: 'execute', mode: 'gated' } }];
+    // The inbound edge to the custom column carries a gate the test card cannot pass, so the request
+    // stays blocked at the gate (the iso card normalizer only mints default columns — see findings),
+    // which is enough to prove the data-driven column-existence check no longer rejects "staging".
+    board.transitions = [
+      ...board.transitions,
+      { from: 'commit-publish', to: 'staging', gates: ['has_owner_and_acceptance'] },
+      { from: 'staging', to: 'done', gates: ['clean_diff_and_hygiene'] },
+    ];
+    commitBoard(board);
+    let card = commitCard({ id: 'custom-card', boardId: 'custom-board', title: 'Custom', columnId: 'commit-publish', acceptanceCriteria: [] });
+
+    let toCustom = service.requestTransition({
+      boardId: 'custom-board', cardId: card.id, fromColumnId: 'commit-publish', toColumnId: 'staging', actor: 'test', reason: 'Stage it.',
+    });
+    assert.equal(
+      toCustom.gateResult.failures.some(f => f.gate === 'known_column'), false,
+      'a board column id must be accepted as a transition target',
+    );
+    assert.equal(
+      toCustom.gateResult.failures.some(f => f.gate === 'invalid_board_graph'), false,
+      'the custom board is structurally valid',
+    );
+
+    let toUnknown = service.requestTransition({
+      boardId: 'custom-board', cardId: card.id, fromColumnId: 'commit-publish', toColumnId: 'nowhere', actor: 'test', reason: 'Bad target.',
+    });
+    assert.equal(toUnknown.status, 'blocked');
+    assert.ok(toUnknown.gateResult.failures.some(f => f.gate === 'known_column'));
+  });
+
+  it('S5 validator wiring: a structurally invalid board fails every transition with invalid_board_graph', () => {
+    let board = createDefaultWorkflowBoard({ id: 'broken-board' });
+    // Inbound-to-terminal edge missing the hygiene gate -> hygiene_cut_incomplete (inv 11 violation).
+    board.transitions = [...board.transitions, { from: 'quality-audit', to: 'done', gates: ['audit_pass_or_explicit_waiver'] }];
+    commitBoard(board);
+    let card = commitCard({ id: 'broken-card', boardId: 'broken-board', title: 'Broken', columnId: 'ideas', projectId: 'agent-portal', domain: 'backend' });
+
+    let result = service.requestTransition({
+      boardId: 'broken-board', cardId: card.id, fromColumnId: 'ideas', toColumnId: 'backlog', actor: 'test', reason: 'Classify.',
+    });
+    assert.equal(result.status, 'blocked');
+    assert.ok(result.gateResult.failures.some(f => f.gate === 'invalid_board_graph'));
+  });
 });
 
 describe('normalizeWorkflowEscalation', () => {
