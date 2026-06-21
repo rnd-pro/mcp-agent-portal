@@ -148,6 +148,76 @@ pg-workflow-board .wb-board {
   --sn-kanban-header-min-height: 88px;
 }
 
+pg-workflow-board .wb-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: var(--sn-button-radius, 8px);
+  background: var(--sn-node-bg);
+}
+
+pg-workflow-board .wb-view-toggle-btn {
+  --sn-button-size: 26px;
+  --sn-button-padding: 0;
+}
+
+pg-workflow-board .wb-view-toggle-btn[aria-pressed="true"],
+pg-workflow-board .wb-view-toggle-btn.is-active {
+  --sn-button-bg: color-mix(in srgb, var(--sn-node-selected) 22%, transparent);
+  color: var(--sn-node-selected);
+}
+
+pg-workflow-board .wb-graph-region {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--sn-node-border);
+  border-radius: var(--sn-card-radius);
+  background: var(--sn-node-bg);
+}
+
+pg-workflow-board .wb-graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-block-end: 1px solid var(--sn-layout-border);
+  flex-shrink: 0;
+}
+
+pg-workflow-board .wb-graph-btn {
+  --sn-button-size: 26px;
+  --sn-button-padding: 0;
+}
+
+pg-workflow-board .wb-graph-stats {
+  min-width: 0;
+  color: var(--sn-text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pg-workflow-board .wb-graph-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+pg-workflow-board .wb-graph-empty {
+  position: absolute;
+  inset: 44px 0 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
 pg-workflow-board .wb-chip {
   display: inline-flex;
   align-items: center;
