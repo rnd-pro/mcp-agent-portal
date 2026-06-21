@@ -1061,11 +1061,11 @@ export function createWorkflowBoardService(opts = {}) {
         let overlappingFiles = files.filter(file => candidateFiles.some(candidateFile => fileScopesOverlap(file, candidateFile)));
         return overlappingFiles.length
           ? {
-              cardId: candidate.id,
-              title: candidate.title,
-              columnId: candidate.columnId,
-              files: overlappingFiles,
-            }
+            cardId: candidate.id,
+            title: candidate.title,
+            columnId: candidate.columnId,
+            files: overlappingFiles,
+          }
           : null;
       })
       .filter(Boolean);
@@ -2823,10 +2823,10 @@ export function createWorkflowBoardService(opts = {}) {
     }, runtimeState.tasks);
     return wantsCompactProjection(filter)
       ? compactBoardProjection(projection, {
-          tasks: runtimeState.tasks,
-          systemLoad: runtimeState.systemLoad,
-          runtime: compactRuntimeSummary(runtimeState.tasks),
-        })
+        tasks: runtimeState.tasks,
+        systemLoad: runtimeState.systemLoad,
+        runtime: compactRuntimeSummary(runtimeState.tasks),
+      })
       : projection;
   }
 
@@ -3905,46 +3905,46 @@ export function createWorkflowBoardService(opts = {}) {
     let isAudit = card.columnId === 'quality-audit' || textOrNull(args.action) === 'audit';
     let auditBlock = isAudit
       ? [
-          '',
-          '',
-          'Quality audit task:',
-          '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
-          '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
-          '- Record the verdict via the public `workflow_board` action `update_item` with a `checks` object: set `audit` to `passed` or `failed` (use `auditWaiver` only for an explicit human waiver).',
-          '- Do not advance the card yourself; the gate moves it once the audit check passes.',
-        ].join('\n')
+        '',
+        '',
+        'Quality audit task:',
+        '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
+        '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
+        '- Record the verdict via the public `workflow_board` action `update_item` with a `checks` object: set `audit` to `passed` or `failed` (use `auditWaiver` only for an explicit human waiver).',
+        '- Do not advance the card yourself; the gate moves it once the audit check passes.',
+      ].join('\n')
       : '';
     let escalationState = card.metadata?.escalation
       ? normalizeWorkflowEscalationState(card.metadata.escalation)
       : null;
     let escalationBlock = escalationState && hasActiveEscalation(card)
       ? [
-          '',
-          '',
-          `Escalation re-engagement (attempt ${escalationState.attemptCount}). A prior run could not self-resolve and routed this card back for re-routing.`,
-          `- Escalation kind: ${escalationState.kind}`,
-          escalationState.detail ? `- Detail: ${escalationState.detail}` : '',
-          textOrNull(escalationState.lastEscalation?.suggestedResolution)
-            ? `- Suggested resolution: ${escalationState.lastEscalation.suggestedResolution}`
-            : '',
-          textOrNull(escalationState.lastEscalation?.proposedLane)
-            ? `- Proposed lane (advisory only): ${escalationState.lastEscalation.proposedLane}`
-            : '',
-          '- Route by kind:',
-          '  - insufficient_permission: PROPOSE a capable lane (resource group / agent) and let the board gate or a human approve it. Never self-grant rights or approval.',
-          '  - insufficient_context: gather and attach the missing context, or decompose an investigation child card, then re-delegate.',
-          '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
-          '  - rework: re-delegate the fix with the audit findings as acceptance criteria.',
-          '- Permission and approval policy stay board/human-owned; this channel only proposes.',
-        ].filter(Boolean).join('\n')
+        '',
+        '',
+        `Escalation re-engagement (attempt ${escalationState.attemptCount}). A prior run could not self-resolve and routed this card back for re-routing.`,
+        `- Escalation kind: ${escalationState.kind}`,
+        escalationState.detail ? `- Detail: ${escalationState.detail}` : '',
+        textOrNull(escalationState.lastEscalation?.suggestedResolution)
+          ? `- Suggested resolution: ${escalationState.lastEscalation.suggestedResolution}`
+          : '',
+        textOrNull(escalationState.lastEscalation?.proposedLane)
+          ? `- Proposed lane (advisory only): ${escalationState.lastEscalation.proposedLane}`
+          : '',
+        '- Route by kind:',
+        '  - insufficient_permission: PROPOSE a capable lane (resource group / agent) and let the board gate or a human approve it. Never self-grant rights or approval.',
+        '  - insufficient_context: gather and attach the missing context, or decompose an investigation child card, then re-delegate.',
+        '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
+        '  - rework: re-delegate the fix with the audit findings as acceptance criteria.',
+        '- Permission and approval policy stay board/human-owned; this channel only proposes.',
+      ].filter(Boolean).join('\n')
       : '';
     let proofMarkers = requiredProofMarkersForWorkItem(card, args);
     let proofMarkerContract = proofMarkers.length
       ? [
-          '- Required proof marker lines:',
-          ...proofMarkers.map(marker => `  - \`${marker}:PASS\` or \`${marker}:FAIL\``),
-          '- Place required proof marker lines after the report body and before any `WORKFLOW_RESULT:` line.',
-        ].join('\n')
+        '- Required proof marker lines:',
+        ...proofMarkers.map(marker => `  - \`${marker}:PASS\` or \`${marker}:FAIL\``),
+        '- Place required proof marker lines after the report body and before any `WORKFLOW_RESULT:` line.',
+      ].join('\n')
       : '';
     let outputContract = [
       '',
