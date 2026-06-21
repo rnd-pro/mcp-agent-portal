@@ -126,7 +126,7 @@ describe('workflow board model and service', () => {
     assert.deepEqual(sg.get('workflowLeases'), {});
   });
 
-  it('refreshes an existing default board to the current column automation policy', () => {
+  it('fill-only refreshes a default board: preserves customizations, adds missing defaults (inv 17, 19)', () => {
     let oldBoard = createDefaultWorkflowBoard({ now: 123 });
     oldBoard.version = 7;
     oldBoard.columns = oldBoard.columns.map((column) => (
@@ -150,10 +150,14 @@ describe('workflow board model and service', () => {
     let readyColumn = board.columns.find(column => column.id === 'ready');
 
     assert.equal(board.version, 8);
-    assert.equal(readyColumn.automation.mode, 'auto');
+    // Fill-only (inv 17): the customized mode/agent survive the policy-version bump; they are NOT
+    // reset to the default `auto`/`orchestrator`. Only missing default keys (agents, parallelLimit)
+    // are filled in.
+    assert.equal(readyColumn.automation.mode, 'gated');
+    assert.equal(readyColumn.automation.agent, 'legacy-agent');
     assert.deepEqual(readyColumn.automation.agents, ['orchestrator']);
-    assert.equal(readyColumn.automation.agent, undefined);
     assert.equal(readyColumn.automation.parallelLimit, 4);
+    // inv 19: a missing default transition (the deleted backlog->ready) is still re-added.
     assert.ok(board.transitions.find(transition => transition.from === 'backlog' && transition.to === 'ready'));
     assert.equal(sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`).version, 8);
 
@@ -175,6 +179,104 @@ describe('workflow board model and service', () => {
     assert.equal(updated.column.automation.mode, 'gated');
     assert.deepEqual(reloadedReady.automation.agents, ['reviewer']);
     assert.equal(reloadedReady.automation.parallelLimit, 2);
+  });
+
+  it('fill-only refresh preserves a customized transition gate while adding a missing default (inv 17)', () => {
+    let oldBoard = createDefaultWorkflowBoard({ now: 123 });
+    // Customize an existing default transition's gates (a user-authored stricter gate) and delete a
+    // different default transition entirely so the refresh has a missing default to re-add.
+    oldBoard.transitions = oldBoard.transitions
+      .filter(transition => !(transition.from === 'backlog' && transition.to === 'ready'))
+      .map(transition => (
+        transition.from === 'quality-audit' && transition.to === 'commit-publish'
+          ? { ...transition, gate: 'custom_release_gate', gates: ['custom_release_gate'] }
+          : transition
+      ));
+    sg.commit([{ op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: oldBoard }], 'seed');
+
+    let board = service.getBoardProjection().board;
+    let customized = board.transitions.find(t => t.from === 'quality-audit' && t.to === 'commit-publish');
+    assert.deepEqual(customized.gates, ['custom_release_gate'], 'customized transition gates must survive the refresh');
+    assert.ok(
+      board.transitions.find(t => t.from === 'backlog' && t.to === 'ready'),
+      'missing default transition must be re-added (inv 19)',
+    );
+  });
+
+  it('runs a one-time forward schema-v2 migration over persisted boards and cards (AD-8, inv 16)', () => {
+    // Seed v1-shaped board + card directly: pre-v2 schema strings, no lifecycle/dependsOn on the card.
+    // No `workflowSchema` marker is seeded, so the one-time sweep must run on first access.
+    let v1Board = {
+      ...createDefaultWorkflowBoard({ now: 123 }),
+      schema: 'workflow-board/v1',
+    };
+    // A genuine v1-shaped card: a fully-normalized card with the v2-only fields stripped and the
+    // schema downgraded, so it differs from v2 exactly where the migrator fills (lifecycle/dependsOn).
+    let normalizedCard = normalizeWorkflowCardInput(
+      { title: 'Legacy card', boardId: DEFAULT_WORKFLOW_BOARD_ID, columnId: 'ideas' },
+      { id: 'card-v1', now: 100 },
+    );
+    let { lifecycle, dependsOn, ...rest } = normalizedCard;
+    let v1Card = { ...rest, schema: 'workflow-card/v1' };
+    sg.commit([
+      { op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: v1Board },
+      { op: 'set', path: 'workflowCards/card-v1', value: v1Card },
+    ], 'seed');
+    assert.equal(sg.get('workflowSchema'), undefined);
+
+    // Any board entry point triggers the one-time sweep.
+    service.getBoardProjection();
+
+    let migratedBoard = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let migratedCard = sg.get('workflowCards/card-v1');
+    assert.equal(migratedBoard.schema, 'workflow-board/v2');
+    assert.equal(migratedCard.schema, 'workflow-card/v2');
+    assert.equal(migratedCard.lifecycle, 'idle');
+    assert.deepEqual(migratedCard.dependsOn, []);
+    assert.deepEqual(sg.get('workflowSchema'), { version: 2 });
+
+    // Idempotency: with the migration settled (marker set, board policy refreshed), a further
+    // access must not re-commit. Capture version after a warm-up access, then assert the next
+    // access leaves it untouched — proving the migration is a steady-state no-op.
+    service.getBoardProjection();
+    let versionBefore = sg.version;
+    service.getBoardProjection();
+    assert.equal(sg.version, versionBefore, 'steady-state access must not re-commit the migration');
+
+    // No read-time schema branch: a migrated card reads identically on first and second access.
+    let first = service.getCard('card-v1');
+    let second = service.getCard('card-v1');
+    assert.deepEqual(first, second);
+    assert.equal(first.schema, 'workflow-card/v2');
+  });
+
+  it('a fresh service instance treats an already-migrated store as a marker no-op (durable guard)', () => {
+    // First instance migrates and sets the durable marker.
+    let legacy = normalizeWorkflowCardInput(
+      { title: 'Legacy', boardId: DEFAULT_WORKFLOW_BOARD_ID, columnId: 'ideas' },
+      { id: 'card-legacy', now: 1 },
+    );
+    let { lifecycle: _l, dependsOn: _d, ...legacyRest } = legacy;
+    sg.commit([{
+      op: 'set',
+      path: 'workflowCards/card-legacy',
+      value: { ...legacyRest, schema: 'workflow-card/v1' },
+    }], 'seed');
+    service.getBoardProjection();
+    assert.deepEqual(sg.get('workflowSchema'), { version: 2 });
+
+    // A second, freshly-constructed service (per-request seam) shares the StateGraph but starts with
+    // its own per-instance flag. The DURABLE marker — not the flag — must keep it a no-op.
+    let versionBefore = sg.version;
+    let freshService = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    freshService.getBoardProjection();
+    assert.equal(sg.version, versionBefore, 'a fresh instance must not re-migrate when the marker is current');
   });
 
   it('freezes the projection-v2 lifecycle / dependsOn / queue / telemetry shape', async () => {
