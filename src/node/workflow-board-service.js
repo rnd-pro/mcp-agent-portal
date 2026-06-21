@@ -2559,6 +2559,8 @@ export function createWorkflowBoardService(opts = {}) {
     let activeLeases = activeCards.filter(card => Boolean(card.lease));
     let runningTaskCount = runtimeState.runtime?.runningTaskCount
       ?? compactRuntimeSummary(runtimeState.tasks).runningTaskCount;
+    let queue = asObject(projection.queue);
+    let telemetry = asObject(projection.telemetry);
     return {
       boardMode: projection.board.mode,
       globalParallelLimit: finiteNumber(projection.board.automation?.globalParallelLimit),
@@ -2567,6 +2569,16 @@ export function createWorkflowBoardService(opts = {}) {
       activeRunCount: activeRuns.length,
       activeLeaseCount: activeLeases.length,
       runningTaskCount,
+      // Admission backpressure at a glance for the L1 monitor (read from the full projection's
+      // queue/telemetry; the compact view never recomputes them).
+      queue: {
+        depth: finiteNumber(queue.depth ?? telemetry.queueDepth) ?? 0,
+        blockedOnDependencyCount: finiteNumber(
+          queue.blockedOnDependencyCount ?? telemetry.blockedOnDependencyCount,
+        ) ?? 0,
+        admissions: finiteNumber(telemetry.admissions) ?? 0,
+        admissionFailures: finiteNumber(telemetry.admissionFailures) ?? 0,
+      },
     };
   }
 
