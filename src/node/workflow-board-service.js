@@ -2851,7 +2851,7 @@ export function createWorkflowBoardService(opts = {}) {
       let status = runtimeTaskStatus(task);
       let timestamp = runtimeTaskTimestamp(task) ?? now();
       return [{
-        schema: 'workflow-card/v1',
+        schema: 'workflow-card/v2',
         id: `runtime-${slugSegment(id)}`,
         boardId: board.id,
         title: runtimeTaskTitle(id, task),
