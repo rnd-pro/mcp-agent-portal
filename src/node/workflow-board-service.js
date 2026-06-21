@@ -21,6 +21,7 @@ import {
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
   isFloorGateMonotonic,
+  isWorkflowLifecycleTransitionAllowed,
   migrateWorkflowBoardToV2,
   migrateWorkflowCardToV2,
   normalizeWorkflowTransitionEvent,
@@ -110,6 +111,10 @@ const ADMISSION_INFLIGHT_GRACE_MS = ADMISSION_LEASE_TTL_BUDGET_MS
 const DEFAULT_DRAIN_BUDGET = 32;
 // Priority enum → ordinal for the fairness comparator (higher = admitted first; inv 6).
 const WORKFLOW_PRIORITY_ORDER = { critical: 3, high: 2, normal: 1, low: 0 };
+// Max time a card may sit `blocked` on an unsatisfied dependency before the release/reconcile tick
+// escalates it to a typed `needs_decision` (inv 24: never a silent permanent block). The blocked-age
+// clock is `card.metadata.dependencyBlock.blockedAt`, stamped when the dependency path blocks it.
+const MAX_BLOCKED_AGE_MS = 24 * 60 * 60 * 1000;
 
 function priorityOrdinal(priority) {
   let key = textOrNull(priority);
@@ -735,6 +740,23 @@ export function createWorkflowBoardService(opts = {}) {
       };
     }
 
+    // Import/write-time dependency cycle re-check (inv 23): a card written (created, updated, or
+    // imported/normalized-on-read) with `dependsOn` edges must not close a cycle. Each new upstream
+    // edge is rejected if this card is already reachable from that upstream in the committed closure.
+    // Rejected without committing — the link path enforces the same at edit time.
+    for (let dep of card.dependsOn) {
+      if (wouldCreateDependencyCycle(board.id, card.id, dep.cardId)) {
+        return {
+          ok: false,
+          status: 'blocked',
+          failures: [{ gate: 'dependency_cycle', reason: `Dependency ${card.id} → ${dep.cardId} would create a cycle.` }],
+          board,
+          card: current ? clone(current) : null,
+          checks: getChecks(id),
+        };
+      }
+    }
+
     let ops = [{ op: 'set', path: `workflowCards/${card.id}`, value: card }];
     let checks = getChecks(card.id);
 
@@ -1186,6 +1208,9 @@ export function createWorkflowBoardService(opts = {}) {
     let queueEpoch = readQueueEpoch(board.id);
     let admissionId = computeAdmissionId(board.id, card.id, enqueuedAt, queueEpoch);
     let notBefore = finiteNumber(opts.notBefore);
+    // Priority inheritance (AD-5, inv 24): the admission-ordering priority is the MAX of this card's
+    // own priority and every transitive downstream waiter's priority, so an upstream feeding a
+    // high-priority dependent is admitted ahead of unrelated low-priority cards and never starved.
     let entry = {
       schema: 'workflow-queue-entry/v1',
       admissionId,
@@ -1193,7 +1218,8 @@ export function createWorkflowBoardService(opts = {}) {
       boardId: board.id,
       columnId: card.columnId,
       groupKey: resolveGroupKey(card),
-      priority: priorityOrdinal(card.priority),
+      priority: effectiveAdmissionPriority(card, board),
+      basePriority: priorityOrdinal(card.priority),
       priorityLabel: textOrNull(card.priority) ?? 'normal',
       enqueuedAt,
       queueEpoch,
@@ -1251,6 +1277,504 @@ export function createWorkflowBoardService(opts = {}) {
       if (a.enqueuedAt !== b.enqueuedAt) return a.enqueuedAt - b.enqueuedAt;
       return a.cardId.localeCompare(b.cardId);
     });
+  }
+
+  // ── Board-native task dependencies (WS-B2; AD-5, inv 21-24) ───────────────────────────────────
+  // A card's `dependsOn: [{ cardId, releaseWhen, onUpstreamFailure }]` (frozen iso vocabulary) gates
+  // its admission: while any upstream edge is unsatisfied the dependent sits `idle↔blocked` (the only
+  // lifecycle transition this path owns — the scheduler still owns queued→admitting→running). The
+  // release tick (releaseDependencies) runs at the TOP of every admission pass, before drain: a
+  // blocked card whose every edge is satisfied is enqueued (blocked→queued via the S8 enqueue path).
+  // Failure propagation (an upstream terminal-failure or deletion) resolves each downstream edge per
+  // its `onUpstreamFailure` so a dependent is never left silently blocked forever (inv 22). Cycles are
+  // rejected at link (and re-checked at import + admission, inv 23). Priority inheritance lifts an
+  // upstream's admission priority to the max over its transitive waiters so a chain feeding a
+  // high-priority card is not starved (inv 24).
+
+  function boardCardsFor(boardId) {
+    return Object.values(getCollection(stateGraph, 'workflowCards')).filter(card => card.boardId === boardId);
+  }
+
+  function cardDependsOn(card) {
+    return normalizeWorkflowDependsOn(card?.dependsOn ?? card?.depends_on);
+  }
+
+  // Is one `dependsOn` edge satisfied? `releaseWhen` selects the signal; a missing/deleted upstream is
+  // NOT "satisfied" here — the failure path (propagateUpstreamResolution) owns that resolution.
+  function dependencyEdgeSatisfied(dep, upstreamCard, upstreamRuns, upstreamChecks, classifier) {
+    if (!upstreamCard) return false;
+    switch (dep.releaseWhen) {
+      case 'run_success':
+        // Data-driven success signal. NOTE (inv 21): `run_success` is unsafe while the upstream can
+        // still bounce backward via `rework_authorized` — a successful run does not pin the card in a
+        // terminal column, so the release may fire before the upstream's work is durably done. It is
+        // offered as an explicit opt-in; `card_done` is the safe default.
+        return (upstreamRuns ?? []).some(run => ['success', 'completed'].includes(textOrNull(run.status)));
+      case 'audit_passed':
+        // Audit floor check signed off (reuse the iso `checkPassed` truth table).
+        return checkPassed((upstreamChecks ?? {}).audit);
+      case 'card_done':
+      default:
+        // Safe default: the upstream card reached a TERMINAL column. The terminal set is data-driven
+        // off the board's `automation.action:'close'` classification — never the hardcoded 'done' id.
+        return classifier.isTerminal(upstreamCard.columnId);
+    }
+  }
+
+  // Is every edge of a dependent satisfied? An edge whose upstream resolved via `release`-on-failure
+  // is treated as satisfied (recorded on the dependent's dependencyBlock.releasedEdges).
+  function allDependenciesSatisfied(card, board, classifier, releasedEdges) {
+    let deps = cardDependsOn(card);
+    if (!deps.length) return true;
+    let released = releasedEdges instanceof Set ? releasedEdges : new Set(releasedEdges ?? []);
+    for (let dep of deps) {
+      if (released.has(dep.cardId)) continue;
+      let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
+      let satisfied = dependencyEdgeSatisfied(
+        dep,
+        upstream,
+        upstream ? getRunsForCard(upstream.id) : [],
+        upstream ? getChecks(upstream.id) : {},
+        classifier,
+      );
+      if (!satisfied) return false;
+    }
+    return true;
+  }
+
+  function dependencyBlockState(card) {
+    let block = card?.metadata?.dependencyBlock;
+    return block && typeof block === 'object' ? block : null;
+  }
+
+  function releasedEdgesFor(card) {
+    let block = dependencyBlockState(card);
+    return new Set(Array.isArray(block?.releasedEdges) ? block.releasedEdges : []);
+  }
+
+  // Cycle check (inv 23). Linking `dependent → upstream` closes a cycle iff `dependent` is already
+  // reachable FROM `upstream` in the current dependency closure (transitive DFS, not depth-1). A
+  // self-link is trivially a cycle.
+  function wouldCreateDependencyCycle(boardId, dependentCardId, upstreamCardId) {
+    if (dependentCardId === upstreamCardId) return true;
+    let seen = new Set();
+    let stack = [upstreamCardId];
+    while (stack.length) {
+      let next = stack.pop();
+      if (next === dependentCardId) return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      for (let dep of cardDependsOn(stateGraph.get(`workflowCards/${next}`))) {
+        stack.push(dep.cardId);
+      }
+    }
+    return false;
+  }
+
+  // Does `card`'s current dependency closure contain a cycle (any card reachable from itself)? Used as
+  // the defensive admission guard (inv 23) — a card whose closure is cyclic must not be admitted.
+  function dependencyClosureIsCyclic(cardId) {
+    let seen = new Set();
+    let stack = [cardId];
+    let first = true;
+    while (stack.length) {
+      let next = stack.pop();
+      if (!first && next === cardId) return true;
+      first = false;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      for (let dep of cardDependsOn(stateGraph.get(`workflowCards/${next}`))) {
+        stack.push(dep.cardId);
+      }
+    }
+    return false;
+  }
+
+  // Priority inheritance (inv 24). An upstream's effective admission priority is the MAX of its own
+  // priority and every transitive downstream waiter's priority, so a chain feeding a high-priority
+  // card is admitted with the inherited (elevated) priority and never starved while blocked cards sit
+  // outside the queue. Bounded by the cycle-safe `seen` guard.
+  function effectiveAdmissionPriority(card, board) {
+    let boardId = board?.id ?? card.boardId;
+    let cards = boardCardsFor(boardId);
+    // downstream adjacency: upstreamId → [dependent cards that wait on it]
+    let waitersOf = new Map();
+    for (let dependent of cards) {
+      for (let dep of cardDependsOn(dependent)) {
+        if (!waitersOf.has(dep.cardId)) waitersOf.set(dep.cardId, []);
+        waitersOf.get(dep.cardId).push(dependent);
+      }
+    }
+    let best = priorityOrdinal(card.priority);
+    let seen = new Set([card.id]);
+    let stack = [...(waitersOf.get(card.id) ?? [])];
+    while (stack.length) {
+      let waiter = stack.pop();
+      if (seen.has(waiter.id)) continue;
+      seen.add(waiter.id);
+      best = Math.max(best, priorityOrdinal(waiter.priority));
+      for (let next of waitersOf.get(waiter.id) ?? []) {
+        if (!seen.has(next.id)) stack.push(next);
+      }
+    }
+    return best;
+  }
+
+  function dependencyLifecycleCard(card, lifecycle, principal, ts, metadata) {
+    return normalizeWorkflowCardInput({
+      ...card,
+      lifecycle,
+      metadata: metadata ?? card.metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+  }
+
+  // Persist the dependent into `blocked` (idle→blocked), stamping the blocked-age clock so the
+  // max-blocked-age escalation has a durable start time. Idempotent if already blocked.
+  function commitDependencyBlock(board, card, principal) {
+    if (normalizeWorkflowLifecycle(card.lifecycle) === 'blocked') return card;
+    if (!isWorkflowLifecycleTransitionAllowed(card.lifecycle, 'blocked', 'dependency')) return card;
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card) ?? {};
+    metadata.dependencyBlock = {
+      blockedAt: Number(block.blockedAt) || ts,
+      releasedEdges: Array.isArray(block.releasedEdges) ? block.releasedEdges : [],
+    };
+    let blocked = dependencyLifecycleCard(card, 'blocked', principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: blocked }], sourceForPrincipal(principal));
+    return blocked;
+  }
+
+  // Persist the dependent out of `blocked` back to `idle` (blocked→idle), clearing the blocked-age
+  // clock. The release tick / auto-admit path then decides whether to enqueue.
+  function commitDependencyUnblock(card, principal) {
+    if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked') return card;
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    delete metadata.dependencyBlock;
+    let idle = dependencyLifecycleCard(card, 'idle', principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: idle }], sourceForPrincipal(principal));
+    return idle;
+  }
+
+  // Raise a typed `needs_decision` escalation on a card (the dependency-failure / max-blocked-age
+  // path). Reuses the frozen escalation channel: a normalized escalation recorded on
+  // `card.metadata.escalation` plus an `escalation` transition event for board visibility. Returns the
+  // updated card.
+  function raiseDependencyEscalation(board, card, principal, detail, suggestedResolution) {
+    let ts = now();
+    let escalation = normalizeWorkflowEscalation(
+      { kind: 'needs_decision', detail, suggestedResolution, raisedBy: principal.label },
+      { now: ts },
+    );
+    let existing = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : null;
+    let state = normalizeWorkflowEscalationState({
+      lastEscalation: escalation,
+      attemptCount: existing?.attemptCount ?? 0,
+      firstAt: existing?.firstAt ?? ts,
+      lastAt: ts,
+      nextAttemptAt: existing?.nextAttemptAt ?? ts,
+      humanEscalated: existing?.humanEscalated ?? false,
+      history: [
+        ...(existing?.history ?? []),
+        { kind: 'needs_decision', detail, runId: null, at: ts },
+      ],
+    });
+    let metadata = { ...(card.metadata ?? {}), escalation: state };
+    let next = dependencyLifecycleCard(card, card.lifecycle, principal, ts, metadata);
+    let escId = nextId(makeId, 'escalation');
+    let event = normalizeWorkflowTransitionEvent({
+      id: escId,
+      eventType: 'escalation',
+      boardId: board.id,
+      cardId: card.id,
+      fromColumnId: card.columnId,
+      toColumnId: card.columnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason: detail,
+      status: 'accepted',
+      sideEffects: [{ type: 'escalation', status: 'raised', kind: 'needs_decision', detail }],
+    }, { id: escId, now: ts });
+    stateGraph.commit([
+      { op: 'set', path: `workflowCards/${card.id}`, value: next },
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceForPrincipal(principal));
+    return next;
+  }
+
+  // Cancel a dependent (the `cancel_self` failure resolution): drive it to the board's terminal
+  // (close) column and clear its dependency block. Best-effort — if the board has no terminal column
+  // the lifecycle is still cleared so the card is not left silently blocked.
+  function cancelDependentCard(board, card, principal, reason) {
+    let ts = now();
+    let classifier = classifyWorkflowGraph(board);
+    let terminalColumn = board.columns.find(column => classifier.isTerminal(column.id));
+    let metadata = { ...(card.metadata ?? {}) };
+    delete metadata.dependencyBlock;
+    let cancelled = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'idle',
+      columnId: terminalColumn ? terminalColumn.id : card.columnId,
+      metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    let eventId = nextId(makeId, 'dependency');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId,
+      eventType: 'transition',
+      boardId: board.id,
+      cardId: card.id,
+      fromColumnId: card.columnId,
+      toColumnId: cancelled.columnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason,
+      status: 'accepted',
+      sideEffects: [{ type: 'dependency_resolution', resolution: 'cancel_self', detail: reason }],
+    }, { id: eventId, now: ts });
+    stateGraph.commit([
+      { op: 'set', path: `workflowCards/${card.id}`, value: cancelled },
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceForPrincipal(principal));
+    return cancelled;
+  }
+
+  // Record an edge as `release`-resolved on the dependent so allDependenciesSatisfied treats it as
+  // satisfied without waiting for the (failed/deleted) upstream's normal signal.
+  function commitReleasedEdge(card, upstreamCardId, principal) {
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card) ?? {};
+    let releasedEdges = new Set(Array.isArray(block.releasedEdges) ? block.releasedEdges : []);
+    releasedEdges.add(upstreamCardId);
+    metadata.dependencyBlock = {
+      blockedAt: Number(block.blockedAt) || ts,
+      releasedEdges: [...releasedEdges],
+    };
+    let next = dependencyLifecycleCard(card, card.lifecycle, principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: next }], sourceForPrincipal(principal));
+    return next;
+  }
+
+  // Failure propagation (inv 22): an upstream reaching a terminal-failure or being deleted resolves
+  // every downstream edge that points at it, per the dependent's `onUpstreamFailure`. Fan-in fast-fail:
+  // a dependent with multiple edges resolves the moment ANY required edge terminal-fails (we do not
+  // wait for the others). Never a silent permanent block.
+  function propagateUpstreamResolution(upstreamCard, board, kind) {
+    let principal = daemonPrincipal();
+    let resolved = [];
+    let detailKind = kind === 'deleted' ? 'was deleted' : 'reached a terminal failure';
+    for (let dependent of boardCardsFor(board.id)) {
+      let deps = cardDependsOn(dependent);
+      let edge = deps.find(dep => dep.cardId === upstreamCard.id);
+      if (!edge) continue;
+      let live = clone(stateGraph.get(`workflowCards/${dependent.id}`));
+      if (!live) continue;
+      let detail = `Upstream dependency ${upstreamCard.id} ${detailKind}; resolving edge on ${dependent.id} per onUpstreamFailure=${edge.onUpstreamFailure}.`;
+      if (edge.onUpstreamFailure === 'release') {
+        commitReleasedEdge(live, upstreamCard.id, principal);
+        resolved.push({ cardId: dependent.id, resolution: 'release' });
+      } else if (edge.onUpstreamFailure === 'cancel_self') {
+        cancelDependentCard(board, live, principal, detail);
+        resolved.push({ cardId: dependent.id, resolution: 'cancel_self' });
+      } else {
+        // block_and_escalate (default): a typed needs_decision on the dependent — never a silent block.
+        raiseDependencyEscalation(board, live, principal, detail, 'Decide whether to release, reroute, or cancel the dependent.');
+        resolved.push({ cardId: dependent.id, resolution: 'block_and_escalate' });
+      }
+    }
+    return resolved;
+  }
+
+  // Release tick (inv 21, 24): for each `blocked` card on the board, if every edge is satisfied →
+  // enqueue it (blocked→queued via the S8 enqueue path). A card blocked past MAX_BLOCKED_AGE_MS
+  // escalates to needs_decision (never a silent permanent block). Runs at the TOP of the admission
+  // pass, before drain, and in the reconcile loop.
+  function releaseDependencies(boardId) {
+    let board = ensureBoard(boardId);
+    let classifier = classifyWorkflowGraph(board);
+    let principal = daemonPrincipal();
+    let released = [];
+    let escalated = [];
+    let currentNow = now();
+    for (let card of boardCardsFor(board.id)) {
+      if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked') continue;
+      let live = clone(card);
+      let releasedEdges = releasedEdgesFor(live);
+      if (allDependenciesSatisfied(live, board, classifier, releasedEdges)) {
+        let idle = commitDependencyUnblock(live, principal);
+        let enqueued = enqueueWorkItem(board, idle);
+        if (enqueued.ok) released.push({ cardId: card.id, admissionId: enqueued.entry?.admissionId });
+        continue;
+      }
+      let block = dependencyBlockState(live);
+      let blockedAt = Number(block?.blockedAt);
+      if (Number.isFinite(blockedAt) && (currentNow - blockedAt) >= MAX_BLOCKED_AGE_MS && !hasActiveEscalation(live)) {
+        raiseDependencyEscalation(
+          board,
+          live,
+          principal,
+          `Card ${card.id} has been blocked on an unsatisfied dependency for over ${Math.floor(MAX_BLOCKED_AGE_MS / 3600000)}h.`,
+          'Decide whether to release, reroute, or cancel the blocked card.',
+        );
+        escalated.push({ cardId: card.id });
+      }
+    }
+    return { ok: true, boardId: board.id, released, escalated };
+  }
+
+  // Link a dependency: set/extend the dependent's `dependsOn` with `{ cardId|dependsOnCardId }`
+  // upstream edges. Gated as a card mutation (card.write). Rejects (no commit) on a cycle (inv 23).
+  // After link, recompute the dependent's lifecycle: an unsatisfied edge on an idle/blocked card →
+  // blocked; an already-satisfied set leaves it idle for the release tick (or immediate enqueue if its
+  // column auto-admits).
+  function linkDependency(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    if (!cardId) throw new Error('linkDependency requires cardId.');
+    let linkGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!linkGate.ok) return linkGate;
+    let card = getCard(cardId);
+    let board = ensureBoard(card.boardId);
+    let additions = normalizeWorkflowDependsOn(args.dependsOn ?? args.depends_on);
+    if (!additions.length) return { ok: false, reason: 'no_dependencies', card };
+    for (let dep of additions) {
+      if (!stateGraph.get(`workflowCards/${dep.cardId}`)) {
+        return { ok: false, reason: 'upstream_not_found', upstreamCardId: dep.cardId, card };
+      }
+      if (wouldCreateDependencyCycle(board.id, cardId, dep.cardId)) {
+        return { ok: false, reason: 'dependency_cycle', upstreamCardId: dep.cardId, card };
+      }
+    }
+    let byCardId = new Map(cardDependsOn(card).map(dep => [dep.cardId, dep]));
+    for (let dep of additions) byCardId.set(dep.cardId, dep);
+    let nextDependsOn = [...byCardId.values()];
+    let ts = now();
+    let linked = normalizeWorkflowCardInput({
+      ...card,
+      dependsOn: nextDependsOn,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: linked }], sourceForPrincipal(principal));
+    let outcome = recomputeDependencyLifecycle(board, linked, principal);
+    return { ok: true, card: outcome.card, dependsOn: outcome.card.dependsOn, lifecycle: outcome.card.lifecycle, ...outcome.extra };
+  }
+
+  // Unlink a dependency: remove the `{ cardId|dependsOnCardId }` upstream edge(s) from the dependent.
+  // Gated as a card mutation. After unlink, recompute lifecycle (a now-fully-satisfied card clears to
+  // idle/enqueues; a still-blocked card stays blocked).
+  function unlinkDependency(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    if (!cardId) throw new Error('unlinkDependency requires cardId.');
+    let unlinkGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!unlinkGate.ok) return unlinkGate;
+    let card = getCard(cardId);
+    let board = ensureBoard(card.boardId);
+    let removeIds = new Set(
+      normalizeWorkflowDependsOn(
+        args.dependsOn ?? args.depends_on ?? args.dependsOnCardId ?? args.depends_on_card_id ?? args.upstreamCardId,
+      ).map(dep => dep.cardId),
+    );
+    if (!removeIds.size) return { ok: false, reason: 'no_dependencies', card };
+    let nextDependsOn = cardDependsOn(card).filter(dep => !removeIds.has(dep.cardId));
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card);
+    if (block && Array.isArray(block.releasedEdges)) {
+      let releasedEdges = block.releasedEdges.filter(id => !removeIds.has(id));
+      metadata.dependencyBlock = { ...block, releasedEdges };
+    }
+    let unlinked = normalizeWorkflowCardInput({
+      ...card,
+      dependsOn: nextDependsOn,
+      metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: unlinked }], sourceForPrincipal(principal));
+    let outcome = recomputeDependencyLifecycle(board, unlinked, principal);
+    return { ok: true, card: outcome.card, dependsOn: outcome.card.dependsOn, lifecycle: outcome.card.lifecycle, ...outcome.extra };
+  }
+
+  // After a link/unlink, recompute the dependent's idle↔blocked lifecycle (the only transition this
+  // path owns). An unsatisfied edge on a not-yet-queued card → blocked. A fully-satisfied set on a
+  // blocked card → idle, then enqueue immediately if its column auto-admits (else leave for the
+  // release tick). A card already queued/admitting/running is left to the scheduler.
+  function recomputeDependencyLifecycle(board, card, principal) {
+    let classifier = classifyWorkflowGraph(board);
+    let lifecycle = normalizeWorkflowLifecycle(card.lifecycle);
+    let releasedEdges = releasedEdgesFor(card);
+    let satisfied = allDependenciesSatisfied(card, board, classifier, releasedEdges);
+    if (['queued', 'admitting', 'running'].includes(lifecycle)) {
+      return { card, extra: {} };
+    }
+    if (!satisfied) {
+      let blocked = commitDependencyBlock(board, card, principal);
+      return { card: blocked, extra: { blocked: true } };
+    }
+    // All edges satisfied. If it was blocked, clear to idle; then enqueue when the column auto-admits.
+    let cleared = lifecycle === 'blocked' ? commitDependencyUnblock(card, principal) : card;
+    if (columnAutoAdmits(board, cleared.columnId)) {
+      let enqueued = enqueueWorkItem(board, cleared);
+      if (enqueued.ok) {
+        return { card: enqueued.card ?? getCard(cleared.id), extra: { enqueued: true, admissionId: enqueued.entry?.admissionId } };
+      }
+    }
+    return { card: cleared, extra: {} };
+  }
+
+  // A column auto-admits iff its automation trigger fires on entry without a manual gate (the S8 auto
+  // path). Used to decide whether a freshly-satisfied dependent enqueues immediately or waits for the
+  // release tick.
+  function columnAutoAdmits(board, columnId) {
+    let automation = columnAutomation(board, columnId);
+    return automation.mode === 'auto' && (automation.trigger === 'on_enter' || automation.trigger === 'lease_required');
   }
 
   // ── Board-admission lease (D1.5, inv 31, 35; AD-10/16) ────────────────────────────────────────
@@ -1336,6 +1860,12 @@ export function createWorkflowBoardService(opts = {}) {
   // INLINE (best-effort after an enqueue) and the scheduler LOOP call the same code path.
   async function drainWorkflowQueue(boardId, opts = {}, context = {}) {
     let board = ensureBoard(boardId);
+    // Release tick first (AD-5 admission pseudocode: releaseDependencies() then drain). Blocked cards
+    // whose every edge is satisfied are enqueued before this pass picks the admission order, and a
+    // card blocked past max-blocked-age escalates. Skipped only when the board mode forbids release.
+    if (!['stopped', 'maintenance'].includes(board.mode)) {
+      releaseDependencies(board.id);
+    }
     let owner = textOrNull(opts.owner) ?? `drain-${slugSegment(board.id)}-${nextId(makeId, 'pass')}`;
     let budget = Number.isFinite(Number(opts.budget)) && Number(opts.budget) > 0
       ? Math.floor(Number(opts.budget))
@@ -1397,6 +1927,16 @@ export function createWorkflowBoardService(opts = {}) {
       return { admissionId: entry.admissionId, reason: 'card_missing' };
     }
     card = clone(card);
+    // Defensive admission-time cycle guard (inv 23): refuse to admit a card whose dependency closure
+    // is cyclic. The link path already rejects cycles, but a malformed import or a concurrent edit
+    // could slip a cycle in; admitting one would risk a non-terminating release/inheritance walk.
+    if (dependencyClosureIsCyclic(entry.cardId)) {
+      let epoch = readQueueEpoch(board.id);
+      stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
+        [{ op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` }],
+        sourceForPrincipal(daemonPrincipal()), { durable: true });
+      return { admissionId: entry.admissionId, reason: 'dependency_cycle' };
+    }
     let principal = daemonPrincipal();
     let admittingStartedAt = now();
     let admissionRecord = {
@@ -2319,6 +2859,10 @@ export function createWorkflowBoardService(opts = {}) {
     let chatId = textOrNull(filter.chatId ?? filter.chat_id);
     let currentNow = now();
     let ops = [];
+    // Upstream cards whose run reached a terminal-failure this pass — their downstream dependency
+    // edges are resolved after the reconcile commit (inv 22) so the upstream's failed status is
+    // already durable when propagation reads it.
+    let failedUpstreamIds = new Set();
 
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id) continue;
@@ -2357,6 +2901,8 @@ export function createWorkflowBoardService(opts = {}) {
 
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
+        // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution.
+        if (['error', 'failed', 'cancelled'].includes(nextStatus)) failedUpstreamIds.add(card.id);
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
         let nextRun = normalizeWorkflowRunInput({
           ...run,
@@ -2472,7 +3018,15 @@ export function createWorkflowBoardService(opts = {}) {
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
-    return { ok: true, updated: ops.length };
+    // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
+    // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
+    // fast-fail — a dependent resolves the moment ANY required edge terminal-fails.
+    let propagated = [];
+    for (let upstreamId of failedUpstreamIds) {
+      let upstream = stateGraph.get(`workflowCards/${upstreamId}`);
+      if (upstream) propagated.push(...propagateUpstreamResolution(clone(upstream), board, 'terminal_failure'));
+    }
+    return { ok: true, updated: ops.length, propagated };
   }
 
   function deriveRecoveryCard(card, currentNow) {
@@ -2981,7 +3535,11 @@ export function createWorkflowBoardService(opts = {}) {
       { op: 'delete', path: `workflowCards/${cardId}` },
       { op: 'delete', path: `workflowLeases/${cardId}` },
     ], sourceForPrincipal(principal));
-    return { ok: true, card, deleted: true };
+    // Delete is an upstream-resolution trigger (inv 22): a deleted upstream resolves every downstream
+    // edge that pointed at it per the dependent's onUpstreamFailure — never a silent permanent block.
+    let board = ensureBoard(card.boardId);
+    let propagated = propagateUpstreamResolution(card, board, 'deleted');
+    return { ok: true, card, deleted: true, ...(propagated.length ? { propagated } : {}) };
   }
 
   function claimWorkItem(args = {}, context = {}) {
@@ -4364,6 +4922,10 @@ export function createWorkflowBoardService(opts = {}) {
             await reconcileWorkflowAdmissions({ boardId: board.id });
             await reconcileWorkflowRecovery({ boardId: board.id });
             await reconcileWorkflowEscalations({ boardId: board.id });
+            // Dependency release tick (AD-5): enqueue blocked cards whose edges are satisfied and
+            // escalate any card blocked past max-blocked-age, before the admission pass. The drain
+            // also runs it, but the reconcile loop covers modes that drain skips.
+            if (!['stopped', 'maintenance'].includes(board.mode)) releaseDependencies(board.id);
             // Scheduler loop: a bounded admission pass drains the queue under the board-admission
             // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
             await drainWorkflowQueue(board.id, {});
@@ -4416,6 +4978,9 @@ export function createWorkflowBoardService(opts = {}) {
     orchestrateWorkItem,
     enqueueWorkItem,
     drainWorkflowQueue,
+    linkDependency,
+    unlinkDependency,
+    releaseDependencies,
     resumeWorkItem,
     controlWorkItem,
     reconcileWorkflowRuntimeTasks,
