@@ -89,6 +89,47 @@ const FLOOR_CHECK_KEYS = new Set([
 // Card rights fields (inv 13): mutating any of these is policy authorship (intent policy.author),
 // gated by AUTHOR. A non-author write is held for approval and the field is dropped from the patch.
 const CARD_RIGHTS_FIELDS = ['approvalMode', 'resourceGroup', 'assignedAgent', 'proposedLane'];
+// ── Scheduler / admission constants (WS-B1, v5 Decision 1) ──────────────────────────────────────
+// The board-admission lease (D1.5) is short-lived with a heartbeat; it is DISTINCT from the 30-min
+// per-card work lease (DEFAULT_LEASE_TTL_MS). One admitter per board holds it across a drain pass.
+const ADMISSION_LEASE_TTL_MS = 15 * 1000;
+const ADMISSION_LEASE_HEARTBEAT_MS = 5 * 1000;
+// inv 44 (v5): ADMISSION_INFLIGHT_GRACE_MS >= board_lease_TTL + heartbeat + worst_case_delegate +
+// clock_skew, measured on WALL-clock (cross-process post-restart cannot trust a monotonic clock).
+// 15s TTL + 5s heartbeat + 600s worst-case delegate (the delegate_task spawn budget) + 30s skew
+// = 650s. A live-but-slow admitter inside this window is never reclaimed; reclaim also requires the
+// lease epoch to be stale (a newer holder bumped it), so a healthy heartbeating admitter is safe.
+const ADMISSION_LEASE_TTL_BUDGET_MS = ADMISSION_LEASE_TTL_MS;
+const ADMISSION_WORST_CASE_DELEGATE_MS = 600 * 1000;
+const ADMISSION_CLOCK_SKEW_MS = 30 * 1000;
+const ADMISSION_INFLIGHT_GRACE_MS = ADMISSION_LEASE_TTL_BUDGET_MS
+  + ADMISSION_LEASE_HEARTBEAT_MS
+  + ADMISSION_WORST_CASE_DELEGATE_MS
+  + ADMISSION_CLOCK_SKEW_MS;
+// Bounded admission budget per drain pass (inv 5: serial recount, no unbounded loop).
+const DEFAULT_DRAIN_BUDGET = 32;
+// Priority enum → ordinal for the fairness comparator (higher = admitted first; inv 6).
+const WORKFLOW_PRIORITY_ORDER = { critical: 3, high: 2, normal: 1, low: 0 };
+
+function priorityOrdinal(priority) {
+  let key = textOrNull(priority);
+  if (key && Object.hasOwn(WORKFLOW_PRIORITY_ORDER, key)) return WORKFLOW_PRIORITY_ORDER[key];
+  return WORKFLOW_PRIORITY_ORDER.normal;
+}
+
+// Deterministic, reconstructable admissionId (AD-2 / D1.1): a stable hash of the immutable enqueue
+// identity. The same (boardId, cardId, enqueuedAt, queueEpoch) always yields the same id, so a
+// re-drive under a new lease epoch produces the SAME admissionId — the ledger and agent-pool dedup
+// on it, so zero extra reservations and zero extra spawns (inv 41).
+function computeAdmissionId(boardId, cardId, enqueuedAt, queueEpoch) {
+  let material = JSON.stringify([
+    textOrNull(boardId) ?? '',
+    textOrNull(cardId) ?? '',
+    Number(enqueuedAt) || 0,
+    Number(queueEpoch) || 0,
+  ]);
+  return `adm-${crypto.createHash('sha256').update(material).digest('hex').slice(0, 24)}`;
+}
 
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -262,6 +303,15 @@ function extractTaskIdFromDelegateResult(result) {
     ?? result?.taskId
     ?? result?.task_id
     ?? null;
+}
+
+// A delegate failure is a CAPACITY rejection (no slot granted; the scheduler re-queues) iff its
+// message is the agent-pool slot-ledger at-capacity / ledger-busy signal. Any other delegation
+// error is a hard failure that surfaces as a failed run rather than looping in the admission queue.
+function isCapacityRejectionError(message) {
+  let text = textOrNull(message);
+  if (!text) return false;
+  return /at capacity|group_at_capacity|host_at_capacity|ledger_busy|ledger_error/i.test(text);
 }
 
 function recoverySummary(cards) {
@@ -1091,6 +1141,448 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, automation, capacity, boardCapacity, fileConflicts };
   }
 
+  // ── Admission scheduler (WS-B1; v5 Decision 1, AD-2/9/10/13/14/16/17) ──────────────────────────
+  // Storage shapes (all durable in StateGraph):
+  //   workflowQueueEpoch/{boardId}        → monotonic int; the commitCAS fence epoch for this board
+  //   workflowQueueEntries/{admissionId}  → { cardId, boardId, columnId, groupKey, priority,
+  //                                           enqueuedAt, queueEpoch, admissionId, notBefore }
+  //   workflowQueueCursor/{boardId}       → { groupKey } persisted round-robin cursor
+  //   workflowAdmissionLease/{boardId}    → { owner, leaseEpoch, startedAt, heartbeatAt, ttlMs }
+  //   workflowAdmissionResolution/{cardId}→ { cardId, leaseEpoch, admissionId, phase, startedAt }
+  // The queue ENTRY overlaps the card lifecycle/run until `running` is durable (AD-2: never a gap).
+
+  // groupKey = capacity-governing resource group, fallback projectId, then a board-wide bucket.
+  function resolveGroupKey(card = {}) {
+    return textOrNull(card.resourceGroup)
+      ?? textOrNull(card.projectId)
+      ?? `board:${textOrNull(card.boardId) ?? DEFAULT_WORKFLOW_BOARD_ID}`;
+  }
+
+  function readQueueEpoch(boardId) {
+    let raw = stateGraph.get(`workflowQueueEpoch/${boardId}`);
+    return (raw === undefined || raw === null) ? 0 : Number(raw) || 0;
+  }
+
+  function listQueueEntries(boardId) {
+    return Object.values(getCollection(stateGraph, 'workflowQueueEntries'))
+      .filter(entry => entry.boardId === boardId);
+  }
+
+  function liveQueueEntryForCard(boardId, cardId) {
+    return listQueueEntries(boardId).find(entry => entry.cardId === cardId) ?? null;
+  }
+
+  // Enqueue (inv 3, 4, 31; AD-2). Appends a durable queue entry and sets lifecycle=queued in ONE
+  // commitCAS frame on the board queue epoch. inv 31: at most one live entry per card — a re-enqueue
+  // of an already-queued card is a no-op that returns the existing entry. enqueuedAt/queueEpoch are
+  // immutable for a live entry. Returns { ok, entry, deduped?, reason? }.
+  function enqueueWorkItem(board, card, opts = {}) {
+    let existing = liveQueueEntryForCard(board.id, card.id);
+    if (existing) return { ok: true, entry: existing, deduped: true };
+    let principal = daemonPrincipal();
+    let gateResult = gate('daemon.bookkeeping', principal, { boardId: board.id, cardId: card.id });
+    if (!gateResult.ok) return { ok: false, reason: 'enqueue_gate_blocked', gate: gateResult };
+    let enqueuedAt = now();
+    let queueEpoch = readQueueEpoch(board.id);
+    let admissionId = computeAdmissionId(board.id, card.id, enqueuedAt, queueEpoch);
+    let notBefore = finiteNumber(opts.notBefore);
+    let entry = {
+      schema: 'workflow-queue-entry/v1',
+      admissionId,
+      cardId: card.id,
+      boardId: board.id,
+      columnId: card.columnId,
+      groupKey: resolveGroupKey(card),
+      priority: priorityOrdinal(card.priority),
+      priorityLabel: textOrNull(card.priority) ?? 'normal',
+      enqueuedAt,
+      queueEpoch,
+      notBefore: notBefore ?? null,
+    };
+    let queued = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'queued',
+      version: card.version + 1,
+      updatedAt: enqueuedAt,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: enqueuedAt,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: enqueuedAt,
+    });
+    // inv 36: the enqueue write is commitCAS-guarded on the queue epoch and durable; a stale-epoch
+    // racer writes nothing. The one-live-entry uniqueness is enforced by the existing-entry check
+    // above plus the synchronous CAS frame (no await between read and write).
+    let res = stateGraph.commitCAS(
+      `workflowQueueEpoch/${board.id}`,
+      queueEpoch,
+      [
+        { op: 'set', path: `workflowQueueEntries/${admissionId}`, value: entry },
+        { op: 'set', path: `workflowCards/${card.id}`, value: queued },
+      ],
+      sourceForPrincipal(principal),
+      { durable: true },
+    );
+    if (!res.ok) return { ok: false, reason: 'queue_contended', currentEpoch: res.currentEpoch };
+    return { ok: true, entry, card: queued };
+  }
+
+  // Deterministic, restart-stable admission order (inv 6): group round-robin off the persisted
+  // cursor → priority desc → enqueuedAt asc → cardId asc. The cursor names the LAST group admitted;
+  // groups after it (wrapping) sort first, so the next pass starts a different group — round-robin.
+  function admissionOrder(boardId, entries) {
+    let cursorGroup = textOrNull(stateGraph.get(`workflowQueueCursor/${boardId}`)?.groupKey);
+    let groups = [...new Set(entries.map(entry => entry.groupKey))].sort();
+    let rank = new Map();
+    if (groups.length) {
+      let start = cursorGroup ? (groups.indexOf(cursorGroup) + 1) : 0;
+      if (start < 0) start = 0;
+      for (let i = 0; i < groups.length; i += 1) {
+        rank.set(groups[(start + i) % groups.length], i);
+      }
+    }
+    return entries.slice().sort((a, b) => {
+      let groupDelta = (rank.get(a.groupKey) ?? 0) - (rank.get(b.groupKey) ?? 0);
+      if (groupDelta !== 0) return groupDelta;
+      if (a.priority !== b.priority) return b.priority - a.priority;
+      if (a.enqueuedAt !== b.enqueuedAt) return a.enqueuedAt - b.enqueuedAt;
+      return a.cardId.localeCompare(b.cardId);
+    });
+  }
+
+  // ── Board-admission lease (D1.5, inv 31, 35; AD-10/16) ────────────────────────────────────────
+  function readAdmissionLease(boardId) {
+    return clone(stateGraph.get(`workflowAdmissionLease/${boardId}`) ?? null);
+  }
+
+  function admissionLeaseEpochPath(boardId) {
+    return `workflowAdmissionLease/${boardId}/leaseEpoch`;
+  }
+
+  // Acquire the board-admission lease, making the admit path single-writer per board. Reclaim of a
+  // held lease requires the prior lease to be epoch-bumpable AND past its TTL+grace on wall-clock.
+  // commitCAS on the lease epoch fences two contending admitters: only one bumps the epoch. Returns
+  // { ok, owner, leaseEpoch } or { ok:false, reason }.
+  function acquireAdmissionLease(boardId, owner) {
+    let current = readAdmissionLease(boardId);
+    let currentNow = now();
+    let leaseEpoch = Number(current?.leaseEpoch) || 0;
+    if (current && current.owner && current.owner !== owner) {
+      let heartbeatAt = Number(current.heartbeatAt ?? current.startedAt) || 0;
+      let ttlMs = Number(current.ttlMs) || ADMISSION_LEASE_TTL_MS;
+      let healthy = currentNow <= heartbeatAt + ttlMs;
+      if (healthy) return { ok: false, reason: 'admission_lease_held', owner: current.owner };
+    }
+    let nextLease = {
+      schema: 'workflow-admission-lease/v1',
+      owner,
+      leaseEpoch: leaseEpoch + 1,
+      startedAt: currentNow,
+      heartbeatAt: currentNow,
+      ttlMs: ADMISSION_LEASE_TTL_MS,
+    };
+    let res = stateGraph.commitCAS(
+      admissionLeaseEpochPath(boardId),
+      leaseEpoch,
+      [{ op: 'set', path: `workflowAdmissionLease/${boardId}`, value: nextLease }],
+      sourceForPrincipal(daemonPrincipal()),
+      { durable: true },
+    );
+    if (!res.ok) return { ok: false, reason: 'admission_lease_contended' };
+    return { ok: true, owner, leaseEpoch: nextLease.leaseEpoch };
+  }
+
+  function heartbeatAdmissionLease(boardId, owner, leaseEpoch) {
+    let current = readAdmissionLease(boardId);
+    if (!current || current.owner !== owner || Number(current.leaseEpoch) !== leaseEpoch) return false;
+    let next = { ...current, heartbeatAt: now() };
+    stateGraph.commit(
+      [{ op: 'set', path: `workflowAdmissionLease/${boardId}`, value: next }],
+      sourceForPrincipal(daemonPrincipal()),
+      { durable: true },
+    );
+    return true;
+  }
+
+  function releaseAdmissionLease(boardId, owner, leaseEpoch) {
+    let current = readAdmissionLease(boardId);
+    if (!current || current.owner !== owner || Number(current.leaseEpoch) !== leaseEpoch) return false;
+    stateGraph.commit(
+      [{ op: 'delete', path: `workflowAdmissionLease/${boardId}` }],
+      sourceForPrincipal(daemonPrincipal()),
+      { durable: true },
+    );
+    return true;
+  }
+
+  // Detect a stranded `admitting` card whose admitter is gone: lease epoch-stale (a newer lease
+  // exists or the lease is absent) AND wall-clock grace elapsed since the admission started. This is
+  // the recovery barrier of AD-16 — recovery never reclaims an in-flight admission inside the grace.
+  function admissionLeaseStranded(boardId, admittingStartedAt) {
+    let current = readAdmissionLease(boardId);
+    let started = Number(admittingStartedAt) || 0;
+    let graceElapsed = now() > started + ADMISSION_INFLIGHT_GRACE_MS;
+    if (!current) return graceElapsed;
+    let healthy = now() <= (Number(current.heartbeatAt ?? current.startedAt) || 0) + (Number(current.ttlMs) || ADMISSION_LEASE_TTL_MS);
+    if (healthy) return false;
+    return graceElapsed;
+  }
+
+  // ── Drain / admission pass (D1.1-D1.5, inv 1-7, 36, 41-44) ────────────────────────────────────
+  // The SOLE owner of queued→admitting→running + lease grant, run under the board-admission lease.
+  // INLINE (best-effort after an enqueue) and the scheduler LOOP call the same code path.
+  async function drainWorkflowQueue(boardId, opts = {}, context = {}) {
+    let board = ensureBoard(boardId);
+    let owner = textOrNull(opts.owner) ?? `drain-${slugSegment(board.id)}-${nextId(makeId, 'pass')}`;
+    let budget = Number.isFinite(Number(opts.budget)) && Number(opts.budget) > 0
+      ? Math.floor(Number(opts.budget))
+      : DEFAULT_DRAIN_BUDGET;
+    let admitted = [];
+    let rolledBack = [];
+    let skipped = [];
+
+    let lease = acquireAdmissionLease(board.id, owner);
+    if (!lease.ok) {
+      return { ok: true, drained: false, reason: lease.reason, admitted, rolledBack, skipped };
+    }
+    try {
+      let entries = admissionOrder(board.id, listQueueEntries(board.id));
+      let processed = 0;
+      let lastHeartbeat = now();
+      for (let entry of entries) {
+        if (processed >= budget) break;
+        // Re-read board mode per card (AD-16): a mode flip mid-pass must take effect immediately.
+        let liveBoard = ensureBoard(board.id);
+        if (['paused', 'draining', 'stopped', 'maintenance', 'recovery_only'].includes(liveBoard.mode)) {
+          skipped.push({ admissionId: entry.admissionId, reason: `board_mode_${liveBoard.mode}` });
+          break;
+        }
+        if (entry.notBefore !== null && now() < entry.notBefore) {
+          skipped.push({ admissionId: entry.admissionId, reason: 'not_before' });
+          continue;
+        }
+        processed += 1;
+        if (now() - lastHeartbeat >= ADMISSION_LEASE_HEARTBEAT_MS) {
+          heartbeatAdmissionLease(board.id, owner, lease.leaseEpoch);
+          lastHeartbeat = now();
+        }
+        let outcome = await admitQueueEntry(liveBoard, entry, lease, opts, context);
+        if (outcome.admitted) admitted.push(outcome);
+        else if (outcome.rolledBack) rolledBack.push(outcome);
+        else skipped.push(outcome);
+      }
+    } finally {
+      releaseAdmissionLease(board.id, owner, lease.leaseEpoch);
+    }
+    return { ok: true, drained: true, owner, admitted, rolledBack, skipped };
+  }
+
+  // Admit one queue entry. (1) commitCAS-fenced admission write (D1.3, inv 36): in one durable frame
+  // write the admission record carrying admissionId + set lifecycle=admitting. (2) Reserve the slot
+  // by delegating with admission_id (D1.1/D1.2): agent-pool acquires the ledger slot keyed by
+  // admissionId and persists its dedup record before ack. (3) On grant → lifecycle=running + remove
+  // the queue entry. On at-capacity/not-granted → rollback to queued (head of class, enqueuedAt
+  // preserved). A stale-epoch admitter's CAS fails and it writes nothing (no late compensation).
+  async function admitQueueEntry(board, entry, lease, opts = {}, context = {}) {
+    let card = stateGraph.get(`workflowCards/${entry.cardId}`);
+    if (!card) {
+      // Card vanished — drop the orphan entry under the same epoch fence.
+      let epoch = readQueueEpoch(board.id);
+      stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
+        [{ op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` }],
+        sourceForPrincipal(daemonPrincipal()), { durable: true });
+      return { admissionId: entry.admissionId, reason: 'card_missing' };
+    }
+    card = clone(card);
+    let principal = daemonPrincipal();
+    let admittingStartedAt = now();
+    let admissionRecord = {
+      schema: 'workflow-admission/v1',
+      admissionId: entry.admissionId,
+      cardId: entry.cardId,
+      boardId: board.id,
+      groupKey: entry.groupKey,
+      leaseEpoch: lease.leaseEpoch,
+      queueEpoch: entry.queueEpoch,
+      enqueuedAt: entry.enqueuedAt,
+      startedAt: admittingStartedAt,
+      phase: 'admitting',
+    };
+    let admittingCard = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'admitting',
+      version: card.version + 1,
+      updatedAt: admittingStartedAt,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: admittingStartedAt,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: admittingStartedAt,
+    });
+    // (1) Fenced admission write. The queue epoch is the owning epoch: a concurrent drain that read
+    // a stale epoch fails here and writes nothing (inv 36, the CAS fence). The bump also invalidates
+    // any in-flight admitter that captured the older epoch.
+    let queueEpoch = readQueueEpoch(board.id);
+    let fenced = stateGraph.commitCAS(
+      `workflowQueueEpoch/${board.id}`,
+      queueEpoch,
+      [
+        { op: 'set', path: `workflowAdmissions/${entry.admissionId}`, value: admissionRecord },
+        { op: 'set', path: `workflowCards/${card.id}`, value: admittingCard },
+      ],
+      sourceForPrincipal(principal),
+      { durable: true },
+    );
+    if (!fenced.ok) {
+      return { admissionId: entry.admissionId, reason: 'admission_cas_conflict', currentEpoch: fenced.currentEpoch };
+    }
+
+    // (2) Reserve the slot + spawn via the delegate path, threading admission_id. orchestrateWorkItem
+    // grants the per-card WORK lease (durable) and creates the run; the delegate passes admission_id
+    // to agent-pool, which acquires the ledger slot keyed by it (idempotent) and persists the dedup
+    // record before ack. A capacity rejection surfaces as a delegate isError → run not started.
+    let automation = cardAutomation(board, card);
+    let agent = chooseStageAgent(automation, card, opts);
+    let orchestrateResult;
+    try {
+      orchestrateResult = await orchestrateWorkItem({
+        ...opts,
+        boardId: board.id,
+        cardId: card.id,
+        admission_id: entry.admissionId,
+        expectedVersion: undefined,
+        expected_version: undefined,
+        mode: automation.mode ?? 'auto',
+        agent,
+        leaseOwner: textOrNull(opts.leaseOwner ?? opts.lease_owner) ?? agent,
+        approval_mode: opts.approval_mode ?? automation.approvalMode,
+        resource_group: opts.resource_group ?? automation.resourceGroup,
+        reason: textOrNull(opts.reason) ?? `Admission of card ${card.id}.`,
+      }, { ...context, principal });
+    } catch (error) {
+      orchestrateResult = { ok: false, error: error.message, sideEffects: [] };
+    }
+
+    let granted = Boolean(orchestrateResult?.ok)
+      && orchestrateResult?.run?.status === 'running';
+    if (!granted) {
+      // A capacity rejection (no slot granted) re-queues the card; any other delegation failure is a
+      // hard error that orchestrateWorkItem already recorded as a failed run + needs_audit. A thrown
+      // error (no result) is treated as transient and re-queued too.
+      let slotRejected = orchestrateResult?.slotRejected !== false
+        && (orchestrateResult?.slotRejected === true || !orchestrateResult?.ok);
+      if (!slotRejected) {
+        // (3a-hard) Hard delegation failure. Leave orchestrateWorkItem's failed run + card as-is and
+        // remove the queue entry + admission record so the card does not loop in the queue. The card
+        // keeps its column (orchestrate did not advance it) and its needs_audit recovery flag.
+        let removeEpoch = readQueueEpoch(board.id);
+        stateGraph.commitCAS(
+          `workflowQueueEpoch/${board.id}`,
+          removeEpoch,
+          [
+            { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+            { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
+          ],
+          sourceForPrincipal(principal),
+          { durable: true },
+        );
+        return {
+          admissionId: entry.admissionId,
+          cardId: card.id,
+          result: orchestrateResult,
+          failed: true,
+          reason: orchestrateResult?.error ?? 'delegation_failed',
+        };
+      }
+      // (3a-capacity) Rollback (inv 2): lifecycle→queued at the head of its fairness class, enqueuedAt
+      // preserved (the entry was never removed). No slot was granted, so there is nothing to release;
+      // releaseSlot remains the reconcile/recovery path's single-owner duty. admitting record cleared.
+      let rolledCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+      let nextCard = normalizeWorkflowCardInput({
+        ...clone(rolledCard),
+        lifecycle: 'queued',
+        version: rolledCard.version + 1,
+        updatedAt: now(),
+        updatedBy: principal.label,
+      }, {
+        id: card.id,
+        actor: principal.label,
+        now: now(),
+        version: rolledCard.version + 1,
+        createdAt: rolledCard.createdAt,
+        updatedAt: now(),
+      });
+      let rollbackEpoch = readQueueEpoch(board.id);
+      stateGraph.commitCAS(
+        `workflowQueueEpoch/${board.id}`,
+        rollbackEpoch,
+        [
+          { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
+          { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
+        ],
+        sourceForPrincipal(principal),
+        { durable: true },
+      );
+      return {
+        admissionId: entry.admissionId,
+        cardId: card.id,
+        rolledBack: true,
+        reason: orchestrateResult?.error ?? 'slot_not_granted',
+      };
+    }
+
+    // (3b) Granted: the run is durable (running) and the per-card lease is held. Promote
+    // lifecycle→running and REMOVE the queue entry + admission record now that running is durable
+    // (AD-2: the overlap ends only here). Advance the round-robin cursor to this group.
+    let runningCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+    let promotedCard = normalizeWorkflowCardInput({
+      ...clone(runningCard),
+      lifecycle: 'running',
+      version: runningCard.version + 1,
+      updatedAt: now(),
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: now(),
+      version: runningCard.version + 1,
+      createdAt: runningCard.createdAt,
+      updatedAt: now(),
+    });
+    let promoteEpoch = readQueueEpoch(board.id);
+    stateGraph.commitCAS(
+      `workflowQueueEpoch/${board.id}`,
+      promoteEpoch,
+      [
+        { op: 'set', path: `workflowCards/${card.id}`, value: promotedCard },
+        { op: 'set', path: `workflowQueueCursor/${board.id}`, value: { groupKey: entry.groupKey } },
+        { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+        { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
+      ],
+      sourceForPrincipal(principal),
+      { durable: true },
+    );
+    return {
+      admissionId: entry.admissionId,
+      cardId: card.id,
+      admitted: true,
+      agent,
+      result: orchestrateResult,
+    };
+  }
+
+  // Reroute (inv 31; v2 "enqueues a card; never jumps the admission queue"). What was the immediate
+  // orchestrate trigger now ENQUEUES (lifecycle→queued) and then INLINE-DRAINS best-effort, so a card
+  // that fits capacity is still admitted in the same request (today's responsiveness preserved). It
+  // NEVER calls orchestrateWorkItem directly — the drain is the sole admission owner. The return
+  // shape mirrors the legacy orchestrate result so existing callers keep reading
+  // `orchestration.result.{card,run,lease}` and `orchestration.agent`.
   async function maybeAutoOrchestrateCard(board, card, args = {}, context = {}) {
     let candidate = autoOrchestrationCandidate(board, card, args);
     if (!candidate.ok) {
@@ -1106,30 +1598,77 @@ export function createWorkflowBoardService(opts = {}) {
       };
     }
     let automation = candidate.automation;
-    let agent = chooseStageAgent(automation, card, args);
-    let result = await orchestrateWorkItem({
-      ...args,
-      boardId: board.id,
-      cardId: card.id,
-      expectedVersion: undefined,
-      expected_version: undefined,
-      mode: automation.mode ?? 'auto',
-      agent,
-      leaseOwner: textOrNull(args.leaseOwner ?? args.lease_owner) ?? agent,
-      approval_mode: args.approval_mode ?? automation.approvalMode,
-      resource_group: args.resource_group ?? automation.resourceGroup,
-      reason: textOrNull(args.reason) ?? `Card entered ${card.columnId}.`,
-    }, context);
+    let enqueued = enqueueWorkItem(board, card, { notBefore: args.notBefore ?? args.not_before });
+    if (!enqueued.ok) {
+      return {
+        ok: false,
+        skipped: true,
+        enqueued: false,
+        reason: enqueued.reason,
+        automation,
+        capacity: candidate.capacity,
+        boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
+        sideEffects: [],
+      };
+    }
+    let admissionId = enqueued.entry.admissionId;
+    // Inline best-effort drain (capacity-gated). Same code path as the scheduler loop.
+    let drain = await drainWorkflowQueue(board.id, { ...args }, context);
+    let mine = drain.admitted.find(item => item.admissionId === admissionId);
+    if (mine) {
+      let result = mine.result;
+      return {
+        ok: true,
+        skipped: false,
+        enqueued: true,
+        admissionId,
+        automation,
+        capacity: candidate.capacity,
+        boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
+        agent: mine.agent,
+        result,
+        drain,
+        sideEffects: result.sideEffects || [],
+      };
+    }
+    // Hard delegation failure on this card's admission (not a capacity re-queue): admitQueueEntry
+    // returns a non-admitted result with `failed:true`, which the drain collects into `skipped`.
+    // Surface the failed run so the caller sees the failure rather than a silently-queued card.
+    let mineHardFail = (drain.skipped ?? []).find(item => item.admissionId === admissionId && item.failed);
+    if (mineHardFail?.result) {
+      return {
+        ok: true,
+        skipped: false,
+        enqueued: true,
+        failed: true,
+        admissionId,
+        automation,
+        capacity: candidate.capacity,
+        boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
+        agent: mineHardFail.agent ?? chooseStageAgent(automation, card, args),
+        result: mineHardFail.result,
+        drain,
+        sideEffects: mineHardFail.result.sideEffects || [],
+      };
+    }
+    // Enqueued but not admitted this pass (at capacity, deferred, or a concurrent admitter holds the
+    // lease). The card stays `queued`; a later drain admits it. This is a successful enqueue, not a
+    // failure — callers see ok:true, enqueued:true, and no started run.
     return {
       ok: true,
       skipped: false,
+      enqueued: true,
+      queued: true,
+      admissionId,
       automation,
       capacity: candidate.capacity,
       boardCapacity: candidate.boardCapacity,
       fileConflicts: candidate.fileConflicts,
-      agent,
-      result,
-      sideEffects: result.sideEffects || [],
+      drain,
+      sideEffects: [],
     };
   }
 
@@ -2716,6 +3255,20 @@ export function createWorkflowBoardService(opts = {}) {
       agent_slug: desiredAgent,
       context_mode: args.context_mode === 'off' ? 'off' : 'auto',
     };
+    // Admission slot key (D1.1/D1.2). The board-minted admissionId is passed through to agent-pool,
+    // which acquires the ledger slot keyed by it (idempotent) and persists its dedup record before
+    // ack. prepareDelegateTaskCall forwards unknown fields unchanged.
+    let admissionId = textOrNull(args.admission_id ?? args.admissionId);
+    if (admissionId) delegateArgs.admission_id = admissionId;
+    // D2.1 (parent side): the board declares the server-assigned slug for the spawned task so the
+    // portal's connection→{taskId, serverAssignedSlug} principal map can be established when the
+    // agent's MCP connection initializes. The per-task SECRET that makes this unforgeable is minted
+    // and injected by agent-pool at spawn, then presented at MCP `initialize`. That mint/present
+    // pipeline is agent-pool-side and OUT OF SCOPE here. SEAM: agent-pool must (a) mint a per-task
+    // secret keyed by this `verified_slug`/admissionId at spawn and inject it as a non-overridable
+    // credential, and (b) the MCP initialize handler must resolve that secret to this slug. Until
+    // that lands, MCP principals still fall back to the WS-AUTH-P least-privilege default.
+    if (desiredAgent) delegateArgs.verified_slug = desiredAgent;
     let approvalMode = textOrNull(args.approval_mode ?? card.approvalMode);
     if (approvalMode) delegateArgs.approval_mode = approvalMode;
     let resourceGroup = textOrNull(args.resource_group ?? card.resourceGroup);
@@ -2877,6 +3430,12 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     let delegationFailed = args.delegate !== false && !delegated.ok;
+    // Slot-rejection vs hard failure (D1.1/D1.2): a capacity rejection from agent-pool means NO slot
+    // was granted — the admission scheduler re-queues this card (transient). Any OTHER delegation
+    // failure is a hard error (e.g. unknown resource group) that surfaces as a failed run + needs_audit
+    // so it does not loop in the queue. `slotRejected` lets the drain branch on exactly this.
+    let delegateError = textOrNull(delegated.sideEffects?.[0]?.error);
+    let slotRejected = Boolean(delegationFailed && delegateError && isCapacityRejectionError(delegateError));
     let taskIds = uniqueArray([...run.taskIds, ...delegated.taskIds]);
     let nextRun = normalizeWorkflowRunInput({
       ...run,
@@ -2939,7 +3498,7 @@ export function createWorkflowBoardService(opts = {}) {
       ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
     }
     stateGraph.commit(ops, sourceForPrincipal(principal));
-    return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, sideEffects: delegated.sideEffects };
+    return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, slotRejected, sideEffects: delegated.sideEffects };
   }
 
   function resumeWorkItem(args = {}, context = {}) {
@@ -3360,12 +3919,17 @@ export function createWorkflowBoardService(opts = {}) {
       });
       stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: accruedCard }], sourceForPrincipal(principal));
 
+      // Re-engagement enqueues through the same admission queue (AD-17, inv 26): the accrued
+      // backoff window becomes the queue entry's `notBefore`, so the card never jumps the queue and
+      // the shipped escalation backoff pacing is preserved exactly. Attempt accrual already happened
+      // durably above, so a dropped/contended enqueue does not burn an extra attempt here.
       let reengageArgs = {
         boardId: board.id,
         cardId: card.id,
         reason: `Escalation re-engagement #${attemptCount} (${accrued.kind}).`,
         escalation: accrued,
         delegate: args.delegate,
+        notBefore: nextAttemptAt,
       };
       let outcome = null;
       try {
@@ -3381,6 +3945,168 @@ export function createWorkflowBoardService(opts = {}) {
     }
 
     return { ok: true, reengaged, escalatedToHuman };
+  }
+
+  // ── Admission recovery / D1.4 resolution-from-phase (inv 25, 43; AD-11) ───────────────────────
+  // Runs in the reconcile loop. It NEVER takes the board-admission lease (AD-16): it operates on a
+  // read snapshot plus the lifecycle guard, so the two loops cannot deadlock. releaseSlot is owned
+  // here only (single-owner). A `queued`+no-run card is legitimately queued — kept. A stranded
+  // `admitting` card (admission lease epoch-stale + grace-elapsed) is resolved by an idempotent,
+  // ordered, replayable sequence over a durable resolution record so a second crash re-drives from
+  // the persisted phase. The displaced stale-epoch admitter performs no late compensation (D1.5):
+  // its writes are CAS-rejected, so this loop is the sole cleanup owner.
+
+  // Best-effort slot release through the agent-pool proxy. The agent-pool exposes no release tool
+  // today (only the durable dead-pid liveness sweep on acquire/activeCount self-heals a leaked
+  // slot), so this is the PARENT seam: it releases if a tool is wired, else relies on the sweep.
+  // Idempotent on admissionId (inv 41/43). SEAM: agent-pool `release_slot` tool not yet exposed.
+  async function releaseSlotForAdmission(admissionId, context = {}) {
+    let pm = context.proxyManager ?? proxyManager;
+    if (!pm?.requestFromChild) return { released: false, reason: 'proxy_unavailable' };
+    try {
+      let result = await pm.requestFromChild('agent-pool', 'tools/call', {
+        name: 'release_slot',
+        arguments: { admission_id: admissionId },
+      }, 30_000);
+      if (result?.isError) return { released: false, reason: 'release_tool_error' };
+      return { released: true };
+    } catch {
+      // No release tool wired — the dead-pid liveness sweep reclaims the slot. Not an error.
+      return { released: false, reason: 'release_tool_unavailable_sweep_owns' };
+    }
+  }
+
+  // Drive a single resolution record forward from its persisted phase. Canonical phase order:
+  //   'admitting' → 'rolled_back' (StateGraph run→terminal + lifecycle→queued + lease delete)
+  //               → 'slot_released' (idempotent releaseSlot(admissionId))
+  //               → cleared (resolution + admission records deleted).
+  // Each step is idempotent and re-readable, so a second crash mid-resolution re-drives from here.
+  async function driveAdmissionResolution(boardId, resolution, context = {}) {
+    let principal = daemonPrincipal();
+    let { cardId, admissionId } = resolution;
+    let phase = resolution.phase ?? 'admitting';
+
+    if (phase === 'admitting') {
+      // Run→terminal, lifecycle admitting→queued (head, enqueuedAt preserved via the live entry),
+      // per-card lease delete. The queue entry persisted across the crash (AD-2 overlap), so the
+      // card returns to its fairness class without re-enqueue. Bump phase in the same durable frame.
+      let card = stateGraph.get(`workflowCards/${cardId}`);
+      let ops = [];
+      if (card) {
+        let cardCopy = clone(card);
+        let lifecycle = normalizeWorkflowLifecycle(cardCopy.lifecycle);
+        if (lifecycle === 'admitting') {
+          let nextCard = normalizeWorkflowCardInput({
+            ...cardCopy,
+            lifecycle: 'queued',
+            version: cardCopy.version + 1,
+            updatedAt: now(),
+            updatedBy: principal.label,
+          }, {
+            id: cardId,
+            actor: principal.label,
+            now: now(),
+            version: cardCopy.version + 1,
+            createdAt: cardCopy.createdAt,
+            updatedAt: now(),
+          });
+          ops.push({ op: 'set', path: `workflowCards/${cardId}`, value: nextCard });
+        }
+      }
+      for (let run of getRunsForCard(cardId)) {
+        if (RUNNING_RUN_STATUSES.has(run.status) && run.cardId === cardId) {
+          let terminal = normalizeWorkflowRunInput({
+            ...run,
+            status: 'stopped',
+          }, { id: run.id, now: now(), updatedAt: now() });
+          ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: terminal });
+        }
+      }
+      // Clear an orphaned per-card lease ONLY for an admitting-resolution card whose lifecycle is
+      // returning to queued — the lease was granted mid-admission and is now stale. (The general
+      // reconcile rule clears leases only for {running,idle}; admitting resolution is the explicit
+      // exception that re-queues the card and so must drop the half-granted lease.)
+      let lease = stateGraph.get(`workflowLeases/${cardId}`);
+      if (lease) ops.push({ op: 'delete', path: `workflowLeases/${cardId}` });
+      ops.push({
+        op: 'set',
+        path: `workflowAdmissionResolution/${cardId}`,
+        value: { ...resolution, phase: 'rolled_back', updatedAt: now() },
+      });
+      stateGraph.commit(ops, sourceForPrincipal(principal), { durable: true });
+      phase = 'rolled_back';
+    }
+
+    if (phase === 'rolled_back') {
+      await releaseSlotForAdmission(admissionId, context);
+      stateGraph.commit([
+        { op: 'set', path: `workflowAdmissionResolution/${cardId}`, value: { ...resolution, phase: 'slot_released', updatedAt: now() } },
+      ], sourceForPrincipal(principal), { durable: true });
+      phase = 'slot_released';
+    }
+
+    if (phase === 'slot_released') {
+      stateGraph.commit([
+        { op: 'delete', path: `workflowAdmissionResolution/${cardId}` },
+        { op: 'delete', path: `workflowAdmissions/${admissionId}` },
+      ], sourceForPrincipal(principal), { durable: true });
+      phase = 'cleared';
+    }
+    return { cardId, admissionId, phase };
+  }
+
+  async function reconcileWorkflowAdmissions(args = {}, context = {}) {
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let resolved = [];
+    let kept = [];
+
+    // 1. Re-drive any in-progress resolution record from its persisted phase (second-crash safe).
+    let inflight = Object.values(getCollection(stateGraph, 'workflowAdmissionResolution'))
+      .filter(record => record.boardId === board.id);
+    for (let record of inflight) {
+      let result = await driveAdmissionResolution(board.id, record, context);
+      resolved.push(result);
+    }
+
+    // 2. Scan admission records for stranded `admitting` cards (lease epoch-stale + grace-elapsed).
+    let admissions = Object.values(getCollection(stateGraph, 'workflowAdmissions'))
+      .filter(record => record.boardId === board.id && record.phase === 'admitting');
+    for (let record of admissions) {
+      let card = stateGraph.get(`workflowCards/${record.cardId}`);
+      if (!card) continue;
+      let lifecycle = normalizeWorkflowLifecycle(card.lifecycle);
+      if (lifecycle !== 'admitting') continue;
+      if (stateGraph.get(`workflowAdmissionResolution/${record.cardId}`)) continue; // already driving
+      if (!admissionLeaseStranded(board.id, record.startedAt)) {
+        kept.push({ cardId: record.cardId, reason: 'admission_in_flight' });
+        continue;
+      }
+      let resolution = {
+        schema: 'workflow-admission-resolution/v1',
+        cardId: record.cardId,
+        boardId: board.id,
+        leaseEpoch: record.leaseEpoch,
+        admissionId: record.admissionId,
+        phase: 'admitting',
+        startedAt: now(),
+      };
+      stateGraph.commit([
+        { op: 'set', path: `workflowAdmissionResolution/${record.cardId}`, value: resolution },
+      ], sourceForPrincipal(daemonPrincipal()), { durable: true });
+      let result = await driveAdmissionResolution(board.id, resolution, context);
+      resolved.push(result);
+    }
+
+    // 3. A `queued`+no-run card with a live queue entry is legitimately queued — keep it.
+    for (let entry of listQueueEntries(board.id)) {
+      let card = stateGraph.get(`workflowCards/${entry.cardId}`);
+      let lifecycle = normalizeWorkflowLifecycle(card?.lifecycle);
+      if (lifecycle === 'queued' && !activeRunForCard(entry.cardId)) {
+        kept.push({ cardId: entry.cardId, reason: 'legitimately_queued' });
+      }
+    }
+
+    return { ok: true, resolved, kept };
   }
 
   function escalationHumanBlocker(state, maxAttempts) {
@@ -3635,8 +4361,12 @@ export function createWorkflowBoardService(opts = {}) {
         for (let board of boards) {
           try {
             reconcileWorkflowRuntimeTasks({ boardId: board.id });
+            await reconcileWorkflowAdmissions({ boardId: board.id });
             await reconcileWorkflowRecovery({ boardId: board.id });
             await reconcileWorkflowEscalations({ boardId: board.id });
+            // Scheduler loop: a bounded admission pass drains the queue under the board-admission
+            // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
+            await drainWorkflowQueue(board.id, {});
           } catch (err) {
             onError(err, board.id);
           }
@@ -3684,9 +4414,12 @@ export function createWorkflowBoardService(opts = {}) {
     claimWorkItem,
     releaseWorkItem,
     orchestrateWorkItem,
+    enqueueWorkItem,
+    drainWorkflowQueue,
     resumeWorkItem,
     controlWorkItem,
     reconcileWorkflowRuntimeTasks,
+    reconcileWorkflowAdmissions,
     reconcileWorkflowRecovery,
     reconcileWorkflowEscalations,
     parseRunEscalation,

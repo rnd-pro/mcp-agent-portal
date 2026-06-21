@@ -1057,10 +1057,20 @@ links:
     assert.equal(moved.orchestration.result.run.status, 'running');
     assert.equal(moved.orchestration.result.lease.leaseOwner, 'orchestrator');
     assert.deepEqual(moved.orchestration.result.run.taskIds, [taskId]);
+    // Reroute (WS-B1): the transition into the auto column ENQUEUED the card and INLINE-DRAINED it —
+    // the card was admitted through the queue, not orchestrated directly. The auto trigger now stamps
+    // a deterministic admissionId, threads it to the delegate, and the queue entry is consumed once
+    // `running` is durable (inv 31: no live entry remains for an admitted card).
+    assert.equal(moved.orchestration.enqueued, true);
+    assert.ok(moved.orchestration.admissionId?.startsWith('adm-'));
+    assert.equal(service.getCard(created.card.id).lifecycle, 'running');
+    assert.equal(Object.values(sg.get('workflowQueueEntries') || {}).filter(e => e.cardId === created.card.id).length, 0);
     let delegateCalls = calls.filter(call => call.server === 'agent-pool' && call.payload.name === 'delegate_task');
     assert.equal(delegateCalls.length, 1);
     let delegateArgs = delegateCalls[0].payload.arguments;
     assert.equal(delegateArgs.agent_slug, 'orchestrator');
+    assert.equal(delegateArgs.admission_id, moved.orchestration.admissionId, 'admissionId threaded to the delegate (D1.1)');
+    assert.equal(delegateArgs.verified_slug, 'orchestrator', 'D2.1 parent-side slug correlation passed through');
     assert.deepEqual(delegateArgs.files, ['src/node/ready-auto-start.js']);
     assert.match(delegateArgs.prompt, /Preferred agent: orchestrator/);
     assert.doesNotMatch(delegateArgs.prompt, /outside-stage-pool/);
