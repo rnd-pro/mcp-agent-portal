@@ -16,7 +16,9 @@ import {
   normalizeWorkflowBoardMode,
   normalizeWorkflowCardInput,
   normalizeWorkflowChecksInput,
+  normalizeWorkflowDependsOn,
   normalizeWorkflowLeaseInput,
+  normalizeWorkflowLifecycle,
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
   normalizeWorkflowTransitionEvent,
@@ -1174,16 +1176,18 @@ export function createWorkflowBoardService(opts = {}) {
     let cards = [...persistedBoardCards, ...runtimeCards]
       .filter(card => !goalId || card.entityRefs?.goalId === goalId)
       .filter(card => !chatId || card.entityRefs?.chatId === chatId)
-      .sort((a, b) => (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+      .sort((a, b) => (a.createdAt - b.createdAt) || a.id.localeCompare(b.id))
+      .map(projectCardV2);
     let columns = board.columns.map((column) => ({
       ...column,
       cards: cards.filter(card => card.columnId === column.id),
     }));
 
+    let blockedOnDependencyCount = cards.filter(card => card.lifecycle === 'blocked').length;
     let includeCards = filter.includeCards ?? filter.include_cards;
     let includeEvents = filter.includeEvents ?? filter.include_events;
     let projection = {
-      schema: 'workflow-board-projection/v1',
+      schema: 'workflow-board-projection/v2',
       board,
       boardId: board.id,
       scope: { projectId, goalId, chatId },
@@ -1192,6 +1196,20 @@ export function createWorkflowBoardService(opts = {}) {
         : columns,
       cards: includeCards === false ? [] : cards,
       counts: Object.fromEntries(columns.map(column => [column.id, column.cards.length])),
+      queue: {
+        depth: 0,
+        oldestEnqueuedAt: null,
+        perGroupDepth: {},
+        blockedOnDependencyCount,
+      },
+      telemetry: {
+        queueDepth: 0,
+        oldestEnqueuedAt: null,
+        blockedOnDependencyCount,
+        admissions: 0,
+        admissionFailures: 0,
+        drains: 0,
+      },
       events: includeEvents === false
         ? []
         : listEvents({ boardId: board.id, limit: filter.eventLimit ?? filter.event_limit ?? 20 }),
@@ -1200,6 +1218,26 @@ export function createWorkflowBoardService(opts = {}) {
     return wantsCompactProjection(filter)
       ? compactBoardProjection(projection, { tasks: runtimeTasks })
       : projection;
+  }
+
+  // projection-v2 (AD-12): stamp every projected card with the frozen lifecycle / dependsOn / queue
+  // shape. lifecycle and dependsOn are normalized (idle / [] defaults via the iso normalizers). The
+  // per-card queue slot is all-null until the scheduler (S8) populates it; existing values on the
+  // card are surfaced, never invented.
+  function projectCardV2(card) {
+    let queueSource = card.queue ?? {};
+    return {
+      ...card,
+      lifecycle: normalizeWorkflowLifecycle(card.lifecycle),
+      dependsOn: normalizeWorkflowDependsOn(card.dependsOn ?? card.depends_on),
+      queue: {
+        enqueuedAt: queueSource.enqueuedAt ?? null,
+        queueEpoch: queueSource.queueEpoch ?? null,
+        admissionId: queueSource.admissionId ?? null,
+        priority: queueSource.priority ?? null,
+        position: queueSource.position ?? null,
+      },
+    };
   }
 
   async function getBoardProjectionWithRuntime(filter = {}, context = {}) {
