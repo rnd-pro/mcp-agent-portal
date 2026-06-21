@@ -33,6 +33,7 @@ import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
 import { CAP, daemonPrincipal, derivePrincipal, evaluateIntent, INTENT_CAPABILITY } from './server/principal.js';
 import { getStateGraph } from './state-graph.js';
+import { getTeamMemoryRoot } from '../../packages/agent-pool-mcp/src/runtime/paths.js';
 
 const WORKFLOW_SOURCE = 'workflow-board';
 const DEFAULT_EVENT_LIMIT = 50;
@@ -5182,11 +5183,13 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function workspaceRoot() {
-    return path.join(projectRoot, '.agent-portal', 'workspace');
+    let teamMemoryRoot = getTeamMemoryRoot();
+    return teamMemoryRoot ? path.join(teamMemoryRoot, 'workspace') : null;
   }
 
   async function listWorkItemFiles(args = {}) {
     let root = workspaceRoot();
+    if (!root) return [];
     let projectId = textOrNull(args.projectId ?? args.project_id);
     let projects = projectId ? [slugSegment(projectId)] : [];
     if (!projects.length) {
@@ -5343,13 +5346,18 @@ export function createWorkflowBoardService(opts = {}) {
     let card = getCard(cardId);
     let projectId = textOrNull(args.projectId ?? args.project_id ?? card.projectId) ?? 'global';
     let root = workspaceRoot();
+    if (!root) {
+      throw new Error(
+        'Team memory is not configured. Set agentPortal.teamMemoryRoot or AGENT_PORTAL_MEMORY_ROOT.',
+      );
+    }
     let markdownPath = textOrNull(args.markdownPath ?? args.markdown_path ?? card.metadata?.markdownPath)
       ?? path.join(slugSegment(projectId), 'plans', 'work-items', `${slugSegment(card.id)}.md`);
     let absPath = path.isAbsolute(markdownPath)
       ? markdownPath
       : path.join(root, markdownPath);
     if (!safeRelativePath(absPath, root)) {
-      throw new Error('Workflow markdown export path must stay inside .agent-portal/workspace.');
+      throw new Error('Workflow markdown export path must stay inside team-memory workspace.');
     }
     let frontmatter = {
       id: card.id,
