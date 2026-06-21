@@ -8,10 +8,18 @@ import {
   DEFAULT_WORKFLOW_BOARD_ID,
   DEFAULT_WORKFLOW_COLUMN_IDS,
   RECOVERY_FLAGS,
+  WORKFLOW_CARD_LIFECYCLE_STATES,
   WORKFLOW_ESCALATION_KINDS,
+  classifyWorkflowGraph,
   createDefaultWorkflowBoard,
+  isWorkflowLifecycleTransitionAllowed,
+  migrateWorkflowBoardToV2,
+  migrateWorkflowCardToV2,
   normalizeWorkflowCardInput,
+  normalizeWorkflowDependsOn,
   normalizeWorkflowEscalation,
+  normalizeWorkflowLifecycle,
+  validateWorkflowTransitionGraph,
 } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
@@ -66,7 +74,7 @@ describe('workflow board model and service', () => {
     }, { id: 'card-1', now: 456 });
 
     assert.equal(board.id, DEFAULT_WORKFLOW_BOARD_ID);
-    assert.equal(board.schema, 'workflow-board/v1');
+    assert.equal(board.schema, 'workflow-board/v2');
     assert.deepEqual(board.columns.map(column => column.id), DEFAULT_WORKFLOW_COLUMN_IDS);
     assert.equal(board.mode, 'armed');
     assert.equal(board.automation.pickup, 'auto');
@@ -95,7 +103,7 @@ describe('workflow board model and service', () => {
       board.columns.find(column => column.id === 'commit-publish').automation.agents,
       ['release-manager'],
     );
-    assert.equal(card.schema, 'workflow-card/v1');
+    assert.equal(card.schema, 'workflow-card/v2');
     assert.equal(card.id, 'card-1');
     assert.equal(card.columnId, 'ideas');
     assert.equal(card.cwd, '/workspace/agent-portal');
@@ -2143,5 +2151,261 @@ describe('normalizeWorkflowEscalation', () => {
     assert.equal(normalizeWorkflowEscalation({ kind: 'totally_made_up', detail: 'x' }), null);
     assert.equal(normalizeWorkflowEscalation({ detail: 'no kind' }), null);
     assert.equal(normalizeWorkflowEscalation({}), null);
+  });
+});
+
+describe('workflow card lifecycle (AD-4)', () => {
+  it('normalizes absent, unknown, and every valid lifecycle state', () => {
+    assert.equal(normalizeWorkflowLifecycle(undefined), 'idle');
+    assert.equal(normalizeWorkflowLifecycle(null), 'idle');
+    assert.equal(normalizeWorkflowLifecycle(''), 'idle');
+    assert.equal(normalizeWorkflowLifecycle('not-a-state'), 'idle');
+    for (let state of WORKFLOW_CARD_LIFECYCLE_STATES) {
+      assert.equal(normalizeWorkflowLifecycle(state), state);
+    }
+  });
+
+  it('defaults a normalized card lifecycle to idle and carries dependsOn', () => {
+    let card = normalizeWorkflowCardInput({ title: 'Lifecycle default' }, { id: 'card-lc' });
+    assert.equal(card.lifecycle, 'idle');
+    assert.deepEqual(card.dependsOn, []);
+  });
+
+  it('honors a provided lifecycle state on the card', () => {
+    let card = normalizeWorkflowCardInput({ title: 'Queued card', lifecycle: 'queued' }, { id: 'card-q' });
+    assert.equal(card.lifecycle, 'queued');
+  });
+
+  it('allows the scheduler-owned transitions and denies them to the dependency owner', () => {
+    let schedulerEdges = [
+      ['idle', 'queued'],
+      ['queued', 'admitting'],
+      ['admitting', 'running'],
+      ['running', 'idle'],
+      ['admitting', 'queued'],
+      ['running', 'queued'],
+    ];
+    for (let [from, to] of schedulerEdges) {
+      assert.equal(isWorkflowLifecycleTransitionAllowed(from, to, 'scheduler'), true, `${from}->${to} scheduler`);
+      assert.equal(isWorkflowLifecycleTransitionAllowed(from, to, 'dependency'), false, `${from}->${to} denied to dependency`);
+    }
+  });
+
+  it('lets only the dependency owner drive idle<->blocked', () => {
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'blocked', 'dependency'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('blocked', 'idle', 'dependency'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'blocked', 'scheduler'), false);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('blocked', 'idle', 'scheduler'), false);
+  });
+
+  it('allows same-state transitions (idempotent) and denies illegal edges', () => {
+    assert.equal(isWorkflowLifecycleTransitionAllowed('running', 'running', 'scheduler'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'idle', 'dependency'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'running', 'scheduler'), false);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('queued', 'blocked', 'dependency'), false);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'queued', 'nobody'), false);
+  });
+});
+
+describe('workflow board-native dependencies (AD-5)', () => {
+  it('expands a string shorthand into a defaulted dependency object', () => {
+    assert.deepEqual(normalizeWorkflowDependsOn(['card-a']), [
+      { cardId: 'card-a', releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' },
+    ]);
+  });
+
+  it('coerces unknown enum values to their defaults', () => {
+    assert.deepEqual(
+      normalizeWorkflowDependsOn([
+        { cardId: 'card-b', releaseWhen: 'whenever', onUpstreamFailure: 'explode' },
+      ]),
+      [{ cardId: 'card-b', releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' }],
+    );
+  });
+
+  it('keeps known enum values and dedupes by cardId (last wins)', () => {
+    assert.deepEqual(
+      normalizeWorkflowDependsOn([
+        { cardId: 'card-c', releaseWhen: 'run_success' },
+        { cardId: 'card-c', releaseWhen: 'audit_passed', onUpstreamFailure: 'cancel_self' },
+      ]),
+      [{ cardId: 'card-c', releaseWhen: 'audit_passed', onUpstreamFailure: 'cancel_self' }],
+    );
+  });
+
+  it('drops entries with no cardId and returns [] for empty input', () => {
+    assert.deepEqual(normalizeWorkflowDependsOn([{ releaseWhen: 'card_done' }, '', null]), []);
+    assert.deepEqual(normalizeWorkflowDependsOn([]), []);
+    assert.deepEqual(normalizeWorkflowDependsOn(undefined), []);
+  });
+});
+
+describe('workflow graph classifier (AD-6)', () => {
+  it('ranks the default board stages in pipeline order', () => {
+    let classifier = classifyWorkflowGraph(createDefaultWorkflowBoard());
+    let order = ['ideas', 'backlog', 'ready', 'in-progress', 'quality-audit', 'commit-publish', 'done'];
+    for (let i = 1; i < order.length; i += 1) {
+      assert.ok(
+        classifier.rankOf(order[i - 1]) < classifier.rankOf(order[i]),
+        `${order[i - 1]} ranks before ${order[i]}`,
+      );
+    }
+    assert.equal(classifier.rankOf('does-not-exist'), -1);
+  });
+
+  it('classes the two rework edges as recovery + backward, and only done as terminal', () => {
+    let classifier = classifyWorkflowGraph(createDefaultWorkflowBoard());
+    let reworkEdges = classifier.edges.filter(edge => edge.to === 'ready' && edge.edgeClass === 'recovery');
+    assert.deepEqual(
+      reworkEdges.map(edge => edge.from).sort(),
+      ['in-progress', 'quality-audit'],
+    );
+    assert.ok(reworkEdges.every(edge => edge.backward === true));
+    assert.deepEqual([...classifier.terminals], ['done']);
+    assert.equal(classifier.isTerminal('done'), true);
+    assert.equal(classifier.isTerminal('ready'), false);
+    assert.equal(classifier.edgeClass('ideas', 'backlog'), 'forward');
+    assert.equal(classifier.edgeClass('in-progress', 'ready'), 'recovery');
+    assert.equal(classifier.edgeClass('nope', 'nope'), null);
+  });
+});
+
+describe('workflow transition-graph validator (AD-6)', () => {
+  function makeBoard(columns, transitions) {
+    return { schema: 'workflow-board/v2', id: 'test-board', columns, transitions };
+  }
+  function column(id, action) {
+    return { id, title: id, automation: action ? { action } : {} };
+  }
+
+  it('accepts the shipped default board (anchor)', () => {
+    let result = validateWorkflowTransitionGraph(createDefaultWorkflowBoard());
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it('flags a forward cycle', () => {
+    let board = makeBoard(
+      [column('a'), column('b', 'close')],
+      [
+        { from: 'a', to: 'b', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        { from: 'b', to: 'a', gates: ['no_active_blocker'] },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'forward_cycle'));
+  });
+
+  it('does not flag a governed rework recovery edge as a cycle', () => {
+    let board = makeBoard(
+      [column('start'), column('work'), column('audit'), column('done', 'close')],
+      [
+        { from: 'start', to: 'work', gate: 'no_active_blocker' },
+        { from: 'work', to: 'audit', gate: 'audit_pass_or_explicit_waiver' },
+        { from: 'audit', to: 'done', gate: 'clean_diff_and_hygiene' },
+        { from: 'audit', to: 'work', gate: 'rework_authorized' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.equal(result.classifier.edgeClass('audit', 'work'), 'recovery');
+  });
+
+  it('flags an audit-skipping one-hop terminal edge (audit_not_dominating)', () => {
+    let board = makeBoard(
+      [column('hotfix'), column('done', 'close')],
+      [{ from: 'hotfix', to: 'done', gate: 'clean_diff_and_hygiene' }],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'audit_not_dominating'));
+  });
+
+  it('flags a terminal with a non-hygiene inbound edge (hygiene_cut_incomplete)', () => {
+    let board = makeBoard(
+      [column('start'), column('audit'), column('done', 'close')],
+      [
+        { from: 'start', to: 'audit', gate: 'audit_pass_or_explicit_waiver' },
+        // Inbound to terminal carries audit but not hygiene -> P1 fails, P2 holds.
+        { from: 'audit', to: 'done', gate: 'audit_pass_or_explicit_waiver' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'hygiene_cut_incomplete'));
+  });
+
+  it('flags a dead-end non-terminal column', () => {
+    let board = makeBoard(
+      [column('start'), column('dead'), column('done', 'close')],
+      [
+        { from: 'start', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        { from: 'start', to: 'dead', gate: 'no_active_blocker' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'dead_end_column' && /dead/.test(error.detail)));
+  });
+
+  it('flags an orphan / unreachable terminal', () => {
+    let board = makeBoard(
+      [column('start'), column('mid'), column('done', 'close')],
+      [
+        // start -> mid is a forward path that never reaches done; done has no inbound edge.
+        { from: 'start', to: 'mid', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'dead_end_column' && /orphan/.test(error.detail)));
+  });
+
+  it('flags a transition referencing a bogus gate (unknown_gate)', () => {
+    let board = makeBoard(
+      [column('start'), column('done', 'close')],
+      [{ from: 'start', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene', 'totally_bogus'] }],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'unknown_gate'));
+  });
+});
+
+describe('workflow schema v2 migration (AD-8)', () => {
+  it('migrates a v1-shaped card to v2 with idle lifecycle and empty dependsOn', () => {
+    let v1Card = {
+      schema: 'workflow-card/v1',
+      id: 'card-old',
+      title: 'Legacy card',
+      columnId: 'ready',
+      owner: 'orchestrator',
+    };
+    let migrated = migrateWorkflowCardToV2(v1Card);
+    assert.equal(migrated.schema, 'workflow-card/v2');
+    assert.equal(migrated.lifecycle, 'idle');
+    assert.deepEqual(migrated.dependsOn, []);
+    assert.equal(migrated.owner, 'orchestrator');
+    assert.equal(migrated.title, 'Legacy card');
+  });
+
+  it('is idempotent on an already-v2 card', () => {
+    let v2Card = migrateWorkflowCardToV2({ id: 'card-v2', title: 'V2 card', lifecycle: 'queued', dependsOn: ['up-1'] });
+    assert.deepEqual(migrateWorkflowCardToV2(v2Card), v2Card);
+    assert.equal(v2Card.lifecycle, 'queued');
+    assert.deepEqual(v2Card.dependsOn, [
+      { cardId: 'up-1', releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' },
+    ]);
+  });
+
+  it('fills board v2 fields without overwriting a customized column title', () => {
+    let board = createDefaultWorkflowBoard();
+    board.schema = 'workflow-board/v1';
+    board.columns = board.columns.map(col => (col.id === 'ready' ? { ...col, title: 'Custom Ready' } : col));
+    let migrated = migrateWorkflowBoardToV2(board);
+    assert.equal(migrated.schema, 'workflow-board/v2');
+    assert.equal(migrated.columns.find(col => col.id === 'ready').title, 'Custom Ready');
+    assert.deepEqual(migrateWorkflowBoardToV2(migrated), migrated);
   });
 });

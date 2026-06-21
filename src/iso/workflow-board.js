@@ -1,5 +1,5 @@
-export const WORKFLOW_BOARD_SCHEMA = 'workflow-board/v1';
-export const WORKFLOW_CARD_SCHEMA = 'workflow-card/v1';
+export const WORKFLOW_BOARD_SCHEMA = 'workflow-board/v2';
+export const WORKFLOW_CARD_SCHEMA = 'workflow-card/v2';
 export const WORKFLOW_TRANSITION_SCHEMA = 'workflow-transition/v1';
 export const WORKFLOW_CHECKS_SCHEMA = 'workflow-checks/v1';
 export const WORKFLOW_RUN_SCHEMA = 'workflow-run/v1';
@@ -135,6 +135,128 @@ export function normalizeWorkflowEscalationState(input = {}) {
 export function hasActiveEscalation(card = {}) {
   let state = card?.metadata?.escalation;
   return Boolean(state && (state.kind || state.lastEscalation) && !(state.humanEscalated ?? state.human_escalated));
+}
+
+/**
+ * Card lifecycle state machine (AD-4). Orthogonal to `columnId` and task status. The scheduler owns
+ * every transition except `idle↔blocked`, which the dependency link/unlink path owns.
+ */
+export const WORKFLOW_CARD_LIFECYCLE_STATES = ['idle', 'blocked', 'queued', 'admitting', 'running'];
+
+/** Normalize a card lifecycle value; absent/unknown/empty collapses to `idle`. */
+export function normalizeWorkflowLifecycle(value) {
+  let text = textOrNull(value);
+  if (!text) return 'idle';
+  return WORKFLOW_CARD_LIFECYCLE_STATES.includes(text) ? text : 'idle';
+}
+
+/** The two owners that may drive lifecycle transitions. */
+export const WORKFLOW_LIFECYCLE_OWNERS = ['scheduler', 'dependency'];
+
+const WORKFLOW_LIFECYCLE_TRANSITIONS = {
+  scheduler: [
+    ['idle', 'queued'],
+    ['queued', 'admitting'],
+    ['admitting', 'running'],
+    ['running', 'idle'],
+    ['admitting', 'queued'],
+    ['running', 'queued'],
+  ],
+  dependency: [
+    ['idle', 'blocked'],
+    ['blocked', 'idle'],
+  ],
+};
+
+/**
+ * Is a lifecycle transition legal for the given owner? Same-state (from===to) is always allowed
+ * (idempotent). The scheduler owns admission/rollback/re-drive; the `dependency` owner owns only
+ * `idle↔blocked`. Any other (from, to) returns false.
+ */
+export function isWorkflowLifecycleTransitionAllowed(from, to, owner) {
+  let f = normalizeWorkflowLifecycle(from);
+  let t = normalizeWorkflowLifecycle(to);
+  if (f === t) return true;
+  let edges = WORKFLOW_LIFECYCLE_TRANSITIONS[owner];
+  if (!edges) return false;
+  return edges.some(([a, b]) => a === f && b === t);
+}
+
+/**
+ * Board-native dependency release semantics (AD-5). `card_done` is the safe default; `run_success`
+ * is documented unsafe under reworkable upstreams.
+ */
+export const WORKFLOW_RELEASE_WHEN = ['run_success', 'audit_passed', 'card_done'];
+export const WORKFLOW_ON_UPSTREAM_FAILURE = ['block_and_escalate', 'release', 'cancel_self'];
+
+/**
+ * Normalize a `dependsOn` list into `{ cardId, releaseWhen, onUpstreamFailure }` entries. Accepts an
+ * array of cardId strings (shorthand) or objects; entries without a cardId are dropped; unknown enum
+ * values coerce to the default; entries dedupe by cardId (last wins).
+ */
+export function normalizeWorkflowDependsOn(input) {
+  let source = Array.isArray(input) ? input : (input === undefined || input === null ? [] : [input]);
+  let byCardId = new Map();
+  for (let item of source) {
+    let cardId = typeof item === 'object' && item !== null
+      ? textOrNull(item.cardId ?? item.card_id ?? item.id)
+      : textOrNull(item);
+    if (!cardId) continue;
+    let releaseWhen = normalizeKnownValue(
+      typeof item === 'object' && item !== null ? (item.releaseWhen ?? item.release_when) : null,
+      WORKFLOW_RELEASE_WHEN,
+      'card_done',
+    );
+    let onUpstreamFailure = normalizeKnownValue(
+      typeof item === 'object' && item !== null ? (item.onUpstreamFailure ?? item.on_upstream_failure) : null,
+      WORKFLOW_ON_UPSTREAM_FAILURE,
+      'block_and_escalate',
+    );
+    byCardId.set(cardId, { cardId, releaseWhen, onUpstreamFailure });
+  }
+  return [...byCardId.values()];
+}
+
+/**
+ * Closed, frozen vocabulary of every built-in gate id — the keys of the build-time `GATE_CHECKS`
+ * registry. Config may only REFERENCE these ids; an unknown gate id fails closed.
+ */
+export const WORKFLOW_GATE_VOCABULARY = [
+  'classified_and_project_scoped',
+  'has_owner_and_acceptance',
+  'no_active_blocker',
+  'audit_pass_or_explicit_waiver',
+  'clean_diff_and_hygiene',
+  'rework_authorized',
+];
+
+/** Floor-gate classification (inv 9, 10). */
+export const WORKFLOW_HYGIENE_GATES = ['clean_diff_and_hygiene'];
+export const WORKFLOW_AUDIT_GATES = ['audit_pass_or_explicit_waiver'];
+export const WORKFLOW_RECOVERY_GATES = ['rework_authorized'];
+
+export function gateIsHygiene(gateId) {
+  return WORKFLOW_HYGIENE_GATES.includes(gateId);
+}
+
+export function gateIsAudit(gateId) {
+  return WORKFLOW_AUDIT_GATES.includes(gateId);
+}
+
+export function gateIsRecovery(gateId) {
+  return WORKFLOW_RECOVERY_GATES.includes(gateId);
+}
+
+/**
+ * Floor-gate monotonicity: `customGateIds` must be a superset of the floor (hygiene + audit) gates
+ * present in `baseGateIds`. Adding non-floor gates is fine; dropping a floor gate is non-monotonic.
+ */
+export function isFloorGateMonotonic(baseGateIds, customGateIds) {
+  let base = textArray(baseGateIds);
+  let custom = new Set(textArray(customGateIds));
+  return base
+    .filter(gate => gateIsHygiene(gate) || gateIsAudit(gate))
+    .every(gate => custom.has(gate));
 }
 
 export const ACTIVE_RECOVERY_COLUMN_IDS = [
@@ -525,6 +647,8 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
     automation: normalizeWorkflowAutomation(input.automation),
     entityRefs: normalizeWorkflowEntityRefs(input.entityRefs ?? input.entity_refs ?? {}),
     metadata: objectOrEmpty(input.metadata),
+    lifecycle: normalizeWorkflowLifecycle(input.lifecycle),
+    dependsOn: normalizeWorkflowDependsOn(input.dependsOn ?? input.depends_on),
     recoveryFlags: normalizeRecoveryFlags(input.recoveryFlags ?? input.recovery_flags),
     version: positiveVersion(input.version ?? opts.version),
     createdAt: input.createdAt ?? input.created_at ?? opts.createdAt ?? now,
@@ -650,4 +774,272 @@ export function evaluateWorkflowTransitionGates({ board, card, checks = {}, requ
   }
 
   return { ok: failures.length === 0, checks: results, failures };
+}
+
+function transitionGateIds(transition) {
+  return textArray(transition?.gates ?? transition?.gate);
+}
+
+function edgeIsRecoveryGated(gates) {
+  return gates.some(gate => gateIsRecovery(gate));
+}
+
+function edgeIsHygieneGated(gates) {
+  return gates.some(gate => gateIsHygiene(gate));
+}
+
+function edgeIsAuditGated(gates) {
+  return gates.some(gate => gateIsAudit(gate));
+}
+
+/**
+ * Longest-path topo rank over an adjacency map. Sources (no inbound) start at 0; each node's rank is
+ * the max rank of its predecessors + 1 (Kahn order). If a cycle blocks Kahn from draining, the
+ * remaining nodes fall back to a stable index order so the classifier never throws — the validator
+ * reports the cycle separately.
+ */
+function computeStageRank(columnIds, forwardEdges) {
+  let indegree = new Map(columnIds.map(id => [id, 0]));
+  let adjacency = new Map(columnIds.map(id => [id, []]));
+  for (let edge of forwardEdges) {
+    if (!adjacency.has(edge.from) || !indegree.has(edge.to)) continue;
+    adjacency.get(edge.from).push(edge.to);
+    indegree.set(edge.to, indegree.get(edge.to) + 1);
+  }
+  let rank = new Map(columnIds.map(id => [id, 0]));
+  let queue = columnIds.filter(id => indegree.get(id) === 0);
+  let processed = 0;
+  while (queue.length) {
+    let node = queue.shift();
+    processed += 1;
+    for (let next of adjacency.get(node)) {
+      rank.set(next, Math.max(rank.get(next), rank.get(node) + 1));
+      indegree.set(next, indegree.get(next) - 1);
+      if (indegree.get(next) === 0) queue.push(next);
+    }
+  }
+  if (processed < columnIds.length) {
+    // Cycle present: assign remaining (still-blocked) nodes a stable index-based rank.
+    columnIds.forEach((id, index) => {
+      if (indegree.get(id) > 0) rank.set(id, index);
+    });
+  }
+  return rank;
+}
+
+/**
+ * Shared transition-graph classifier (AD-6). Computes the forward subgraph `G_f` (all edges except
+ * recovery edges), topological `stageRank` over `G_f`, the terminal set, and per-edge classification
+ * (`forward`/`recovery`, `backward`, `destructive`). A **recovery edge** is recovery-gated AND
+ * strictly rank-decreasing; rank is established over the non-recovery-gated edges so the definition is
+ * well-founded. No column name is hardcoded — terminals come from `automation.action === 'close'`.
+ */
+export function classifyWorkflowGraph(board) {
+  let columns = Array.isArray(board?.columns) ? board.columns : [];
+  let columnIds = columns.map(column => column.id).filter(Boolean);
+  let transitions = Array.isArray(board?.transitions) ? board.transitions : [];
+
+  let terminals = new Set(
+    columns.filter(column => column?.automation?.action === 'close').map(column => column.id),
+  );
+
+  let rawEdges = transitions
+    .map((transition) => {
+      let gates = transitionGateIds(transition);
+      return {
+        from: textOrNull(transition.from),
+        to: textOrNull(transition.to),
+        gates,
+        recoveryGated: edgeIsRecoveryGated(gates),
+      };
+    })
+    .filter(edge => edge.from && edge.to);
+
+  // Rank basis: non-recovery-gated edges. Recovery-gated edges are the only recovery candidates.
+  let rankBasisEdges = rawEdges.filter(edge => !edge.recoveryGated);
+  let stageRank = computeStageRank(columnIds, rankBasisEdges);
+  let rankOf = (columnId) => (stageRank.has(columnId) ? stageRank.get(columnId) : -1);
+
+  let edges = rawEdges.map((edge) => {
+    let fromRank = rankOf(edge.from);
+    let toRank = rankOf(edge.to);
+    let rankDecreasing = toRank < fromRank;
+    let edgeClass = edge.recoveryGated && rankDecreasing ? 'recovery' : 'forward';
+    let backward = rankDecreasing;
+    let destructive = backward && (terminals.has(edge.from));
+    return { from: edge.from, to: edge.to, gates: edge.gates, edgeClass, backward, destructive };
+  });
+
+  let edgeClassIndex = new Map(edges.map(edge => [`${edge.from} ${edge.to}`, edge.edgeClass]));
+
+  return {
+    stageRank,
+    terminals,
+    edges,
+    rankOf,
+    isTerminal: (columnId) => terminals.has(columnId),
+    edgeClass: (from, to) => edgeClassIndex.get(`${from} ${to}`) ?? null,
+  };
+}
+
+/**
+ * Formal transition-graph validation (AD-6, inv 11). Returns `{ ok, errors, classifier }`. The forward
+ * subgraph `G_f` (edges classified `forward`) must be acyclic; every terminal `t` must have a hygiene
+ * inbound edge-cut (P1) and audit-domination (P2); reachability (no dead-end non-terminals, every
+ * terminal reachable + non-orphan); and every referenced gate must be in the closed vocabulary.
+ */
+export function validateWorkflowTransitionGraph(board) {
+  let classifier = classifyWorkflowGraph(board);
+  let errors = [];
+  let columns = Array.isArray(board?.columns) ? board.columns : [];
+  let columnIds = columns.map(column => column.id).filter(Boolean);
+  let terminals = classifier.terminals;
+  let forwardEdges = classifier.edges.filter(edge => edge.edgeClass === 'forward');
+
+  // (4) Unknown gate fails closed.
+  for (let edge of classifier.edges) {
+    for (let gate of edge.gates) {
+      if (!WORKFLOW_GATE_VOCABULARY.includes(gate)) {
+        errors.push({ code: 'unknown_gate', detail: `Transition ${edge.from} -> ${edge.to} references unknown gate "${gate}".` });
+      }
+    }
+  }
+
+  // (1) G_f acyclic — Kahn over forward edges; if it cannot drain, a forward cycle exists.
+  let indegree = new Map(columnIds.map(id => [id, 0]));
+  let adjacency = new Map(columnIds.map(id => [id, []]));
+  let inbound = new Map(columnIds.map(id => [id, []]));
+  for (let edge of forwardEdges) {
+    if (!adjacency.has(edge.from) || !indegree.has(edge.to)) continue;
+    adjacency.get(edge.from).push(edge.to);
+    inbound.get(edge.to).push(edge);
+    indegree.set(edge.to, indegree.get(edge.to) + 1);
+  }
+  let working = new Map(indegree);
+  let queue = columnIds.filter(id => working.get(id) === 0);
+  let visitedOrder = [];
+  while (queue.length) {
+    let node = queue.shift();
+    visitedOrder.push(node);
+    for (let next of adjacency.get(node)) {
+      working.set(next, working.get(next) - 1);
+      if (working.get(next) === 0) queue.push(next);
+    }
+  }
+  let hasForwardCycle = visitedOrder.length < columnIds.length;
+  if (hasForwardCycle) {
+    errors.push({ code: 'forward_cycle', detail: 'Forward subgraph G_f contains a cycle.' });
+  }
+
+  // Sources = columns with no inbound forward edge.
+  let sources = columnIds.filter(id => inbound.get(id).length === 0);
+
+  // Forward reachability from the source set.
+  let reachable = new Set();
+  let stack = [...sources];
+  while (stack.length) {
+    let node = stack.pop();
+    if (reachable.has(node)) continue;
+    reachable.add(node);
+    for (let next of adjacency.get(node) ?? []) stack.push(next);
+  }
+
+  // (3) Reachability: dead-end non-terminals; unreachable/orphan terminals.
+  for (let id of columnIds) {
+    let isTerminal = terminals.has(id);
+    let outbound = adjacency.get(id) ?? [];
+    if (!isTerminal && outbound.length === 0) {
+      errors.push({ code: 'dead_end_column', detail: `Non-terminal column "${id}" has no outbound forward edge.` });
+    }
+    if (isTerminal) {
+      if (inbound.get(id).length === 0) {
+        errors.push({ code: 'dead_end_column', detail: `Terminal column "${id}" is an orphan (no inbound forward edge).` });
+      }
+      if (!reachable.has(id)) {
+        errors.push({ code: 'unreachable_terminal', detail: `Terminal column "${id}" is not reachable from any source.` });
+      }
+    }
+  }
+
+  // (2) Per-terminal floor-gate properties.
+  for (let terminal of terminals) {
+    let inboundEdges = inbound.get(terminal) ?? [];
+    // P1 — hygiene inbound edge-cut: every inbound forward edge must be hygiene-gated.
+    if (inboundEdges.length > 0 && !inboundEdges.every(edge => edgeIsHygieneGated(edge.gates))) {
+      errors.push({ code: 'hygiene_cut_incomplete', detail: `Terminal column "${terminal}" has an inbound forward edge without a hygiene gate.` });
+    }
+    // P2 — audit domination: every forward path source -> terminal passes an audit-gated edge.
+    if (!auditDominatesTerminal(terminal, sources, adjacency, inbound)) {
+      errors.push({ code: 'audit_not_dominating', detail: `Audit-gated edges do not dominate terminal column "${terminal}".` });
+    }
+  }
+
+  return { ok: errors.length === 0, errors, classifier };
+}
+
+/**
+ * Audit-domination check: does every forward path from any source to `terminal` traverse at least one
+ * audit-gated edge? Walk forward edges from the sources but stop descending through audit-gated edges
+ * (they satisfy domination on that path). If the terminal is still reachable without crossing an audit
+ * gate, domination fails.
+ */
+function auditDominatesTerminal(terminal, sources, adjacency, inbound) {
+  let auditEdgeTargets = new Set();
+  for (let [, edges] of inbound) {
+    for (let edge of edges) {
+      if (edgeIsAuditGated(edge.gates)) auditEdgeTargets.add(`${edge.from} ${edge.to}`);
+    }
+  }
+  let reachedWithoutAudit = new Set();
+  let stack = sources.filter(id => id !== terminal);
+  while (stack.length) {
+    let node = stack.pop();
+    if (reachedWithoutAudit.has(node)) continue;
+    reachedWithoutAudit.add(node);
+    if (node === terminal) return false;
+    for (let next of adjacency.get(node) ?? []) {
+      // Crossing an audit-gated edge satisfies domination on this path; do not descend through it.
+      if (auditEdgeTargets.has(`${node} ${next}`)) continue;
+      stack.push(next);
+    }
+  }
+  return !reachedWithoutAudit.has(terminal);
+}
+
+/**
+ * One-time forward migration of a card to schema v2 (AD-8). Stamps the v2 schema, fills `lifecycle`
+ * (default `idle`) and `dependsOn` (default `[]`) when absent, preserves every other field.
+ * Idempotent and pure (no clock dependence beyond the passed-in card).
+ */
+export function migrateWorkflowCardToV2(card) {
+  let source = objectOrEmpty(card);
+  return {
+    ...source,
+    schema: WORKFLOW_CARD_SCHEMA,
+    lifecycle: normalizeWorkflowLifecycle(source.lifecycle),
+    dependsOn: normalizeWorkflowDependsOn(source.dependsOn ?? source.depends_on),
+  };
+}
+
+/**
+ * One-time forward migration of a board to schema v2 (AD-8, inv 17). Stamps the v2 schema and
+ * normalizes columns/transitions to the current shape — FILL-ONLY: a user-customized column or
+ * transition value is never overwritten; only missing v2 fields are added. Idempotent.
+ */
+export function migrateWorkflowBoardToV2(board) {
+  let source = objectOrEmpty(board);
+  let columns = Array.isArray(source.columns) ? source.columns : [];
+  let transitions = Array.isArray(source.transitions) ? source.transitions : [];
+  return {
+    ...source,
+    schema: WORKFLOW_BOARD_SCHEMA,
+    columns: columns.map(column => ({
+      ...column,
+      automation: { ...objectOrEmpty(column?.automation) },
+    })),
+    transitions: transitions.map(transition => ({
+      ...transition,
+      gates: textArray(transition?.gates ?? transition?.gate),
+    })),
+  };
 }
