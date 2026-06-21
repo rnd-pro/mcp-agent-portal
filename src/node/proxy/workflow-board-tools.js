@@ -66,6 +66,41 @@ const ACTIONS = {
     description: 'Move a card through the shared gated transition engine. Entering auto columns can trigger orchestration.',
     required: ['cardId', 'toColumnId'],
   },
+  enqueue: {
+    method: 'enqueueWorkflowCard',
+    description: 'Admit a card into the scheduler queue (lifecycle queued). Returns admissionId; the scheduler drains it under capacity.',
+    required: ['cardId'],
+  },
+  queue: {
+    method: 'getWorkflowBoard',
+    description: 'Read-only queue/telemetry projection: per-card lifecycle, queue slots, and board queue depth.',
+    required: [],
+  },
+  link_dependency: {
+    method: 'linkDependency',
+    description: 'Add upstream dependency edge(s) to a card. A card with an unsatisfied edge is held blocked until released.',
+    required: ['cardId', 'dependsOn'],
+  },
+  unlink_dependency: {
+    method: 'unlinkDependency',
+    description: 'Remove upstream dependency edge(s) from a card and recompute its blocked/idle lifecycle.',
+    required: ['cardId', 'dependsOn'],
+  },
+  define_column: {
+    method: 'defineWorkflowColumn',
+    description: 'Add or update a board column. Re-validates the transition graph; an invalid graph is rejected. Authoring is policy.define.',
+    required: ['columnId'],
+  },
+  define_transition: {
+    method: 'defineWorkflowTransition',
+    description: 'Add or update a transition edge with closed-vocabulary gates. Re-validates the graph. Authoring is policy.define.',
+    required: ['from', 'to'],
+  },
+  define_gate: {
+    method: 'defineWorkflowGate',
+    description: 'Replace the gate list on an existing transition. Floor gates may not be weakened on a forward edge. Authoring is policy.define.',
+    required: ['from', 'to', 'gates'],
+  },
   orchestrate: {
     method: 'orchestrateWorkItem',
     description: 'Ask the Portal orchestrator to run an eligible work item.',
@@ -130,6 +165,51 @@ const ACTION_EXAMPLES = {
     boardId: DEFAULT_WORKFLOW_BOARD_ID,
     cardId: 'card-id',
     reason: 'Card entered the ready column',
+  },
+  enqueue: {
+    action: 'enqueue',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'card-id',
+    reason: 'Admit the card into the scheduler queue',
+  },
+  queue: {
+    action: 'queue',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    projectId: 'project-id',
+  },
+  link_dependency: {
+    action: 'link_dependency',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'downstream-card-id',
+    dependsOn: ['upstream-card-id'],
+  },
+  unlink_dependency: {
+    action: 'unlink_dependency',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'downstream-card-id',
+    dependsOn: ['upstream-card-id'],
+  },
+  define_column: {
+    action: 'define_column',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    columnId: 'design-review',
+    title: 'Design Review',
+    after: 'backlog',
+    automation: { trigger: 'on_enter', action: 'audit', mode: 'gated', agents: ['code-reviewer'] },
+  },
+  define_transition: {
+    action: 'define_transition',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    from: 'backlog',
+    to: 'design-review',
+    gates: ['has_owner_and_acceptance'],
+  },
+  define_gate: {
+    action: 'define_gate',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    from: 'quality-audit',
+    to: 'commit-publish',
+    gates: ['audit_pass_or_explicit_waiver'],
   },
   delete_item: {
     action: 'delete_item',
@@ -277,6 +357,12 @@ function createRemoteWorkflowBoardService(backend) {
     updateWorkflowColumn: args => post('/api/workflow-board/columns/update', args, true),
     deleteWorkItem: args => post('/api/workflow-board/delete', args, true),
     requestWorkflowTransition: args => post('/api/workflow-board/transition', args, true),
+    enqueueWorkflowCard: args => post('/api/workflow-board/enqueue', args, true),
+    linkDependency: args => post('/api/workflow-board/dependencies/link', args, true),
+    unlinkDependency: args => post('/api/workflow-board/dependencies/unlink', args, true),
+    defineWorkflowColumn: args => post('/api/workflow-board/columns/define', args, true),
+    defineWorkflowTransition: args => post('/api/workflow-board/transitions/define', args, true),
+    defineWorkflowGate: args => post('/api/workflow-board/gates/define', args, true),
     orchestrateWorkItem: args => post('/api/workflow-board/orchestrate', args, true),
     controlWorkItem: args => post('/api/workflow-board/control', args, true),
     getWorkflowRecoveryState: args => get('/api/workflow-board/recovery', args),
@@ -310,7 +396,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         includeEvents: { type: 'boolean', description: 'Include recent events for get_board.' },
         includeRuntime: { type: 'boolean', description: 'Include linked runtime projection for get_board.' },
         compact: { type: 'boolean', description: 'Return a bounded status projection for L1 monitoring instead of full card history.' },
-        view: { type: 'string', enum: ['status'], description: 'Projection view for get_board. Use status for compact monitoring.' },
+        view: { type: 'string', enum: ['status', 'queue'], description: 'Projection view for get_board/queue. Use status for compact monitoring, queue for scheduler depth.' },
         includeResolved: { type: 'boolean', description: 'Include resolved recovery records for recovery.' },
         cardId: { type: 'string', description: 'Workflow card/work-item ID.' },
         parentCardId: { type: 'string', description: 'Parent workflow card ID for child cards.' },
@@ -360,6 +446,22 @@ export const WORKFLOW_BOARD_TOOLS = [
         checks: { type: 'object', description: 'Optional gate checks for update_item.' },
         fromColumnId: { type: 'string', description: 'Expected current column for transition.' },
         toColumnId: { type: 'string', enum: DEFAULT_WORKFLOW_COLUMN_IDS, description: 'Destination column for transition.' },
+        from: { type: 'string', description: 'Source column for define_transition/define_gate.' },
+        to: { type: 'string', description: 'Destination column for define_transition/define_gate.' },
+        gates: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Closed-vocabulary gate ids for define_transition/define_gate.',
+        },
+        title: { type: 'string', description: 'Column title for define_column.' },
+        after: { type: 'string', description: 'Insert a new define_column column after this column id.' },
+        position: { type: 'number', description: 'Insert a new define_column column at this index.' },
+        dependsOn: {
+          type: 'array',
+          items: { type: ['string', 'object'] },
+          description: 'Upstream dependency edge(s) for link_dependency/unlink_dependency.',
+        },
+        notBefore: { type: 'number', description: 'Earliest admission timestamp for enqueue.' },
         mode: { type: 'string', enum: ['manual', 'auto', 'gated'], description: 'Transition or orchestration mode.' },
         boardMode: { type: 'string', enum: ['passive', 'armed', 'autonomous', 'manual', 'paused', 'draining', 'stopped', 'maintenance', 'recovery_only'], description: 'Board mode for action=control_board resume overrides.' },
         control: { type: 'string', enum: ['pause', 'stop', 'cancel', 'resume', 'drain', 'maintenance', 'manual', 'recovery_only', 'arm'], description: 'Runtime control action for action=control or board action for action=control_board.' },
@@ -615,6 +717,44 @@ function serviceArgsForAction(action, args = {}) {
       mode: args.mode,
     });
   }
+  if (action === 'enqueue') {
+    return cleanUndefined({
+      ...common,
+      notBefore: args.notBefore,
+    });
+  }
+  if (action === 'queue') {
+    return cleanUndefined({
+      ...common,
+      includeCards: args.includeCards,
+      includeRuntime: args.includeRuntime,
+      view: 'queue',
+    });
+  }
+  if (action === 'link_dependency' || action === 'unlink_dependency') {
+    return cleanUndefined({
+      ...common,
+      dependsOn: args.dependsOn,
+    });
+  }
+  if (action === 'define_column') {
+    return cleanUndefined({
+      ...common,
+      columnId: args.columnId,
+      title: args.title,
+      automation: args.automation,
+      after: args.after,
+      position: args.position,
+    });
+  }
+  if (action === 'define_transition' || action === 'define_gate') {
+    return cleanUndefined({
+      ...common,
+      from: args.from,
+      to: args.to,
+      gates: args.gates,
+    });
+  }
   if (action === 'orchestrate') {
     return cleanUndefined({
       ...common,
@@ -716,7 +856,28 @@ function nextForAction(action, args = {}, result = {}) {
       call: statusRefreshCall(),
     };
   }
-  if (action === 'orchestrate' || action === 'control' || action === 'control_board' || action === 'update_item' || action === 'update_board' || action === 'update_column' || action === 'delete_item') {
+  if (action === 'enqueue') {
+    return {
+      recommendedAction: 'queue',
+      reason: 'Inspect scheduler queue depth and the card lifecycle after admission.',
+      call: cleanUndefined({ action: 'queue', boardId, projectId: args.projectId }),
+    };
+  }
+  if (action === 'define_column' || action === 'define_transition' || action === 'define_gate') {
+    if (result.ok === false) {
+      return {
+        recommendedAction: 'help',
+        reason: 'The board edit was rejected by the graph validator or held for approval; read failures, then retry.',
+        call: { action: 'help' },
+      };
+    }
+    return {
+      recommendedAction: 'get_board',
+      reason: 'Refresh the board projection to inspect the authored columns/transitions.',
+      call: statusRefreshCall(),
+    };
+  }
+  if (action === 'orchestrate' || action === 'control' || action === 'control_board' || action === 'update_item' || action === 'update_board' || action === 'update_column' || action === 'delete_item' || action === 'link_dependency' || action === 'unlink_dependency') {
     return {
       recommendedAction: 'get_board',
       reason: 'Refresh board state after runtime or card mutation.',
@@ -731,10 +892,16 @@ function hintsForAction(action, result = {}) {
     'Use action=help when unsure which workflow_board command to call.',
     'Use action=get_board to refresh current board state before deciding the next mutation.',
   ];
-  if (action === 'get_board') {
+  if (action === 'get_board' || action === 'queue') {
     hints.push('Use action=transition for column moves; do not mutate columnId directly.');
   }
-  if (result?.status === 'blocked' || result?.ok === false) {
+  if (action === 'define_column' || action === 'define_transition' || action === 'define_gate') {
+    hints.push('Board authoring is policy.define: a non-author edit returns pendingApproval, and an invalid graph is rejected with the validator error.');
+  }
+  if (action === 'enqueue') {
+    hints.push('Use action=queue to watch queue depth; the scheduler admits queued cards under capacity.');
+  }
+  if (result?.status === 'blocked' || result?.status === 'pendingApproval' || result?.ok === false) {
     hints.push('Read gateResult/failures, then use action=update_item or checks before retrying.');
   }
   return hints;
