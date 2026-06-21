@@ -123,6 +123,12 @@ function priorityOrdinal(priority) {
   return WORKFLOW_PRIORITY_ORDER.normal;
 }
 
+// Deterministic code-unit string comparison (inv 6): locale-independent so the admission order is
+// restart-stable across hosts, unlike `localeCompare` whose collation varies by ICU/locale.
+function compareCodeUnits(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 // Deterministic, reconstructable admissionId (AD-2 / D1.1): a stable hash of the immutable enqueue
 // identity. The same (boardId, cardId, enqueuedAt, queueEpoch) always yields the same id, so a
 // re-drive under a new lease epoch produces the SAME admissionId — the ledger and agent-pool dedup
@@ -817,7 +823,18 @@ export function createWorkflowBoardService(opts = {}) {
     }
 
     stateGraph.commit(ops, sourceForPrincipal(principal));
-    return { ok: true, board, card, checks, ...(deniedRights.length ? { deniedRightsFields: deniedRights } : {}) };
+
+    // F-DEP-1(a): enforce dependency satisfaction on the PRIMARY write path. Enforcement otherwise
+    // lived only in linkDependency→recomputeDependencyLifecycle, so a card written here with a
+    // populated `dependsOn` (create, update, import, decompose) stayed `idle`, enqueued, and admitted
+    // with deps unmet. Recompute now: a not-yet-queued card with an unsatisfied edge → `blocked`.
+    // The scheduler still owns queued/admitting/running, so those lifecycles are left untouched.
+    let resultCard = card;
+    if (card.dependsOn.length && ['idle', 'blocked'].includes(normalizeWorkflowLifecycle(card.lifecycle))) {
+      let outcome = recomputeDependencyLifecycle(board, card, principal);
+      resultCard = outcome.card;
+    }
+    return { ok: true, board, card: resultCard, checks, ...(deniedRights.length ? { deniedRightsFields: deniedRights } : {}) };
   }
 
   // Narrow-only floor-gate check (inv 12): a card's `automation.gates` override may only NARROW the
@@ -1281,11 +1298,26 @@ export function createWorkflowBoardService(opts = {}) {
   // groups after it (wrapping) sort first, so the next pass starts a different group — round-robin.
   function admissionOrder(boardId, entries) {
     let cursorGroup = textOrNull(stateGraph.get(`workflowQueueCursor/${boardId}`)?.groupKey);
-    let groups = [...new Set(entries.map(entry => entry.groupKey))].sort();
+    let groups = [...new Set(entries.map(entry => entry.groupKey))].sort(compareCodeUnits);
     let rank = new Map();
     if (groups.length) {
-      let start = cursorGroup ? (groups.indexOf(cursorGroup) + 1) : 0;
-      if (start < 0) start = 0;
+      // F-SCH-5: round-robin fairness. The cursor names the last-admitted group; the next pass starts
+      // at the group AFTER it. When that group has since drained (absent from `groups`), do not reset
+      // to group 0 (which re-starves whatever was already served) — continue from the position the
+      // cursor occupied by inserting it into the sorted order and resuming at the next index.
+      let start;
+      if (!cursorGroup) {
+        start = 0;
+      } else {
+        let idx = groups.indexOf(cursorGroup);
+        if (idx >= 0) {
+          start = idx + 1;
+        } else {
+          // Cursor group drained: find where it WOULD sit and continue from the next surviving group.
+          let insertAt = groups.findIndex(group => compareCodeUnits(group, cursorGroup) > 0);
+          start = insertAt < 0 ? 0 : insertAt;
+        }
+      }
       for (let i = 0; i < groups.length; i += 1) {
         rank.set(groups[(start + i) % groups.length], i);
       }
@@ -1295,7 +1327,8 @@ export function createWorkflowBoardService(opts = {}) {
       if (groupDelta !== 0) return groupDelta;
       if (a.priority !== b.priority) return b.priority - a.priority;
       if (a.enqueuedAt !== b.enqueuedAt) return a.enqueuedAt - b.enqueuedAt;
-      return a.cardId.localeCompare(b.cardId);
+      // F-SCH-4: deterministic code-unit tiebreak (locale-independent, restart-stable across hosts).
+      return compareCodeUnits(a.cardId, b.cardId);
     });
   }
 
@@ -1596,6 +1629,22 @@ export function createWorkflowBoardService(opts = {}) {
     return next;
   }
 
+  // Is an upstream card already in a settled terminal-failure state? (F-DEP-2 level check.) True when
+  // its latest run terminal-FAILED (error|failed|cancelled) and nothing is still in flight that could
+  // clear it (no requested/running/recovering run). This is the level-triggered counterpart of the
+  // reconcile edge-trigger (which only fires on a status TRANSITION): an upstream that was already
+  // failed when the edge was linked never transitions, so the dependent would otherwise sit blocked
+  // until the 24h max-blocked-age tick. A terminal SUCCESS is satisfaction, not failure, and is not
+  // reported here.
+  function upstreamInTerminalFailure(upstreamCard) {
+    if (!upstreamCard) return false;
+    let runs = getRunsForCard(upstreamCard.id);
+    if (!runs.length) return false;
+    if (runs.some(run => RUNNING_RUN_STATUSES.has(run.status))) return false;
+    let latest = runs[runs.length - 1];
+    return ['error', 'failed', 'cancelled'].includes(textOrNull(latest.status));
+  }
+
   // Failure propagation (inv 22): an upstream reaching a terminal-failure or being deleted resolves
   // every downstream edge that points at it, per the dependent's `onUpstreamFailure`. Fan-in fast-fail:
   // a dependent with multiple edges resolves the moment ANY required edge terminal-fails (we do not
@@ -1641,6 +1690,34 @@ export function createWorkflowBoardService(opts = {}) {
       if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked') continue;
       let live = clone(card);
       let releasedEdges = releasedEdgesFor(live);
+      // F-DEP-2: level-trigger onUpstreamFailure. Before the satisfaction check, resolve any edge
+      // whose upstream is ALREADY in a settled terminal-failure (the edge-triggered reconcile path
+      // only fires on a status transition, so an already-failed upstream at link time never escalates
+      // until the 24h tick). Apply the edge's policy now: release marks the edge satisfied,
+      // cancel_self cancels the dependent, block_and_escalate raises needs_decision. After resolution
+      // the dependent's state may change, so re-read it before the satisfaction check below.
+      let resolvedAny = false;
+      for (let dep of cardDependsOn(live)) {
+        if (releasedEdges.has(dep.cardId)) continue;
+        let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
+        if (!upstreamInTerminalFailure(upstream)) continue;
+        let detail = `Upstream dependency ${dep.cardId} reached a terminal failure; resolving edge on ${card.id} per onUpstreamFailure=${dep.onUpstreamFailure}.`;
+        if (dep.onUpstreamFailure === 'release') {
+          commitReleasedEdge(live, dep.cardId, principal);
+        } else if (dep.onUpstreamFailure === 'cancel_self') {
+          cancelDependentCard(board, live, principal, detail);
+        } else {
+          raiseDependencyEscalation(board, live, principal, detail, 'Decide whether to release, reroute, or cancel the dependent.');
+        }
+        resolvedAny = true;
+      }
+      if (resolvedAny) {
+        let refreshed = stateGraph.get(`workflowCards/${card.id}`);
+        // cancel_self moved the card off `blocked` (to its terminal column) — nothing more to do.
+        if (!refreshed || normalizeWorkflowLifecycle(refreshed.lifecycle) !== 'blocked') continue;
+        live = clone(refreshed);
+        releasedEdges = releasedEdgesFor(live);
+      }
       if (allDependenciesSatisfied(live, board, classifier, releasedEdges)) {
         let idle = commitDependencyUnblock(live, principal);
         let enqueued = enqueueWorkItem(board, idle);
@@ -2177,6 +2254,38 @@ export function createWorkflowBoardService(opts = {}) {
         sourceForPrincipal(daemonPrincipal()), { durable: true });
       return { admissionId: entry.admissionId, reason: 'dependency_cycle' };
     }
+    // F-DEP-1(b): defense in depth. The queue must never run a card with unsatisfied dependencies,
+    // even if one slipped past the write-path recompute (a concurrent edit, a stale enqueue, or an
+    // upstream that regressed after enqueue). Re-block the card and drop its queue entry under the
+    // epoch fence; the release tick re-enqueues it once every edge is satisfied.
+    {
+      let depClassifier = classifyWorkflowGraph(board);
+      let depReleased = releasedEdgesFor(card);
+      if (!allDependenciesSatisfied(card, board, depClassifier, depReleased)) {
+        let epoch = readQueueEpoch(board.id);
+        let reblocked = normalizeWorkflowCardInput({
+          ...clone(card),
+          lifecycle: 'blocked',
+          version: card.version + 1,
+          updatedAt: now(),
+          updatedBy: daemonPrincipal().label,
+        }, {
+          id: card.id,
+          actor: daemonPrincipal().label,
+          now: now(),
+          version: card.version + 1,
+          createdAt: card.createdAt,
+          updatedAt: now(),
+        });
+        stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
+          [
+            { op: 'set', path: `workflowCards/${card.id}`, value: reblocked },
+            { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+          ],
+          sourceForPrincipal(daemonPrincipal()), { durable: true });
+        return { admissionId: entry.admissionId, cardId: card.id, reason: 'dependencies_unsatisfied' };
+      }
+    }
     let principal = daemonPrincipal();
     let admittingStartedAt = now();
     let admissionRecord = {
@@ -2249,8 +2358,28 @@ export function createWorkflowBoardService(opts = {}) {
       orchestrateResult = { ok: false, error: error.message, sideEffects: [] };
     }
 
+    // F-SCH-3: re-validate that THIS pass still owns the admission lease before any promote/rollback
+    // CAS write. The orchestrate await can block up to the worst-case delegate budget (≫ the 15s lease
+    // TTL) with no heartbeat, so a second admitter may have reclaimed the lease and re-admitted this
+    // entry meanwhile. If we were displaced, write nothing and return a benign result — the new lease
+    // holder (and, failing that, recovery) owns the outcome. Combined with the idempotent-grant below,
+    // the re-admit converges instead of double-writing or stranding.
+    let liveLease = readAdmissionLease(board.id);
+    if (!liveLease || liveLease.owner !== lease.owner || Number(liveLease.leaseEpoch) !== lease.leaseEpoch) {
+      return { admissionId: entry.admissionId, cardId: card.id, displaced: true, reason: 'admission_lease_displaced' };
+    }
+
+    // F-SCH-1: a grant is the run being durably running OR an idempotent existing ACTIVE run.
+    // orchestrateWorkItem returns `{ ok, idempotent:true, run }` when activeRunForCard finds an
+    // existing run, and RUNNING_RUN_STATUSES includes `requested`/`recovering`. Such a run is already
+    // being handled, so treat it as granted: promote lifecycle→running and drop the entry. Without
+    // this, an idempotent `requested`/`recovering` run gave granted=false + slotRejected=false → the
+    // hard-failure branch deleted the entry+record and stranded the card in `admitting` forever.
     let granted = Boolean(orchestrateResult?.ok)
-      && orchestrateResult?.run?.status === 'running';
+      && (orchestrateResult?.run?.status === 'running'
+        || (orchestrateResult?.idempotent
+          && orchestrateResult?.run
+          && RUNNING_RUN_STATUSES.has(orchestrateResult.run.status)));
     if (!granted) {
       // A capacity rejection (no slot granted) re-queues the card; any other delegation failure is a
       // hard error that orchestrateWorkItem already recorded as a failed run + needs_audit. A thrown
@@ -2258,14 +2387,37 @@ export function createWorkflowBoardService(opts = {}) {
       let slotRejected = orchestrateResult?.slotRejected !== false
         && (orchestrateResult?.slotRejected === true || !orchestrateResult?.ok);
       if (!slotRejected) {
-        // (3a-hard) Hard delegation failure. Leave orchestrateWorkItem's failed run + card as-is and
-        // remove the queue entry + admission record so the card does not loop in the queue. The card
-        // keeps its column (orchestrate did not advance it) and its needs_audit recovery flag.
+        // (3a-hard) Hard delegation failure (a non-capacity error, e.g. unknown resource group).
+        // orchestrateWorkItem already recorded the failed run + needs_audit recovery flag.
+        // F-SCH-2: if agent-pool reserved a slot before the spawn failed, that slot is orphaned the
+        // moment we delete the admission record (recovery can no longer see it). Release it first
+        // (idempotent — a no-op when nothing was reserved).
+        await releaseSlotForAdmission(entry.admissionId, context);
+        // F-SCH-1 (defense): never leave the card in `admitting` with no admission record — that is
+        // unrecoverable (reconcile only resolves `admitting` cards that still have a record). Demote
+        // lifecycle→idle in the SAME frame that drops the entry + record, keeping the failed run and
+        // needs_audit flag so a human/auditor can re-engage. A stuck card is then always recoverable.
+        let failedCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+        let recoverableCard = normalizeWorkflowCardInput({
+          ...clone(failedCard),
+          lifecycle: 'idle',
+          version: failedCard.version + 1,
+          updatedAt: now(),
+          updatedBy: principal.label,
+        }, {
+          id: card.id,
+          actor: principal.label,
+          now: now(),
+          version: failedCard.version + 1,
+          createdAt: failedCard.createdAt,
+          updatedAt: now(),
+        });
         let removeEpoch = readQueueEpoch(board.id);
         stateGraph.commitCAS(
           `workflowQueueEpoch/${board.id}`,
           removeEpoch,
           [
+            { op: 'set', path: `workflowCards/${card.id}`, value: recoverableCard },
             { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
             { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
           ],
@@ -5245,6 +5397,8 @@ export function createWorkflowBoardService(opts = {}) {
     orchestrateWorkItem,
     enqueueWorkItem,
     enqueueWorkflowCard,
+    listQueueEntries,
+    admissionOrder,
     drainWorkflowQueue,
     linkDependency,
     unlinkDependency,

@@ -30,46 +30,55 @@ const ACTIONS = {
     method: 'createWorkItem',
     description: 'Create a workflow card/work item.',
     required: ['title'],
+    mutates: true,
   },
   decompose: {
     method: 'decomposeWorkItem',
     description: 'Split a broad workflow card into first-class child cards without starting them automatically.',
     required: ['cardId', 'childItems'],
+    mutates: true,
   },
   update_item: {
     method: 'updateWorkItem',
     description: 'Patch a workflow card/work item.',
     required: ['cardId'],
+    mutates: true,
   },
   update_board: {
     method: 'updateWorkflowBoard',
     description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit.',
     required: ['patch'],
+    mutates: true,
   },
   control_board: {
     method: 'controlWorkflowBoard',
     description: 'Apply a board-level automation control action such as pause, resume, drain, stop, manual, recovery_only, or maintenance.',
     required: ['control'],
+    mutates: true,
   },
   update_column: {
     method: 'updateWorkflowColumn',
     description: 'Patch column automation settings such as trigger, mode, agent pool, and parallel limit.',
     required: ['columnId', 'patch'],
+    mutates: true,
   },
   delete_item: {
     method: 'deleteWorkItem',
     description: 'Remove a workflow card from the board while preserving audited transition history.',
     required: ['cardId'],
+    mutates: true,
   },
   transition: {
     method: 'requestWorkflowTransition',
     description: 'Move a card through the shared gated transition engine. Entering auto columns can trigger orchestration.',
     required: ['cardId', 'toColumnId'],
+    mutates: true,
   },
   enqueue: {
     method: 'enqueueWorkflowCard',
     description: 'Admit a card into the scheduler queue (lifecycle queued). Returns admissionId; the scheduler drains it under capacity.',
     required: ['cardId'],
+    mutates: true,
   },
   queue: {
     method: 'getWorkflowBoard',
@@ -80,36 +89,43 @@ const ACTIONS = {
     method: 'linkDependency',
     description: 'Add upstream dependency edge(s) to a card. A card with an unsatisfied edge is held blocked until released.',
     required: ['cardId', 'dependsOn'],
+    mutates: true,
   },
   unlink_dependency: {
     method: 'unlinkDependency',
     description: 'Remove upstream dependency edge(s) from a card and recompute its blocked/idle lifecycle.',
     required: ['cardId', 'dependsOn'],
+    mutates: true,
   },
   define_column: {
     method: 'defineWorkflowColumn',
     description: 'Add or update a board column. Re-validates the transition graph; an invalid graph is rejected. Authoring is policy.define.',
     required: ['columnId'],
+    mutates: true,
   },
   define_transition: {
     method: 'defineWorkflowTransition',
     description: 'Add or update a transition edge with closed-vocabulary gates. Re-validates the graph. Authoring is policy.define.',
     required: ['from', 'to'],
+    mutates: true,
   },
   define_gate: {
     method: 'defineWorkflowGate',
     description: 'Replace the gate list on an existing transition. Floor gates may not be weakened on a forward edge. Authoring is policy.define.',
     required: ['from', 'to', 'gates'],
+    mutates: true,
   },
   orchestrate: {
     method: 'orchestrateWorkItem',
     description: 'Ask the Portal orchestrator to run an eligible work item.',
     required: ['cardId'],
+    mutates: true,
   },
   control: {
     method: 'controlWorkItem',
     description: 'Pause, stop, or cancel a running/active workflow card.',
     required: ['cardId', 'control'],
+    mutates: true,
   },
   recovery: {
     method: 'getWorkflowRecoveryState',
@@ -120,6 +136,7 @@ const ACTIONS = {
     method: 'reconcileWorkflowRecovery',
     description: 'Persist recovery flags and recovery run state for active workflow cards.',
     required: [],
+    mutates: true,
   },
   list_events: {
     method: 'listWorkflowEvents',
@@ -979,9 +996,21 @@ export async function handleWorkflowBoardTool(
   let validation = validateActionArgs(action, args);
   if (!validation.ok) return errorResult(validation.message, validation.details);
 
+  // F-SEC: prevent loopback-forward identity laundering. A live workflow backend forwards only `args`
+  // (no identity) to /api/workflow-board/*, whose principalForRequest returns a full human principal
+  // for any 127.0.0.1 request — so an agent's MCP mutation forwarded cross-process would execute with
+  // human DEFINE/AUTHOR/AUDIT rights. For any MUTATING action, force the in-process identity-aware
+  // service so the MCP-derived (agent/anonymous) principal below is the one that actually gates the
+  // write. Read-only actions may still use the live backend for a cross-process board read (no
+  // mutation, so no privilege to launder). The local-UI loopback-human path on the route is
+  // untouched: a real local browser with no forwarded principal stays human.
+  let resolveOptions = ACTIONS[action]?.mutates
+    ? { ...options, disableLiveWorkflowBackend: true }
+    : options;
+
   let service;
   try {
-    service = await resolveWorkflowBoardService(proxyManager, options);
+    service = await resolveWorkflowBoardService(proxyManager, resolveOptions);
   } catch (error) {
     return errorResult(error.message, { action });
   }

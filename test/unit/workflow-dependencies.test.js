@@ -263,6 +263,71 @@ describe('workflow board task dependencies', () => {
     assert.ok(entry.priority > unrelatedEntry.priority, 'the inheriting upstream sorts ahead of the unrelated low-priority card');
   });
 
+  // F-DEP-1 regression: dependency enforcement must hold on the PRIMARY write path, not only in
+  // linkDependency. A card written via createOrUpdateCard with a populated dependsOn whose upstream is
+  // not yet done must become `blocked` (not idle), and the scheduler must refuse to admit it.
+  it('blocks a card created via createOrUpdateCard with an unsatisfied dependsOn and never admits it', async () => {
+    makeCard('up-direct');
+    // Write the dependent directly with dependsOn populated — the bug left this at `idle`.
+    let down = makeCard('down-direct', { dependsOn: ['up-direct'] });
+    assert.equal(service.getCard(down.id).dependsOn[0].cardId, 'up-direct');
+    assert.equal(service.getCard(down.id).lifecycle, 'blocked', 'an unsatisfied dependsOn blocks on the create path');
+
+    // Defense in depth: even if a blocked card is forced into the queue, the scheduler must not admit
+    // it while the dependency is unmet. Plant a queue entry + queued lifecycle and drain.
+    let board = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let blocked = service.getCard(down.id);
+    let enqueuedAt = now;
+    sg.commit([
+      { op: 'set', path: `workflowCards/${down.id}`, value: { ...blocked, lifecycle: 'queued' } },
+      { op: 'set', path: `workflowQueueEntries/adm-down-direct`, value: {
+        schema: 'workflow-queue-entry/v1', admissionId: 'adm-down-direct', cardId: down.id, boardId: board.id,
+        columnId: blocked.columnId, groupKey: 'impl', priority: 1, basePriority: 1, priorityLabel: 'normal',
+        enqueuedAt, queueEpoch: sg.get(`workflowQueueEpoch/${board.id}`) ?? 0, notBefore: null,
+      } },
+    ], 'test:force-queue', { durable: true });
+
+    let drain = await service.drainWorkflowQueue(board.id, {});
+    assert.equal(drain.admitted.length, 0, 'the scheduler refuses to admit a card with an unmet dependency');
+    assert.notEqual(service.getCard(down.id).lifecycle, 'running', 'the unmet-dependency card never runs');
+    assert.equal(service.getCard(down.id).lifecycle, 'blocked', 'the scheduler re-blocks the card');
+
+    // Once the upstream is satisfied, the release tick frees it and a drain admits it.
+    moveToTerminal('up-direct');
+    service.releaseDependencies(board.id);
+    assert.equal(service.getCard(down.id).lifecycle, 'queued', 'satisfied dependency releases the card to the queue');
+  });
+
+  // F-DEP-2 regression: onUpstreamFailure must be level-triggered for an upstream that was ALREADY in
+  // a terminal-failure state at link time. The edge-triggered reconcile only fires on a status
+  // transition, so without the level check the dependent waits the full 24h max-blocked-age window.
+  it('applies onUpstreamFailure on the next release tick for an already-failed upstream (no 24h wait)', () => {
+    // release: an already-failed upstream lets the dependent proceed on the next tick.
+    makeCard('failed-up-rel');
+    writeRun('failed-up-rel', 'failed');
+    makeCard('down-rel', { dependsOn: [{ cardId: 'failed-up-rel', onUpstreamFailure: 'release' }] });
+    assert.equal(service.getCard('down-rel').lifecycle, 'blocked', 'blocked at link time');
+
+    // cancel_self: an already-failed upstream cancels the dependent on the next tick.
+    makeCard('failed-up-can');
+    writeRun('failed-up-can', 'failed');
+    makeCard('down-can', { dependsOn: [{ cardId: 'failed-up-can', onUpstreamFailure: 'cancel_self' }] });
+
+    // block_and_escalate (default): an already-failed upstream escalates the dependent on the tick.
+    makeCard('failed-up-esc');
+    writeRun('failed-up-esc', 'cancelled');
+    makeCard('down-esc', { dependsOn: ['failed-up-esc'] });
+
+    // A SINGLE release tick (not a 24h wait) resolves all three per policy.
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+
+    assert.equal(service.getCard('down-rel').lifecycle, 'queued', 'release lets the dependent proceed');
+    assert.equal(service.getCard('down-can').columnId, 'done', 'cancel_self moves the dependent to terminal');
+    assert.notEqual(service.getCard('down-can').lifecycle, 'blocked', 'cancel_self unblocks the dependent');
+    let esc = service.getCard('down-esc');
+    assert.equal(esc.metadata?.escalation?.kind, 'needs_decision', 'block_and_escalate raises a typed needs_decision');
+  });
+
   it('escalates a card blocked past the max-blocked-age threshold', () => {
     makeCard('stale-up');
     makeCard('stale-down');
