@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { DEFAULT_WORKFLOW_BOARD_ID } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
 import { humanPrincipal } from '../../src/node/server/principal.js';
@@ -641,5 +642,146 @@ describe('workflow admission scheduler (WS-B1)', () => {
     assert.equal(drain.admitted.length, 1);
     assert.equal(service.getCard('up-low').lifecycle, 'running', 'the inheriting upstream is admitted first');
     assert.equal(service.getCard('unrelated').lifecycle, 'queued', 'the unrelated normal card waits');
+  });
+});
+
+// Runtime-reconcile auto-advance: when a card's run terminates, reconcileWorkflowRuntimeTasks moves
+// the card forward (in-progress→quality-audit) and must (1) normalize the now-dead lifecycle off
+// `running`, and (2) under drive, fire the destination column's on_enter automation so an audit
+// actually starts — not leave the card needs_audit forever. The READ path (drive off) stays
+// side-effect-light: no agent spawns.
+describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
+  let tmpDir;
+  let sg;
+  let now;
+  let idSeq;
+  let ledger;
+  let service;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-runtime-reconcile-'));
+    sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    now = 1000;
+    idSeq = 0;
+    ledger = makeLedgerProxy();
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager: ledger.proxy,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+  });
+
+  afterEach(async () => {
+    await sg.flushChatWrites();
+    sg.flush();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // Plant a card in `in-progress` (lifecycle running) with a live run linked to a runtime task and a
+  // lease, mirroring a card the scheduler already admitted. Returns { cardId, runId, taskId }.
+  function plantRunningCard(id = 'wip') {
+    let created = service.createOrUpdateCard({
+      id,
+      title: `Card ${id}`,
+      body: 'Runtime-linked work item.',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      assignedAgent: 'backend-engineer',
+      resourceGroup: 'impl',
+      acceptanceCriteria: ['Done when audited'],
+      actor: 'test',
+    });
+    let card = created.card;
+    let runId = `run-${id}`;
+    let taskId = `task-${id}`;
+    sg.commit([
+      { op: 'set', path: `workflowCards/${id}`, value: { ...card, columnId: 'in-progress', lifecycle: 'running' } },
+      { op: 'set', path: `workflowRuns/${runId}`, value: {
+        schema: 'workflow-run/v1', id: runId, boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: id,
+        status: 'running', taskIds: [taskId], startedAt: 900, updatedAt: 901,
+      } },
+      { op: 'set', path: `workflowLeases/${id}`, value: {
+        schema: 'workflow-lease/v1', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: id, runId,
+        leaseOwner: 'orchestrator', leaseExpiresAt: 99999, updatedAt: 901,
+      } },
+    ], 'test:plant-running');
+    return { cardId: id, runId, taskId };
+  }
+
+  it('drive off: auto-advances to quality-audit, normalizes lifecycle running→idle, writes a runtime event, and spawns NOTHING', async () => {
+    let { cardId, runId, taskId } = plantRunningCard();
+    assert.equal(service.getCard(cardId).columnId, 'in-progress');
+    assert.equal(service.getCard(cardId).lifecycle, 'running');
+
+    // The runtime task is now completed; the reconcile must terminalize the run and advance the card.
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
+    let result = await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'completed run auto-advances the card to quality-audit');
+    assert.equal(card.lifecycle, 'idle', 'a terminated run normalizes the stale running lifecycle to idle');
+    assert.equal(sg.get(`workflowRuns/${runId}`).status, 'completed', 'the run is terminalized');
+
+    // The auto-advance is surfaced; no drive means no driven outcomes are computed.
+    assert.ok(result.advanced.some(item => item.cardId === cardId && item.toColumnId === 'quality-audit'));
+    assert.equal(result.driven, undefined, 'drive off omits the driven report');
+
+    // A runtime transition event is recorded for the advance.
+    let events = service.listEvents({ cardId });
+    assert.ok(events.some(event => event.eventType === 'runtime' && event.toColumnId === 'quality-audit'),
+      'a runtime event captures the advance');
+
+    // Side-effect-light: the READ path must not spawn an audit. No agent-pool delegate, no new run.
+    assert.equal(ledger.calls.filter(call => call.server === 'agent-pool').length, 0, 'no agent-pool delegation');
+    assert.equal(ledger.slotCount(), 0, 'no ledger slot reserved');
+    assert.equal(Object.values(sg.get('workflowRuns') || {}).filter(run => run.cardId === cardId).length, 1,
+      'no second (audit) run was created');
+  });
+
+  it('drive on: fires the quality-audit on_enter automation for the advanced card (a real audit delegation)', async () => {
+    let { cardId, taskId } = plantRunningCard('wip-drive');
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks, { drive: true },
+    );
+
+    // The card advanced AND the drive attempted its on_enter audit.
+    assert.ok(result.advanced.some(item => item.cardId === cardId && item.toColumnId === 'quality-audit'));
+    assert.ok(Array.isArray(result.driven), 'drive on reports driven outcomes');
+    let drivenEntry = result.driven.find(item => item.cardId === cardId);
+    assert.ok(drivenEntry, 'the advanced card is driven');
+    assert.equal(drivenEntry.ok, true, 'the on_enter audit orchestration succeeded');
+
+    // The drive went through the real admission/delegation path: the agent-pool stub was called and a
+    // slot reserved for the audit. The card is no longer stuck needs_audit with nothing running.
+    assert.ok(ledger.calls.some(call => call.server === 'agent-pool'), 'the audit reached the agent-pool delegate');
+    assert.equal(ledger.slotCount(), 1, 'exactly one audit slot reserved for the advanced card');
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit');
+    assert.equal(card.lifecycle, 'running', 'the freshly-admitted audit run puts the card back to running');
+  });
+
+  it('without drive the card stays out of audit: lifecycle is idle, needs_audit is NOT set, and no audit runs (locks the bug)', async () => {
+    // A `completed` run advances the card but does NOT stamp needs_audit (only non-completed terminals
+    // do). Pre-fix, the card sat lifecycle=running with no audit ever firing — this locks the lifecycle
+    // normalization and the absence of any spawned audit on the read path.
+    let { cardId, taskId } = plantRunningCard('wip-locked');
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    let card = service.getCard(cardId);
+    assert.notEqual(card.lifecycle, 'running', 'lifecycle must not stay running after the run terminated');
+    assert.equal(card.lifecycle, 'idle');
+    assert.equal(ledger.slotCount(), 0, 'the read reconcile never starts an audit run');
   });
 });

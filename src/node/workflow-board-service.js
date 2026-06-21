@@ -3078,7 +3078,9 @@ export function createWorkflowBoardService(opts = {}) {
     await seedWorkflowWorkItemsForProjection(filter);
     let runtimeState = await readRuntimeState(context);
     if (filter.reconcileRuntime === true || filter.reconcile_runtime === true) {
-      reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
+      // Read-side reconcile is side-effect-light: drive defaults off so a projection read never
+      // spawns an agent. Autonomous on_enter drive belongs to the reconcile loop (drive: true).
+      await reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
     }
     let projection = getBoardProjection({
       ...filter,
@@ -3340,7 +3342,7 @@ export function createWorkflowBoardService(opts = {}) {
     return card.columnId;
   }
 
-  function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks()) {
+  async function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks(), { drive = false } = {}) {
     // Schedule/projection-driven board self-reconciliation: the board's own automation
     // commits these runtime transitions, so the committing identity is the daemon.
     let principal = daemonPrincipal();
@@ -3354,6 +3356,9 @@ export function createWorkflowBoardService(opts = {}) {
     // edges are resolved after the reconcile commit (inv 22) so the upstream's failed status is
     // already durable when propagation reads it.
     let failedUpstreamIds = new Set();
+    // Cards auto-advanced into a new column this pass (e.g. in-progress→quality-audit). After the
+    // commit lands, the destination column's on_enter automation is driven for these (drive only).
+    let advanced = [];
 
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id) continue;
@@ -3418,14 +3423,21 @@ export function createWorkflowBoardService(opts = {}) {
           ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
+        // A terminated run leaves no live lifecycle; normalize stale `running` back to `idle`
+        // (valid per WORKFLOW_CARD_LIFECYCLE_STATES) so bookkeeping reflects the ended run.
+        let nextLifecycle = terminal ? 'idle' : latestCard.lifecycle;
         let needsCardUpdate = nextColumnId !== latestCard.columnId
           || nextFlags.join('|') !== normalizeRecoveryFlags(latestCard.recoveryFlags).join('|')
-          || escalationDelta !== null;
+          || escalationDelta !== null
+          || (terminal && latestCard.lifecycle === 'running');
 
         if (needsCardUpdate) {
+          // Record an auto-advance so on_enter automation can be driven post-commit (inv: drive).
+          if (nextColumnId !== latestCard.columnId) advanced.push({ cardId: latestCard.id, toColumnId: nextColumnId });
           latestCard = normalizeWorkflowCardInput({
             ...latestCard,
             columnId: nextColumnId,
+            lifecycle: nextLifecycle,
             recoveryFlags: nextFlags,
             metadata: nextMetadata,
             version: latestCard.version + 1,
@@ -3502,12 +3514,39 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
 
+    let committed = false;
     if (ops.length) {
       // The daemon's self-driven reconcile is slot/step/lease bookkeeping — gated on
       // daemon.bookkeeping (DAEMON). A non-daemon principal here would fail the gate and
       // the reconcile would not commit (fail-closed).
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
-      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+      if (result.ok) {
+        stateGraph.commit(ops, sourceForPrincipal(principal));
+        committed = true;
+      }
+    }
+    // on_enter drive (opt-in): an auto-advanced card (e.g. into quality-audit) only fires its
+    // destination column's on_enter automation on the explicit transition/create paths today. The
+    // autonomous reconcile loop owns this drive so a runtime-completed card actually starts its audit
+    // instead of sitting needs_audit forever. Best-effort and idempotent — maybeAutoOrchestrateCard's
+    // candidate gate (board mode/pickup, audit-already-passed) is the authority, and we skip a card
+    // that still has a live run. Read-side projection callers pass drive=false (no agent spawns).
+    let driven = [];
+    if (drive && committed) {
+      for (let entry of advanced) {
+        let card = stateGraph.get(`workflowCards/${entry.cardId}`);
+        if (!card) continue;
+        let automation = cardAutomation(board, card);
+        if (automation.trigger !== 'on_enter' || !['orchestrate', 'audit'].includes(automation.action)) continue;
+        if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+        let outcome = null;
+        try {
+          outcome = await maybeAutoOrchestrateCard(board, clone(card), {}, { principal });
+        } catch {
+          // best-effort autonomous drive — a failed on_enter must not abort the reconcile pass.
+        }
+        driven.push({ cardId: card.id, toColumnId: entry.toColumnId, ok: Boolean(outcome?.ok), skipped: outcome?.skipped ?? null });
+      }
     }
     // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
     // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
@@ -3517,7 +3556,9 @@ export function createWorkflowBoardService(opts = {}) {
       let upstream = stateGraph.get(`workflowCards/${upstreamId}`);
       if (upstream) propagated.push(...propagateUpstreamResolution(clone(upstream), board, 'terminal_failure'));
     }
-    return { ok: true, updated: ops.length, propagated };
+    return drive
+      ? { ok: true, updated: ops.length, propagated, advanced, driven }
+      : { ok: true, updated: ops.length, propagated, advanced };
   }
 
   function deriveRecoveryCard(card, currentNow) {
@@ -5431,7 +5472,7 @@ export function createWorkflowBoardService(opts = {}) {
         let { boards } = listWorkflowBoards({ includeArchived: false });
         for (let board of boards) {
           try {
-            reconcileWorkflowRuntimeTasks({ boardId: board.id });
+            await reconcileWorkflowRuntimeTasks({ boardId: board.id }, undefined, { drive: true });
             await reconcileWorkflowAdmissions({ boardId: board.id });
             await reconcileWorkflowRecovery({ boardId: board.id });
             await reconcileWorkflowEscalations({ boardId: board.id });

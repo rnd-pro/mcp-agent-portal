@@ -148,7 +148,7 @@ describe('workflow board task dependencies', () => {
     assert.equal(service.getCard('down-audit').lifecycle, 'queued', 'audit_passed releases on a passed audit check');
   });
 
-  it('raises a needs_decision escalation on the dependent when a block_and_escalate upstream terminal-fails', () => {
+  it('raises a needs_decision escalation on the dependent when a block_and_escalate upstream terminal-fails', async () => {
     makeCard('up-fail');
     makeCard('down-block');
     service.linkDependency({ cardId: 'down-block', dependsOn: ['up-fail'] });
@@ -174,7 +174,7 @@ describe('workflow board task dependencies', () => {
 
     // Drive the runtime reconcile with a stub runtime-tasks map reporting the task as failed.
     let runtimeTasks = new Map([['task-up-fail', { id: 'task-up-fail', status: 'failed' }]]);
-    let reconciled = service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+    let reconciled = await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
     assert.ok(reconciled.propagated.some(item => item.cardId === 'down-block' && item.resolution === 'block_and_escalate'));
 
     let down = service.getCard('down-block');
