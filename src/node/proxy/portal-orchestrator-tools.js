@@ -831,9 +831,9 @@ function withFinalAnswerReadiness(
   let repairHint = canEvaluateFinal ? finalAnswerRepairHint(chatId, taskId, finalAgentMessage, { baseHints }) : null;
   let hints = canEvaluateFinal
     ? [
-        repairHint,
-        ...baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== repairHint.id),
-      ]
+      repairHint,
+      ...baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== repairHint.id),
+    ]
     : baseHints.filter((hint) => hint?.id !== 'close-stage' && hint?.id !== 'repair-final-answer');
   let promptHintMap = {
     ...(developmentMap.promptHintMap || {}),
@@ -841,9 +841,9 @@ function withFinalAnswerReadiness(
   };
   let activityMap = developmentMap.activityMap
     ? {
-        ...developmentMap.activityMap,
-        promptHints: hints.map(summarizeLocalActivityHint),
-      }
+      ...developmentMap.activityMap,
+      promptHints: hints.map(summarizeLocalActivityHint),
+    }
     : developmentMap.activityMap;
 
   return {
@@ -1135,11 +1135,11 @@ async function stopTask(proxyManager, sg, chatId, taskId, action, args = {}) {
   let toolName = action === 'finish' ? 'finish_task' : 'cancel_task';
   let toolArgs = action === 'finish'
     ? {
-        task_id: taskId,
-        kill_process: args.kill_process !== false,
-        recursive: args.recursive !== false,
-        remove_from_memory: Boolean(args.remove_from_memory),
-      }
+      task_id: taskId,
+      kill_process: args.kill_process !== false,
+      recursive: args.recursive !== false,
+      remove_from_memory: Boolean(args.remove_from_memory),
+    }
     : { task_id: taskId };
 
   let result = await callInternalTaskTool(proxyManager, toolName, toolArgs);

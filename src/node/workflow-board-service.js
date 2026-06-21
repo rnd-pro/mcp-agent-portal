@@ -1248,6 +1248,8 @@ export function createWorkflowBoardService(opts = {}) {
     // Priority inheritance (AD-5, inv 24): the admission-ordering priority is the MAX of this card's
     // own priority and every transitive downstream waiter's priority, so an upstream feeding a
     // high-priority dependent is admitted ahead of unrelated low-priority cards and never starved.
+    // This is the enqueue-time snapshot; admissionOrder recomputes the inheritance LIVE at order time
+    // so a dependent linked AFTER enqueue still lifts the frozen value (effectiveAdmissionPrioritiesFor).
     let entry = {
       schema: 'workflow-queue-entry/v1',
       admissionId,
@@ -1298,6 +1300,11 @@ export function createWorkflowBoardService(opts = {}) {
   // groups after it (wrapping) sort first, so the next pass starts a different group — round-robin.
   function admissionOrder(boardId, entries) {
     let cursorGroup = textOrNull(stateGraph.get(`workflowQueueCursor/${boardId}`)?.groupKey);
+    // inv 24 (live): recompute priority inheritance at order time so an upstream that gained a
+    // high-priority dependent AFTER it was enqueued is no longer starved behind its frozen-low
+    // entry.priority. Compute the transitive-max for every card once and override the comparison with
+    // the live ordinal (falling back to the frozen value if a card is somehow absent from the board).
+    let { effective: livePriority } = effectiveAdmissionPrioritiesFor(ensureBoard(boardId));
     let groups = [...new Set(entries.map(entry => entry.groupKey))].sort(compareCodeUnits);
     let rank = new Map();
     if (groups.length) {
@@ -1325,7 +1332,9 @@ export function createWorkflowBoardService(opts = {}) {
     return entries.slice().sort((a, b) => {
       let groupDelta = (rank.get(a.groupKey) ?? 0) - (rank.get(b.groupKey) ?? 0);
       if (groupDelta !== 0) return groupDelta;
-      if (a.priority !== b.priority) return b.priority - a.priority;
+      let pa = livePriority.get(a.cardId) ?? a.priority;
+      let pb = livePriority.get(b.cardId) ?? b.priority;
+      if (pa !== pb) return pb - pa;
       if (a.enqueuedAt !== b.enqueuedAt) return a.enqueuedAt - b.enqueuedAt;
       // F-SCH-4: deterministic code-unit tiebreak (locale-independent, restart-stable across hosts).
       return compareCodeUnits(a.cardId, b.cardId);
@@ -1473,6 +1482,45 @@ export function createWorkflowBoardService(opts = {}) {
     return best;
   }
 
+  // inv 24 (live): effective admission priorities for every card on the board, computed in one pass so
+  // admissionOrder reflects priority inheritance recomputed live at order time (not just the value
+  // frozen into entry.priority at enqueue). Builds the downstream `waitersOf` adjacency once (same
+  // construction as effectiveAdmissionPriority) and memoizes each card's transitive-max over the shared
+  // map — bounded O(cards + edges) total, cycle-safe via the per-walk `seen` guard. Returns a Map
+  // cardId → effective ordinal.
+  function effectiveAdmissionPrioritiesFor(board) {
+    let cards = boardCardsFor(board.id);
+    let waitersOf = new Map();
+    for (let dependent of cards) {
+      for (let dep of cardDependsOn(dependent)) {
+        if (!waitersOf.has(dep.cardId)) waitersOf.set(dep.cardId, []);
+        waitersOf.get(dep.cardId).push(dependent);
+      }
+    }
+    let byId = new Map(cards.map(card => [card.id, card]));
+    let memo = new Map();
+    function effectiveFor(card) {
+      let cached = memo.get(card.id);
+      if (cached !== undefined) return cached;
+      let best = priorityOrdinal(card.priority);
+      let seen = new Set([card.id]);
+      let stack = [...(waitersOf.get(card.id) ?? [])];
+      while (stack.length) {
+        let waiter = stack.pop();
+        if (seen.has(waiter.id)) continue;
+        seen.add(waiter.id);
+        best = Math.max(best, priorityOrdinal(waiter.priority));
+        for (let next of waitersOf.get(waiter.id) ?? []) {
+          if (!seen.has(next.id)) stack.push(next);
+        }
+      }
+      memo.set(card.id, best);
+      return best;
+    }
+    for (let card of cards) effectiveFor(card);
+    return { byId, effective: memo };
+  }
+
   function dependencyLifecycleCard(card, lifecycle, principal, ts, metadata) {
     return normalizeWorkflowCardInput({
       ...card,
@@ -1520,12 +1568,12 @@ export function createWorkflowBoardService(opts = {}) {
     return idle;
   }
 
-  // Raise a typed `needs_decision` escalation on a card (the dependency-failure / max-blocked-age
-  // path). Reuses the frozen escalation channel: a normalized escalation recorded on
-  // `card.metadata.escalation` plus an `escalation` transition event for board visibility. Returns the
-  // updated card.
-  function raiseDependencyEscalation(board, card, principal, detail, suggestedResolution) {
-    let ts = now();
+  // Build the frozen-channel pieces of a typed `needs_decision` escalation: the normalized escalation
+  // state (folded onto `card.metadata.escalation`) plus the `escalation` transition event for board
+  // visibility. Returns the next metadata + event without committing, so callers can fold both into
+  // their own (possibly CAS-fenced) frame. Shared by the release/max-blocked-age path and the
+  // admission-time cycle guard (inv 22) so every escalation uses one vocabulary.
+  function buildDependencyEscalation(board, card, principal, detail, suggestedResolution, ts) {
     let escalation = normalizeWorkflowEscalation(
       { kind: 'needs_decision', detail, suggestedResolution, raisedBy: principal.label },
       { now: ts },
@@ -1544,7 +1592,6 @@ export function createWorkflowBoardService(opts = {}) {
       ],
     });
     let metadata = { ...(card.metadata ?? {}), escalation: state };
-    let next = dependencyLifecycleCard(card, card.lifecycle, principal, ts, metadata);
     let escId = nextId(makeId, 'escalation');
     let event = normalizeWorkflowTransitionEvent({
       id: escId,
@@ -1559,6 +1606,15 @@ export function createWorkflowBoardService(opts = {}) {
       status: 'accepted',
       sideEffects: [{ type: 'escalation', status: 'raised', kind: 'needs_decision', detail }],
     }, { id: escId, now: ts });
+    return { metadata, event };
+  }
+
+  // Raise a typed `needs_decision` escalation on a card (the dependency-failure / max-blocked-age
+  // path), keeping the card's current lifecycle. Returns the updated card.
+  function raiseDependencyEscalation(board, card, principal, detail, suggestedResolution) {
+    let ts = now();
+    let { metadata, event } = buildDependencyEscalation(board, card, principal, detail, suggestedResolution, ts);
+    let next = dependencyLifecycleCard(card, card.lifecycle, principal, ts, metadata);
     stateGraph.commit([
       { op: 'set', path: `workflowCards/${card.id}`, value: next },
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
@@ -2247,12 +2303,42 @@ export function createWorkflowBoardService(opts = {}) {
     // Defensive admission-time cycle guard (inv 23): refuse to admit a card whose dependency closure
     // is cyclic. The link path already rejects cycles, but a malformed import or a concurrent edit
     // could slip a cycle in; admitting one would risk a non-terminating release/inheritance walk.
+    // inv 22 (never a silent permanent block): a cycle will NOT self-resolve via the release tick, so
+    // dropping the entry alone would strand the card with no entry, no trigger, and no escalation.
+    // Escalate it instead — set lifecycle→idle (recoverable, mirroring the hard-failure path) and raise
+    // the same typed `needs_decision` escalation the release path uses, so a human/auditor sees it. The
+    // card set, escalation event, and entry delete land in ONE durable CAS under the queue epoch fence.
     if (dependencyClosureIsCyclic(entry.cardId)) {
+      let principal = daemonPrincipal();
+      let ts = now();
+      let detail = `Card ${card.id} cannot be admitted: its dependency closure is cyclic.`;
+      let { metadata, event } = buildDependencyEscalation(
+        board, card, principal, detail, 'Break the dependency cycle, then re-enqueue the card.', ts,
+      );
+      let escalated = normalizeWorkflowCardInput({
+        ...clone(card),
+        lifecycle: 'idle',
+        metadata,
+        version: card.version + 1,
+        updatedAt: ts,
+        updatedBy: principal.label,
+      }, {
+        id: card.id,
+        actor: principal.label,
+        now: ts,
+        version: card.version + 1,
+        createdAt: card.createdAt,
+        updatedAt: ts,
+      });
       let epoch = readQueueEpoch(board.id);
       stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
-        [{ op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` }],
-        sourceForPrincipal(daemonPrincipal()), { durable: true });
-      return { admissionId: entry.admissionId, reason: 'dependency_cycle' };
+        [
+          { op: 'set', path: `workflowCards/${card.id}`, value: escalated },
+          { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+          { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+        ],
+        sourceForPrincipal(principal), { durable: true });
+      return { admissionId: entry.admissionId, cardId: card.id, reason: 'dependency_cycle' };
     }
     // F-DEP-1(b): defense in depth. The queue must never run a card with unsatisfied dependencies,
     // even if one slipped past the write-path recompute (a concurrent edit, a stale enqueue, or an

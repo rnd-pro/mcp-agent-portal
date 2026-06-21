@@ -283,8 +283,8 @@ export function startWebServer(projectRoot) {
       getTools: async () => {
         return await _collectAllTools(proxyManager);
       },
-      onToolCall: async (name, args) => {
-        return _routeToolCall(proxyManager, name, args);
+      onToolCall: async (name, args, options) => {
+        return _routeToolCall(proxyManager, name, args, options);
       },
       onResourcesList: async () => {
         return _aggregateResources(proxyManager);
@@ -451,11 +451,14 @@ async function _refreshToolCache(proxyManager) {
  * @param {MCPProxyManager} proxyManager
  * @param {string} toolName
  * @param {object} args
+ * @param {{ context?: { verifiedSlug?: string } }} [options] - Server-verified
+ *   transport identity (e.g. MCP per-task secret resolution). Threaded only to
+ *   the in-process portal tools; child MCP servers receive args alone.
  * @returns {Promise<object>}
  */
-async function _routeToolCall(proxyManager, toolName, args) {
+async function _routeToolCall(proxyManager, toolName, args, options = {}) {
   if (META_TOOLS.some(t => t.name === toolName)) {
-    return _routePortalToolCall(proxyManager, toolName, args);
+    return _routePortalToolCall(proxyManager, toolName, args, options);
   }
 
   if (isInternalMcpToolName(toolName)) {
@@ -490,7 +493,7 @@ async function _routeToolCall(proxyManager, toolName, args) {
   return { content: [{ type: 'text', text: `Unknown tool: ${toolName}` }], isError: true };
 }
 
-async function _routePortalToolCall(proxyManager, toolName, args = {}) {
+async function _routePortalToolCall(proxyManager, toolName, args = {}, options = {}) {
   if (toolName === 'discover_tools') {
     let tools = await _collectChildTools(proxyManager);
     let query = (args.query || '').toLowerCase();
@@ -510,7 +513,7 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
     if (!realToolName) {
       return { content: [{ type: 'text', text: 'Missing "name" argument — specify which tool to call' }], isError: true };
     }
-    return _routeToolCall(proxyManager, realToolName, args.arguments || {});
+    return _routeToolCall(proxyManager, realToolName, args.arguments || {}, options);
   }
 
   if (toolName === 'get_portal_status') {
@@ -592,7 +595,7 @@ async function _routePortalToolCall(proxyManager, toolName, args = {}) {
   }
 
   if (isPortalOrchestratorTool(toolName)) {
-    return handlePortalOrchestratorTool(proxyManager, toolName, args, 'mcp-http');
+    return handlePortalOrchestratorTool(proxyManager, toolName, args, 'mcp-http', options);
   }
 
   if (isPortalGoalTool(toolName)) {
