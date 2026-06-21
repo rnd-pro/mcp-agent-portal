@@ -550,4 +550,96 @@ describe('workflow admission scheduler (WS-B1)', () => {
     });
     assert.equal(ledger.slotCount(), beforeSlots, 're-drive on the same admissionId reserves no extra slot');
   });
+
+  // inv 22: a card whose dependency closure is cyclic must not be silently stranded. The link path
+  // rejects cycles, but a malformed import can plant a pre-existing cyclic dependsOn. The admission
+  // cycle guard must ESCALATE — drop the entry AND move the card to a human-visible recoverable state
+  // with a typed needs_decision escalation — not leave it queued/idle with no entry and no trigger
+  // (which the pre-fix drop-only branch did: a permanent silent block).
+  it('admission cycle guard escalates a cyclic card instead of silently stranding it (inv 22)', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    let board = service.ensureBoard();
+
+    // Plant a card with a self-referential dependsOn (a 1-cycle) directly — the link path would reject
+    // this, so write the cyclic closure raw, exactly as a malformed import would.
+    let card = makeReadyCard(service, { resourceGroup: 'impl', card: { id: 'cyc' } });
+    let live = service.getCard(card.id);
+    let enqueuedAt = now;
+    sg.commit([
+      { op: 'set', path: `workflowCards/${card.id}`, value: {
+        ...live, lifecycle: 'queued', dependsOn: [{ cardId: card.id, releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' }],
+      } },
+      { op: 'set', path: 'workflowQueueEntries/adm-cyc', value: {
+        schema: 'workflow-queue-entry/v1', admissionId: 'adm-cyc', cardId: card.id, boardId: board.id,
+        columnId: live.columnId, groupKey: 'impl', priority: 1, basePriority: 1, priorityLabel: 'normal',
+        enqueuedAt, queueEpoch: sg.get(`workflowQueueEpoch/${board.id}`) ?? 0, notBefore: null,
+      } },
+    ], 'test:plant-cycle', { durable: true });
+
+    let drain = await service.drainWorkflowQueue(board.id, {});
+    assert.equal(drain.admitted.length, 0, 'the cyclic card is never admitted/run');
+
+    // The queue entry is gone (dropped under the epoch fence)…
+    assert.equal(sg.get('workflowQueueEntries/adm-cyc'), undefined, 'the cyclic queue entry is dropped');
+    let after = service.getCard(card.id);
+    // …and the card is NOT silently left queued/idle-without-escalation: it carries the same typed
+    // needs_decision escalation the release path uses, in a recoverable (non-running) lifecycle.
+    assert.notEqual(after.lifecycle, 'running');
+    assert.notEqual(after.lifecycle, 'queued', 'not silently re-queued (would never re-trigger)');
+    assert.equal(after.lifecycle, 'idle', 'escalated to the recoverable idle state (mirrors the hard-failure path)');
+    assert.equal(after.metadata?.escalation?.kind, 'needs_decision', 'a typed escalation a human can act on');
+    assert.match(after.metadata.escalation.lastEscalation.detail, /cyclic/, 'escalation names the dependency cycle');
+
+    // An escalation transition event is emitted for board visibility.
+    let events = service.listEvents({ boardId: board.id }).filter(e => e.cardId === card.id && e.eventType === 'escalation');
+    assert.equal(events.length, 1, 'one escalation event for the stuck card');
+  });
+
+  // inv 24 (live priority inheritance, MINOR-3): an upstream's admission priority must reflect a
+  // high-priority dependent linked AFTER the upstream was enqueued. The frozen entry.priority is
+  // captured low at enqueue; admissionOrder must recompute the transitive-max live at order time so the
+  // upstream is not starved behind unrelated work. Pre-fix, admissionOrder sorted on the frozen low
+  // value and the upstream would lose its slot — that assertion (commented) is what this locks.
+  it('admissionOrder recomputes priority inheritance live for a dependent linked after enqueue (inv 24)', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 1 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    let board = service.ensureBoard();
+
+    // Upstream enqueued LOW — its entry.priority freezes at low (0). An unrelated NORMAL card in the
+    // SAME group is enqueued so admission order (priority desc) is observable: pre-fix, NORMAL (frozen
+    // 1) outranks the upstream's frozen low (0); post-fix, the upstream inherits HIGH (2) live.
+    let upstream = makeReadyCard(service, { resourceGroup: 'impl', priority: 'low', card: { id: 'up-low' } });
+    let unrelated = makeReadyCard(service, { resourceGroup: 'impl', priority: 'normal', card: { id: 'unrelated' } });
+    let eUp = service.enqueueWorkItem(board, service.getCard(upstream.id), {});
+    let eOther = service.enqueueWorkItem(board, service.getCard(unrelated.id), {});
+    assert.equal(eUp.entry.priority, 0, 'upstream entry.priority frozen LOW at enqueue');
+
+    // Equal enqueuedAt so the priority comparison is the sole discriminator (not enqueuedAt/cardId).
+    let entries = sg.get('workflowQueueEntries');
+    sg.commit([
+      { op: 'set', path: `workflowQueueEntries/${eUp.entry.admissionId}`, value: { ...entries[eUp.entry.admissionId], enqueuedAt: 500 } },
+      { op: 'set', path: `workflowQueueEntries/${eOther.entry.admissionId}`, value: { ...entries[eOther.entry.admissionId], enqueuedAt: 500 } },
+    ], 'test:equal-enqueuedAt', { durable: true });
+
+    // AFTER enqueue, link a HIGH dependent onto the upstream. The dependent waits (blocked, outside the
+    // queue); the upstream gains a high-priority downstream waiter and must inherit its priority.
+    makeReadyCard(service, { resourceGroup: 'impl', priority: 'high', card: { id: 'hi-dep' } });
+    service.linkDependency({ cardId: 'hi-dep', dependsOn: ['up-low'] });
+    assert.equal(service.getCard('hi-dep').lifecycle, 'blocked', 'the high dependent waits on the upstream');
+
+    // Live recompute: the upstream now sorts AHEAD of the unrelated normal card. The frozen entry.priority
+    // (low) would have placed it LAST — pre-fix this assertion fails.
+    let ordered = service.admissionOrder(board.id, service.listQueueEntries(board.id));
+    assert.equal(ordered[0].cardId, 'up-low', 'upstream inherits HIGH live and sorts first, not behind normal');
+    assert.equal(ordered[0].priority, 0, 'the frozen record is unchanged (low); only the comparison is overridden');
+
+    // And a drain (group limit 1) admits the upstream first, proving the live order is what runs.
+    let drain = await service.drainWorkflowQueue(board.id, {});
+    assert.equal(drain.admitted.length, 1);
+    assert.equal(service.getCard('up-low').lifecycle, 'running', 'the inheriting upstream is admitted first');
+    assert.equal(service.getCard('unrelated').lifecycle, 'queued', 'the unrelated normal card waits');
+  });
 });

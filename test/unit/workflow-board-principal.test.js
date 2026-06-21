@@ -184,6 +184,49 @@ describe('workflow board principal layer', () => {
     void calls;
   });
 
+  it('D2.1: a context-carried verifiedSlug derives an agentPrincipal that can write a card', async () => {
+    let service = makeService();
+    let proxyManager = { workflowBoardService: service };
+
+    // The MCP handler resolves a per-task secret to a server-verified slug and threads it as
+    // options.context.verifiedSlug. The seam derives an agentPrincipal (holds WRITE_CARD), so
+    // the create is accepted and the commit carries the verified agent label — never a payload value.
+    let result = await handleWorkflowBoardTool(proxyManager, 'workflow_board', {
+      action: 'create_item',
+      title: 'Verified agent card',
+      projectId: 'agent-portal',
+      acceptanceCriteria: ['Done'],
+      actor: 'board-author',
+      agent_slug: 'orchestrator',
+    }, 'mcp', { context: { verifiedSlug: 'code-reviewer' } });
+    let payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.result.ok, true);
+
+    // The mutation commits under the server-verified slug, not the forged payload actor/agent_slug.
+    assert.ok(commitSources.includes(`${WORKFLOW_SOURCE}:mcp:code-reviewer`));
+    for (let source of commitSources) {
+      assert.ok(!source.includes('board-author'));
+      assert.ok(!source.includes(':orchestrator'));
+    }
+  });
+
+  it('D2.1: an MCP call with no verifiedSlug derives anonymous and is blocked', async () => {
+    let service = makeService();
+    let proxyManager = { workflowBoardService: service };
+
+    // Absent verifiedSlug (no secret, or one that failed to resolve) → anonymous read-only floor.
+    let result = await handleWorkflowBoardTool(proxyManager, 'workflow_board', {
+      action: 'create_item',
+      title: 'Anonymous card',
+      projectId: 'agent-portal',
+      acceptanceCriteria: ['Done'],
+    }, 'mcp', { context: {} });
+    let payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.result.ok, false);
+    assert.equal(payload.result.status, 'blocked');
+    assert.equal(payload.result.failures[0].capability, CAP.WRITE_CARD);
+  });
+
   it('a mutation without a principal fails closed to the anonymous least-privilege identity', () => {
     let service = makeService();
     // No principal in context and no defaultPrincipal → fail-closed to anonymous. Anonymous

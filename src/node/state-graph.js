@@ -404,8 +404,8 @@ export class StateGraph extends EventEmitter {
 
   // ── Persistence: Load ──────────────────────────────────
 
-   // Load state from snapshot + replay WAL.
-   // Call once on startup.
+  // Load state from snapshot + replay WAL.
+  // Call once on startup.
   load() {
     let dir = path.dirname(this._snapshotPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -582,7 +582,14 @@ export class StateGraph extends EventEmitter {
 
   // ── Persistence: Snapshot Compaction ────────────────────
 
-  // Async snapshot write + WAL truncation.
+  // Async snapshot write + WAL truncation — power-failure durable.
+  // Mirrors the fsync barriers and ordering of _writeSnapshotSync() while
+  // staying async (called fire-and-forget from commit(), so it must not block
+  // the event loop with synchronous fsync on large state). The ordering is
+  // load-bearing: the snapshot (and its directory entry) must be durable on
+  // disk BEFORE the WAL is truncated, otherwise a power failure can land the
+  // truncation while the snapshot's data blocks are still in cache — losing
+  // every commit since the previous snapshot.
   async _writeSnapshot() {
     this._commitsSinceSnapshot = 0;
     let snap = JSON.stringify(this._state, null, 2);
@@ -591,23 +598,71 @@ export class StateGraph extends EventEmitter {
     try {
       let dir = path.dirname(this._snapshotPath);
       await fsp.mkdir(dir, { recursive: true }).catch(() => {});
-      // Flush pending WAL first
+
+      // 1. Flush pending WAL durably (append + fsync) so nothing committed
+      //    since the last flush is lost before we truncate below.
       if (this._walQueue.length > 0) {
         let batch = this._walQueue.splice(0);
-        await fsp.appendFile(this._walPath, batch.join('\n') + '\n');
+        let wfh = await fsp.open(this._walPath, 'a');
+        try {
+          await wfh.write(batch.join('\n') + '\n');
+          await wfh.sync();
+        } finally { await wfh.close(); }
       }
 
-      // Write snapshot atomically (write to tmp, then rename)
+      // 2. Write the snapshot to tmp and fsync it BEFORE the rename, so the
+      //    rename can only ever publish fully-durable bytes.
       let tmpPath = this._snapshotPath + '.tmp';
-      await fsp.writeFile(tmpPath, snap);
-      await fsp.rename(tmpPath, this._snapshotPath);
+      let sfh = await fsp.open(tmpPath, 'w');
+      try {
+        await sfh.write(snap);
+        await sfh.sync();
+      } finally { await sfh.close(); }
 
-      // Truncate WAL (all entries are now in snapshot)
-      await fsp.writeFile(this._walPath, '');
+      // 3. Atomically publish, then fsync the directory so the new file's
+      //    directory entry is durable. Only after this is the snapshot truly
+      //    durable on disk.
+      await fsp.rename(tmpPath, this._snapshotPath);
+      await this._fsyncDirAsync(dir);
+
+      // 4. Compact the WAL. A durable commit (version > v) can land on the WAL
+      //    file during the async writes above — truncating to empty would lose
+      //    it, since it is not in this snapshot. Read-filter-rewrite
+      //    SYNCHRONOUSLY so no commit can interleave between the read and the
+      //    rewrite, keep only entries newer than the snapshot, and fsync so the
+      //    compaction is itself crash-safe. Everything <= v is now durable in
+      //    the snapshot.
+      let kept = [];
+      if (fs.existsSync(this._walPath)) {
+        for (let line of fs.readFileSync(this._walPath, 'utf8').split('\n')) {
+          if (!line) continue;
+          let keep = false;
+          try { keep = JSON.parse(line).v > v; } catch { keep = false; }
+          if (keep) kept.push(line);
+        }
+      }
+      let wfd = fs.openSync(this._walPath, 'w');
+      try {
+        fs.writeSync(wfd, kept.length ? kept.join('\n') + '\n' : '');
+        fs.fsyncSync(wfd);
+      } finally { fs.closeSync(wfd); }
 
       this._snapshotVersion = v;
     } catch (err) {
       console.error('[StateGraph] Snapshot write failed:', err.message);
+    }
+  }
+
+  // Best-effort async fsync of a directory entry (local filesystems only;
+  // directory fsync is unsupported on some platforms/filesystems).
+  async _fsyncDirAsync(dir) {
+    let dfh;
+    try {
+      dfh = await fsp.open(dir, 'r');
+      await dfh.sync();
+    } catch { /* best-effort: not all platforms allow directory fsync */ }
+    finally {
+      if (dfh !== undefined) { try { await dfh.close(); } catch { /* ignore */ } }
     }
   }
 
@@ -646,7 +701,7 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-   // Flush all pending writes and snapshot. Call on process exit.
+  // Flush all pending writes and snapshot. Call on process exit.
   flush() {
     if (this._walTimer) {
       clearTimeout(this._walTimer);

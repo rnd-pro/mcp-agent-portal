@@ -22,6 +22,11 @@ import {
   internalMcpToolBlockedResult,
   isInternalMcpToolName,
 } from './mcp-tool-visibility.js';
+import { resolveVerifiedSlug } from '../server/agent-identity-resolver.js';
+
+// Per-task secret carried by Agent-Pool-spawned agents for verified identity.
+// Server-resolved only; a body-supplied agent_slug is never trusted as identity.
+const TASK_SECRET_HEADER = 'x-agent-portal-task-secret';
 
 /**
  * @typedef {Object} McpHttpOptions
@@ -77,7 +82,7 @@ export function createMcpHttpHandler(opts) {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, X-Agent-Portal-Task-Secret');
     res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
 
     if (req.method === 'OPTIONS') {
@@ -170,6 +175,12 @@ function handlePost(req, res, opts) {
     sessionId = req.headers['mcp-session-id'];
   }
 
+  // Server-verified agent identity. The per-task secret may arrive on any request
+  // (often the initialize, then omitted from later tools/call); capture it on the
+  // session whenever present so subsequent calls still resolve. Never trust a
+  // body-supplied agent_slug — only this header-derived secret yields identity.
+  let taskSecret = req.headers[TASK_SECRET_HEADER];
+
   let body = [];
   req.on('data', chunk => body.push(chunk));
   req.on('end', async () => {
@@ -203,6 +214,7 @@ function handlePost(req, res, opts) {
     }
 
     let sess = sessions.get(sessionId);
+    if (taskSecret) sess.taskSecret = taskSecret;
 
     // ── SSE mode: push responses via SSE stream ──
     if (sess.res) {
@@ -352,8 +364,14 @@ async function processMessage(msg, req, opts, sessionId) {
       };
     }
 
+    // Server-verified identity: resolve the session's per-task secret to a slug.
+    // Fail-closed — an absent/invalid secret leaves verifiedSlug null, so the
+    // principal layer falls back to the anonymous read-only floor. The plaintext
+    // secret never reaches onToolCall, logs, or the result.
+    let verifiedSlug = resolveVerifiedSlug(sess?.taskSecret) || undefined;
+
     try {
-      let result = await opts.onToolCall(toolName, args);
+      let result = await opts.onToolCall(toolName, args, { context: { verifiedSlug } });
       return { jsonrpc: '2.0', id: msg.id, result };
     } catch (err) {
       return {
