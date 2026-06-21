@@ -172,6 +172,84 @@ describe('workflow board model and service', () => {
     assert.equal(reloadedReady.automation.parallelLimit, 2);
   });
 
+  it('freezes the projection-v2 lifecycle / dependsOn / queue / telemetry shape', async () => {
+    let blocked = service.createOrUpdateCard({
+      title: 'Blocked on upstream',
+      columnId: 'ideas',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      lifecycle: 'blocked',
+      dependsOn: ['card-upstream'],
+      actor: 'test',
+    });
+    service.createOrUpdateCard({
+      title: 'Plain idle card',
+      columnId: 'ideas',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      actor: 'test',
+    });
+    // A standalone runtime task (not linked to any persisted card) synthesizes a runtime card.
+    sg.commit([{
+      op: 'set',
+      path: 'tasks/task-rt-projection',
+      value: { id: 'task-rt-projection', kind: 'workflow-task', status: 'running', projectId: 'agent-portal', updatedAt: 1500 },
+    }], 'seed');
+
+    let projection = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
+
+    assert.equal(projection.schema, 'workflow-board-projection/v2');
+
+    // Board-level queue + telemetry: frozen shape, dependency-derived counts are real, rest are placeholders.
+    assert.deepEqual(projection.queue, {
+      depth: 0,
+      oldestEnqueuedAt: null,
+      perGroupDepth: {},
+      blockedOnDependencyCount: 1,
+    });
+    assert.deepEqual(projection.telemetry, {
+      queueDepth: 0,
+      oldestEnqueuedAt: null,
+      blockedOnDependencyCount: 1,
+      admissions: 0,
+      admissionFailures: 0,
+      drains: 0,
+    });
+
+    // Every projected card carries lifecycle / dependsOn / a five-key null-default queue slot.
+    let queueKeys = ['enqueuedAt', 'queueEpoch', 'admissionId', 'priority', 'position'];
+    for (let card of projection.cards) {
+      assert.ok(WORKFLOW_CARD_LIFECYCLE_STATES.includes(card.lifecycle), `lifecycle ${card.lifecycle}`);
+      assert.ok(Array.isArray(card.dependsOn), 'dependsOn is an array');
+      assert.deepEqual(Object.keys(card.queue).sort(), [...queueKeys].sort());
+      for (let key of queueKeys) assert.equal(card.queue[key], null);
+    }
+    // The same per-card shape is present inside columns[].cards.
+    for (let column of projection.columns) {
+      for (let card of column.cards) {
+        assert.ok(WORKFLOW_CARD_LIFECYCLE_STATES.includes(card.lifecycle));
+        assert.deepEqual(Object.keys(card.queue).sort(), [...queueKeys].sort());
+      }
+    }
+
+    let blockedCard = projection.cards.find(card => card.id === blocked.card.id);
+    assert.equal(blockedCard.lifecycle, 'blocked');
+    assert.equal(blockedCard.dependsOn[0].cardId, 'card-upstream');
+
+    // Runtime-synthesized cards carry the frozen v2 fields with safe defaults.
+    let runtimeCard = projection.cards.find(card => card.id.startsWith('runtime-'));
+    assert.ok(runtimeCard, 'expected a runtime-synthesized card');
+    assert.equal(runtimeCard.lifecycle, 'idle');
+    assert.deepEqual(runtimeCard.dependsOn, []);
+    assert.deepEqual(runtimeCard.queue, {
+      enqueuedAt: null,
+      queueEpoch: null,
+      admissionId: null,
+      priority: null,
+      position: null,
+    });
+  });
+
   it('blocks failed gates and optimistic version mismatches before accepting transitions', () => {
     let created = service.createOrUpdateCard({
       title: 'Raw workflow idea',
