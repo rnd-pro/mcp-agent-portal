@@ -21,6 +21,8 @@ import {
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
   isFloorGateMonotonic,
+  migrateWorkflowBoardToV2,
+  migrateWorkflowCardToV2,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
   validateWorkflowTransitionGraph,
@@ -57,6 +59,10 @@ const ESCALATION_DETAIL_PATTERN = /ESCALATION_DETAIL:\s*(.+)/i;
 const ESCALATION_SUGGESTION_PATTERN = /ESCALATION_SUGGESTION:\s*(.+)/i;
 const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
+// Persisted board/card schema version. The iso normalizers are always-forward, so a single
+// one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
+// no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
+const WORKFLOW_SCHEMA_VERSION = 2;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 // Execution-class column actions: a card in a column with one of these actions can carry an
 // in-flight run that needs recovery (orchestrate/execute/audit/publish each spawn or require a
@@ -420,6 +426,11 @@ export function createWorkflowBoardService(opts = {}) {
     throw new Error('Workflow board service requires a StateGraph instance.');
   }
   let embedderPrincipal = isPrincipal(defaultPrincipal) ? defaultPrincipal : null;
+  // Per-instance fast-path for the one-time schema migration. The service is constructed
+  // per-request on some paths, so this flag is NOT authoritative for correctness — the durable
+  // `workflowSchema` marker is. It only skips the single marker `get` on repeat calls within one
+  // long-lived instance once we have observed the marker is current.
+  let schemaMigrated = false;
 
   // Fail-closed identity: every mutator obtains its committing principal from the per-call
   // context (the HTTP/MCP seams put it on `context.principal`). Absent that, a trusted
@@ -451,6 +462,37 @@ export function createWorkflowBoardService(opts = {}) {
     return principal?.kind === 'daemon';
   }
 
+  // One-time forward migration to schema v2 (AD-8; inv 16). The durable `workflowSchema` marker is
+  // authoritative: if it already reports the current version this is a single `get` no-op on the hot
+  // path. Otherwise sweep every persisted board + card through the always-forward iso migrators
+  // once, commit only the entries that actually changed plus the marker in one commit, and never
+  // branch on a v1 schema again at read time. Idempotent: a second call hits the marker no-op.
+  function ensureWorkflowSchemaMigrated() {
+    if (schemaMigrated) return;
+    if (stateGraph.get('workflowSchema')?.version === WORKFLOW_SCHEMA_VERSION) {
+      schemaMigrated = true;
+      return;
+    }
+    let ops = [];
+    let boards = getCollection(stateGraph, 'workflowBoards');
+    for (let [id, board] of Object.entries(boards)) {
+      let migrated = migrateWorkflowBoardToV2(board);
+      if (JSON.stringify(board) !== JSON.stringify(migrated)) {
+        ops.push({ op: 'set', path: `workflowBoards/${id}`, value: migrated });
+      }
+    }
+    let cards = getCollection(stateGraph, 'workflowCards');
+    for (let [id, card] of Object.entries(cards)) {
+      let migrated = migrateWorkflowCardToV2(card);
+      if (JSON.stringify(card) !== JSON.stringify(migrated)) {
+        ops.push({ op: 'set', path: `workflowCards/${id}`, value: migrated });
+      }
+    }
+    ops.push({ op: 'set', path: 'workflowSchema', value: { version: WORKFLOW_SCHEMA_VERSION } });
+    stateGraph.commit(ops, sourceForPrincipal(daemonPrincipal()));
+    schemaMigrated = true;
+  }
+
   function refreshDefaultBoardPolicy(existing, id) {
     if (id !== DEFAULT_WORKFLOW_BOARD_ID) return clone(existing);
     let board = clone(existing);
@@ -463,16 +505,21 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: board.createdAt ?? ts,
       updatedAt: board.updatedAt ?? ts,
     });
+    // Fill-only policy refresh (inv 17): a customized column/transition is never clobbered. For a
+    // default column that already exists, current values win and defaults only fill gaps; a default
+    // column missing from the board is added wholesale (a legitimate fill). Same for transitions by
+    // from->to key. inv 19 still holds: an MVP-era board gains every missing v2 column/transition.
     let currentColumns = Array.isArray(board.columns) ? board.columns : [];
     let columnsById = new Map(currentColumns.map(column => [textOrNull(column?.id), column]));
     let defaultColumnIds = new Set(defaults.columns.map(column => column.id));
     let nextColumns = defaults.columns.map((defaultColumn) => {
-      let current = asObject(columnsById.get(defaultColumn.id));
+      let current = columnsById.get(defaultColumn.id);
+      if (!current) return { ...defaultColumn, automation: { ...defaultColumn.automation } };
       return {
         ...current,
         id: defaultColumn.id,
-        title: defaultColumn.title,
-        automation: { ...defaultColumn.automation },
+        title: textOrNull(current.title) ?? defaultColumn.title,
+        automation: { ...defaultColumn.automation, ...asObject(current.automation) },
       };
     });
     for (let column of currentColumns) {
@@ -485,12 +532,11 @@ export function createWorkflowBoardService(opts = {}) {
     let transitionsByKey = new Map(currentTransitions.map(transition => [transitionKey(transition), transition]));
     let defaultTransitionKeys = new Set(defaults.transitions.map(transitionKey));
     let nextTransitions = defaults.transitions.map((defaultTransition) => {
-      let current = asObject(transitionsByKey.get(transitionKey(defaultTransition)));
-      return {
-        ...current,
-        ...defaultTransition,
-        gates: textArray(defaultTransition.gates ?? defaultTransition.gate),
-      };
+      let current = transitionsByKey.get(transitionKey(defaultTransition));
+      if (!current) {
+        return { ...defaultTransition, gates: textArray(defaultTransition.gates ?? defaultTransition.gate) };
+      }
+      return current;
     });
     for (let transition of currentTransitions) {
       if (!defaultTransitionKeys.has(transitionKey(transition))) nextTransitions.push(transition);
@@ -519,6 +565,7 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function ensureBoard(boardId = DEFAULT_WORKFLOW_BOARD_ID) {
+    ensureWorkflowSchemaMigrated();
     let id = textOrNull(boardId) ?? DEFAULT_WORKFLOW_BOARD_ID;
     let existing = stateGraph.get(`workflowBoards/${id}`);
     if (existing) return refreshDefaultBoardPolicy(existing, id);
@@ -1357,6 +1404,7 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function getBoardProjection(filter = {}, runtimeTasks = null) {
+    ensureWorkflowSchemaMigrated();
     let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let projectId = textOrNull(filter.projectId ?? filter.project_id);
     let goalId = textOrNull(filter.goalId ?? filter.goal_id);
