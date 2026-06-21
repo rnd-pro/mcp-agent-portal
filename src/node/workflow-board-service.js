@@ -20,6 +20,7 @@ import {
   normalizeWorkflowLifecycle,
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
+  normalizeWorkflowSubscription,
   isFloorGateMonotonic,
   isWorkflowLifecycleTransitionAllowed,
   migrateWorkflowBoardToV2,
@@ -122,6 +123,13 @@ function priorityOrdinal(priority) {
   let key = textOrNull(priority);
   if (key && Object.hasOwn(WORKFLOW_PRIORITY_ORDER, key)) return WORKFLOW_PRIORITY_ORDER[key];
   return WORKFLOW_PRIORITY_ORDER.normal;
+}
+
+// Inverse of priorityOrdinal: map an ordinal back to its label (used to lift a synthetic join card's
+// priority to the max member ordinal). An out-of-range ordinal collapses to `normal`.
+function priorityLabel(ordinal) {
+  let entry = Object.entries(WORKFLOW_PRIORITY_ORDER).find(([, value]) => value === ordinal);
+  return entry ? entry[0] : 'normal';
 }
 
 // Deterministic code-unit string comparison (inv 6): locale-independent so the admission order is
@@ -1385,11 +1393,15 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   // Is every edge of a dependent satisfied? An edge whose upstream resolved via `release`-on-failure
-  // is treated as satisfied (recorded on the dependent's dependencyBlock.releasedEdges).
+  // is treated as satisfied (recorded on the dependent's dependencyBlock.releasedEdges). A join card
+  // carries `metadata.joinPolicy` (S5); the per-edge truth is folded by that policy instead of a flat
+  // AND. A normal card has no joinPolicy, so the AND fast path below is byte-identical to before.
   function allDependenciesSatisfied(card, board, classifier, releasedEdges) {
     let deps = cardDependsOn(card);
     if (!deps.length) return true;
     let released = releasedEdges instanceof Set ? releasedEdges : new Set(releasedEdges ?? []);
+    let policy = card?.metadata?.joinPolicy;
+    if (policy) return joinPolicySatisfied(card, deps, released, classifier, policy);
     for (let dep of deps) {
       if (released.has(dep.cardId)) continue;
       let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
@@ -1403,6 +1415,47 @@ export function createWorkflowBoardService(opts = {}) {
       if (!satisfied) return false;
     }
     return true;
+  }
+
+  // Per-edge satisfaction reduced by a join policy. The per-edge boolean is computed ONCE here (same
+  // `dependencyEdgeSatisfied` / `released.has` truth the AND loop uses) and folded by `policy.type`:
+  // `all` mirrors the flat AND; `any` needs one edge; `quorum` needs >= policy.k; `all_settled` needs
+  // every edge to be either edge-satisfied OR released (a released edge = settled-by-failure), i.e. no
+  // edge still pending. Pure/read-only.
+  function joinPolicySatisfied(card, deps, released, classifier, policy) {
+    let satisfiedCount = 0;
+    let settledCount = 0;
+    // A released edge = settled-by-failure (its onUpstreamFailure resolved to `release`); for the
+    // materialized join, an all_settled subscription maps failures to `release`, so a failed member
+    // arrives here already released. (A non-release/escalating edge is governed by failure propagation,
+    // not by this count.)
+    for (let dep of deps) {
+      let isReleased = released.has(dep.cardId);
+      let edgeSatisfied = isReleased;
+      if (!isReleased) {
+        let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
+        edgeSatisfied = dependencyEdgeSatisfied(
+          dep,
+          upstream,
+          upstream ? getRunsForCard(upstream.id) : [],
+          upstream ? getChecks(upstream.id) : {},
+          classifier,
+        );
+      }
+      if (edgeSatisfied) satisfiedCount += 1;
+      if (edgeSatisfied || isReleased) settledCount += 1;
+    }
+    switch (policy.type) {
+      case 'any':
+        return satisfiedCount >= 1;
+      case 'quorum':
+        return satisfiedCount >= (Number(policy.k) || deps.length);
+      case 'all_settled':
+        return settledCount === deps.length;
+      case 'all':
+      default:
+        return satisfiedCount === deps.length;
+    }
   }
 
   function dependencyBlockState(card) {
@@ -1795,6 +1848,61 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     return { ok: true, boardId: board.id, released, escalated };
+  }
+
+  // Materialize a `join` subscription as a synthetic dependent card (S5). The join `dependsOn` every
+  // member (releaseWhen: card_done); the per-member `onUpstreamFailure` is mapped from the
+  // subscription's onFailure — `all_settled` => `release` (a failed member counts as settled, so the
+  // all_settled / quorum / any policies release once a member is done-or-failed), and the default
+  // `fail_fast` => `block_and_escalate` (a failed member hard-interrupts the join). The joinPolicy is
+  // stored on `metadata.joinPolicy` so allDependenciesSatisfied folds the member edges by policy.
+  // Reuses the createOrUpdateCard write path (which re-checks the cycle guard) and lifts the join's
+  // priority to the max member priority via effectiveAdmissionPriority. Returns the created card, or
+  // `{ ok:false, reason }` on a self-referential/cyclic join.
+  function materializeJoinCard(board, subscription, ownerCardId, principal = resolvePrincipal()) {
+    let normalized = normalizeWorkflowSubscription(subscription);
+    if (!normalized || normalized.mode !== 'join') return { ok: false, reason: 'not_a_join' };
+    let ensuredBoard = ensureBoard(board?.id ?? board ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let onUpstreamFailure = normalized.onFailure === 'all_settled' ? 'release' : 'block_and_escalate';
+    let dependsOn = normalized.members.map(cardId => ({
+      cardId,
+      releaseWhen: 'card_done',
+      onUpstreamFailure,
+    }));
+    let joinId = nextId(makeId, 'join');
+    // Reject a self-referential or cyclic join before committing (a member equal to the join, or a
+    // member that already reaches the join in the dependency closure).
+    for (let dep of dependsOn) {
+      if (wouldCreateDependencyCycle(ensuredBoard.id, joinId, dep.cardId)) {
+        return { ok: false, reason: 'dependency_cycle', upstreamCardId: dep.cardId };
+      }
+    }
+    // Lift the join's priority to the max member priority so a join feeding on a high-priority member
+    // inherits the elevated admission ordinal (reuses effectiveAdmissionPriority's ordinal model).
+    let liftedOrdinal = normalized.members.reduce((best, memberId) => {
+      let member = stateGraph.get(`workflowCards/${memberId}`);
+      let lifted = member ? effectiveAdmissionPriority(member, ensuredBoard) : 0;
+      return Math.max(best, lifted);
+    }, 0);
+    let owner = stateGraph.get(`workflowCards/${ownerCardId}`);
+    let created = createOrUpdateCard({
+      id: joinId,
+      boardId: ensuredBoard.id,
+      columnId: 'backlog',
+      kind: 'join',
+      title: `Join: ${ownerCardId ?? joinId}`,
+      priority: priorityLabel(liftedOrdinal),
+      parentCardId: ownerCardId ?? null,
+      projectId: owner?.projectId ?? null,
+      domain: owner?.domain ?? null,
+      owner: owner?.owner ?? 'orchestrator',
+      dependsOn,
+      metadata: { joinPolicy: normalized.joinPolicy, subscription: normalized },
+    }, principal);
+    if (!created.ok) {
+      return { ok: false, reason: created.failures?.[0]?.gate ?? 'join_create_failed', detail: created };
+    }
+    return created.card;
   }
 
   // Link a dependency: set/extend the dependent's `dependsOn` with `{ cardId|dependsOnCardId }`
@@ -4552,13 +4660,24 @@ export function createWorkflowBoardService(opts = {}) {
     // card.metadata.executedBy (dedup). A floor-check write later checks this list — an executor
     // cannot sign the audit/hygiene of a card it executed (separated duty).
     let nextExecutedBy = uniqueArray([...textArray(card.metadata?.executedBy), principal.id]);
+    // A delegated card may carry an orchestrator-return subscription (S5). Persist the NORMALIZED
+    // record on metadata.subscription beside the entityRefs merge; this only records the subscription
+    // (a memberless join normalizes to null and is dropped) — join materialization is an explicit
+    // materializeJoinCard call, not an auto-spawn here.
+    let normalizedSubscription = effectiveArgs.subscription
+      ? normalizeWorkflowSubscription(effectiveArgs.subscription)
+      : null;
     let nextCard = normalizeWorkflowCardInput({
       ...card,
       columnId: nextColumnId,
       recoveryFlags: delegationFailed
         ? uniqueArray([...normalizeRecoveryFlags(card.recoveryFlags), 'needs_audit'])
         : card.recoveryFlags,
-      metadata: { ...asObject(card.metadata), executedBy: nextExecutedBy },
+      metadata: {
+        ...asObject(card.metadata),
+        executedBy: nextExecutedBy,
+        ...(normalizedSubscription ? { subscription: normalizedSubscription } : {}),
+      },
       entityRefs: {
         ...card.entityRefs,
         chatId: delegated.chatId,
@@ -5537,6 +5656,7 @@ export function createWorkflowBoardService(opts = {}) {
     drainWorkflowQueue,
     linkDependency,
     unlinkDependency,
+    materializeJoinCard,
     defineWorkflowColumn,
     defineWorkflowTransition,
     defineWorkflowGate,

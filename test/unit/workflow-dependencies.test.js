@@ -342,4 +342,190 @@ describe('workflow board task dependencies', () => {
     assert.equal(down.metadata?.escalation?.kind, 'needs_decision', 'max-blocked-age escalates, never a silent permanent block');
     assert.equal(down.lifecycle, 'blocked', 'the card stays blocked but is now human-visible');
   });
+
+  // ── S4: join-policy fold in allDependenciesSatisfied ─────────────────────────────────────────────
+  // Plant a join card directly with a `dependsOn` over members and `metadata.joinPolicy`; lifecycle is
+  // `blocked` so the release tick re-runs allDependenciesSatisfied and frees the join exactly when the
+  // policy is met. A satisfied join is enqueued (blocked → queued) by the release tick.
+  function plantJoinCard(id, members, joinPolicy) {
+    let dependsOn = members.map(cardId => ({ cardId, releaseWhen: 'card_done', onUpstreamFailure: 'release' }));
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${id}`,
+      value: {
+        schema: 'workflow-card/v2', id, boardId: DEFAULT_WORKFLOW_BOARD_ID, columnId: 'backlog',
+        kind: 'join', title: `Join ${id}`, lifecycle: 'blocked', dependsOn,
+        metadata: { joinPolicy, dependencyBlock: { blockedAt: 100, releasedEdges: [] } },
+        acceptanceCriteria: [], blockers: [], recoveryFlags: [], entityRefs: { taskIds: [], files: [] },
+        version: 1, createdAt: 100, updatedAt: 100, createdBy: 'test', updatedBy: 'test',
+      },
+    }], 'test');
+  }
+
+  function joinReleased(joinId) {
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    return service.getCard(joinId).lifecycle === 'queued';
+  }
+
+  it('S4 join `all`: unsatisfied until every member is done', () => {
+    makeCard('all-m1');
+    makeCard('all-m2');
+    plantJoinCard('join-all', ['all-m1', 'all-m2'], { type: 'all' });
+
+    assert.equal(joinReleased('join-all'), false, 'no member done → blocked');
+    moveToTerminal('all-m1');
+    assert.equal(joinReleased('join-all'), false, 'one of two done → still blocked');
+    moveToTerminal('all-m2');
+    assert.equal(joinReleased('join-all'), true, 'both done → released');
+  });
+
+  it('S4 join `any`: satisfied on the first member done', () => {
+    makeCard('any-m1');
+    makeCard('any-m2');
+    plantJoinCard('join-any', ['any-m1', 'any-m2'], { type: 'any' });
+
+    assert.equal(joinReleased('join-any'), false, 'no member done → blocked');
+    moveToTerminal('any-m1');
+    assert.equal(joinReleased('join-any'), true, 'first member done → released');
+  });
+
+  it('S4 join `quorum {k:2}` over 3 members: satisfied at 2', () => {
+    makeCard('q-m1');
+    makeCard('q-m2');
+    makeCard('q-m3');
+    plantJoinCard('join-quorum', ['q-m1', 'q-m2', 'q-m3'], { type: 'quorum', k: 2 });
+
+    assert.equal(joinReleased('join-quorum'), false, '0 done → blocked');
+    moveToTerminal('q-m1');
+    assert.equal(joinReleased('join-quorum'), false, '1 of 3 done < quorum → blocked');
+    moveToTerminal('q-m2');
+    assert.equal(joinReleased('join-quorum'), true, '2 of 3 done == quorum → released');
+  });
+
+  it('S4 join `all_settled`: satisfied when every member is done-or-released(failed)', () => {
+    makeCard('set-done');
+    makeCard('set-fail');
+    plantJoinCard('join-settled', ['set-done', 'set-fail'], { type: 'all_settled' });
+
+    assert.equal(joinReleased('join-settled'), false, 'neither settled → blocked');
+    moveToTerminal('set-done');
+    assert.equal(joinReleased('join-settled'), false, 'one done, one still pending → blocked');
+
+    // The failed member terminal-fails: its `release` edge resolves to a released (settled) edge, so
+    // all_settled now sees every edge settled (one done, one settled-by-failure) → released.
+    writeRun('set-fail', 'failed');
+    assert.equal(joinReleased('join-settled'), true, 'all members done-or-failed → released');
+  });
+
+  it('S4 regression: a NORMAL card with plain dependsOn (no joinPolicy) still ANDs every edge', () => {
+    // Byte-identical to the existing fan-in case: a 2-edge dependent stays blocked until BOTH are done.
+    makeCard('and-a');
+    makeCard('and-b');
+    makeCard('and-down');
+    service.linkDependency({ cardId: 'and-down', dependsOn: ['and-a', 'and-b'] });
+    assert.equal(service.getCard('and-down').lifecycle, 'blocked');
+    assert.equal(service.getCard('and-down').metadata?.joinPolicy, undefined, 'no joinPolicy on a normal card');
+
+    moveToTerminal('and-a');
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    assert.equal(service.getCard('and-down').lifecycle, 'blocked', 'one of two done → AND still blocks');
+    moveToTerminal('and-b');
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    assert.equal(service.getCard('and-down').lifecycle, 'queued', 'both done → AND releases');
+  });
+
+  // ── S5: materializeJoinCard + delegate-time subscription persistence ─────────────────────────────
+  it('S5 materializeJoinCard: synthetic card depends on every member with the failure-mapped policy', () => {
+    makeCard('jm-a');
+    makeCard('jm-b');
+    let board = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let join = service.materializeJoinCard(board, {
+      mode: 'join', members: ['jm-a', 'jm-b'], onFailure: 'fail_fast', joinPolicy: { type: 'any' },
+    }, 'owner-card');
+
+    assert.ok(join.id, 'a join card was created');
+    let deps = join.dependsOn;
+    assert.deepEqual(deps.map(d => d.cardId).sort(), ['jm-a', 'jm-b'], 'depends on every member');
+    assert.ok(deps.every(d => d.releaseWhen === 'card_done'), 'each member edge releaseWhen=card_done');
+    assert.ok(
+      deps.every(d => d.onUpstreamFailure === 'block_and_escalate'),
+      'fail_fast → block_and_escalate on each member edge',
+    );
+    assert.equal(join.metadata.joinPolicy.type, 'any', 'the joinPolicy is stored on the synthetic card');
+  });
+
+  it('S5 materializeJoinCard: all_settled onFailure maps each member edge to release', () => {
+    makeCard('js-a');
+    makeCard('js-b');
+    let board = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let join = service.materializeJoinCard(board, {
+      mode: 'join', members: ['js-a', 'js-b'], onFailure: 'all_settled', joinPolicy: { type: 'all_settled' },
+    }, 'owner-card');
+    assert.ok(
+      join.dependsOn.every(d => d.onUpstreamFailure === 'release'),
+      'all_settled → release on each member edge (a failed member counts as settled)',
+    );
+    assert.equal(join.metadata.joinPolicy.type, 'all_settled');
+  });
+
+  it('S5 materializeJoinCard: a cyclic join is rejected by the cycle guard', () => {
+    // The synthetic join id is minted via makeId('join') → the first call yields `join-1` (idSeq is
+    // controlled by the harness and makeCard passes explicit ids, so no `join` id is minted before
+    // this). Plant a member that ALREADY depends on `join-1`; materializing the join over that member
+    // closes member → join-1 → member, which the cycle guard must reject without committing.
+    sg.commit([{
+      op: 'set', path: 'workflowCards/cyc-member',
+      value: {
+        schema: 'workflow-card/v2', id: 'cyc-member', boardId: DEFAULT_WORKFLOW_BOARD_ID, columnId: 'backlog',
+        title: 'Cyc member', lifecycle: 'idle',
+        dependsOn: [{ cardId: 'join-1', releaseWhen: 'card_done', onUpstreamFailure: 'release' }],
+        metadata: {}, acceptanceCriteria: [], blockers: [], recoveryFlags: [], entityRefs: { taskIds: [], files: [] },
+        version: 1, createdAt: 100, updatedAt: 100, createdBy: 'test', updatedBy: 'test',
+      },
+    }], 'test');
+    let board = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let res = service.materializeJoinCard(board, {
+      mode: 'join', members: ['cyc-member'], onFailure: 'fail_fast',
+    }, 'cyc-member');
+    assert.equal(res.ok, false, 'the cyclic join is rejected');
+    assert.equal(res.reason, 'dependency_cycle');
+    assert.equal(sg.get('workflowCards/join-1'), undefined, 'no join card was committed on rejection');
+  });
+
+  it('S5 materializeJoinCard: rejects a memberless subscription (not a join)', () => {
+    let board = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let res = service.materializeJoinCard(board, { mode: 'join', members: [] }, 'owner');
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'not_a_join', 'a memberless join normalizes to null → not_a_join');
+  });
+
+  it('S5 delegate persists a normalized subscription on metadata.subscription, otherwise unchanged', async () => {
+    // Orchestrate with delegate:false (no proxy in this harness) so the card-write path runs without a
+    // real delegation. A `subscription` arg must be persisted as the NORMALIZED record; everything else
+    // (column, run) is unchanged from a plain orchestrate.
+    makeCard('sub-card', { columnId: 'ready' });
+    let result = await service.orchestrateWorkItem({
+      cardId: 'sub-card',
+      delegate: false,
+      subscription: { mode: 'join', members: ['m1', 'm2', 'm2'], onFailure: 'all_settled', joinPolicy: { type: 'quorum', k: 2 } },
+    });
+    assert.equal(result.ok, true);
+    let sub = service.getCard('sub-card').metadata?.subscription;
+    assert.ok(sub, 'a subscription record is persisted');
+    assert.equal(sub.schema, 'workflow-subscription/v1');
+    assert.equal(sub.mode, 'join');
+    assert.equal(sub.onFailure, 'all_settled');
+    assert.deepEqual(sub.members, ['m1', 'm2'], 'members are deduped by the normalizer');
+    assert.equal(sub.joinPolicy.type, 'quorum');
+    assert.equal(sub.joinPolicy.k, 2);
+    // No join cards are auto-created — persistence only records the subscription.
+    assert.equal(service.getCard('sub-card').columnId, 'ready', 'column unchanged with delegate:false');
+  });
+
+  it('S5 delegate without a subscription leaves metadata.subscription absent (unchanged behavior)', async () => {
+    makeCard('nosub-card', { columnId: 'ready' });
+    let result = await service.orchestrateWorkItem({ cardId: 'nosub-card', delegate: false });
+    assert.equal(result.ok, true);
+    assert.equal(service.getCard('nosub-card').metadata?.subscription, undefined, 'no subscription persisted');
+  });
 });
