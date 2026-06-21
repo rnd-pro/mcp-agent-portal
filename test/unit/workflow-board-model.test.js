@@ -23,6 +23,7 @@ import {
 } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
+import { humanPrincipal } from '../../src/node/server/principal.js';
 
 function writeWorkItemSeed(root, projectId, fileName, frontmatter, body = 'Durable body.') {
   let dir = path.join(root, '.agent-portal', 'workspace', projectId, 'plans', 'work-items');
@@ -51,6 +52,10 @@ describe('workflow board model and service', () => {
       now: () => now++,
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
+      // These tests drive the service in-process as the trusted local human (board-author caps),
+      // so the ~hundreds of existing mutating assertions keep passing through the S6 gate. The
+      // harness sets the principal once here; production wiring never sets defaultPrincipal.
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
   });
 
@@ -526,6 +531,7 @@ describe('workflow board model and service', () => {
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let active = service.createOrUpdateCard({
       id: 'card-active',
@@ -638,6 +644,7 @@ describe('workflow board model and service', () => {
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     service.createOrUpdateCard({
       id: 'card-active',
@@ -686,6 +693,7 @@ describe('workflow board model and service', () => {
       now: () => now++,
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     writeWorkItemSeed(tmpDir, 'agent-portal', 'work-item-2026-06-18-agent-workflow-kanban-mvp.md', `
 schema: agent-workflow-card/v1
@@ -830,6 +838,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Implement workflow automation',
@@ -915,6 +924,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Ready auto start',
@@ -978,6 +988,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Ready invalid resource group',
@@ -1036,6 +1047,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Blocked ready card',
@@ -1121,6 +1133,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Thrown delegate error',
@@ -1215,6 +1228,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     service.createOrUpdateCard({
       title: 'Parent implementation',
@@ -1279,6 +1293,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Release authorization packet',
@@ -1320,6 +1335,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Repair workflow-kanban closure audit',
@@ -1363,6 +1379,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Runtime completion sync',
@@ -1421,6 +1438,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let rootChat = sg.createChat({
       name: 'Workflow root',
@@ -1563,6 +1581,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Manual pickup ready card',
@@ -1650,6 +1669,7 @@ links:
       now: () => now++,
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       id: 'work-item-md',
@@ -1682,6 +1702,7 @@ links:
       stateGraph: secondGraph,
       now: () => now++,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     try {
       let imported = await importingService.importWorkflowWorkItems({
@@ -1806,6 +1827,7 @@ links:
       now: () => bigNow++,
       makeId: (prefix) => `${prefix}-wc-${++idSeq}`,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = localService.createOrUpdateCard({
       title: 'Idle task',
@@ -1952,6 +1974,7 @@ links:
     };
     service = createWorkflowBoardService({
       stateGraph: sg, now: () => now++, makeId: (prefix) => `${prefix}-${++idSeq}`, projectRoot: tmpDir, proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Audit me', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
@@ -2017,6 +2040,7 @@ links:
   it('reconcileTick start/stop is idempotent and tracks the active flag', () => {
     let ticked = createWorkflowBoardService({
       stateGraph: sg, now: () => now++, makeId: (prefix) => `${prefix}-tick-${++idSeq}`, projectRoot: tmpDir, reconcileTickMs: 10_000_000,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     assert.equal(ticked.reconcileTick.active, false);
     ticked.reconcileTick.start();
