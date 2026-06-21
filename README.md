@@ -240,11 +240,9 @@ npm start
 
 `npm run build` creates the production browser bundle in `dist/web`. Normal MCP/server starts use that bundle when it is present and fall back to `web/` when it is not. Use `npm run dev` for source-module development against `web/`, or set `AGENT_PORTAL_WEB_ROOT` to serve an explicit UI directory in container builds.
 
-If `.agent-portal` is configured as a private skills submodule, set its local remote before initializing submodules:
+Initialize the product submodules:
 
 ```bash
-git config submodule..agent-portal.url <private-agent-portal-skills-remote>
-git submodule update --init .agent-portal
 git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp
 ```
 
@@ -252,14 +250,17 @@ git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp
 
 Agent Portal reads project-local skills, agents, and workflows from the `.agent-portal/` directory in your project root.
 
-The skills directory can be configured as a private submodule. Set the private remote in local Git config before initializing it:
+`.agent-portal` is shared **team memory**: keep a single clone of the private skills remote one directory level above your projects, and link it into each project as a relative symlink. It is **not** a per-project git submodule.
 
 ```bash
-git config submodule..agent-portal.url <private-agent-portal-skills-remote>
-git submodule update --init .agent-portal
+# once, in the directory above your projects
+git clone <private-agent-portal-skills-remote> .agent-portal
+# in each project
+ln -s ../.agent-portal .agent-portal
+echo '.agent-portal' >> .gitignore
 ```
 
-See `.agent-portal/README.md` when project-local skills are installed.
+Edits, commits, and pushes happen once in the shared clone; there is no per-project submodule pointer to bump. See `.agent-portal/README.md` for the team-memory layout.
 
 ## Related Projects
 
