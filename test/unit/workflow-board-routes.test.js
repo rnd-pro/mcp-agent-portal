@@ -12,6 +12,10 @@ function makeReq(method, url, body) {
   let req = new EventEmitter();
   req.method = method;
   req.url = url;
+  // Same-uid loopback request: the route seam derives the bootstrap local-human principal
+  // (board-author caps) from this, so mutating route handlers pass the S6 capability gate.
+  req.socket = { remoteAddress: '127.0.0.1' };
+  req.headers = {};
   req.destroy = (err) => req.emit('error', err);
   process.nextTick(() => {
     if (body !== undefined) req.emit('data', JSON.stringify(body));

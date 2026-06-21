@@ -20,13 +20,14 @@ import {
   normalizeWorkflowLifecycle,
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
+  isFloorGateMonotonic,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
   validateWorkflowTransitionGraph,
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
-import { CAP, daemonPrincipal, derivePrincipal, evaluateIntent } from './server/principal.js';
+import { CAP, daemonPrincipal, derivePrincipal, evaluateIntent, INTENT_CAPABILITY } from './server/principal.js';
 import { getStateGraph } from './state-graph.js';
 
 const WORKFLOW_SOURCE = 'workflow-board';
@@ -68,6 +69,20 @@ const RUNTIME_RUNNING_STATUSES = new Set(['running', 'active', 'started', 'strea
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled', 'stopped']);
 const KNOWN_WORKFLOW_PROOF_MARKERS = ['COMPLETION_PROOF', 'RELEASE_AUTH_PACKET'];
 const PROOF_MARKER_PATTERN = /\b([A-Z][A-Z0-9_]{2,})\s*:\s*(?:\*|PASS|FAIL)(?=$|[^A-Z0-9_])/g;
+// Floor check keys (inv 33): the concrete `workflowChecks` keys consumed by the audit/hygiene
+// floor gates (audit_pass_or_explicit_waiver / clean_diff_and_hygiene). Writing any of these is a
+// separated-duty signature — it requires AUDIT (intent checks.write.floor), never plain WRITE_CARD.
+const FLOOR_CHECK_KEYS = new Set([
+  'audit',
+  'auditWaiver',
+  'cleanDiff',
+  'hygiene',
+  'publicHygiene',
+  'packageHygiene',
+]);
+// Card rights fields (inv 13): mutating any of these is policy authorship (intent policy.author),
+// gated by AUTHOR. A non-author write is held for approval and the field is dropped from the patch.
+const CARD_RIGHTS_FIELDS = ['approvalMode', 'resourceGroup', 'assignedAgent', 'proposedLane'];
 
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -123,16 +138,9 @@ function sourceForPrincipal(principal) {
   return suffix ? `${WORKFLOW_SOURCE}:${suffix}` : WORKFLOW_SOURCE;
 }
 
-// Fail-closed identity: every mutator obtains its committing principal from the
-// per-call context (the HTTP/MCP seams put it on `context.principal`). A missing
-// principal resolves to the anonymous least-privilege floor — never a privileged
-// default identity.
-function resolvePrincipal(context = {}) {
-  let principal = context?.principal;
-  if (principal && typeof principal === 'object' && typeof principal.label === 'string') {
-    return principal;
-  }
-  return derivePrincipal({ channel: 'unknown' });
+function isPrincipal(value) {
+  return Boolean(value && typeof value === 'object' && typeof value.label === 'string'
+    && Array.isArray(value.capabilities));
 }
 
 function formatControlAction(value = '') {
@@ -400,9 +408,47 @@ export function createWorkflowBoardService(opts = {}) {
     proxyManager = null,
     reconcileTickMs = DEFAULT_RECONCILE_TICK_MS,
     onReconcileTickError = () => {},
+    // Trusted-embedder seam. `defaultPrincipal` is the committing identity for direct,
+    // in-process callers (and the unit-test harness) that do not flow through the HTTP/MCP
+    // seams. PRODUCTION wiring (web-server routes, MCP tool handler) never sets it, so the
+    // seam-derived `context.principal` stays authoritative and an unauthenticated request
+    // still fail-closes to anonymous (inv 45 preserved). It is NOT a way to grant rights to
+    // an untrusted caller — only an embedder that already owns the process supplies it.
+    defaultPrincipal = null,
   } = opts;
   if (!stateGraph) {
     throw new Error('Workflow board service requires a StateGraph instance.');
+  }
+  let embedderPrincipal = isPrincipal(defaultPrincipal) ? defaultPrincipal : null;
+
+  // Fail-closed identity: every mutator obtains its committing principal from the per-call
+  // context (the HTTP/MCP seams put it on `context.principal`). Absent that, a trusted
+  // in-process embedder's `defaultPrincipal` is used; otherwise the anonymous least-privilege
+  // floor — never a privileged default identity.
+  function resolvePrincipal(context = {}) {
+    if (isPrincipal(context?.principal)) return context.principal;
+    if (embedderPrincipal) return embedderPrincipal;
+    return derivePrincipal({ channel: 'unknown' });
+  }
+
+  // Standard blocked verdict, shaped exactly like the transition path's blocked result so the
+  // gate is indistinguishable from a failed transition gate to every caller. A mutator calls
+  // `gate(type, principal, extra)` and, on a non-ok verdict, returns this WITHOUT committing.
+  function gate(type, principal, extra = {}) {
+    let verdict = evaluateIntent({ type, ...extra }, principal);
+    if (verdict.ok) return { ok: true };
+    return {
+      ok: false,
+      status: verdict.verdict === 'pendingApproval' ? 'pendingApproval' : 'blocked',
+      failures: [{ gate: 'capability', reason: verdict.reason, capability: verdict.capability }],
+    };
+  }
+
+  // The daemon drives the board's own self-healing/seed commits; its writes are bookkeeping, not a
+  // human/agent card edit. Operational mutators map a daemon principal to `daemon.bookkeeping` (DAEMON)
+  // and everyone else to the intent the operation actually represents.
+  function isDaemonPrincipal(principal) {
+    return principal?.kind === 'daemon';
   }
 
   function refreshDefaultBoardPolicy(existing, id) {
@@ -498,6 +544,28 @@ export function createWorkflowBoardService(opts = {}) {
     return clone(card);
   }
 
+  // A check write is a FLOOR write iff it touches any floor check key (audit/hygiene). A mixed
+  // write (floor + basic keys) is treated as floor-wide (the stricter gate wins). The intent
+  // type maps to checks.write.floor (AUDIT) or checks.write.basic (WRITE_CARD) accordingly.
+  function checkWriteIntent(checksInput) {
+    let keys = Object.keys(asObject(checksInput?.checks ?? checksInput));
+    let isFloor = keys.some(key => FLOOR_CHECK_KEYS.has(key));
+    return isFloor ? 'checks.write.floor' : 'checks.write.basic';
+  }
+
+  // Rights fields present in an input that actually CHANGE the card's current value. Unchanged
+  // pass-throughs (e.g. an update_item that re-sends the whole card) are not a rights mutation.
+  function changedRightsFields(input, current) {
+    let changed = [];
+    for (let field of CARD_RIGHTS_FIELDS) {
+      if (!(field in input)) continue;
+      let nextValue = textOrNull(input[field]);
+      let currentValue = textOrNull(current?.[field]);
+      if (nextValue !== currentValue) changed.push(field);
+    }
+    return changed;
+  }
+
   function createOrUpdateCard(input = {}, principal = resolvePrincipal()) {
     let actor = principal.label;
     let id = textOrNull(input.id ?? input.cardId ?? input.card_id) ?? nextId(makeId, 'card');
@@ -513,9 +581,31 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
 
+    // Gate the card-body write (non-rights fields). A daemon self-heal/seed commit is bookkeeping
+    // (DAEMON); a human/agent edit is card.write (WRITE_CARD).
+    let daemonWrite = isDaemonPrincipal(principal);
+    let bodyGate = gate(daemonWrite ? 'daemon.bookkeeping' : 'card.write', principal, { boardId: board.id, cardId: id });
+    if (!bodyGate.ok) return { ...bodyGate, board, card: current ? clone(current) : null, checks: getChecks(id) };
+
+    // Rights-field authorship (inv 13). A rights field that changes a card value is a policy.author
+    // intent (AUTHOR). A non-author write is held: the rights field is dropped, never applied; the
+    // body write proceeds. `proposedLane` is advisory unless applied by a board-author here. The
+    // daemon does not author rights — it never reaches this branch with a rights change in practice.
+    let requestedRights = daemonWrite ? [] : changedRightsFields(input, current);
+    let deniedRights = [];
+    let scrubbedInput = input;
+    if (requestedRights.length) {
+      let rightsGate = gate('policy.author', principal, { boardId: board.id, cardId: id });
+      if (!rightsGate.ok) {
+        deniedRights = requestedRights;
+        scrubbedInput = { ...input };
+        for (let field of requestedRights) delete scrubbedInput[field];
+      }
+    }
+
     let ts = now();
     let merged = mergeDefined(current ?? {}, {
-      ...input,
+      ...scrubbedInput,
       id,
       boardId: board.id,
       version: current ? current.version + 1 : 1,
@@ -531,10 +621,52 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: current?.createdAt ?? ts,
       updatedAt: ts,
     });
+
+    // Narrow-only automation (inv 12). A card automation may only narrow (add to) a column's floor
+    // gates, never drop one. Checked on the raw input automation (the card normalizer does not carry
+    // a `gates` override) at the merge point — iso stays frozen. A non-monotonic override is rejected
+    // without committing.
+    let monotonic = cardAutomationIsMonotonic(board, card.columnId, asObject(scrubbedInput.automation));
+    if (!monotonic.ok) {
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{ gate: 'narrow_only_automation', reason: monotonic.reason }],
+        board,
+        card: current ? clone(current) : null,
+        checks: getChecks(id),
+      };
+    }
+
     let ops = [{ op: 'set', path: `workflowCards/${card.id}`, value: card }];
     let checks = getChecks(card.id);
 
     if (input.checks !== undefined) {
+      // Separated-duty gated check-writing (inv 33, 47). Classify the write: a floor-gate check
+      // (audit/hygiene) needs AUDIT; a basic check needs only WRITE_CARD. An executor (its id in
+      // card.executedBy) can never sign a floor check for its own card, even with AUDIT.
+      let intentType = daemonWrite ? 'daemon.bookkeeping' : checkWriteIntent(input.checks);
+      let checksGate = gate(intentType, principal, { boardId: board.id, cardId: id });
+      if (!checksGate.ok) {
+        return { ...checksGate, board, card: current ? clone(current) : null, checks };
+      }
+      if (intentType === 'checks.write.floor') {
+        let executedBy = textArray(current?.metadata?.executedBy);
+        if (executedBy.includes(principal.id)) {
+          return {
+            ok: false,
+            status: 'blocked',
+            failures: [{
+              gate: 'separated_duty',
+              reason: `Principal "${principal.id}" executed card ${id} and cannot sign its own floor-gate (audit/hygiene) check.`,
+              capability: CAP.AUDIT,
+            }],
+            board,
+            card: current ? clone(current) : null,
+            checks,
+          };
+        }
+      }
       let record = normalizeWorkflowChecksInput(input.checks, {
         cardId: card.id,
         actor,
@@ -546,7 +678,22 @@ export function createWorkflowBoardService(opts = {}) {
     }
 
     stateGraph.commit(ops, sourceForPrincipal(principal));
-    return { board, card, checks };
+    return { board, card, checks, ...(deniedRights.length ? { deniedRightsFields: deniedRights } : {}) };
+  }
+
+  // Narrow-only floor-gate check (inv 12): a card's `automation.gates` override may only NARROW the
+  // column's floor gates (add gates), never drop a floor (audit/hygiene) gate. Cards without a gate
+  // override are unconstrained here — the column gates apply unchanged.
+  function cardAutomationIsMonotonic(board, columnId, cardAutomation) {
+    let cardGates = textArray(cardAutomation.gates ?? cardAutomation.gate);
+    if (!cardGates.length) return { ok: true };
+    let columnGates = textArray(columnAutomation(board, columnId).gates);
+    if (!columnGates.length) return { ok: true };
+    if (isFloorGateMonotonic(columnGates, cardGates)) return { ok: true };
+    return {
+      ok: false,
+      reason: `Card automation may only narrow column "${columnId}" floor gates, not drop them.`,
+    };
   }
 
   function createFailure(gate, reason) {
@@ -667,6 +814,12 @@ export function createWorkflowBoardService(opts = {}) {
     let actor = principal.label;
     let request = normalizeWorkflowTransitionRequest({ ...input, actor });
     let board = ensureBoard(request.boardId);
+    let capabilityGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.transition',
+      principal,
+      { boardId: request.boardId, cardId: request.cardId, toColumnId: request.toColumnId },
+    );
+    if (!capabilityGate.ok) return capabilityGate;
     let card = getCard(request.cardId);
     let checks = getChecks(card.id);
     let gateResult = evaluateRequest(board, card, checks, request);
@@ -1726,15 +1879,11 @@ export function createWorkflowBoardService(opts = {}) {
     }
 
     if (ops.length) {
-      // Named gate chokepoint. Enforcement lands in S6 (gate engine); the daemon's
-      // self-driven reconcile routes its mutation through evaluateIntent so the frozen
-      // signature has at least one live call site. The stub verdict is permissive.
-      let verdict = evaluateIntent(
-        { type: 'runtime_reconcile', boardId: board.id, capability: CAP.DAEMON },
-        principal,
-        { board },
-      );
-      if (verdict.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+      // The daemon's self-driven reconcile is slot/step/lease bookkeeping — gated on
+      // daemon.bookkeeping (DAEMON). A non-daemon principal here would fail the gate and
+      // the reconcile would not commit (fail-closed).
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
     return { ok: true, updated: ops.length };
   }
@@ -1806,6 +1955,7 @@ export function createWorkflowBoardService(opts = {}) {
   async function createWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let result = createOrUpdateCard(args, principal);
+    if (result.ok === false) return result;
     let orchestration = await maybeAutoOrchestrateCard(result.board, result.card, args, { ...context, principal });
     return {
       ok: true,
@@ -1836,6 +1986,7 @@ export function createWorkflowBoardService(opts = {}) {
       expectedVersion: args.expectedVersion ?? args.expected_version,
       checks: args.checks,
     }, principal);
+    if (result.ok === false) return result;
     return { ok: true, ...result };
   }
 
@@ -1858,6 +2009,12 @@ export function createWorkflowBoardService(opts = {}) {
   function decomposeWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let decomposeGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!decomposeGate.ok) return decomposeGate;
     let parent = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -1941,6 +2098,13 @@ export function createWorkflowBoardService(opts = {}) {
   function updateWorkflowColumn(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    // Column definition is policy authorship (inv 8): a non-DEFINE principal is held for approval.
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
     let columnId = textOrNull(args.columnId ?? args.column_id ?? args.id);
     if (!columnId) throw new Error('Workflow column id is required.');
     let expectedVersion = args.expectedVersion ?? args.expected_version;
@@ -2019,6 +2183,13 @@ export function createWorkflowBoardService(opts = {}) {
   function updateWorkflowBoard(args = {}, options = {}) {
     let principal = resolvePrincipal(options);
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    // Board automation is policy authorship. `controlWorkflowBoard` already gated the caller on
+    // board.control before routing the mode change here (options.gatedBy='board.control'), so it is
+    // not re-gated; a direct automation edit is gated on policy.define (held for non-DEFINE callers).
+    if (options.gatedBy !== 'board.control' && !isDaemonPrincipal(principal)) {
+      let policyGate = gate('policy.define', principal, { boardId: board.id });
+      if (!policyGate.ok) return policyGate;
+    }
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
       let version = Number(expectedVersion);
@@ -2107,6 +2278,12 @@ export function createWorkflowBoardService(opts = {}) {
     let principal = resolvePrincipal(context);
     let childContext = { ...context, principal };
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let controlGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'board.control',
+      principal,
+      { boardId: board.id },
+    );
+    if (!controlGate.ok) return controlGate;
     let action = textOrNull(args.action ?? args.control) ?? 'pause';
     if (!['pause', 'resume', 'drain', 'stop', 'maintenance', 'manual', 'recovery_only', 'arm'].includes(action)) {
       throw new Error('Workflow board control action must be pause, resume, drain, stop, maintenance, manual, recovery_only, or arm.');
@@ -2153,6 +2330,7 @@ export function createWorkflowBoardService(opts = {}) {
       reason: textOrNull(args.reason) ?? `${formatControlAction(action)} board automation.`,
     }, {
       principal,
+      gatedBy: 'board.control',
       eventType: 'board_control',
       sideEffects: [
         {
@@ -2194,6 +2372,12 @@ export function createWorkflowBoardService(opts = {}) {
   function deleteWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let deleteGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!deleteGate.ok) return deleteGate;
     let card = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -2216,6 +2400,14 @@ export function createWorkflowBoardService(opts = {}) {
   function claimWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    // Lease control over a card run. Daemon lease bookkeeping maps to daemon.bookkeeping; a
+    // human/agent claim is card.control (both hold CONTROL).
+    let claimGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!claimGate.ok) return claimGate;
     let card = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -2240,6 +2432,12 @@ export function createWorkflowBoardService(opts = {}) {
   function releaseWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let releaseGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!releaseGate.ok) return releaseGate;
     let card = getCard(cardId);
     stateGraph.commit([{ op: 'delete', path: `workflowLeases/${cardId}` }], sourceForPrincipal(principal));
     return { ok: true, card, released: true };
@@ -2526,6 +2724,12 @@ export function createWorkflowBoardService(opts = {}) {
   async function orchestrateWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let orchestrateGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.orchestrate',
+      principal,
+      { cardId },
+    );
+    if (!orchestrateGate.ok) return orchestrateGate;
     let actor = principal.label;
     let card = getCard(cardId);
     let board = ensureBoard(args.boardId ?? args.board_id ?? card.boardId);
@@ -2632,12 +2836,17 @@ export function createWorkflowBoardService(opts = {}) {
       taskIds,
     }, { id: run.id, now: ts, updatedAt: now() });
     let nextColumnId = delegated.ok && card.columnId === 'ready' ? 'in-progress' : card.columnId;
+    // Execution attribution (inv 47): the principal that drove this run is recorded durably on
+    // card.metadata.executedBy (dedup). A floor-check write later checks this list — an executor
+    // cannot sign the audit/hygiene of a card it executed (separated duty).
+    let nextExecutedBy = uniqueArray([...textArray(card.metadata?.executedBy), principal.id]);
     let nextCard = normalizeWorkflowCardInput({
       ...card,
       columnId: nextColumnId,
       recoveryFlags: delegationFailed
         ? uniqueArray([...normalizeRecoveryFlags(card.recoveryFlags), 'needs_audit'])
         : card.recoveryFlags,
+      metadata: { ...asObject(card.metadata), executedBy: nextExecutedBy },
       entityRefs: {
         ...card.entityRefs,
         chatId: delegated.chatId,
@@ -2688,6 +2897,12 @@ export function createWorkflowBoardService(opts = {}) {
   function resumeWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let resumeGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!resumeGate.ok) return resumeGate;
     let actor = principal.label;
     let card = getCard(cardId);
     let ts = now();
@@ -2731,6 +2946,12 @@ export function createWorkflowBoardService(opts = {}) {
   async function controlWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let controlGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!controlGate.ok) return controlGate;
     let actor = principal.label;
     let action = textOrNull(args.action) ?? 'pause';
     if (!['pause', 'stop', 'cancel'].includes(action)) {
@@ -2929,7 +3150,10 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function reconcileWorkflowRecovery(args = {}, context = {}) {
-    let principal = resolvePrincipal(context);
+    // Recovery reconcile is board self-healing — the board recomputing its own recovery flags.
+    // Identity is the daemon (consistent with runtime/escalation reconcile), so the periodic
+    // tick (no per-call principal) and a public trigger both commit as bookkeeping.
+    let principal = daemonPrincipal();
     let actor = principal.label;
     await seedWorkflowWorkItemsForProjection(args);
     let projection = getBoardProjection(args);
@@ -2979,7 +3203,10 @@ export function createWorkflowBoardService(opts = {}) {
       reconciled.push({ card: nextCard, run, flags });
     }
 
-    if (ops.length) stateGraph.commit(ops, sourceForPrincipal(principal));
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: projection.board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
     return {
       ok: true,
       reconciled,
@@ -3247,6 +3474,15 @@ export function createWorkflowBoardService(opts = {}) {
         continue;
       }
       let result = createOrUpdateCard(cardInput, principal);
+      if (result.ok === false) {
+        skipped.push({
+          cardId: cardInput.id,
+          title: cardInput.title,
+          markdownPath: cardInput.metadata.markdownPath,
+          reason: result.status === 'pendingApproval' ? 'pending_approval' : 'blocked',
+        });
+        continue;
+      }
       imported.push({
         cardId: result.card.id,
         title: result.card.title,
@@ -3259,8 +3495,14 @@ export function createWorkflowBoardService(opts = {}) {
 
   async function exportWorkflowWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
-    let actor = principal.label;
     let cardId = normalizeCardId(args);
+    let exportGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!exportGate.ok) return exportGate;
+    let actor = principal.label;
     let card = getCard(cardId);
     let projectId = textOrNull(args.projectId ?? args.project_id ?? card.projectId) ?? 'global';
     let root = workspaceRoot();

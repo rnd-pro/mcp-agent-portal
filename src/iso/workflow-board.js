@@ -337,7 +337,6 @@ const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   defaultApprovalMode: 'plan',
   globalParallelLimit: 8,
   fallbackAgents: ['orchestrator'],
-  manualGateOverride: false,
 };
 
 const DEFAULT_WORKFLOW_TRANSITIONS = [
@@ -550,7 +549,6 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
     fallbackAgents: fallbackAgents.length
       ? fallbackAgents
       : [...DEFAULT_WORKFLOW_BOARD_AUTOMATION.fallbackAgents],
-    manualGateOverride: Boolean(automation.manualGateOverride ?? automation.manual_gate_override),
     ...(leaseTtlMs ? { leaseTtlMs } : {}),
   };
 }

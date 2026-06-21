@@ -150,10 +150,38 @@ export function derivePrincipal(transport = {}) {
 }
 
 /**
- * Frozen mutation-policy entrypoint. Policy enforcement (capability checks against
- * the intent) lands in Phase 2 — the gate engine, S6. This slice freezes the
- * signature and is the named home for that decision; the stub is permissive so
- * current behavior does not regress.
+ * Frozen intent → capability map (S6). Every mutating board intent declares the single
+ * capability that authorizes it. Two of those — DEFINE and AUTHOR — are policy-authorship
+ * capabilities: a principal that lacks them does not get a hard block, it gets
+ * `pendingApproval` (inv 8: a policy edit by a non-author defaults to approval, not denial).
+ * An intent type absent from this map fails closed.
+ */
+export const INTENT_CAPABILITY = {
+  read: CAP.READ,
+  'card.write': CAP.WRITE_CARD,
+  'card.transition': CAP.TRANSITION,
+  'card.orchestrate': CAP.ORCHESTRATE,
+  'card.control': CAP.CONTROL,
+  'checks.write.floor': CAP.AUDIT,
+  'checks.write.basic': CAP.WRITE_CARD,
+  'policy.define': CAP.DEFINE,
+  'policy.author': CAP.AUTHOR,
+  'board.control': CAP.CONTROL,
+  'daemon.bookkeeping': CAP.DAEMON,
+};
+
+// Policy-authorship capabilities: absence yields pendingApproval, not a hard block.
+const POLICY_AUTHORSHIP_CAPABILITIES = new Set([CAP.DEFINE, CAP.AUTHOR]);
+
+/**
+ * Frozen mutation-policy entrypoint and single gate engine (S6). Maps `intent.type` to its
+ * required capability and decides the verdict purely from `principal.capabilities`:
+ *   - holds the capability        → `{ ok: true, verdict: 'accepted' }`
+ *   - lacks an operational cap     → `{ ok: false, verdict: 'blocked', reason, capability }`
+ *   - lacks a policy-authorship cap (DEFINE/AUTHOR) → `{ ok: false, verdict: 'pendingApproval', reason, capability }`
+ *   - unknown intent type          → fail closed `{ ok: false, verdict: 'blocked', reason: 'unknown intent', capability: null }`
+ *
+ * Identity is read ONLY from `principal`; `intent` and `context` never supply or override it.
  *
  * @param {{ type: string, boardId?: string, cardId?: string, fromColumnId?: string, toColumnId?: string, capability?: string }} intent
  * @param {{ kind: string, id: string, capabilities: string[], label: string, transport: object }} principal
@@ -161,8 +189,21 @@ export function derivePrincipal(transport = {}) {
  * @returns {{ ok: boolean, verdict: 'accepted'|'blocked'|'pendingApproval'|'rolledBack', reason?: string, capability?: string }}
  */
 export function evaluateIntent(intent, principal, context) {
-  void intent;
-  void principal;
   void context;
-  return { ok: true, verdict: 'accepted' };
+  let type = textOrNull(intent?.type);
+  let required = type ? INTENT_CAPABILITY[type] : undefined;
+  if (!required) {
+    return { ok: false, verdict: 'blocked', reason: 'unknown intent', capability: null };
+  }
+  let held = Array.isArray(principal?.capabilities) ? principal.capabilities : [];
+  if (held.includes(required)) {
+    return { ok: true, verdict: 'accepted' };
+  }
+  let verdict = POLICY_AUTHORSHIP_CAPABILITIES.has(required) ? 'pendingApproval' : 'blocked';
+  return {
+    ok: false,
+    verdict,
+    reason: `Principal "${principal?.label ?? 'unknown'}" lacks capability ${required} for intent ${type}.`,
+    capability: required,
+  };
 }
