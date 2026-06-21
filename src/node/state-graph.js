@@ -187,6 +187,7 @@ export class StateGraph extends EventEmitter {
     this._snapshotPath = opts.snapshotPath || SNAPSHOT_PATH;
     this._walPath = opts.walPath || WAL_PATH;
     this._chatsDir = opts.chatsDir || CHATS_DIR;
+    this._oldConfigPath = opts.oldConfigPath || OLD_CONFIG_PATH;
     this._state = defaultState();
     this._version = 0;
 
@@ -268,9 +269,14 @@ export class StateGraph extends EventEmitter {
    *
    * @param {Array<{ op: string, path: string, value?: any }>} ops
    * @param {string} [source='unknown'] — who made this mutation (for audit)
+   * @param {{ durable?: boolean }} [opts] — when `durable`, the WAL entry is
+   *        written synchronously with an fsync barrier before this call
+   *        returns (durable-before-side-effect; e.g. admission before a spawn).
+   *        Throws if the durable write fails, so the caller never proceeds on
+   *        a commit that is not on stable storage.
    * @returns {number} assigned version number
    */
-  commit(ops, source = 'unknown') {
+  commit(ops, source = 'unknown', opts = {}) {
     if (!Array.isArray(ops) || ops.length === 0) return this._version;
 
     // Validate ops
@@ -307,9 +313,15 @@ export class StateGraph extends EventEmitter {
       this._ring.shift();
     }
 
-    // 5. Queue for async WAL write
+    // 5. Persist the WAL entry — async group-commit by default, or a
+    //    synchronous fsync barrier when the caller needs durability before a
+    //    side effect (admission must be on stable storage before delegating).
     this._walQueue.push(JSON.stringify(entry));
-    this._scheduleWalFlush();
+    if (opts.durable) {
+      this._flushWalDurable();
+    } else {
+      this._scheduleWalFlush();
+    }
 
     // 6. Track for snapshot compaction
     this._commitsSinceSnapshot++;
@@ -321,6 +333,39 @@ export class StateGraph extends EventEmitter {
     this.emit('commit', { v: this._version, ops, source });
 
     return this._version;
+  }
+
+  /**
+   * Compare-and-set commit. Reads the monotonic epoch at `epochPath`; if it
+   * equals `expectedEpoch`, applies `ops` AND bumps the epoch by one in the
+   * SAME synchronous frame — Node's single thread makes the read→check→apply
+   * atomic, there is no await between them. On mismatch nothing is written.
+   *
+   * With `{ durable: true }` the CAS and the fsync barrier fuse into one
+   * indivisible step: the epoch bump and the durable WAL write land in a single
+   * commit, never two. This is the epoch-fence for admission writes
+   * (workflow scheduler v5 AD-2/AD-14): a stale-epoch holder writes nothing.
+   *
+   * @param {string} epochPath — slash path to the monotonic epoch counter
+   * @param {number} expectedEpoch — the epoch the caller observed
+   * @param {Array<{ op: string, path: string, value?: any }>} [ops]
+   * @param {string} [source]
+   * @param {{ durable?: boolean }} [opts]
+   * @returns {{ ok: boolean, conflict: boolean, currentEpoch: number, version: number, epoch?: number }}
+   */
+  commitCAS(epochPath, expectedEpoch, ops = [], source = 'unknown', opts = {}) {
+    if (!epochPath || typeof epochPath !== 'string') {
+      throw new Error('commitCAS: missing epochPath');
+    }
+    let raw = _getPath(this._state, epochPath);
+    let currentEpoch = (raw === undefined || raw === null) ? 0 : raw;
+    if (currentEpoch !== expectedEpoch) {
+      return { ok: false, conflict: true, currentEpoch, version: this._version };
+    }
+    let nextEpoch = currentEpoch + 1;
+    let allOps = [...ops, { op: 'set', path: epochPath, value: nextEpoch }];
+    let version = this.commit(allOps, source, opts);
+    return { ok: true, conflict: false, currentEpoch, epoch: nextEpoch, version };
   }
 
   // ── Convenience write helpers ──────────────────────────
@@ -383,24 +428,28 @@ export class StateGraph extends EventEmitter {
       }
     }
 
-    // 2. Replay WAL entries
+    // 2. Replay WAL entries — version-sorted, so replay is order-independent.
+    //    Durable synchronous writes and async group-commits append to the same
+    //    WAL and can interleave on disk; sorting by version keeps recovery
+    //    correct regardless of physical order.
     if (fs.existsSync(this._walPath)) {
       try {
         let lines = fs.readFileSync(this._walPath, 'utf8').split('\n').filter(Boolean);
-        let replayed = 0;
+        let entries = [];
         for (let line of lines) {
-          try {
-            let entry = JSON.parse(line);
-            if (entry.v > this._version) {
-              for (let op of entry.ops) _applyOp(this._state, op);
-              this._version = entry.v;
-              this._state._v = entry.v;
-              this._state._ts = entry.ts;
-              // Also populate ring buffer for immediate delta sync
-              this._ring.push(entry);
-              replayed++;
-            }
-          } catch { /* skip corrupt line */ }
+          try { entries.push(JSON.parse(line)); }
+          catch { /* skip corrupt line */ }
+        }
+        entries.sort((a, b) => (a.v || 0) - (b.v || 0));
+        for (let entry of entries) {
+          if (entry.v > this._version) {
+            for (let op of entry.ops) _applyOp(this._state, op);
+            this._version = entry.v;
+            this._state._v = entry.v;
+            this._state._ts = entry.ts;
+            // Also populate ring buffer for immediate delta sync
+            this._ring.push(entry);
+          }
         }
       } catch (err) {
         console.error('[StateGraph] WAL replay failed:', err.message);
@@ -408,7 +457,7 @@ export class StateGraph extends EventEmitter {
     }
 
     // 3. Migrate from old config if no snapshot exists
-    if (!snapshotLoaded && this._version === 0 && fs.existsSync(OLD_CONFIG_PATH)) {
+    if (!snapshotLoaded && this._version === 0 && fs.existsSync(this._oldConfigPath)) {
       this._migrateFromOldConfig();
       this._writeSnapshotSync();
     }
@@ -483,6 +532,54 @@ export class StateGraph extends EventEmitter {
     }
   }
 
+  // Synchronously flush pending WAL entries with an fsync barrier.
+  // writeSync + fsyncSync forces the bytes to stable storage, not just the OS
+  // page cache, so a hard crash cannot lose a durable commit. Replay is
+  // version-sorted, so this may interleave on disk with the async group-commit
+  // without breaking recovery.
+  _flushWalDurable() {
+    if (this._walTimer) {
+      clearTimeout(this._walTimer);
+      this._walTimer = null;
+    }
+    if (this._walQueue.length === 0) return;
+    let batch = this._walQueue.splice(0);
+    let dir = path.dirname(this._walPath);
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      let existedBefore = fs.existsSync(this._walPath);
+      let fd = fs.openSync(this._walPath, 'a');
+      try {
+        fs.writeSync(fd, batch.join('\n') + '\n');
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      // On first creation the WAL's directory entry must also be durable, or a
+      // crash can lose the whole file (fsync(fd) persists data + inode, not the
+      // parent-directory link).
+      if (!existedBefore) this._fsyncDir(dir);
+    } catch (err) {
+      // Re-queue and surface: a durable commit must never report success when
+      // the bytes are not on disk.
+      this._walQueue.unshift(...batch);
+      throw new Error(`Durable WAL write failed: ${err.message}`);
+    }
+  }
+
+  // Best-effort fsync of a directory entry (local filesystems only; directory
+  // fsync is unsupported on some platforms/filesystems).
+  _fsyncDir(dir) {
+    let dfd;
+    try {
+      dfd = fs.openSync(dir, 'r');
+      fs.fsyncSync(dfd);
+    } catch { /* best-effort: not all platforms allow directory fsync */ }
+    finally {
+      if (dfd !== undefined) { try { fs.closeSync(dfd); } catch { /* ignore */ } }
+    }
+  }
+
   // ── Persistence: Snapshot Compaction ────────────────────
 
   // Async snapshot write + WAL truncation.
@@ -514,20 +611,32 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-  // Synchronous snapshot write (for process exit).
+  // Synchronous snapshot write (for process exit) with fsync barriers.
   _writeSnapshotSync() {
     try {
-      fs.mkdirSync(path.dirname(this._snapshotPath), { recursive: true });
+      let snapDir = path.dirname(this._snapshotPath);
+      fs.mkdirSync(snapDir, { recursive: true });
       fs.mkdirSync(path.dirname(this._walPath), { recursive: true });
-      // Flush pending WAL synchronously
+      // Flush pending WAL synchronously with an fsync barrier.
       if (this._walQueue.length > 0) {
-        fs.appendFileSync(this._walPath, this._walQueue.join('\n') + '\n');
+        let wfd = fs.openSync(this._walPath, 'a');
+        try {
+          fs.writeSync(wfd, this._walQueue.join('\n') + '\n');
+          fs.fsyncSync(wfd);
+        } finally { fs.closeSync(wfd); }
         this._walQueue = [];
       }
 
+      // Write the snapshot durably: tmp + fsync, atomic rename, fsync dir.
       let tmpPath = this._snapshotPath + '.tmp';
-      fs.writeFileSync(tmpPath, JSON.stringify(this._state, null, 2));
+      let sfd = fs.openSync(tmpPath, 'w');
+      try {
+        fs.writeSync(sfd, JSON.stringify(this._state, null, 2));
+        fs.fsyncSync(sfd);
+      } finally { fs.closeSync(sfd); }
       fs.renameSync(tmpPath, this._snapshotPath);
+      this._fsyncDir(snapDir);
+      // WAL is now compacted into the snapshot.
       fs.writeFileSync(this._walPath, '');
       this._snapshotVersion = this._version;
       this._commitsSinceSnapshot = 0;
@@ -555,7 +664,7 @@ export class StateGraph extends EventEmitter {
   // Migrate from old config-store format.
   _migrateFromOldConfig() {
     try {
-      let old = JSON.parse(fs.readFileSync(OLD_CONFIG_PATH, 'utf8'));
+      let old = JSON.parse(fs.readFileSync(this._oldConfigPath, 'utf8'));
       let ops = [];
 
       // Settings
