@@ -538,6 +538,8 @@ describe('workflow board model and service', () => {
       actor: 'test',
     });
 
+    // The unknown column is now rejected by the service's board-driven column check (the iso card
+    // normalizer is board-agnostic after S5 carry-over), and the decomposition is still atomic.
     assert.throws(
       () => service.decomposeWorkItem({
         cardId: parent.card.id,
@@ -547,7 +549,7 @@ describe('workflow board model and service', () => {
           { id: 'child-invalid', title: 'Invalid child', columnId: 'unknown-column' },
         ],
       }),
-      /Unknown workflow column/,
+      /Unknown workflow column "unknown-column"/,
     );
     assert.equal(service.getBoardProjection().cards.some(card => card.id === 'child-valid'), false);
     assert.equal(service.getBoardProjection().events.some(event => event.eventType === 'decomposition'), false);

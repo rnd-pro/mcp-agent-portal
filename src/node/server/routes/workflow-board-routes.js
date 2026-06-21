@@ -124,6 +124,66 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/transition': requestTransition,
     'POST /api/workflow-board/transitions': requestTransition,
 
+    'POST /api/workflow-board/enqueue': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = await resolveService().enqueueWorkflowCard(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/dependencies/link': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().linkDependency(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/dependencies/unlink': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().unlinkDependency(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/columns/define': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().defineWorkflowColumn(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/transitions/define': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().defineWorkflowTransition(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/gates/define': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().defineWorkflowGate(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'POST /api/workflow-board/orchestrate': async (req, res) => {
       try {
         let body = await parseBody(req);

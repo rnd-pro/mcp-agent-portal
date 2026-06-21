@@ -609,10 +609,11 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
   if (!id) throw new Error('Workflow card requires id.');
   let title = textOrNull(input.title);
   if (!title) throw new Error('Workflow card requires title.');
+  // Board-agnostic: the normalizer accepts any non-empty columnId (default `ideas`). It cannot know a
+  // board's column set, so a custom column added via define_column is honored here; the service
+  // validates `columnId ∈ board.columns` at the card-creation chokepoint (createOrUpdateCard / the
+  // decompose child path), which is where the board is in scope.
   let columnId = textOrNull(input.columnId ?? input.column_id) ?? 'ideas';
-  if (!DEFAULT_WORKFLOW_COLUMN_IDS.includes(columnId)) {
-    throw new Error(`Unknown workflow column "${columnId}". Supported: ${DEFAULT_WORKFLOW_COLUMN_IDS.join(', ')}`);
-  }
   return {
     schema: WORKFLOW_CARD_SCHEMA,
     id,

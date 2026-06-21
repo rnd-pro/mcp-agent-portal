@@ -116,7 +116,16 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.childItems.type, 'array');
     assert.equal(schema.properties.childColumnId.type, 'string');
     assert.equal(schema.properties.compact.type, 'boolean');
-    assert.deepEqual(schema.properties.view.enum, ['status']);
+    assert.deepEqual(schema.properties.view.enum, ['status', 'queue']);
+    assert.equal(schema.properties.action.enum.includes('enqueue'), true);
+    assert.equal(schema.properties.action.enum.includes('queue'), true);
+    assert.equal(schema.properties.action.enum.includes('link_dependency'), true);
+    assert.equal(schema.properties.action.enum.includes('define_column'), true);
+    assert.equal(schema.properties.action.enum.includes('define_transition'), true);
+    assert.equal(schema.properties.action.enum.includes('define_gate'), true);
+    assert.equal(schema.properties.gates.items.type, 'string');
+    assert.equal(schema.properties.from.type, 'string');
+    assert.equal(schema.properties.to.type, 'string');
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {

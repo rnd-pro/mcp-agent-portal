@@ -27,6 +27,7 @@ import {
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
   validateWorkflowTransitionGraph,
+  WORKFLOW_GATE_VOCABULARY,
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
@@ -723,6 +724,11 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: current?.createdAt ?? ts,
       updatedAt: ts,
     });
+
+    // Board-driven column authority (S5 carry-over). The iso normalizer is board-agnostic, so the
+    // board's own column set is the authority here: a card may land in any default or
+    // define_column-added column the board actually has, and a genuinely-unknown column is rejected.
+    assertBoardColumn(board, card.columnId);
 
     // Narrow-only automation (inv 12). A card automation may only narrow (add to) a column's floor
     // gates, never drop one. Checked on the raw input automation (the card normalizer does not carry
@@ -1740,6 +1746,226 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: unlinked }], sourceForPrincipal(principal));
     let outcome = recomputeDependencyLifecycle(board, unlinked, principal);
     return { ok: true, card: outcome.card, dependsOn: outcome.card.dependsOn, lifecycle: outcome.card.lifecycle, ...outcome.extra };
+  }
+
+  // ── Board-policy authoring surface (WS-C; inv 8, 11) ──────────────────────────────────────────
+  // Authoring a column/transition/gate is policy.define (DEFINE → pendingApproval for a non-author).
+  // Every mutation re-runs validateWorkflowTransitionGraph on the proposed next board and REJECTS
+  // (without committing) if the graph is invalid, so the board can never be authored into an
+  // unoperable state (inv 11). A successful author commits durably and bumps the board version.
+
+  function bumpBoardVersion(board) {
+    return Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) + 1 : 1;
+  }
+
+  // A define mutation: validate the proposed next board, reject on the first validator error without
+  // committing, else commit the board and return the durable clone. The gate has already passed.
+  function commitDefinedBoard(nextBoard, principal, extra = {}) {
+    let validation = validateWorkflowTransitionGraph(nextBoard);
+    if (!validation.ok) {
+      let first = validation.errors[0];
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{ gate: 'invalid_board_graph', code: first.code, reason: first.detail }],
+      };
+    }
+    stateGraph.commit(
+      [{ op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard }],
+      sourceForPrincipal(principal),
+    );
+    return { ok: true, board: clone(nextBoard), ...extra };
+  }
+
+  // define_column: add OR update a board column. Gate policy.define. Apply to board.columns (insert at
+  // `after`/`position` for a new column; in-place update for an existing one), re-validate the graph,
+  // commit durably, bump version.
+  function defineWorkflowColumn(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let columnId = textOrNull(args.columnId ?? args.column_id ?? args.id);
+    if (!columnId) throw new Error('defineWorkflowColumn requires columnId.');
+    let ts = now();
+    let columns = Array.isArray(board.columns) ? board.columns.slice() : [];
+    let index = columns.findIndex(column => column.id === columnId);
+    let title = textOrNull(args.title);
+    let automationPatch = asObject(args.automation);
+    if (index >= 0) {
+      let current = columns[index];
+      columns[index] = {
+        ...current,
+        title: title ?? current.title,
+        automation: Object.keys(automationPatch).length
+          ? normalizeWorkflowAutomation({ ...asObject(current.automation), ...automationPatch })
+          : asObject(current.automation),
+      };
+    } else {
+      let column = {
+        id: columnId,
+        title: title ?? columnId,
+        automation: normalizeWorkflowAutomation(automationPatch),
+      };
+      let position = resolveColumnInsertIndex(columns, args, columns.length);
+      columns.splice(position, 0, column);
+    }
+    let nextBoard = {
+      ...board,
+      columns,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+      metadata: { ...asObject(board.metadata), columnSettingsUpdatedAt: ts },
+    };
+    let outcome = commitDefinedBoard(nextBoard, principal, {
+      column: clone(columns.find(column => column.id === columnId)),
+    });
+    return outcome;
+  }
+
+  // Insertion index for a NEW column: after `args.after` (column id), else at `args.position` (clamped),
+  // else appended. The default board keeps `done` terminal at the end; an author inserting before it
+  // simply passes a position/after that lands earlier.
+  function resolveColumnInsertIndex(columns, args, fallback) {
+    let after = textOrNull(args.after);
+    if (after) {
+      let idx = columns.findIndex(column => column.id === after);
+      if (idx >= 0) return idx + 1;
+    }
+    let position = Number(args.position);
+    if (Number.isFinite(position)) return Math.max(0, Math.min(columns.length, Math.floor(position)));
+    return fallback;
+  }
+
+  // Validate a proposed gate list against the closed iso vocabulary. Returns the deduped gate id array
+  // or throws on an unknown gate (fail-closed; the validator would also reject it, this is the early,
+  // precise error).
+  function normalizeDefinedGates(gates) {
+    let ids = textArray(gates);
+    for (let id of ids) {
+      if (!WORKFLOW_GATE_VOCABULARY.includes(id)) {
+        throw new Error(`Unknown workflow gate "${id}". Supported: ${WORKFLOW_GATE_VOCABULARY.join(', ')}`);
+      }
+    }
+    return ids;
+  }
+
+  let transitionEdgeKey = transition => `${textOrNull(transition?.from) ?? ''}->${textOrNull(transition?.to) ?? ''}`;
+
+  // define_transition: add/update a transition edge {from, to, gates}. Gate policy.define. The gates
+  // must be a subset of the closed vocabulary (reject unknown). Apply to board.transitions, re-validate,
+  // commit durably.
+  function defineWorkflowTransition(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let from = textOrNull(args.from);
+    let to = textOrNull(args.to);
+    if (!from || !to) throw new Error('defineWorkflowTransition requires from and to.');
+    let gates = normalizeDefinedGates(args.gates ?? args.gate);
+    let ts = now();
+    let transitions = Array.isArray(board.transitions) ? board.transitions.slice() : [];
+    let edge = { from, to, gates };
+    let index = transitions.findIndex(transition => transitionEdgeKey(transition) === `${from}->${to}`);
+    if (index >= 0) transitions[index] = { ...transitions[index], from, to, gates };
+    else transitions.push(edge);
+    let nextBoard = {
+      ...board,
+      transitions,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+    };
+    return commitDefinedBoard(nextBoard, principal, {
+      transition: clone(transitions.find(transition => transitionEdgeKey(transition) === `${from}->${to}`)),
+    });
+  }
+
+  // define_gate: set/replace the gate list on an EXISTING transition (a focused alias of
+  // define_transition that only touches gates). Gate policy.define. Same closed-vocabulary rule, plus
+  // floor-gate monotonicity: a redefinition may not WEAKEN a floor gate on a forward edge. Re-validate,
+  // commit durably.
+  function defineWorkflowGate(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let from = textOrNull(args.from);
+    let to = textOrNull(args.to);
+    if (!from || !to) throw new Error('defineWorkflowGate requires from and to.');
+    let gates = normalizeDefinedGates(args.gates ?? args.gate);
+    let transitions = Array.isArray(board.transitions) ? board.transitions.slice() : [];
+    let index = transitions.findIndex(transition => transitionEdgeKey(transition) === `${from}->${to}`);
+    if (index < 0) throw new Error(`Workflow transition not found: ${from} -> ${to}.`);
+    let current = transitions[index];
+    // Floor-gate monotonicity (inv 9, 10): a forward edge's redefinition may not drop a floor
+    // (audit/hygiene) gate it currently carries. A backward (rank-decreasing) edge is not a forward
+    // edge, so monotonicity does not apply there. The classifier tells us the edge class.
+    let classifier = classifyWorkflowGraph(board);
+    let edgeClass = classifier.edgeClass(from, to);
+    let currentGates = textArray(current.gates ?? current.gate);
+    if (edgeClass === 'forward' && !isFloorGateMonotonic(currentGates, gates)) {
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{
+          gate: 'floor_gate_monotonic',
+          reason: `Gate redefinition for forward edge ${from} -> ${to} may not weaken a floor (audit/hygiene) gate.`,
+        }],
+      };
+    }
+    transitions[index] = { ...current, from, to, gates };
+    let ts = now();
+    let nextBoard = {
+      ...board,
+      transitions,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+    };
+    return commitDefinedBoard(nextBoard, principal, {
+      transition: clone(transitions[index]),
+    });
+  }
+
+  // enqueue (WS-C public action): resolve the card, gate card.transition (enqueue is an admission
+  // request), then call the internal enqueueWorkItem. Returns the enqueue result (admissionId,
+  // lifecycle). This is the explicit `enqueue` action — distinct from the auto-orchestrate reroute.
+  function enqueueWorkflowCard(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let cardId = normalizeCardId(args);
+    let admissionGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.transition',
+      principal,
+      { cardId },
+    );
+    if (!admissionGate.ok) return admissionGate;
+    let card = getCard(cardId);
+    let board = ensureBoard(card.boardId);
+    let notBefore = args.notBefore ?? args.not_before;
+    let enqueued = enqueueWorkItem(board, card, { notBefore });
+    if (!enqueued.ok) return { ok: false, reason: enqueued.reason, ...(enqueued.gate ? { gate: enqueued.gate } : {}) };
+    let nextCard = enqueued.card ?? getCard(cardId);
+    return {
+      ok: true,
+      boardId: board.id,
+      cardId: nextCard.id,
+      admissionId: enqueued.entry?.admissionId ?? null,
+      lifecycle: nextCard.lifecycle,
+      deduped: enqueued.deduped ?? false,
+      entry: enqueued.entry,
+    };
   }
 
   // After a link/unlink, recompute the dependent's idle↔blocked lifecycle (the only transition this
@@ -3166,6 +3392,7 @@ export function createWorkflowBoardService(opts = {}) {
     }
     let actor = principal.label;
     let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
+    let board = ensureBoard(parent.boardId);
     let ts = now();
     let children = childItemsFromArgs(args).map((item) => {
       let childContext = textArray(item.context);
@@ -3174,11 +3401,16 @@ export function createWorkflowBoardService(opts = {}) {
       if (stateGraph.get(`workflowCards/${id}`)) {
         throw new Error(`Workflow decomposition child card already exists: ${id}`);
       }
+      let columnId = textOrNull(item.columnId ?? item.column_id) ?? childColumnId;
+      // Board-driven column authority (S5 carry-over): a child card from untrusted childItems may only
+      // land in a column the board actually has. The iso normalizer is board-agnostic, so this is the
+      // chokepoint that rejects a genuinely-unknown column.
+      assertBoardColumn(board, columnId);
       return normalizeWorkflowCardInput({
         ...item,
         id,
         boardId: parent.boardId,
-        columnId: textOrNull(item.columnId ?? item.column_id) ?? childColumnId,
+        columnId,
         parentCardId: parent.id,
         projectId: textOrNull(item.projectId ?? item.project_id) ?? parent.projectId,
         domain: textOrNull(item.domain) ?? parent.domain,
@@ -3199,7 +3431,6 @@ export function createWorkflowBoardService(opts = {}) {
         updatedAt: ts,
       });
     });
-    let board = ensureBoard(parent.boardId);
     let eventId = textOrNull(args.eventId ?? args.event_id) ?? nextId(makeId, 'decomposition');
     let event = normalizeWorkflowTransitionEvent({
       id: eventId,
@@ -3591,6 +3822,16 @@ export function createWorkflowBoardService(opts = {}) {
   function columnAutomation(board, columnId) {
     let column = board.columns.find(item => item.id === columnId);
     return asObject(column?.automation);
+  }
+
+  // Board-driven column existence check (S5 carry-over). The iso card normalizer is board-agnostic;
+  // a card's columnId is authoritative against the BOARD's own columns (default or define_column-added),
+  // not the global default-id constant. Throws a clear, board-scoped error for an unknown column.
+  function assertBoardColumn(board, columnId) {
+    let supported = (Array.isArray(board?.columns) ? board.columns : []).map(column => column.id);
+    if (!supported.includes(columnId)) {
+      throw new Error(`Unknown workflow column "${columnId}". Supported: ${supported.join(', ')}`);
+    }
   }
 
   function cardAutomation(board, card) {
@@ -4977,9 +5218,13 @@ export function createWorkflowBoardService(opts = {}) {
     releaseWorkItem,
     orchestrateWorkItem,
     enqueueWorkItem,
+    enqueueWorkflowCard,
     drainWorkflowQueue,
     linkDependency,
     unlinkDependency,
+    defineWorkflowColumn,
+    defineWorkflowTransition,
+    defineWorkflowGate,
     releaseDependencies,
     resumeWorkItem,
     controlWorkItem,
