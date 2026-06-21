@@ -137,6 +137,140 @@ export function hasActiveEscalation(card = {}) {
   return Boolean(state && (state.kind || state.lastEscalation) && !(state.humanEscalated ?? state.human_escalated));
 }
 
+// ── Orchestrator return / subscription channel (event-driven control loop) ──────────────────────
+// A child task reports back to the orchestrator via typed "return" events; the orchestrator is a
+// dormant reducer woken by the board substrate only on ACTIONABLE returns. These are pure contracts;
+// the node layer mints them on the reconcile path and drives the wake through the escalation channel.
+
+export const WORKFLOW_RETURN_SCHEMA = 'workflow-return/v1';
+
+export const WORKFLOW_RETURN_KINDS = [
+  'completed', 'failed',                                  // terminal — run reached a final status
+  'needs_decision', 'needs_context', 'needs_permission',  // intermediate — two-way
+  'blocked',                                              // intermediate — hard-interrupt
+  'partial', 'discovered', 'progress',                    // intermediate — soft
+];
+export const WORKFLOW_RETURN_TERMINAL_KINDS = ['completed', 'failed'];
+export const WORKFLOW_RETURN_HARD_INTERRUPT_KINDS = ['needs_decision', 'blocked', 'needs_permission'];
+export const WORKFLOW_RETURN_COALESCE_ONLY_KINDS = ['progress', 'partial'];
+export const WORKFLOW_RETURN_ACTIONABLE_KINDS =
+  WORKFLOW_RETURN_KINDS.filter(kind => !WORKFLOW_RETURN_COALESCE_ONLY_KINDS.includes(kind));
+
+// Folds a two-way return onto the existing escalation vocabulary for re-engagement.
+const RETURN_KIND_TO_ESCALATION = {
+  needs_decision: 'needs_decision',
+  needs_context: 'insufficient_context',
+  needs_permission: 'insufficient_permission',
+  blocked: 'needs_decision',
+};
+
+/** Does a return of this kind warrant waking the orchestrator (vs. coalesce-only progress/partial)? */
+export function isActionableReturn(kind) { return WORKFLOW_RETURN_ACTIONABLE_KINDS.includes(textOrNull(kind)); }
+/** A hard-interrupt return wakes regardless of subscription (the child cannot proceed without a reply). */
+export function isHardInterrupt(kind) { return WORKFLOW_RETURN_HARD_INTERRUPT_KINDS.includes(textOrNull(kind)); }
+/** A terminal return — the child's run reached a final status. */
+export function isTerminalReturn(kind) { return WORKFLOW_RETURN_TERMINAL_KINDS.includes(textOrNull(kind)); }
+
+/**
+ * Normalize a typed return event. Flags are denormalized so the hot path does zero table lookups.
+ * Returns null on an unknown kind or a missing correlationId (the inbox key, frozen as the cardId).
+ * @param {object} input
+ * @param {{ now?: number, seq?: number, correlationId?: string, runId?: string, taskId?: string, raisedBy?: string, eventId?: string }} [opts]
+ */
+export function normalizeWorkflowReturnEvent(input = {}, opts = {}) {
+  let source = objectOrEmpty(input);
+  let kind = textOrNull(source.kind);
+  if (!kind || !WORKFLOW_RETURN_KINDS.includes(kind)) return null;
+  let correlationId = textOrNull(source.correlationId ?? source.correlation_id ?? opts.correlationId);
+  if (!correlationId) return null;
+
+  let now = Number(opts.now);
+  let raisedAt = Number.isFinite(now) ? now : Number(source.raisedAt ?? source.raised_at);
+  let seq = Number(source.seq ?? opts.seq);
+
+  let terminal = WORKFLOW_RETURN_TERMINAL_KINDS.includes(kind);
+  let hardInterrupt = WORKFLOW_RETURN_HARD_INTERRUPT_KINDS.includes(kind);
+  let actionable = WORKFLOW_RETURN_ACTIONABLE_KINDS.includes(kind);
+  let twoWayByKind = hardInterrupt || kind === 'needs_context';
+  let needsResponse = actionable && (twoWayByKind || source.needsResponse === true || source.needs_response === true);
+
+  return {
+    schema: WORKFLOW_RETURN_SCHEMA,
+    eventId: textOrNull(source.eventId ?? source.event_id ?? opts.eventId),
+    kind, terminal, actionable, hardInterrupt, needsResponse,
+    correlationId,
+    escalationKind: RETURN_KIND_TO_ESCALATION[kind] ?? null,
+    seq: Number.isFinite(seq) ? seq : null,
+    detail: textOrNull(source.detail),
+    payload: objectOrNull(source.payload),
+    supersedes: textOrNull(source.supersedes ?? source.supersedes_id),
+    runId: textOrNull(source.runId ?? source.run_id ?? opts.runId),
+    taskId: textOrNull(source.taskId ?? source.task_id ?? opts.taskId),
+    raisedBy: textOrNull(source.raisedBy ?? source.raised_by ?? opts.raisedBy),
+    raisedAt: Number.isFinite(raisedAt) ? raisedAt : null,
+  };
+}
+
+/** Does `incoming` supersede `prior` in the per-card return inbox? (coalesce/dedup, inv: ordering-safe) */
+export function returnEventSupersedes(incoming, prior) {
+  if (!incoming || !prior) return false;
+  if (incoming.correlationId !== prior.correlationId) return false;
+  if (incoming.supersedes && incoming.supersedes === prior.eventId) return true;
+  if (prior.needsResponse) return false;     // an unanswered question never auto-vanishes
+  if (prior.terminal) return false;          // a late non-terminal cannot un-finish a run
+  if (incoming.seq !== null && prior.seq !== null && incoming.seq < prior.seq) return false;
+  let priorCoalesceOnly = !prior.actionable; // progress | partial
+  return priorCoalesceOnly && (incoming.actionable || incoming.terminal);
+}
+
+/** Fold `incoming` into the bounded per-card return inbox, dropping superseded/stale entries. */
+export function coalesceReturnEvents(events, incoming, limit = 12) {
+  let list = Array.isArray(events) ? events : [];
+  if (!incoming) return list.slice(-limit);
+  // A coalesce-only incoming is dropped when a terminal for its correlationId already landed.
+  if (!incoming.actionable && !incoming.terminal
+    && list.some(prior => prior.correlationId === incoming.correlationId && prior.terminal)) {
+    return list.slice(-limit);
+  }
+  let kept = list.filter(prior => !returnEventSupersedes(incoming, prior));
+  kept.push(incoming);
+  return kept.slice(-limit);
+}
+
+// ── Orchestrator subscription (when a child's return wakes the orchestrator) ─────────────────────
+export const WORKFLOW_SUBSCRIPTION_SCHEMA = 'workflow-subscription/v1';
+export const WORKFLOW_SUBSCRIPTION_MODES = ['final', 'stage', 'join'];
+export const WORKFLOW_JOIN_POLICY_TYPES = ['all', 'any', 'quorum', 'all_settled'];
+export const WORKFLOW_SUBSCRIPTION_ON_FAILURE = ['fail_fast', 'all_settled'];
+
+/**
+ * Normalize an orchestrator subscription. `join` is a FIXED-membership barrier over `members`,
+ * realized as a synthetic dependent (releaseWhen: card_done); `completed` means subtree-complete,
+ * not "this run exited", so fixed-member joins compose into a tree. Returns null for a memberless join.
+ * @param {object} input
+ */
+export function normalizeWorkflowSubscription(input = {}) {
+  let source = objectOrEmpty(input);
+  let mode = normalizeKnownValue(source.mode, WORKFLOW_SUBSCRIPTION_MODES, 'final');
+  let onFailure = normalizeKnownValue(source.onFailure ?? source.on_failure, WORKFLOW_SUBSCRIPTION_ON_FAILURE, 'fail_fast');
+  if (mode !== 'join') return { schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure };
+  let members = [...new Set(
+    (Array.isArray(source.members) ? source.members : [])
+      .map(member => textOrNull(member && typeof member === 'object' ? (member.cardId ?? member.id) : member))
+      .filter(Boolean),
+  )];
+  if (!members.length) return null;
+  let policy = objectOrEmpty(source.joinPolicy ?? source.join_policy);
+  let type = normalizeKnownValue(policy.type, WORKFLOW_JOIN_POLICY_TYPES, 'all');
+  let k = Number(policy.k);
+  let quorumK = type === 'quorum' && Number.isFinite(k) && k >= 1 && k <= members.length ? Math.floor(k) : null;
+  if (type === 'quorum' && quorumK === null) type = 'all';   // fail-safe: never under-wait
+  return {
+    schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure, members,
+    joinPolicy: { type, ...(quorumK !== null ? { k: quorumK } : {}) },
+  };
+}
+
 /**
  * Card lifecycle state machine (AD-4). Orthogonal to `columnId` and task status. The scheduler owns
  * every transition except `idle↔blocked`, which the dependency link/unlink path owns.
@@ -483,6 +617,10 @@ export function checkPassed(value) {
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function objectOrNull(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
 export function normalizeWorkflowAutomation(input = {}) {
