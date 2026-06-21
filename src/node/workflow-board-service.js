@@ -651,7 +651,14 @@ export function createWorkflowBoardService(opts = {}) {
   // write (floor + basic keys) is treated as floor-wide (the stricter gate wins). The intent
   // type maps to checks.write.floor (AUDIT) or checks.write.basic (WRITE_CARD) accordingly.
   function checkWriteIntent(checksInput) {
-    let keys = Object.keys(asObject(checksInput?.checks ?? checksInput));
+    // Resolve the checks record EXACTLY as normalizeWorkflowChecksInput does — a nested `checks`
+    // key is only unwrapped when it is an object, otherwise the outer object IS the record. This
+    // keeps the floor classification from ever disagreeing with what gets persisted (a non-object
+    // `checks` wrapper key was a floor-check self-grant bypass).
+    let record = checksInput?.checks && typeof checksInput.checks === 'object'
+      ? checksInput.checks
+      : checksInput;
+    let keys = Object.keys(asObject(record));
     let isFloor = keys.some(key => FLOOR_CHECK_KEYS.has(key));
     return isFloor ? 'checks.write.floor' : 'checks.write.basic';
   }
@@ -716,6 +723,13 @@ export function createWorkflowBoardService(opts = {}) {
       updatedAt: ts,
       updatedBy: actor,
     });
+    // executedBy is service-owned (separated-duty integrity, inv 47). It is stamped only by the
+    // run/delegate path; a caller can never set or clear it through metadata input, or it could
+    // wipe its own executor record and then sign its card's audit.
+    merged.metadata = {
+      ...asObject(merged.metadata),
+      executedBy: textArray(current?.metadata?.executedBy),
+    };
     let card = normalizeWorkflowCardInput(merged, {
       id,
       actor,
@@ -803,7 +817,7 @@ export function createWorkflowBoardService(opts = {}) {
     }
 
     stateGraph.commit(ops, sourceForPrincipal(principal));
-    return { board, card, checks, ...(deniedRights.length ? { deniedRightsFields: deniedRights } : {}) };
+    return { ok: true, board, card, checks, ...(deniedRights.length ? { deniedRightsFields: deniedRights } : {}) };
   }
 
   // Narrow-only floor-gate check (inv 12): a card's `automation.gates` override may only NARROW the
