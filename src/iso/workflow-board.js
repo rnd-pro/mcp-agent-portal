@@ -59,6 +59,38 @@ export const RECOVERY_FLAGS = [
   'recovering',
 ];
 
+export const WORKFLOW_ESCALATION_SCHEMA = 'workflow-escalation/v1';
+export const WORKFLOW_ESCALATION_KINDS = [
+  'insufficient_permission',
+  'insufficient_context',
+  'needs_decision',
+  'rework',
+];
+
+/**
+ * Normalize a typed worker escalation. Returns null for an absent/unknown kind so an untyped
+ * `blocked` result preserves today's behavior; the service parser decides the needs_decision
+ * fallback only for a confirmed terminal blocked with no typed block. The record carries NO rights
+ * fields (approvalMode / resourceGroup / assignedAgent) — permission stays board/approval-owned.
+ */
+export function normalizeWorkflowEscalation(input = {}, opts = {}) {
+  let kind = textOrNull(input.kind);
+  if (!kind || !WORKFLOW_ESCALATION_KINDS.includes(kind)) return null;
+  let now = Number(opts.now);
+  let raisedAt = Number.isFinite(now) ? now : Number(input.raisedAt ?? input.raised_at);
+  return {
+    schema: WORKFLOW_ESCALATION_SCHEMA,
+    kind,
+    detail: textOrNull(input.detail),
+    suggestedResolution: textOrNull(input.suggestedResolution ?? input.suggested_resolution),
+    proposedLane: textOrNull(input.proposedLane ?? input.proposed_lane),
+    raisedBy: textOrNull(input.raisedBy ?? input.raised_by ?? opts.raisedBy),
+    raisedAt: Number.isFinite(raisedAt) ? raisedAt : null,
+    runId: textOrNull(input.runId ?? opts.runId),
+    taskId: textOrNull(input.taskId ?? opts.taskId),
+  };
+}
+
 export const ACTIVE_RECOVERY_COLUMN_IDS = [
   'ready',
   'in-progress',

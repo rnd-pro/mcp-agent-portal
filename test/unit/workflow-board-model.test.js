@@ -8,8 +8,10 @@ import {
   DEFAULT_WORKFLOW_BOARD_ID,
   DEFAULT_WORKFLOW_COLUMN_IDS,
   RECOVERY_FLAGS,
+  WORKFLOW_ESCALATION_KINDS,
   createDefaultWorkflowBoard,
   normalizeWorkflowCardInput,
+  normalizeWorkflowEscalation,
 } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
@@ -1946,5 +1948,38 @@ links:
       service.reconcileTick.tickOnce(),
     ]);
     assert.equal(results.filter(r => r.skipped).length, 1, 'exactly one concurrent tick is skipped');
+  });
+});
+
+describe('normalizeWorkflowEscalation', () => {
+  it('exposes exactly the four escalation kinds', () => {
+    assert.deepEqual(WORKFLOW_ESCALATION_KINDS, [
+      'insufficient_permission', 'insufficient_context', 'needs_decision', 'rework',
+    ]);
+  });
+
+  it('types a valid kind into a full record without rights fields', () => {
+    let record = normalizeWorkflowEscalation(
+      { kind: 'insufficient_permission', detail: 'needs write to src', suggestedResolution: 'route to a write lane', approvalMode: 'yolo', resourceGroup: 'admin' },
+      { now: 1000, raisedBy: 'backend-engineer', runId: 'run-1', taskId: 'task-1' },
+    );
+    assert.equal(record.schema, 'workflow-escalation/v1');
+    assert.equal(record.kind, 'insufficient_permission');
+    assert.equal(record.detail, 'needs write to src');
+    assert.equal(record.suggestedResolution, 'route to a write lane');
+    assert.equal(record.raisedBy, 'backend-engineer');
+    assert.equal(record.raisedAt, 1000);
+    assert.equal(record.runId, 'run-1');
+    assert.equal(record.taskId, 'task-1');
+    // Policy-guard invariant: the record must NOT carry rights fields.
+    assert.equal('approvalMode' in record, false);
+    assert.equal('resourceGroup' in record, false);
+    assert.equal('assignedAgent' in record, false);
+  });
+
+  it('returns null for an unknown or absent kind (preserves untyped-blocked behavior)', () => {
+    assert.equal(normalizeWorkflowEscalation({ kind: 'totally_made_up', detail: 'x' }), null);
+    assert.equal(normalizeWorkflowEscalation({ detail: 'no kind' }), null);
+    assert.equal(normalizeWorkflowEscalation({}), null);
   });
 });
