@@ -24,6 +24,7 @@ import {
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
+import { CAP, daemonPrincipal, derivePrincipal, evaluateIntent } from './server/principal.js';
 import { getStateGraph } from './state-graph.js';
 
 const WORKFLOW_SOURCE = 'workflow-board';
@@ -111,9 +112,21 @@ function nextId(makeId, prefix) {
   return `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 }
 
-function sourceFor(actor) {
-  let suffix = textOrNull(actor);
+function sourceForPrincipal(principal) {
+  let suffix = textOrNull(principal?.label);
   return suffix ? `${WORKFLOW_SOURCE}:${suffix}` : WORKFLOW_SOURCE;
+}
+
+// Fail-closed identity: every mutator obtains its committing principal from the
+// per-call context (the HTTP/MCP seams put it on `context.principal`). A missing
+// principal resolves to the anonymous least-privilege floor — never a privileged
+// default identity.
+function resolvePrincipal(context = {}) {
+  let principal = context?.principal;
+  if (principal && typeof principal === 'object' && typeof principal.label === 'string') {
+    return principal;
+  }
+  return derivePrincipal({ channel: 'unknown' });
 }
 
 function formatControlAction(value = '') {
@@ -454,7 +467,7 @@ export function createWorkflowBoardService(opts = {}) {
       version: Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) + 1 : 1,
       updatedAt: ts,
     };
-    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: next }], sourceFor('default-policy'));
+    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: next }], sourceForPrincipal(daemonPrincipal()));
     return clone(next);
   }
 
@@ -467,7 +480,7 @@ export function createWorkflowBoardService(opts = {}) {
     }
     let board = createDefaultWorkflowBoard({ id, now: now() });
     board.metadata = { defaultPolicyVersion: DEFAULT_WORKFLOW_POLICY_VERSION };
-    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: board }], WORKFLOW_SOURCE);
+    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: board }], sourceForPrincipal(daemonPrincipal()));
     return board;
   }
 
@@ -484,8 +497,8 @@ export function createWorkflowBoardService(opts = {}) {
     return clone(card);
   }
 
-  function createOrUpdateCard(input = {}) {
-    let actor = textOrNull(input.actor) ?? 'system';
+  function createOrUpdateCard(input = {}, principal = resolvePrincipal()) {
+    let actor = principal.label;
     let id = textOrNull(input.id ?? input.cardId ?? input.card_id) ?? nextId(makeId, 'card');
     let current = stateGraph.get(`workflowCards/${id}`);
     let boardId = textOrNull(input.boardId ?? input.board_id ?? current?.boardId)
@@ -531,7 +544,7 @@ export function createWorkflowBoardService(opts = {}) {
       ops.push({ op: 'set', path: `workflowChecks/${card.id}`, value: record });
     }
 
-    stateGraph.commit(ops, sourceFor(actor));
+    stateGraph.commit(ops, sourceForPrincipal(principal));
     return { board, card, checks };
   }
 
@@ -586,8 +599,9 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function requestTransition(input = {}) {
-    let request = normalizeWorkflowTransitionRequest(input);
+  function requestTransition(input = {}, principal = resolvePrincipal()) {
+    let actor = principal.label;
+    let request = normalizeWorkflowTransitionRequest({ ...input, actor });
     let board = ensureBoard(request.boardId);
     let card = getCard(request.cardId);
     let checks = getChecks(card.id);
@@ -603,10 +617,10 @@ export function createWorkflowBoardService(opts = {}) {
         columnId: request.toColumnId,
         version: card.version + 1,
         updatedAt: ts,
-        updatedBy: request.actor,
+        updatedBy: actor,
       }, {
         id: card.id,
-        actor: request.actor,
+        actor,
         now: ts,
         version: card.version + 1,
         createdAt: card.createdAt,
@@ -629,7 +643,7 @@ export function createWorkflowBoardService(opts = {}) {
       ops.push({ op: 'set', path: `workflowCards/${card.id}`, value: nextCard });
     }
 
-    stateGraph.commit(ops, sourceFor(request.actor));
+    stateGraph.commit(ops, sourceForPrincipal(principal));
     return { ...event, card: status === 'accepted' ? nextCard : card };
   }
 
@@ -781,7 +795,7 @@ export function createWorkflowBoardService(opts = {}) {
     if (card.columnId === 'ready' && !readyCardHasExecutionContract(card)) {
       return { ok: false, reason: 'ready cards require owner and acceptance criteria before orchestration', automation };
     }
-    let gateResult = readyOrchestrationGate(board, card, textOrNull(args.actor) ?? 'workflow-board');
+    let gateResult = readyOrchestrationGate(board, card);
     if (!gateResult.ok) {
       return {
         ok: false,
@@ -834,7 +848,6 @@ export function createWorkflowBoardService(opts = {}) {
       cardId: card.id,
       expectedVersion: undefined,
       expected_version: undefined,
-      actor: textOrNull(args.actor) ?? 'workflow-board',
       mode: automation.mode ?? 'auto',
       agent,
       leaseOwner: textOrNull(args.leaseOwner ?? args.lease_owner) ?? agent,
@@ -1456,6 +1469,9 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks()) {
+    // Schedule/projection-driven board self-reconciliation: the board's own automation
+    // commits these runtime transitions, so the committing identity is the daemon.
+    let principal = daemonPrincipal();
     let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let projectId = textOrNull(filter.projectId ?? filter.project_id);
     let goalId = textOrNull(filter.goalId ?? filter.goal_id);
@@ -1536,10 +1552,10 @@ export function createWorkflowBoardService(opts = {}) {
             metadata: nextMetadata,
             version: latestCard.version + 1,
             updatedAt: completedAt ?? currentNow,
-            updatedBy: 'workflow-runtime',
+            updatedBy: principal.label,
           }, {
             id: latestCard.id,
-            actor: 'workflow-runtime',
+            actor: principal.label,
             now: currentNow,
             version: latestCard.version + 1,
             createdAt: latestCard.createdAt,
@@ -1557,7 +1573,7 @@ export function createWorkflowBoardService(opts = {}) {
             cardId: latestCard.id,
             fromColumnId: latestCard.columnId,
             toColumnId: latestCard.columnId,
-            actor: ESCALATION_ACTOR,
+            actor: principal.label,
             mode: 'auto',
             reason: escalationDelta.status === 'cleared'
               ? `Escalation resolved by completed run ${run.id}.`
@@ -1589,7 +1605,7 @@ export function createWorkflowBoardService(opts = {}) {
           cardId: latestCard.id,
           fromColumnId: card.columnId,
           toColumnId: latestCard.columnId,
-          actor: 'workflow-runtime',
+          actor: principal.label,
           mode: 'auto',
           reason: `Workflow run ${run.id} reconciled from runtime task status ${nextStatus}.`,
           status: 'accepted',
@@ -1608,7 +1624,17 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
 
-    if (ops.length) stateGraph.commit(ops, sourceFor('runtime'));
+    if (ops.length) {
+      // Named gate chokepoint. Enforcement lands in S6 (gate engine); the daemon's
+      // self-driven reconcile routes its mutation through evaluateIntent so the frozen
+      // signature has at least one live call site. The stub verdict is permissive.
+      let verdict = evaluateIntent(
+        { type: 'runtime_reconcile', boardId: board.id, capability: CAP.DAEMON },
+        principal,
+        { board },
+      );
+      if (verdict.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
     return { ok: true, updated: ops.length };
   }
 
@@ -1675,8 +1701,9 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function createWorkItem(args = {}, context = {}) {
-    let result = createOrUpdateCard(args);
-    let orchestration = await maybeAutoOrchestrateCard(result.board, result.card, args, context);
+    let principal = resolvePrincipal(context);
+    let result = createOrUpdateCard(args, principal);
+    let orchestration = await maybeAutoOrchestrateCard(result.board, result.card, args, { ...context, principal });
     return {
       ok: true,
       ...result,
@@ -1686,7 +1713,8 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function updateWorkItem(args = {}) {
+  function updateWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
     let patch = args.patch && typeof args.patch === 'object' ? args.patch : {};
     let current = getCard(cardId);
@@ -1702,10 +1730,9 @@ export function createWorkflowBoardService(opts = {}) {
       ...contentPatch,
       id: cardId,
       columnId: current.columnId,
-      actor: args.actor,
       expectedVersion: args.expectedVersion ?? args.expected_version,
       checks: args.checks,
-    });
+    }, principal);
     return { ok: true, ...result };
   }
 
@@ -1725,7 +1752,8 @@ export function createWorkflowBoardService(opts = {}) {
     });
   }
 
-  function decomposeWorkItem(args = {}) {
+  function decomposeWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
     let parent = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
@@ -1735,7 +1763,7 @@ export function createWorkflowBoardService(opts = {}) {
         throw new Error(`Workflow card version conflict for ${cardId}. Reload the card and retry.`);
       }
     }
-    let actor = textOrNull(args.actor) ?? 'orchestrator';
+    let actor = principal.label;
     let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
     let ts = now();
     let children = childItemsFromArgs(args).map((item) => {
@@ -1796,7 +1824,7 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       ...children.map(child => ({ op: 'set', path: `workflowCards/${child.id}`, value: child })),
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return {
       ok: true,
       board,
@@ -1807,7 +1835,8 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function updateWorkflowColumn(args = {}) {
+  function updateWorkflowColumn(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let columnId = textOrNull(args.columnId ?? args.column_id ?? args.id);
     if (!columnId) throw new Error('Workflow column id is required.');
@@ -1849,7 +1878,7 @@ export function createWorkflowBoardService(opts = {}) {
         columnSettingsUpdatedAt: ts,
       },
     };
-    stateGraph.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: nextBoard }], sourceFor(args.actor ?? 'column-settings'));
+    stateGraph.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: nextBoard }], sourceForPrincipal(principal));
     return {
       ok: true,
       board: clone(nextBoard),
@@ -1861,7 +1890,7 @@ export function createWorkflowBoardService(opts = {}) {
     return Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) : 0;
   }
 
-  function boardEvent(board, args = {}, options = {}) {
+  function boardEvent(board, principal, args = {}, options = {}) {
     let ts = now();
     let eventId = textOrNull(args.eventId ?? args.event_id ?? options.id) ?? nextId(makeId, 'board-event');
     return normalizeWorkflowTransitionEvent({
@@ -1869,7 +1898,7 @@ export function createWorkflowBoardService(opts = {}) {
       eventType: options.eventType ?? 'board_control',
       boardId: board.id,
       cardId: null,
-      actor: textOrNull(args.actor) ?? 'system',
+      actor: principal.label,
       mode: 'manual',
       reason: textOrNull(args.reason) ?? options.reason,
       status: options.status ?? 'accepted',
@@ -1885,6 +1914,7 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function updateWorkflowBoard(args = {}, options = {}) {
+    let principal = resolvePrincipal(options);
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -1923,7 +1953,7 @@ export function createWorkflowBoardService(opts = {}) {
         automationUpdatedAt: ts,
       },
     };
-    let event = boardEvent(nextBoard, args, {
+    let event = boardEvent(nextBoard, principal, args, {
       eventType: options.eventType ?? 'board_update',
       reason: textOrNull(args.reason) ?? 'Updated workflow board automation.',
       sideEffects: [
@@ -1938,7 +1968,7 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard },
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-    ], sourceFor(args.actor ?? 'board-automation'));
+    ], sourceForPrincipal(principal));
     return { ok: true, board: clone(nextBoard), event: clone(event) };
   }
 
@@ -1971,8 +2001,9 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function controlWorkflowBoard(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let childContext = { ...context, principal };
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
-    let actor = textOrNull(args.actor) ?? 'system';
     let action = textOrNull(args.action ?? args.control) ?? 'pause';
     if (!['pause', 'resume', 'drain', 'stop', 'maintenance', 'manual', 'recovery_only', 'arm'].includes(action)) {
       throw new Error('Workflow board control action must be pause, resume, drain, stop, maintenance, manual, recovery_only, or arm.');
@@ -1986,9 +2017,8 @@ export function createWorkflowBoardService(opts = {}) {
           boardId: board.id,
           cardId: card.id,
           action: cardAction,
-          actor,
           reason: textOrNull(args.reason) ?? `${formatControlAction(action)} from workflow board automation.`,
-        }, context);
+        }, childContext);
         affectedCards.push(card.id);
         sideEffects.push({
           type: 'card_control',
@@ -2003,9 +2033,8 @@ export function createWorkflowBoardService(opts = {}) {
         let result = resumeWorkItem({
           boardId: board.id,
           cardId: card.id,
-          actor,
           reason: textOrNull(args.reason) ?? 'Resume from workflow board automation.',
-        });
+        }, childContext);
         affectedCards.push(card.id);
         sideEffects.push({
           type: 'card_resume',
@@ -2018,9 +2047,9 @@ export function createWorkflowBoardService(opts = {}) {
     let result = updateWorkflowBoard({
       boardId: board.id,
       mode,
-      actor,
       reason: textOrNull(args.reason) ?? `${formatControlAction(action)} board automation.`,
     }, {
+      principal,
       eventType: 'board_control',
       sideEffects: [
         {
@@ -2043,12 +2072,13 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function requestWorkflowTransition(args = {}, context = {}) {
-    let transition = requestTransition(args);
+    let principal = resolvePrincipal(context);
+    let transition = requestTransition(args, principal);
     if (transition.status !== 'accepted') {
       return { ok: true, ...transition, orchestration: null, sideEffects: [] };
     }
     let board = ensureBoard(transition.boardId);
-    let orchestration = await maybeAutoOrchestrateCard(board, transition.card, args, context);
+    let orchestration = await maybeAutoOrchestrateCard(board, transition.card, args, { ...context, principal });
     return {
       ok: true,
       ...transition,
@@ -2058,9 +2088,9 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function deleteWorkItem(args = {}) {
+  function deleteWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
     let card = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -2076,13 +2106,13 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'delete', path: `workflowCards/${cardId}` },
       { op: 'delete', path: `workflowLeases/${cardId}` },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return { ok: true, card, deleted: true };
   }
 
-  function claimWorkItem(args = {}) {
+  function claimWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
     let card = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -2097,18 +2127,18 @@ export function createWorkflowBoardService(opts = {}) {
       boardId: args.boardId ?? args.board_id ?? card.boardId,
       cardId,
       runId: args.runId ?? args.run_id,
-      leaseOwner: args.leaseOwner ?? args.lease_owner ?? actor,
+      leaseOwner: args.leaseOwner ?? args.lease_owner ?? principal.label,
       leaseExpiresAt: Number.isFinite(ttlMs) && ttlMs > 0 ? ts + ttlMs : null,
     }, { cardId, updatedAt: ts });
-    stateGraph.commit([{ op: 'set', path: `workflowLeases/${cardId}`, value: lease }], sourceFor(actor));
+    stateGraph.commit([{ op: 'set', path: `workflowLeases/${cardId}`, value: lease }], sourceForPrincipal(principal));
     return { ok: true, card, lease };
   }
 
-  function releaseWorkItem(args = {}) {
+  function releaseWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
     let card = getCard(cardId);
-    stateGraph.commit([{ op: 'delete', path: `workflowLeases/${cardId}` }], sourceFor(actor));
+    stateGraph.commit([{ op: 'delete', path: `workflowLeases/${cardId}` }], sourceForPrincipal(principal));
     return { ok: true, card, released: true };
   }
 
@@ -2391,8 +2421,9 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function orchestrateWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let actor = principal.label;
     let card = getCard(cardId);
     let board = ensureBoard(args.boardId ?? args.board_id ?? card.boardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
@@ -2464,7 +2495,7 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'set', path: `workflowRuns/${run.id}`, value: run },
       { op: 'set', path: `workflowLeases/${card.id}`, value: lease },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
 
     let delegated = args.delegate === false
       ? { ok: false, sideEffects: [], taskIds: [], chatId: card.entityRefs.chatId, goalId: card.entityRefs.goalId }
@@ -2547,13 +2578,14 @@ export function createWorkflowBoardService(opts = {}) {
       }, { id: eventId, now: ts });
       ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
     }
-    stateGraph.commit(ops, sourceFor(actor));
+    stateGraph.commit(ops, sourceForPrincipal(principal));
     return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, sideEffects: delegated.sideEffects };
   }
 
-  function resumeWorkItem(args = {}) {
+  function resumeWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let actor = principal.label;
     let card = getCard(cardId);
     let ts = now();
     let runId = textOrNull(args.runId ?? args.run_id) ?? nextId(makeId, 'run');
@@ -2589,13 +2621,14 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'set', path: `workflowRuns/${run.id}`, value: run },
       { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return { ok: true, card: nextCard, run };
   }
 
   async function controlWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let actor = principal.label;
     let action = textOrNull(args.action) ?? 'pause';
     if (!['pause', 'stop', 'cancel'].includes(action)) {
       throw new Error('Workflow control action must be pause, stop, or cancel.');
@@ -2656,7 +2689,7 @@ export function createWorkflowBoardService(opts = {}) {
       ...runOps,
       { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
       ...(action === 'pause' ? [] : [{ op: 'delete', path: `workflowLeases/${card.id}` }]),
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return { ok: true, action, card: nextCard, sideEffects };
   }
 
@@ -2793,7 +2826,8 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function reconcileWorkflowRecovery(args = {}, context = {}) {
-    let actor = textOrNull(args.actor) ?? 'recovery';
+    let principal = resolvePrincipal(context);
+    let actor = principal.label;
     await seedWorkflowWorkItemsForProjection(args);
     let projection = getBoardProjection(args);
     let runtimeTasks = await readRuntimeTasks(context);
@@ -2841,7 +2875,7 @@ export function createWorkflowBoardService(opts = {}) {
       reconciled.push({ card: nextCard, run, flags });
     }
 
-    if (ops.length) stateGraph.commit(ops, sourceFor(actor));
+    if (ops.length) stateGraph.commit(ops, sourceForPrincipal(principal));
     return {
       ok: true,
       reconciled,
@@ -2856,6 +2890,10 @@ export function createWorkflowBoardService(opts = {}) {
   // orchestrate automation re-routes by escalation kind — never a direct out-of-gate write, never
   // a silent rights grant. Opt-in per board via `automation.recovery === 'auto'`.
   async function reconcileWorkflowEscalations(args = {}, context = {}) {
+    // Board-internal re-engagement automation: every commit here is the board driving
+    // itself, so identity is the daemon. Re-engagement re-enters the gate as the daemon.
+    let principal = daemonPrincipal();
+    let daemonContext = { ...context, principal };
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
     if (boardAutomation.recovery !== 'auto' && !args.force) {
@@ -2892,10 +2930,10 @@ export function createWorkflowBoardService(opts = {}) {
           metadata: { ...card.metadata, escalation: humanState },
           version: card.version + 1,
           updatedAt: currentNow,
-          updatedBy: ESCALATION_ACTOR,
+          updatedBy: principal.label,
         }, {
           id: card.id,
-          actor: ESCALATION_ACTOR,
+          actor: principal.label,
           now: currentNow,
           version: card.version + 1,
           createdAt: card.createdAt,
@@ -2909,7 +2947,7 @@ export function createWorkflowBoardService(opts = {}) {
           cardId: card.id,
           fromColumnId: card.columnId,
           toColumnId: card.columnId,
-          actor: ESCALATION_ACTOR,
+          actor: principal.label,
           mode: 'auto',
           reason: blocker,
           status: 'accepted',
@@ -2918,7 +2956,7 @@ export function createWorkflowBoardService(opts = {}) {
         stateGraph.commit([
           { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
           { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-        ], sourceFor(ESCALATION_ACTOR));
+        ], sourceForPrincipal(principal));
         escalatedToHuman.push({ cardId: card.id, kind: state.kind, attempts: state.attemptCount, blocker });
         continue;
       }
@@ -2932,21 +2970,20 @@ export function createWorkflowBoardService(opts = {}) {
         metadata: { ...card.metadata, escalation: accrued },
         version: card.version + 1,
         updatedAt: currentNow,
-        updatedBy: ESCALATION_ACTOR,
+        updatedBy: principal.label,
       }, {
         id: card.id,
-        actor: ESCALATION_ACTOR,
+        actor: principal.label,
         now: currentNow,
         version: card.version + 1,
         createdAt: card.createdAt,
         updatedAt: currentNow,
       });
-      stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: accruedCard }], sourceFor(ESCALATION_ACTOR));
+      stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: accruedCard }], sourceForPrincipal(principal));
 
       let reengageArgs = {
         boardId: board.id,
         cardId: card.id,
-        actor: ESCALATION_ACTOR,
         reason: `Escalation re-engagement #${attemptCount} (${accrued.kind}).`,
         escalation: accrued,
         delegate: args.delegate,
@@ -2954,9 +2991,9 @@ export function createWorkflowBoardService(opts = {}) {
       let outcome = null;
       try {
         if (accruedCard.columnId === 'ready') {
-          outcome = await maybeAutoOrchestrateCard(board, accruedCard, reengageArgs, context);
+          outcome = await maybeAutoOrchestrateCard(board, accruedCard, reengageArgs, daemonContext);
         } else {
-          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: 'ready' }, context);
+          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: 'ready' }, daemonContext);
         }
       } catch (error) {
         outcome = { ok: false, error: error.message };
@@ -3076,12 +3113,11 @@ export function createWorkflowBoardService(opts = {}) {
     return importWorkflowWorkItems({
       boardId: filter.boardId ?? filter.board_id,
       projectId: filter.projectId ?? filter.project_id,
-      actor: textOrNull(filter.actor) ?? 'projection-seed-import',
-    });
+    }, { principal: daemonPrincipal() });
   }
 
-  async function importWorkflowWorkItems(args = {}) {
-    let actor = textOrNull(args.actor) ?? 'markdown-import';
+  async function importWorkflowWorkItems(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let files = await listWorkItemFiles(args);
     let imported = [];
     let skipped = [];
@@ -3106,10 +3142,7 @@ export function createWorkflowBoardService(opts = {}) {
         });
         continue;
       }
-      let result = createOrUpdateCard({
-        ...cardInput,
-        actor,
-      });
+      let result = createOrUpdateCard(cardInput, principal);
       imported.push({
         cardId: result.card.id,
         title: result.card.title,
@@ -3120,9 +3153,10 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, imported, skipped, count: imported.length };
   }
 
-  async function exportWorkflowWorkItem(args = {}) {
+  async function exportWorkflowWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let actor = principal.label;
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'markdown-export';
     let card = getCard(cardId);
     let projectId = textOrNull(args.projectId ?? args.project_id ?? card.projectId) ?? 'global';
     let root = workspaceRoot();
@@ -3182,7 +3216,7 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: card.createdAt,
       updatedAt: now(),
     });
-    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: nextCard }], sourceFor(actor));
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: nextCard }], sourceForPrincipal(principal));
     return { ok: true, card: nextCard, markdownPath: relPath };
   }
 

@@ -1,5 +1,7 @@
 import { getStateGraph } from '../../state-graph.js';
 import { createWorkflowBoardService } from '../../workflow-board-service.js';
+import { isLocalRequest } from '../network-auth.js';
+import { derivePrincipal } from '../principal.js';
 import { json, parseBody } from './http.js';
 
 function routeError(res, error) {
@@ -26,10 +28,25 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     proxyManager: ctx.proxyManager,
   });
 
+  // Server-derived HTTP identity. A same-uid loopback request is the bootstrap human
+  // (Option B); a verified LAN session (tracked by the network-auth controller) is a
+  // remote human. Anything else is anonymous (defense-in-depth — such requests are
+  // normally already blocked upstream by requireNetworkAuthorization). The request
+  // body never supplies identity.
+  let principalForRequest = (req) => {
+    if (isLocalRequest(req)) return derivePrincipal({ channel: 'loopback' });
+    if (ctx.networkAuth?.isAuthorized?.(req)) {
+      return derivePrincipal({ channel: 'http-session', human: true, label: 'human' });
+    }
+    return derivePrincipal({ channel: 'unknown' });
+  };
+
+  let mutationContext = (req) => ({ proxyManager: ctx.proxyManager, principal: principalForRequest(req) });
+
   let requestTransition = async (req, res) => {
     try {
       let body = await parseBody(req);
-      let result = await resolveService().requestWorkflowTransition(body, { proxyManager: ctx.proxyManager });
+      let result = await resolveService().requestWorkflowTransition(body, mutationContext(req));
       json(res, { ok: true, result });
     } catch (error) {
       routeError(res, error);
@@ -77,7 +94,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/cards': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = await resolveService().createWorkItem(body, { proxyManager: ctx.proxyManager });
+        let result = await resolveService().createWorkItem(body, mutationContext(req));
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);
@@ -87,7 +104,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/cards/update': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = resolveService().updateWorkItem(body);
+        let result = resolveService().updateWorkItem(body, mutationContext(req));
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);
@@ -97,7 +114,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/decompose': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = resolveService().decomposeWorkItem(body);
+        let result = resolveService().decomposeWorkItem(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);
@@ -110,7 +127,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/orchestrate': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = await resolveService().orchestrateWorkItem(body, { proxyManager: ctx.proxyManager });
+        let result = await resolveService().orchestrateWorkItem(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);
@@ -120,7 +137,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/control': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = await resolveService().controlWorkItem(body, { proxyManager: ctx.proxyManager });
+        let result = await resolveService().controlWorkItem(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);
@@ -130,7 +147,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/delete': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = resolveService().deleteWorkItem(body);
+        let result = resolveService().deleteWorkItem(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);
@@ -140,7 +157,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/columns/update': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = resolveService().updateWorkflowColumn(body);
+        let result = resolveService().updateWorkflowColumn(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);
@@ -153,8 +170,8 @@ export function createWorkflowBoardRoutes(ctx = {}) {
         let action = body.action ?? body.control;
         let service = resolveService();
         let result = action
-          ? await service.controlWorkflowBoard(body, { proxyManager: ctx.proxyManager })
-          : service.updateWorkflowBoard(body);
+          ? await service.controlWorkflowBoard(body, mutationContext(req))
+          : service.updateWorkflowBoard(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);
@@ -190,7 +207,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/recovery/reconcile': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = await resolveService().reconcileWorkflowRecovery(body, { proxyManager: ctx.proxyManager });
+        let result = await resolveService().reconcileWorkflowRecovery(body, mutationContext(req));
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);
@@ -200,7 +217,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/markdown/import': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = await resolveService().importWorkflowWorkItems(body);
+        let result = await resolveService().importWorkflowWorkItems(body, mutationContext(req));
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);
@@ -210,7 +227,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/markdown/export': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = await resolveService().exportWorkflowWorkItem(body);
+        let result = await resolveService().exportWorkflowWorkItem(body, mutationContext(req));
         json(res, { ok: true, ...result });
       } catch (error) {
         routeError(res, error);

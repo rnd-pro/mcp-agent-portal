@@ -258,6 +258,7 @@ export function startWebServer(projectRoot) {
   let routes = createRoutes({
     proxyManager,
     projectRoot,
+    networkAuth,
     getNetworkAccessStatus: () => networkAccessStatus,
     getServerAddress: () => server.address(),
   });

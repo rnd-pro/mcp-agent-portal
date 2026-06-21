@@ -4,6 +4,7 @@ import {
   DEFAULT_WORKFLOW_BOARD_ID,
   DEFAULT_WORKFLOW_COLUMN_IDS,
 } from '../../iso/workflow-board.js';
+import { derivePrincipal } from '../server/principal.js';
 import { listBackends } from '../server/backend-lifecycle.js';
 
 const WORKFLOW_BOARD_TOOL_NAME = 'workflow_board';
@@ -363,7 +364,6 @@ export const WORKFLOW_BOARD_TOOLS = [
         boardMode: { type: 'string', enum: ['passive', 'armed', 'autonomous', 'manual', 'paused', 'draining', 'stopped', 'maintenance', 'recovery_only'], description: 'Board mode for action=control_board resume overrides.' },
         control: { type: 'string', enum: ['pause', 'stop', 'cancel', 'resume', 'drain', 'maintenance', 'manual', 'recovery_only', 'arm'], description: 'Runtime control action for action=control or board action for action=control_board.' },
         reason: { type: 'string', description: 'Human/audit reason.' },
-        actor: { type: 'string', description: 'Actor requesting the command.' },
         entityRefs: { type: 'object', description: 'Linked goals, chats, tasks, or files.' },
         expectedVersion: { type: 'number', description: 'Optimistic version guard.' },
         resourceGroup: { type: 'string', description: 'Optional resource group for create_item or orchestrate.' },
@@ -517,7 +517,6 @@ function serviceArgsForAction(action, args = {}) {
     goalId: args.goalId,
     chatId: args.chatId,
     cardId: args.cardId,
-    actor: args.actor,
     reason: args.reason,
     expectedVersion: args.expectedVersion,
     entityRefs: args.entityRefs,
@@ -827,12 +826,19 @@ export async function handleWorkflowBoardTool(
     return errorResult(error.message, { action });
   }
 
+  // Server-derived MCP identity. Body-supplied actor/agent_slug is never trusted as
+  // identity. Per-task-secret → verifiedSlug correlation (D2.1) is wired at spawn in
+  // WS-B1/S8; until then MCP callers without a server-verified slug resolve to the
+  // least-privilege (anonymous) principal.
+  let verifiedSlug = options.context?.verifiedSlug ?? options.verifiedSlug;
+  let principal = derivePrincipal({ channel: 'mcp', verifiedSlug });
   let context = {
     ...(options.context || {}),
     source,
     toolName,
     action,
     proxyManager,
+    principal,
   };
   let serviceArgs = serviceArgsForAction(action, args);
   let result;
