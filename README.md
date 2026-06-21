@@ -219,13 +219,13 @@ npx mcp-agent-portal --connect wss://...   # client — joins a master node
 
 ## MCP Ecosystem
 
-Agent Portal manages the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal` are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration. Public servers are discoverable through `discover_tools`; `agent-pool-mcp` is the internal execution runtime behind Agent Portal chat orchestration.
+Agent Portal manages the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and the shared team memory are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration. Public servers are discoverable through `discover_tools`; `agent-pool-mcp` is the internal execution runtime behind Agent Portal chat orchestration.
 
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Internal execution runtime for Agent Portal chat orchestration, resource groups, pipelines, scheduling, and peer review | ✅ Production |
-| `.agent-portal` skills | Project-local skills, agents, and workflows | ✅ Production |
+| Team memory | Shared skills, agents, and workflows (configured directory) | ✅ Production |
 | Optional marketplace MCP servers | Browser, terminal, SaaS, and domain tools configured per workspace | Configurable |
 
 ### Local Development
@@ -246,21 +246,20 @@ Initialize the product submodules:
 git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp
 ```
 
-### Agent Portal Skills (`.agent-portal/`)
+### Agent Portal Skills (team memory)
 
-Agent Portal reads project-local skills, agents, and workflows from the `.agent-portal/` directory in your project root.
+Agent Portal reads shared skills, agents, contexts, and workflows from **team memory**: a single clone of the private skills remote, kept once on your machine as a visible directory.
 
-`.agent-portal` is shared **team memory**: keep a single clone of the private skills remote one directory level above your projects, and link it into each project as a relative symlink. It is **not** a per-project git submodule.
+Clone it once, then point Agent Portal at it. There is **no** per-project `.agent-portal` directory, **no** symlink, and **no** git submodule.
 
 ```bash
-# once, in the directory above your projects
-git clone <private-agent-portal-skills-remote> .agent-portal
-# in each project
-ln -s ../.agent-portal .agent-portal
-echo '.agent-portal' >> .gitignore
+# once, in a visible location (e.g. one directory level above your projects)
+git clone <private-agent-portal-skills-remote> team-memory
 ```
 
-Edits, commits, and pushes happen once in the shared clone; there is no per-project submodule pointer to bump. See `.agent-portal/README.md` for the team-memory layout.
+Then set the **Team Memory Root** to that clone, either in the Agent Portal Settings panel (`agentPortal.teamMemoryRoot`) or via the `AGENT_PORTAL_MEMORY_ROOT` environment override. Agent Portal uses the resolved path directly as the content directory; until it is configured, the dashboard shows a "configure team memory" state.
+
+Edits, commits, and pushes happen once in that shared clone — there is no per-project pointer to bump. See the team-memory `README.md` for the layout.
 
 ## Related Projects
 

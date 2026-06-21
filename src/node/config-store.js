@@ -204,6 +204,30 @@ export function setAgentPortalConfig(agentPortal) {
   return config.agentPortal;
 }
 
+/**
+ * Get the configured team-memory content directory, or null when unset.
+ * Resolution at runtime also honors the AGENT_PORTAL_MEMORY_ROOT env override
+ * (see runtime/paths.js getTeamMemoryRoot); this returns the persisted setting.
+ * @returns {string|null}
+ */
+export function getTeamMemoryRoot() {
+  let config = readConfig();
+  return config.agentPortal?.teamMemoryRoot || null;
+}
+
+/**
+ * Persist the team-memory content directory setting.
+ * @param {string|null} dir Absolute path to the team-memory clone, or null to clear.
+ * @returns {string|null}
+ */
+export function setTeamMemoryRoot(dir) {
+  let config = readConfig();
+  if (!config.agentPortal) config.agentPortal = {};
+  config.agentPortal.teamMemoryRoot = dir ? String(dir) : null;
+  writeConfig(config);
+  return config.agentPortal.teamMemoryRoot;
+}
+
 // ── Open Tabs ───────────────────────────────────────────
 
 /** @returns {string[]} */

@@ -37,9 +37,12 @@ describe('workflow board model and service', () => {
   let now;
   let idSeq;
   let service;
+  let oldMemoryRoot;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-board-model-'));
+    oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -62,6 +65,8 @@ describe('workflow board model and service', () => {
   afterEach(async () => {
     await sg.flushChatWrites();
     sg.flush();
+    if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

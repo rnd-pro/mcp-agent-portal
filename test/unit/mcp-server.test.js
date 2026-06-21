@@ -2,6 +2,12 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Self-contained team-memory fixture (workflows/debug_protocol) so this
+// integration test does not depend on the user's configured team memory.
+const FIXTURE_MEMORY_ROOT = path.join(__dirname, 'fixtures', 'team-memory');
 
 // Helper to send a JSON-RPC request to the MCP server process
 function sendRequest(serverProc, method, params, id = 1) {
@@ -44,7 +50,7 @@ describe('mcp-server integration', () => {
     // Spawn the MCP server as a child process
     const serverPath = path.resolve('packages/agent-pool-mcp/index.js');
     serverProc = spawn('node', [serverPath], {
-      env: { ...process.env, PIPELINE_RUN_ID: 'test' }
+      env: { ...process.env, PIPELINE_RUN_ID: 'test', AGENT_PORTAL_MEMORY_ROOT: FIXTURE_MEMORY_ROOT }
     });
     
     // We don't want tests hanging forever

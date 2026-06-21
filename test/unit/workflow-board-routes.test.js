@@ -50,7 +50,9 @@ async function writeRouteWorkItemSeed(root, projectId, fileName, frontmatter) {
 
 describe('workflow board routes', () => {
   it('registers board, card, transition, event, and recovery handlers', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-board-routes-'));
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     let sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -466,12 +468,16 @@ seed_column: backlog
     } finally {
       await sg.flushChatWrites();
       sg.flush();
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
 
   it('serves the WS-C surface routes (enqueue, dependencies, board-policy authoring) as the loopback board-author', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-board-routes-wsc-'));
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     let sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -544,6 +550,8 @@ seed_column: backlog
     } finally {
       await sg.flushChatWrites();
       sg.flush();
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
