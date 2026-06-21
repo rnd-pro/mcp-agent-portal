@@ -1949,6 +1949,168 @@ links:
     ]);
     assert.equal(results.filter(r => r.skipped).length, 1, 'exactly one concurrent tick is skipped');
   });
+
+  // ── Unified escalation channel ──
+  // Seed a card with a still-running workflow run whose linked runtime task has gone terminal,
+  // carrying the worker's final answer (with an optional typed escalation) on the run's chat.
+  function seedTerminalRun({ card, runId, taskId, text, taskStatus = 'error' }) {
+    let chat = sg.createChat({ name: `wf-${runId}`, adapter: 'pool', agent: 'backend-engineer' }, 'test');
+    sg.appendChatMessage(chat.id, { role: 'agent', text, taskId });
+    let ts = now;
+    sg.set(`tasks/${taskId}`, {
+      status: taskStatus, chatId: chat.id, startedAt: ts, updatedAt: ts, completedAt: ts, events: [],
+    }, 'test');
+    sg.commit([{
+      op: 'set',
+      path: `workflowRuns/${runId}`,
+      value: {
+        schema: 'workflow-run/v1', id: runId, boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: card.id,
+        status: 'running', taskIds: [taskId], startedAt: ts, updatedAt: ts, completedAt: null,
+      },
+    }], 'test');
+    return chat.id;
+  }
+
+  it('stores a typed escalation from a terminal blocked run and emits an escalation event', () => {
+    let { card } = service.createOrUpdateCard({
+      title: 'Worker blocked on permission',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'backend-engineer',
+      acceptanceCriteria: ['Edit src/iso'],
+      actor: 'test',
+    });
+    seedTerminalRun({
+      card,
+      runId: 'run-block-1',
+      taskId: 'task-block-1',
+      text: [
+        'Could not finish.',
+        'ESCALATION_KIND: insufficient_permission',
+        'ESCALATION_DETAIL: needs write access to src/iso',
+        'ESCALATION_SUGGESTION: route to a write-capable lane',
+        'WORKFLOW_RESULT: blocked',
+      ].join('\n'),
+    });
+
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    let stored = service.getCard(card.id).metadata.escalation;
+
+    assert.ok(stored, 'escalation recorded on card metadata');
+    assert.equal(stored.kind, 'insufficient_permission');
+    assert.equal(stored.detail, 'needs write access to src/iso');
+    assert.equal(stored.attemptCount, 0, 'parser never advances the attempt counter');
+    assert.equal(stored.humanEscalated, false);
+    assert.equal(stored.lastRunId, 'run-block-1');
+    // Policy guard: no rights fields leak into the durable record.
+    assert.equal('approvalMode' in stored.lastEscalation, false);
+    assert.equal('resourceGroup' in stored.lastEscalation, false);
+    let event = service.listEvents({ cardId: card.id }).find(e => e.eventType === 'escalation');
+    assert.ok(event, 'escalation event emitted');
+    assert.equal(event.sideEffects[0].kind, 'insufficient_permission');
+  });
+
+  it('falls back to needs_decision for an untyped block, and rework from the audit column', () => {
+    let inProgress = service.createOrUpdateCard({
+      title: 'Untyped block', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'backend-engineer', acceptanceCriteria: ['x'], actor: 'test',
+    }).card;
+    seedTerminalRun({ card: inProgress, runId: 'run-u1', taskId: 'task-u1', text: 'Stuck.\nWORKFLOW_RESULT: blocked' });
+
+    let audit = service.createOrUpdateCard({
+      title: 'Audit found problems', columnId: 'quality-audit', projectId: 'agent-portal', domain: 'backend',
+      owner: 'qa-engineer', acceptanceCriteria: ['x'], actor: 'test',
+    }).card;
+    seedTerminalRun({ card: audit, runId: 'run-a1', taskId: 'task-a1', text: 'Audit failed: tests red.\nWORKFLOW_RESULT: blocked' });
+
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    assert.equal(service.getCard(inProgress.id).metadata.escalation.kind, 'needs_decision');
+    assert.equal(service.getCard(audit.id).metadata.escalation.kind, 'rework');
+  });
+
+  it('clears the escalation episode when a later run completes', () => {
+    let { card } = service.createOrUpdateCard({
+      title: 'Blocked then resolved', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'backend-engineer', acceptanceCriteria: ['x'], actor: 'test',
+    });
+    seedTerminalRun({ card, runId: 'run-r1', taskId: 'task-r1', text: 'Blocked.\nESCALATION_KIND: insufficient_context\nWORKFLOW_RESULT: blocked' });
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    assert.ok(service.getCard(card.id).metadata.escalation, 'episode recorded');
+
+    seedTerminalRun({ card, runId: 'run-r2', taskId: 'task-r2', text: 'Done.\nWORKFLOW_RESULT: completed', taskStatus: 'done' });
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    assert.equal(service.getCard(card.id).metadata.escalation, undefined, 'episode cleared on completion');
+  });
+
+  it('does not re-engage when board recovery is manual', async () => {
+    let { card } = service.createOrUpdateCard({
+      title: 'Manual recovery board', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'backend-engineer', acceptanceCriteria: ['x'], actor: 'test',
+    });
+    seedTerminalRun({ card, runId: 'run-m1', taskId: 'task-m1', text: 'Blocked.\nESCALATION_KIND: needs_decision\nWORKFLOW_RESULT: blocked' });
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let result = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    assert.equal(result.skipped, true);
+    assert.equal(service.getCard(card.id).metadata.escalation.attemptCount, 0, 'no accrual under manual recovery');
+  });
+
+  it('re-engages through the gate, advancing the attempt counter and routing the card to ready', async () => {
+    service.updateWorkflowBoard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, automation: { recovery: 'auto' } });
+    let { card } = service.createOrUpdateCard({
+      title: 'Auto re-engage', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'backend-engineer', acceptanceCriteria: ['Ship it'], actor: 'test',
+    });
+    seedTerminalRun({ card, runId: 'run-e1', taskId: 'task-e1', text: 'Blocked.\nESCALATION_KIND: rework\nWORKFLOW_RESULT: blocked' });
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let result = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    let after = service.getCard(card.id);
+
+    assert.equal(result.reengaged.length, 1);
+    assert.equal(result.reengaged[0].attempt, 1);
+    assert.equal(after.metadata.escalation.attemptCount, 1, 'accrual happens in the re-engage step');
+    assert.ok(after.metadata.escalation.nextAttemptAt > now - 1, 'backoff window set');
+    assert.equal(after.columnId, 'ready', 'card routed back to the orchestrate column');
+  });
+
+  it('escalates to a human after the attempt cap without ever exceeding it (natural N rounds)', async () => {
+    service.updateWorkflowBoard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, automation: { recovery: 'auto' } });
+    let { card } = service.createOrUpdateCard({
+      title: 'Unresolvable escalation', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'backend-engineer', acceptanceCriteria: ['Ship it'], actor: 'test',
+    });
+    seedTerminalRun({ card, runId: 'run-cap', taskId: 'task-cap', text: 'Blocked.\nESCALATION_KIND: needs_context\nESCALATION_DETAIL: missing API spec\nWORKFLOW_RESULT: blocked' });
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let counts = [];
+    for (let round = 0; round < 3; round++) {
+      now += 60 * 60 * 1000; // jump past the exponential backoff window
+      await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+      counts.push(service.getCard(card.id).metadata.escalation.attemptCount);
+    }
+
+    assert.deepEqual(counts, [1, 2, 3], 'attempt counter is monotonic, one bump per round');
+
+    now += 60 * 60 * 1000;
+    let capped = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    let final = service.getCard(card.id);
+
+    assert.equal(capped.escalatedToHuman.length, 1, 'card handed to a human at the cap');
+    assert.equal(capped.reengaged.length, 0, 'no further re-engagement after the cap');
+    assert.equal(final.metadata.escalation.humanEscalated, true);
+    assert.equal(final.metadata.escalation.attemptCount, 3, 'counter never exceeds the cap');
+    assert.equal(final.recoveryFlags.includes('blocked'), true);
+    assert.ok(final.blockers.some(b => /Human decision required/.test(b)), 'precise human-handoff blocker recorded');
+
+    now += 60 * 60 * 1000;
+    let afterCap = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    assert.equal(afterCap.reengaged.length, 0, 'human-escalated card stays put');
+    assert.equal(afterCap.escalatedToHuman.length, 0, 'no repeated human handoff');
+  });
 });
 
 describe('normalizeWorkflowEscalation', () => {

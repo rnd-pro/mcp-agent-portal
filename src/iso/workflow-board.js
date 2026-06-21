@@ -91,6 +91,52 @@ export function normalizeWorkflowEscalation(input = {}, opts = {}) {
   };
 }
 
+export const WORKFLOW_ESCALATION_STATE_SCHEMA = 'workflow-escalation-state/v1';
+
+/**
+ * Normalize the durable per-card escalation episode stored on `card.metadata.escalation`.
+ * This is the loop-safety record the channel reasons about: `attemptCount` is owned by the
+ * re-engagement step (NOT the parser), `nextAttemptAt` gates backoff, and `humanEscalated` is the
+ * terminal state once the attempt cap is hit. The parser only records the latest typed escalation
+ * and appends to `history`; it must never advance `attemptCount`, or the cap becomes unreachable.
+ */
+export function normalizeWorkflowEscalationState(input = {}) {
+  let state = objectOrEmpty(input);
+  let last = normalizeWorkflowEscalation(state.lastEscalation ?? state.last_escalation ?? state);
+  let attemptCount = Number(state.attemptCount ?? state.attempt_count);
+  let firstAt = Number(state.firstAt ?? state.first_at);
+  let lastAt = Number(state.lastAt ?? state.last_at);
+  let nextAttemptAt = Number(state.nextAttemptAt ?? state.next_attempt_at);
+  let history = Array.isArray(state.history) ? state.history : [];
+  return {
+    schema: WORKFLOW_ESCALATION_STATE_SCHEMA,
+    kind: last?.kind ?? textOrNull(state.kind),
+    detail: last?.detail ?? textOrNull(state.detail),
+    lastEscalation: last,
+    attemptCount: Number.isFinite(attemptCount) && attemptCount > 0 ? Math.floor(attemptCount) : 0,
+    firstAt: Number.isFinite(firstAt) ? firstAt : null,
+    lastAt: Number.isFinite(lastAt) ? lastAt : null,
+    nextAttemptAt: Number.isFinite(nextAttemptAt) ? nextAttemptAt : null,
+    humanEscalated: Boolean(state.humanEscalated ?? state.human_escalated),
+    lastRunId: textOrNull(state.lastRunId ?? state.last_run_id),
+    history: history
+      .map(item => ({
+        kind: textOrNull(item?.kind),
+        detail: textOrNull(item?.detail),
+        runId: textOrNull(item?.runId ?? item?.run_id),
+        at: Number.isFinite(Number(item?.at)) ? Number(item.at) : null,
+      }))
+      .filter(item => item.kind)
+      .slice(-12),
+  };
+}
+
+/** A card carries a live escalation episode the channel may still act on. */
+export function hasActiveEscalation(card = {}) {
+  let state = card?.metadata?.escalation;
+  return Boolean(state && (state.kind || state.lastEscalation) && !(state.humanEscalated ?? state.human_escalated));
+}
+
 export const ACTIVE_RECOVERY_COLUMN_IDS = [
   'ready',
   'in-progress',
@@ -204,6 +250,20 @@ const DEFAULT_WORKFLOW_TRANSITIONS = [
     to: 'done',
     gate: 'clean_diff_and_hygiene',
   },
+  // Governed rework kickback. The forward DAG is happy-path only; a stuck stage routes back to
+  // `ready` (the column that owns the orchestrate action) so the orchestrator re-routes by
+  // escalation kind. The `rework_authorized` gate keeps this from being a free backward move:
+  // it requires a recorded escalation episode or a failed audit, never an arbitrary regression.
+  {
+    from: 'in-progress',
+    to: 'ready',
+    gate: 'rework_authorized',
+  },
+  {
+    from: 'quality-audit',
+    to: 'ready',
+    gate: 'rework_authorized',
+  },
 ];
 
 const GATE_CHECKS = {
@@ -231,7 +291,20 @@ const GATE_CHECKS = {
     ),
     reason: 'Commit/publish requires clean diff plus hygiene check.',
   }),
+  // Backward rework is allowed only with a governed reason: a live escalation episode the
+  // orchestrator must re-route, or an audit the auditor explicitly failed.
+  rework_authorized: (card, checks) => ({
+    ok: hasActiveEscalation(card) || checkFailed(checks.audit),
+    reason: 'Rework to ready requires a recorded escalation or a failed audit.',
+  }),
 };
+
+function checkFailed(value) {
+  if (value === false) return true;
+  if (value === null || value === undefined || value === true) return false;
+  if (typeof value === 'object') return checkFailed(value.status);
+  return ['failed', 'fail', 'error', 'blocked', 'rejected'].includes(String(value).trim().toLowerCase());
+}
 
 function hasText(value) {
   return typeof value === 'string' && value.trim().length > 0;

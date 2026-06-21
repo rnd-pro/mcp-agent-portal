@@ -8,7 +8,10 @@ import {
   DEFAULT_WORKFLOW_COLUMN_IDS,
   createDefaultWorkflowBoard,
   evaluateWorkflowTransitionGates,
+  hasActiveEscalation,
   normalizeRecoveryFlags,
+  normalizeWorkflowEscalation,
+  normalizeWorkflowEscalationState,
   normalizeWorkflowBoardAutomation,
   normalizeWorkflowBoardMode,
   normalizeWorkflowCardInput,
@@ -37,6 +40,18 @@ const COMPACT_ACTIVE_COLUMN_IDS = new Set([
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
 const DEFAULT_RECONCILE_TICK_MS = 60 * 1000;
+// Escalation channel: the re-engagement loop owns attempt accrual + backoff. ESCALATION_ACTOR
+// labels channel-driven transitions/runs for board visibility. The cap bounds the loop — after
+// this many re-engagements without a completed run the card is handed to a human (blocked + a
+// precise question). Backoff is exponential off this base.
+const ESCALATION_ACTOR = 'escalation-channel';
+const DEFAULT_ESCALATION_MAX_ATTEMPTS = 3;
+const DEFAULT_ESCALATION_BACKOFF_MS = 5 * 60 * 1000;
+const ESCALATION_RESULT_PATTERN = /WORKFLOW_RESULT:\s*([a-z_]+)/i;
+const ESCALATION_KIND_PATTERN = /ESCALATION_KIND:\s*([a-z_]+)/i;
+const ESCALATION_DETAIL_PATTERN = /ESCALATION_DETAIL:\s*(.+)/i;
+const ESCALATION_SUGGESTION_PATTERN = /ESCALATION_SUGGESTION:\s*(.+)/i;
+const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
@@ -1285,6 +1300,120 @@ export function createWorkflowBoardService(opts = {}) {
     return runtimeTaskStatus(task);
   }
 
+  // The worker's final answer is persisted as a `role:'agent'` chat message keyed by taskId
+  // (task-router persistFinalTaskResult). Read it from the run's chat; fall back to a task event
+  // tail. Pure read, never throws — the escalation parser must be resilient to missing state.
+  function workerFinalAnswerText(run, runtimeTasks) {
+    let taskIds = new Set(uniqueArray(run.taskIds));
+    let chatIds = new Set();
+    for (let taskId of taskIds) {
+      let task = runtimeTasks instanceof Map ? runtimeTasks.get(taskId) : null;
+      let chatId = textOrNull(task?.chatId ?? task?.chat_id);
+      if (chatId) chatIds.add(chatId);
+    }
+    for (let chatId of chatIds) {
+      let chat = stateGraph.getChat(chatId);
+      let messages = Array.isArray(chat?.messages) ? chat.messages : [];
+      let scoped = messages.filter(msg => msg?.role === 'agent' && taskIds.has(msg.taskId));
+      let agentMsg = scoped[scoped.length - 1]
+        ?? [...messages].reverse().find(msg => msg?.role === 'agent');
+      let text = textOrNull(agentMsg?.text);
+      if (text) return text;
+    }
+    for (let taskId of taskIds) {
+      let task = runtimeTasks instanceof Map ? runtimeTasks.get(taskId) : null;
+      let events = Array.isArray(task?.events) ? task.events : [];
+      for (let event of [...events].reverse()) {
+        let text = textOrNull(event?.text ?? event?.content ?? event?.message);
+        if (text) return text;
+      }
+    }
+    return null;
+  }
+
+  // Parse a typed escalation from a terminal worker run. Returns a normalized escalation for a
+  // `blocked` result (typed kind, or a `needs_decision` fallback for an untyped block); null for
+  // completed/needs_follow_up or when no signal exists. Wrapped so a parse failure never breaks
+  // reconcile — an unparseable block degrades to no escalation, not a thrown reconcile.
+  function parseRunEscalation(run, runtimeTasks, opts = {}) {
+    try {
+      let text = workerFinalAnswerText(run, runtimeTasks);
+      let fromAuditColumn = Boolean(opts.fromAuditColumn);
+      if (!text) {
+        if (!opts.terminalBlocked) return null;
+        return normalizeWorkflowEscalation(
+          { kind: fromAuditColumn ? 'rework' : 'needs_decision', detail: opts.fallbackDetail ?? null },
+          { now: opts.now, raisedBy: ESCALATION_ACTOR, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null },
+        );
+      }
+      let resultMatch = text.match(ESCALATION_RESULT_PATTERN);
+      let result = resultMatch ? resultMatch[1].toLowerCase() : null;
+      // Only a blocked outcome (explicit, or an inferred terminal block) is an escalation.
+      if (result && result !== 'blocked') return null;
+      if (!result && !opts.terminalBlocked) return null;
+      let kind = text.match(ESCALATION_KIND_PATTERN)?.[1]?.toLowerCase() ?? null;
+      let detail = textOrNull(text.match(ESCALATION_DETAIL_PATTERN)?.[1]);
+      let suggestion = textOrNull(text.match(ESCALATION_SUGGESTION_PATTERN)?.[1]);
+      let lane = textOrNull(text.match(ESCALATION_LANE_PATTERN)?.[1]);
+      let escalation = normalizeWorkflowEscalation({
+        kind,
+        detail,
+        suggestedResolution: suggestion,
+        proposedLane: lane,
+      }, { now: opts.now, raisedBy: ESCALATION_ACTOR, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null });
+      if (escalation) return escalation;
+      // Blocked but no usable typed kind → governed fallback: rework if it came from the audit
+      // stage, otherwise a decision for a human/orchestrator to make.
+      return normalizeWorkflowEscalation(
+        { kind: fromAuditColumn ? 'rework' : 'needs_decision', detail: detail ?? opts.fallbackDetail ?? null },
+        { now: opts.now, raisedBy: ESCALATION_ACTOR, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null },
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  // Decide the durable escalation-state delta for a terminal run. A non-completed terminal run
+  // records/continues the episode (parser owns WHAT, never the attempt counter); a completed run
+  // resolves and clears it. Returns the next `metadata` plus an event descriptor, or null when
+  // there is nothing to write (dedup by run id, or no escalation at all).
+  function computeTerminalEscalation(card, run, nextStatus, runtimeTasks, currentNow) {
+    let metadata = card.metadata && typeof card.metadata === 'object' ? { ...card.metadata } : {};
+    let existing = metadata.escalation
+      ? normalizeWorkflowEscalationState(metadata.escalation)
+      : null;
+
+    if (nextStatus === 'completed') {
+      if (!existing) return null;
+      delete metadata.escalation;
+      return { metadata, status: 'cleared', kind: existing.kind, detail: existing.detail };
+    }
+
+    let escalation = parseRunEscalation(run, runtimeTasks, {
+      terminalBlocked: true,
+      fromAuditColumn: card.columnId === 'quality-audit',
+      now: currentNow,
+    });
+    if (!escalation) return null;
+    if (existing && existing.lastRunId === run.id) return null; // already recorded this run
+
+    let history = [
+      ...(existing?.history ?? []),
+      { kind: escalation.kind, detail: escalation.detail, runId: run.id, at: currentNow },
+    ];
+    let nextState = normalizeWorkflowEscalationState({
+      lastEscalation: escalation,
+      attemptCount: existing?.attemptCount ?? 0, // re-engagement owns accrual; never bump here
+      firstAt: existing?.firstAt ?? currentNow,
+      lastAt: currentNow,
+      nextAttemptAt: existing?.nextAttemptAt ?? currentNow, // first episode is re-engageable now
+      humanEscalated: existing?.humanEscalated ?? false,
+      lastRunId: run.id,
+      history,
+    });
+    return { metadata: { ...metadata, escalation: nextState }, status: 'raised', kind: escalation.kind, detail: escalation.detail };
+  }
+
   function workflowRunStatusFromRuntime(run, runtimeTasks) {
     let taskIds = uniqueArray(run.taskIds);
     if (!taskIds.length) return null;
@@ -1391,14 +1520,20 @@ export function createWorkflowBoardService(opts = {}) {
           if (nextStatus !== 'completed') flags.add('needs_audit');
         }
         let nextFlags = [...flags].filter(flag => normalizeRecoveryFlags([flag]).length > 0);
+        let escalationDelta = terminal
+          ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
+          : null;
+        let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
         let needsCardUpdate = nextColumnId !== latestCard.columnId
-          || nextFlags.join('|') !== normalizeRecoveryFlags(latestCard.recoveryFlags).join('|');
+          || nextFlags.join('|') !== normalizeRecoveryFlags(latestCard.recoveryFlags).join('|')
+          || escalationDelta !== null;
 
         if (needsCardUpdate) {
           latestCard = normalizeWorkflowCardInput({
             ...latestCard,
             columnId: nextColumnId,
             recoveryFlags: nextFlags,
+            metadata: nextMetadata,
             version: latestCard.version + 1,
             updatedAt: completedAt ?? currentNow,
             updatedBy: 'workflow-runtime',
@@ -1411,6 +1546,32 @@ export function createWorkflowBoardService(opts = {}) {
             updatedAt: completedAt ?? currentNow,
           });
           cardChanged = true;
+        }
+
+        if (escalationDelta) {
+          let escId = nextId(makeId, 'escalation');
+          let escEvent = normalizeWorkflowTransitionEvent({
+            id: escId,
+            eventType: 'escalation',
+            boardId: board.id,
+            cardId: latestCard.id,
+            fromColumnId: latestCard.columnId,
+            toColumnId: latestCard.columnId,
+            actor: ESCALATION_ACTOR,
+            mode: 'auto',
+            reason: escalationDelta.status === 'cleared'
+              ? `Escalation resolved by completed run ${run.id}.`
+              : `Escalation ${escalationDelta.kind} recorded from run ${run.id}.`,
+            status: 'accepted',
+            sideEffects: [{
+              type: 'escalation',
+              status: escalationDelta.status,
+              kind: escalationDelta.kind,
+              detail: escalationDelta.detail,
+              runId: run.id,
+            }],
+          }, { id: escId, now: completedAt ?? currentNow });
+          ops.push({ op: 'set', path: `workflowTransitions/${escEvent.id}`, value: escEvent });
         }
 
         if (terminal) {
@@ -2036,6 +2197,30 @@ export function createWorkflowBoardService(opts = {}) {
           '- Do not advance the card yourself; the gate moves it once the audit check passes.',
         ].join('\n')
       : '';
+    let escalationState = card.metadata?.escalation
+      ? normalizeWorkflowEscalationState(card.metadata.escalation)
+      : null;
+    let escalationBlock = escalationState && hasActiveEscalation(card)
+      ? [
+          '',
+          '',
+          `Escalation re-engagement (attempt ${escalationState.attemptCount}). A prior run could not self-resolve and routed this card back for re-routing.`,
+          `- Escalation kind: ${escalationState.kind}`,
+          escalationState.detail ? `- Detail: ${escalationState.detail}` : '',
+          textOrNull(escalationState.lastEscalation?.suggestedResolution)
+            ? `- Suggested resolution: ${escalationState.lastEscalation.suggestedResolution}`
+            : '',
+          textOrNull(escalationState.lastEscalation?.proposedLane)
+            ? `- Proposed lane (advisory only): ${escalationState.lastEscalation.proposedLane}`
+            : '',
+          '- Route by kind:',
+          '  - insufficient_permission: PROPOSE a capable lane (resource group / agent) and let the board gate or a human approve it. Never self-grant rights or approval.',
+          '  - insufficient_context: gather and attach the missing context, or decompose an investigation child card, then re-delegate.',
+          '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
+          '  - rework: re-delegate the fix with the audit findings as acceptance criteria.',
+          '- Permission and approval policy stay board/human-owned; this channel only proposes.',
+        ].filter(Boolean).join('\n')
+      : '';
     let proofMarkers = requiredProofMarkersForWorkItem(card, args);
     let proofMarkerContract = proofMarkers.length
       ? [
@@ -2064,6 +2249,11 @@ export function createWorkflowBoardService(opts = {}) {
       '- Do not end with an introduction to a report; include the report itself.',
       proofMarkerContract,
       '- End with `WORKFLOW_RESULT: completed`, `WORKFLOW_RESULT: blocked`, or `WORKFLOW_RESULT: needs_follow_up`.',
+      '- If you end with `WORKFLOW_RESULT: blocked`, emit a typed escalation on the lines just above it so the orchestrator can route it:',
+      '  - `ESCALATION_KIND:` one of insufficient_permission, insufficient_context, needs_decision, rework',
+      '  - `ESCALATION_DETAIL:` one line — exactly what is missing and why you cannot self-resolve it',
+      '  - `ESCALATION_SUGGESTION:` optional — the capability, context, or decision that would unblock it',
+      '  - Never self-grant rights or approval; permission and approval stay board/human-owned.',
     ].filter(Boolean).join('\n');
     return [
       `Run the Agent Portal workflow work item "${card.title}".`,
@@ -2078,6 +2268,7 @@ export function createWorkflowBoardService(opts = {}) {
       cwdHint,
       fileScopeHint,
       auditBlock,
+      escalationBlock,
       args.reason ? `\n\nTrigger reason: ${args.reason}` : '',
       outputContract,
     ].join('').trim();
@@ -2658,6 +2849,133 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
+  // Escalation re-engagement loop. This is the ONLY place the attempt counter advances — it bumps
+  // the count and pushes the backoff window in the same durable commit, BEFORE re-engaging the
+  // orchestrator, so the cap is always reachable regardless of how the re-engaged run resolves.
+  // Gate-resident: re-engagement routes the card back to `ready` (governed rework edge) so the
+  // orchestrate automation re-routes by escalation kind — never a direct out-of-gate write, never
+  // a silent rights grant. Opt-in per board via `automation.recovery === 'auto'`.
+  async function reconcileWorkflowEscalations(args = {}, context = {}) {
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
+    if (boardAutomation.recovery !== 'auto' && !args.force) {
+      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}`, reengaged: [], escalatedToHuman: [] };
+    }
+    let projectId = textOrNull(args.projectId ?? args.project_id);
+    let currentNow = now();
+    let maxAttempts = Number(args.maxAttempts ?? args.max_attempts);
+    if (!Number.isFinite(maxAttempts) || maxAttempts < 1) maxAttempts = DEFAULT_ESCALATION_MAX_ATTEMPTS;
+    let reengaged = [];
+    let escalatedToHuman = [];
+
+    let cards = Object.values(getCollection(stateGraph, 'workflowCards'))
+      .filter(card => card.boardId === board.id)
+      .filter(card => !projectId || card.projectId === projectId)
+      .filter(card => hasActiveEscalation(card));
+
+    for (let card of cards) {
+      let state = normalizeWorkflowEscalationState(card.metadata.escalation);
+      if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
+      // Self-feed guard: never re-engage while a run is still active for this card. The backoff
+      // window plus this guard mean each round drives exactly one orchestration.
+      if (activeRunForCard(card.id) && !args.force) continue;
+
+      if (state.attemptCount >= maxAttempts) {
+        let humanState = normalizeWorkflowEscalationState({ ...state, humanEscalated: true });
+        let blocker = escalationHumanBlocker(state, maxAttempts);
+        let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+        flags.add('blocked');
+        let nextCard = normalizeWorkflowCardInput({
+          ...card,
+          blockers: uniqueArray([...card.blockers, blocker]),
+          recoveryFlags: [...flags],
+          metadata: { ...card.metadata, escalation: humanState },
+          version: card.version + 1,
+          updatedAt: currentNow,
+          updatedBy: ESCALATION_ACTOR,
+        }, {
+          id: card.id,
+          actor: ESCALATION_ACTOR,
+          now: currentNow,
+          version: card.version + 1,
+          createdAt: card.createdAt,
+          updatedAt: currentNow,
+        });
+        let eventId = nextId(makeId, 'escalation');
+        let event = normalizeWorkflowTransitionEvent({
+          id: eventId,
+          eventType: 'escalation',
+          boardId: board.id,
+          cardId: card.id,
+          fromColumnId: card.columnId,
+          toColumnId: card.columnId,
+          actor: ESCALATION_ACTOR,
+          mode: 'auto',
+          reason: blocker,
+          status: 'accepted',
+          sideEffects: [{ type: 'escalation', status: 'human_handoff', kind: state.kind, detail: state.detail, attempts: state.attemptCount }],
+        }, { id: eventId, now: currentNow });
+        stateGraph.commit([
+          { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
+          { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+        ], sourceFor(ESCALATION_ACTOR));
+        escalatedToHuman.push({ cardId: card.id, kind: state.kind, attempts: state.attemptCount, blocker });
+        continue;
+      }
+
+      // Accrue FIRST, durably, before re-engaging — the central loop-safety invariant.
+      let attemptCount = state.attemptCount + 1;
+      let nextAttemptAt = currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1);
+      let accrued = normalizeWorkflowEscalationState({ ...state, attemptCount, nextAttemptAt });
+      let accruedCard = normalizeWorkflowCardInput({
+        ...card,
+        metadata: { ...card.metadata, escalation: accrued },
+        version: card.version + 1,
+        updatedAt: currentNow,
+        updatedBy: ESCALATION_ACTOR,
+      }, {
+        id: card.id,
+        actor: ESCALATION_ACTOR,
+        now: currentNow,
+        version: card.version + 1,
+        createdAt: card.createdAt,
+        updatedAt: currentNow,
+      });
+      stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: accruedCard }], sourceFor(ESCALATION_ACTOR));
+
+      let reengageArgs = {
+        boardId: board.id,
+        cardId: card.id,
+        actor: ESCALATION_ACTOR,
+        reason: `Escalation re-engagement #${attemptCount} (${accrued.kind}).`,
+        escalation: accrued,
+        delegate: args.delegate,
+      };
+      let outcome = null;
+      try {
+        if (accruedCard.columnId === 'ready') {
+          outcome = await maybeAutoOrchestrateCard(board, accruedCard, reengageArgs, context);
+        } else {
+          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: 'ready' }, context);
+        }
+      } catch (error) {
+        outcome = { ok: false, error: error.message };
+      }
+      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued.kind, ok: Boolean(outcome?.ok) });
+    }
+
+    return { ok: true, reengaged, escalatedToHuman };
+  }
+
+  function escalationHumanBlocker(state, maxAttempts) {
+    let parts = [`Escalation unresolved after ${maxAttempts} re-engagements (${state.kind}).`];
+    if (state.detail) parts.push(state.detail);
+    let suggestion = textOrNull(state.lastEscalation?.suggestedResolution);
+    if (suggestion) parts.push(`Suggested: ${suggestion}`);
+    parts.push('Human decision required.');
+    return parts.join(' ');
+  }
+
   function workspaceRoot() {
     return path.join(projectRoot, '.agent-portal', 'workspace');
   }
@@ -2890,6 +3208,7 @@ export function createWorkflowBoardService(opts = {}) {
           try {
             reconcileWorkflowRuntimeTasks({ boardId: board.id });
             await reconcileWorkflowRecovery({ boardId: board.id });
+            await reconcileWorkflowEscalations({ boardId: board.id });
           } catch (err) {
             onError(err, board.id);
           }
@@ -2939,7 +3258,10 @@ export function createWorkflowBoardService(opts = {}) {
     orchestrateWorkItem,
     resumeWorkItem,
     controlWorkItem,
+    reconcileWorkflowRuntimeTasks,
     reconcileWorkflowRecovery,
+    reconcileWorkflowEscalations,
+    parseRunEscalation,
     importWorkflowWorkItems,
     exportWorkflowWorkItem,
     getWorkflowRecoveryState,
