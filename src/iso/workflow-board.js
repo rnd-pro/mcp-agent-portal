@@ -960,6 +960,17 @@ export function validateWorkflowTransitionGraph(board) {
     }
   }
 
+  // A recovery-classed (kickback) edge into a terminal escapes the P1 hygiene inbound-cut and the P2
+  // audit-domination check, both of which scan only forward edges — so a card could reach the close
+  // column crossing no hygiene/audit gate while the validator still returns ok. A `rework_authorized`
+  // kickback into a `close` column is also semantically invalid (you do not rework INTO done), so
+  // reject any recovery-classed edge whose `to` is a terminal.
+  for (let edge of classifier.edges) {
+    if (edge.edgeClass === 'recovery' && terminals.has(edge.to)) {
+      errors.push({ code: 'recovery_edge_into_terminal', detail: `Recovery edge ${edge.from} -> ${edge.to} targets terminal column "${edge.to}"; a kickback into a close column is invalid.` });
+    }
+  }
+
   // (2) Per-terminal floor-gate properties.
   for (let terminal of terminals) {
     let inboundEdges = inbound.get(terminal) ?? [];

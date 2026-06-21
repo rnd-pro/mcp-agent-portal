@@ -132,14 +132,14 @@ describe('workflow board model and service', () => {
     oldBoard.columns = oldBoard.columns.map((column) => (
       column.id === 'ready'
         ? {
-            ...column,
-            automation: {
-              trigger: 'on_enter',
-              action: 'orchestrate',
-              mode: 'gated',
-              agent: 'legacy-agent',
-            },
-          }
+          ...column,
+          automation: {
+            trigger: 'on_enter',
+            action: 'orchestrate',
+            mode: 'gated',
+            agent: 'legacy-agent',
+          },
+        }
         : column
     ));
     oldBoard.transitions = oldBoard.transitions.filter(transition => transition.to !== 'ready');
@@ -1142,7 +1142,12 @@ links:
     assert.equal(event.toColumnId, 'ready');
     assert.equal(event.sideEffects[0].status, 'failed');
     assert.match(event.sideEffects[0].error, /Resource group `audit` not found/);
-    assert.equal(calls.filter(call => call.server === 'agent-pool').length, 1);
+    // One delegate attempt, then one idempotent release_slot (F-SCH-2): the hard-failure branch
+    // releases the admission slot before deleting the admission record so a slot reserved before a
+    // non-capacity spawn failure is never orphaned.
+    let agentPoolCalls = calls.filter(call => call.server === 'agent-pool');
+    assert.equal(agentPoolCalls.length, 2);
+    assert.equal(agentPoolCalls[1].payload?.name, 'release_slot');
   });
 
   it('does not orchestrate blocked ready cards through auto or direct paths', async () => {
@@ -2695,6 +2700,51 @@ describe('workflow transition-graph validator (AD-6)', () => {
     let result = validateWorkflowTransitionGraph(board);
     assert.equal(result.ok, false);
     assert.ok(result.errors.some(error => error.code === 'unknown_gate'));
+  });
+
+  // F-DEP-3 regression: a recovery-classed (rework_authorized, rank-decreasing) edge INTO a terminal
+  // escapes the P1 hygiene inbound-cut and the P2 audit-domination check (both scan only forward
+  // edges), so a card could reach the close column crossing no hygiene/audit gate while the validator
+  // returns ok. The board below is otherwise fully valid; the ONLY defect is the recovery edge
+  // `b -> done` into the `done` terminal. Pre-fix this returned ok:true (the vulnerability).
+  it('rejects a recovery-classed edge that targets a terminal (recovery_edge_into_terminal)', () => {
+    let board = makeBoard(
+      [column('intake'), column('a'), column('b'), column('done', 'close'), column('release', 'close')],
+      [
+        // Early terminal reached at a low forward rank (P1 hygiene + P2 audit both satisfied).
+        { from: 'intake', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        // A longer forward chain to a second terminal so `b` outranks `done`.
+        { from: 'intake', to: 'a', gate: 'no_active_blocker' },
+        { from: 'a', to: 'b', gate: 'no_active_blocker' },
+        { from: 'b', to: 'release', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        // The defect: a rework_authorized kickback from a higher-rank column INTO the `done` terminal.
+        { from: 'b', to: 'done', gate: 'rework_authorized' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    // The defect edge is classed `recovery` (recovery-gated + rank-decreasing).
+    assert.equal(result.classifier.edgeClass('b', 'done'), 'recovery');
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some(error => error.code === 'recovery_edge_into_terminal' && /b -> done/.test(error.detail)),
+      JSON.stringify(result.errors),
+    );
+  });
+
+  // F-DEP-3 guard: the recovery edge that is NOT into a terminal (the shipped pattern) stays valid.
+  it('still accepts a recovery edge into a non-terminal (the governed-rework pattern)', () => {
+    let board = makeBoard(
+      [column('start'), column('work'), column('audit'), column('done', 'close')],
+      [
+        { from: 'start', to: 'work', gate: 'no_active_blocker' },
+        { from: 'work', to: 'audit', gate: 'audit_pass_or_explicit_waiver' },
+        { from: 'audit', to: 'done', gate: 'clean_diff_and_hygiene' },
+        { from: 'audit', to: 'work', gate: 'rework_authorized' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.equal(result.classifier.edgeClass('audit', 'work'), 'recovery');
   });
 });
 
