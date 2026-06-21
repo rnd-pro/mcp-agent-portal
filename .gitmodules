@@ -4,6 +4,3 @@
 [submodule "packages/project-graph-mcp"]
 	path = packages/project-graph-mcp
 	url = https://github.com/rnd-pro/project-graph-mcp.git
-[submodule ".agent-portal"]
-	path = .agent-portal
-	url = https://example.invalid/private-agent-portal-skills.git
