@@ -754,6 +754,16 @@ export function createWorkflowBoardService(opts = {}) {
       ...asObject(merged.metadata),
       executedBy: textArray(current?.metadata?.executedBy),
     };
+    // Orchestrator return subscription (S5): persist it on the card at create/update so the JOIN
+    // materializes whenever the card is first orchestrated — including by the auto-pickup daemon —
+    // not only when a subscription is threaded through one explicit orchestrate() call (which races
+    // auto-pickup and silently drops the join). An explicit input subscription wins; absent that, an
+    // already-persisted subscription is preserved; an explicit invalid/memberless one clears it.
+    let nextSubscription = input.subscription !== undefined
+      ? normalizeWorkflowSubscription(input.subscription)
+      : (current?.metadata?.subscription ?? null);
+    if (nextSubscription) merged.metadata.subscription = nextSubscription;
+    else delete merged.metadata.subscription;
     let card = normalizeWorkflowCardInput(merged, {
       id,
       actor,
@@ -4883,7 +4893,7 @@ export function createWorkflowBoardService(opts = {}) {
     // materializeJoinCard call, not an auto-spawn here.
     let normalizedSubscription = effectiveArgs.subscription
       ? normalizeWorkflowSubscription(effectiveArgs.subscription)
-      : null;
+      : (card.metadata?.subscription ?? null);
     let nextCard = normalizeWorkflowCardInput({
       ...card,
       columnId: nextColumnId,
