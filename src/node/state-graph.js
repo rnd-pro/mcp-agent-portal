@@ -27,6 +27,7 @@ import {
   normalizeChatGoalStatus,
 } from '../iso/chat-goals.js';
 import { resolveChatCreationAgent } from '../iso/chat-orchestration.js';
+import { isProcessAlive } from './ops/process.js';
 
 // ── Paths ────────────────────────────────────────────────
 const STATE_DIR = process.env.PORTAL_STATE_DIR || path.join(os.homedir(), '.agent-portal');
@@ -212,6 +213,67 @@ export class StateGraph extends EventEmitter {
     // ── Snapshot compaction tracking ──
     this._commitsSinceSnapshot = 0;
     this._snapshotVersion = 0;
+
+    // ── Single-writer ownership guard (opt-in) ──
+    // When two long-lived backends point at the same snapshot, both rewrite + compact it from their
+    // own in-memory state, clobbering each other and dropping the other's un-snapshotted commits. The
+    // guard makes the NEWEST instance the owner (claims on load); a superseded instance refuses to
+    // write/compact and emits 'ownership-lost' so the process can self-exit. Identity is a per-instance
+    // token (so two same-pid instances in a test still differ); liveness uses the recorded pid.
+    this._ownershipGuard = opts.ownershipGuard === true;
+    this._ownerToken = opts.instanceToken || crypto.randomBytes(8).toString('hex');
+    this._ownerPath = this._snapshotPath + '.owner';
+    this._ownershipLostEmitted = false;
+    this._ownerHeartbeat = null;
+  }
+
+  // ── Single-writer ownership ────────────────────────────
+
+  // Stamp this instance as the snapshot owner (atomic tmp+rename). The newest claimant wins; an older
+  // instance detects the change and steps down. Best-effort: a failed claim leaves us fail-open.
+  _claimOwnership() {
+    if (!this._ownershipGuard) return;
+    try {
+      let rec = JSON.stringify({ pid: process.pid, token: this._ownerToken, startedAt: Date.now() });
+      let tmp = this._ownerPath + '.tmp';
+      fs.writeFileSync(tmp, rec);
+      fs.renameSync(tmp, this._ownerPath);
+    } catch { /* fail-open: see _ownsSnapshot */ }
+  }
+
+  // May this instance write/compact the snapshot? Fail-open by design: ONLY a different, still-alive
+  // owner blocks us. A missing/unreadable record or a dead owner is reclaimed and we proceed — the
+  // legitimate single backend must never silently stop persisting.
+  _ownsSnapshot() {
+    if (!this._ownershipGuard) return true;
+    let rec = null;
+    try { rec = JSON.parse(fs.readFileSync(this._ownerPath, 'utf8')); } catch { rec = null; }
+    if (!rec || !rec.token) { this._claimOwnership(); return true; }
+    if (rec.token === this._ownerToken) return true;
+    // A different token owns it: stay down only if that owner is still alive (live newer process, or a
+    // newer same-pid instance as in tests). Otherwise the owner is gone — reclaim.
+    if (rec.pid && rec.pid !== process.pid && isProcessAlive(rec.pid)) return false;
+    if (rec.pid === process.pid) return false;
+    this._claimOwnership();
+    return true;
+  }
+
+  _signalOwnershipLost() {
+    if (this._ownershipLostEmitted) return;
+    this._ownershipLostEmitted = true;
+    if (this._ownerHeartbeat) { clearInterval(this._ownerHeartbeat); this._ownerHeartbeat = null; }
+    try { this.emit('ownership-lost', { ownerPath: this._ownerPath }); } catch { /* listener error */ }
+  }
+
+  // Idle superseded instances write no snapshot, so they would never notice the takeover; a light
+  // unref'd heartbeat lets them step down promptly. Data safety does not depend on it (the write-time
+  // guard already prevents clobbering) — it only makes self-exit timely.
+  _startOwnershipHeartbeat() {
+    if (!this._ownershipGuard || this._ownerHeartbeat) return;
+    this._ownerHeartbeat = setInterval(() => {
+      if (!this._ownsSnapshot()) this._signalOwnershipLost();
+    }, 5000);
+    if (this._ownerHeartbeat.unref) this._ownerHeartbeat.unref();
   }
 
   // ── Public Read API ────────────────────────────────────
@@ -410,6 +472,10 @@ export class StateGraph extends EventEmitter {
     let dir = path.dirname(this._snapshotPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
+    // Claim snapshot ownership up front so any older instance steps down while we read the latest
+    // state, then load from that fresh snapshot+WAL — the newest writer always has the freshest base.
+    this._claimOwnership();
+
     let snapshotLoaded = false;
 
 
@@ -498,6 +564,9 @@ export class StateGraph extends EventEmitter {
       this._version++;
       this._state._v = this._version;
     }
+
+    // Step down promptly if a newer instance later takes over (idle instances write no snapshot).
+    this._startOwnershipHeartbeat();
   }
 
   // ── Persistence: WAL (Async Group Commit) ──────────────
@@ -591,6 +660,9 @@ export class StateGraph extends EventEmitter {
   // truncation while the snapshot's data blocks are still in cache — losing
   // every commit since the previous snapshot.
   async _writeSnapshot() {
+    // Single-writer guard: a superseded instance must NOT rewrite/compact the shared snapshot — that
+    // is the multi-backend clobber that drops the live owner's un-snapshotted commits.
+    if (!this._ownsSnapshot()) { this._signalOwnershipLost(); return; }
     this._commitsSinceSnapshot = 0;
     let snap = JSON.stringify(this._state, null, 2);
     let v = this._version;
@@ -668,6 +740,9 @@ export class StateGraph extends EventEmitter {
 
   // Synchronous snapshot write (for process exit) with fsync barriers.
   _writeSnapshotSync() {
+    // Same single-writer guard as the async path: a superseded instance exiting must not clobber the
+    // owner's snapshot on its way out.
+    if (!this._ownsSnapshot()) { this._signalOwnershipLost(); return; }
     try {
       let snapDir = path.dirname(this._snapshotPath);
       fs.mkdirSync(snapDir, { recursive: true });
@@ -1587,8 +1662,18 @@ let _instance = null;
  */
 export function getStateGraph() {
   if (!_instance) {
-    _instance = new StateGraph();
+    // Only the long-lived backend process (PORTAL_BACKEND=1) enforces single-writer ownership; ephemeral
+    // CLI invocations that read state must not claim it.
+    let ownershipGuard = process.env.PORTAL_BACKEND === '1';
+    _instance = new StateGraph({ ownershipGuard });
     _instance.load();
+
+    if (ownershipGuard) {
+      _instance.on('ownership-lost', () => {
+        console.error('[portal] Another backend has taken ownership of the state snapshot; this instance is a stale duplicate and is exiting to avoid clobbering shared state.');
+        process.exit(0);
+      });
+    }
 
     process.on('beforeExit', () => _instance.flush());
     process.on('SIGINT', () => { _instance.flush(); process.exit(0); });

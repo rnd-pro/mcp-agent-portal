@@ -178,6 +178,15 @@ function shouldRestartBackend(existing, force) {
   return force || (existing.version && existing.version !== currentVersion && currentVersion !== '0.0.0');
 }
 
+async function waitForExit(pid, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!processExists(pid)) return true;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return !processExists(pid);
+}
+
 async function terminateBackend(existing, reason) {
   if (!existing) return;
   if (reason === 'version') {
@@ -187,9 +196,15 @@ async function terminateBackend(existing, reason) {
   }
   try { process.kill(existing.pid, 'SIGTERM'); } catch (e) { console.warn('[portal] Failed to kill old backend:', e.message); }
   try { unlinkSync(getPortFilePath(existing.project)); } catch (e) { /* ignore cleanup error */ }
-  for (let i = 0; i < 15; i++) {
-    await new Promise(r => setTimeout(r, 200));
-    if (!processExists(existing.pid)) break;
+  // Escalate SIGTERM → SIGKILL with death verification. A backend that ignores SIGTERM (or is mid-fsync)
+  // must NOT be left running as an orphan: two live backends multi-writing the shared snapshot is the
+  // exact race that clobbers persistent state, so we ensure the old instance is actually gone.
+  if (!(await waitForExit(existing.pid, 3000))) {
+    console.error(`[portal] Backend PID ${existing.pid} did not exit on SIGTERM; sending SIGKILL.`);
+    try { process.kill(existing.pid, 'SIGKILL'); } catch { /* already gone */ }
+    if (!(await waitForExit(existing.pid, 2000))) {
+      console.error(`[portal] Backend PID ${existing.pid} survived SIGKILL; a stale instance may still be running.`);
+    }
   }
 }
 
