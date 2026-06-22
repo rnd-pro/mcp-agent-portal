@@ -10,6 +10,7 @@ import {
   isActionableReturn,
   isHardInterrupt,
   isTerminalReturn,
+  isWakeDrivingReturn,
   returnEventSupersedes,
   coalesceReturnEvents,
 } from '../../src/iso/workflow-board.js';
@@ -93,6 +94,20 @@ describe('return classifiers + supersede/coalesce (S2)', () => {
     assert.equal(isActionableReturn('discovered'), true);
     assert.equal(isHardInterrupt('blocked'), true);
     assert.equal(isHardInterrupt('discovered'), false);
+  });
+
+  it('isWakeDrivingReturn: a self-completion terminal does not self-wake; routed + intermediate do', () => {
+    let selfDone = normalizeWorkflowReturnEvent({ kind: 'completed', correlationId: 'c' });
+    assert.equal(selfDone.routed, false, 'routed defaults false');
+    assert.equal(isWakeDrivingReturn(selfDone), false, 'a bare self-completion does not re-engage its own card');
+    let routedDone = normalizeWorkflowReturnEvent({ kind: 'completed', correlationId: 'c', routed: true });
+    assert.equal(routedDone.routed, true);
+    assert.equal(isWakeDrivingReturn(routedDone), true, 'a routed completion (join → owner) drives a wake');
+    assert.equal(normalizeWorkflowReturnEvent({ kind: 'failed', correlationId: 'c' }, { routed: true }).routed, true, 'routed via opts provenance');
+    assert.equal(isWakeDrivingReturn(normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: 'c' })), true, 'an intermediate actionable drives a wake');
+    assert.equal(isWakeDrivingReturn(normalizeWorkflowReturnEvent({ kind: 'progress', correlationId: 'c' })), false, 'a coalesce-only return never wakes');
+    assert.equal(isWakeDrivingReturn({ ...routedDone, consumedAt: 123 }), false, 'a consumed return does not re-wake');
+    assert.equal(isWakeDrivingReturn(null), false);
   });
 
   let mk = (kind, over = {}) => normalizeWorkflowReturnEvent({ kind, correlationId: 'c', ...over });

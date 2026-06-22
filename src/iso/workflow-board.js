@@ -172,6 +172,18 @@ export function isHardInterrupt(kind) { return WORKFLOW_RETURN_HARD_INTERRUPT_KI
 export function isTerminalReturn(kind) { return WORKFLOW_RETURN_TERMINAL_KINDS.includes(textOrNull(kind)); }
 
 /**
+ * Does an inbox return event drive a wake of ITS OWN card? Actionable + unconsumed, and either
+ * intermediate (a still-running card that needs routing/a reply) or `routed` (a result delivered to this
+ * card from a child/join). A bare self-completion terminal return (`completed`/`failed` minted by the
+ * card's own run) is NOT wake-driving — it only flows to subscribers/owners, so a finished leaf does not
+ * re-orchestrate itself (and a card cycling through audit does not churn on its own terminal returns).
+ */
+export function isWakeDrivingReturn(event) {
+  if (!event || event.actionable !== true || event.consumedAt) return false;
+  return event.terminal !== true || event.routed === true;
+}
+
+/**
  * Normalize a typed return event. Flags are denormalized so the hot path does zero table lookups.
  * Returns null on an unknown kind or a missing correlationId (the inbox key, frozen as the cardId).
  * @param {object} input
@@ -198,6 +210,10 @@ export function normalizeWorkflowReturnEvent(input = {}, opts = {}) {
     schema: WORKFLOW_RETURN_SCHEMA,
     eventId: textOrNull(source.eventId ?? source.event_id ?? opts.eventId),
     kind, terminal, actionable, hardInterrupt, needsResponse,
+    // `routed` marks a return DELIVERED to this card from elsewhere (a join completion routed to its
+    // owner) rather than minted by the card's own run. A routed terminal return drives a wake; a bare
+    // self-completion terminal return does not re-engage its own card (it only flows to subscribers).
+    routed: source.routed === true || opts.routed === true,
     correlationId,
     escalationKind: RETURN_KIND_TO_ESCALATION[kind] ?? null,
     seq: Number.isFinite(seq) ? seq : null,
@@ -556,11 +572,13 @@ const GATE_CHECKS = {
     ),
     reason: 'Commit/publish requires clean diff plus hygiene check.',
   }),
-  // Backward rework is allowed only with a governed reason: a live escalation episode the
-  // orchestrator must re-route, or an audit the auditor explicitly failed.
-  rework_authorized: (card, checks) => ({
-    ok: hasActiveEscalation(card) || checkFailed(checks.audit),
-    reason: 'Rework to ready requires a recorded escalation or a failed audit.',
+  // Backward rework is allowed only with a governed reason: a live escalation episode the orchestrator
+  // must re-route, an audit the auditor explicitly failed, or a board return-loop re-engagement waking a
+  // dormant orchestrator with queued returns to deliver. `request.reworkAuthorized` is set ONLY by the
+  // daemon board-self-drive (the service gates it on the daemon principal), never by a caller body.
+  rework_authorized: (card, checks, request) => ({
+    ok: hasActiveEscalation(card) || checkFailed(checks.audit) || request?.reworkAuthorized === true,
+    reason: 'Rework to ready requires a recorded escalation, a failed audit, or a board re-engagement.',
   }),
 };
 

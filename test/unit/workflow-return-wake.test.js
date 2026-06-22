@@ -133,14 +133,15 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
 
   // Plant a normalized return event on the card's inbox. The shape mirrors normalizeWorkflowReturnEvent
   // output (denormalized flags) so the driver's candidate filter reads it exactly as the mint writes it.
-  function returnEvent({ kind, detail = null, correlationId, terminal = false, actionable = true, hardInterrupt = false }) {
+  function returnEvent({ kind, detail = null, correlationId, terminal = false, actionable = true, hardInterrupt = false, routed = false }) {
     return {
       schema: 'workflow-return/v1',
-      eventId: `ret-${kind}-${correlationId}`,
+      eventId: `ret-${kind}-${correlationId}${routed ? '-routed' : ''}`,
       kind,
       terminal,
       actionable,
       hardInterrupt,
+      routed,
       needsResponse: hardInterrupt,
       correlationId,
       escalationKind: hardInterrupt ? 'needs_decision' : null,
@@ -192,6 +193,68 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     // A second drive must NOT re-engage — the consumed return no longer wakes the loop.
     let second = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
     assert.equal(second.reengaged.length, 0, 'a consumed return does not re-engage again (idempotent wake)');
+  });
+
+  it('a self-completion terminal return does NOT re-engage its own card; a routed one does', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'enable recovery' });
+    let board = service.ensureBoard();
+
+    // A finished leaf carries its own `completed` terminal return — it must NOT re-orchestrate itself
+    // (this is what stops a card cycling through the audit stage from churning on its own returns).
+    let selfDone = makeReadyCard(service, { title: 'self-done', resourceGroup: 'impl' });
+    seedReturns(selfDone, [returnEvent({ kind: 'completed', correlationId: selfDone.id, terminal: true })]);
+    let r1 = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(r1.reengaged.length, 0, 'a bare self-completion terminal return is not a wake candidate');
+    assert.ok(!service.getCard(selfDone.id).metadata.returns[0].consumedAt, 'and it is not consumed');
+
+    // A routed completion (a join result delivered to the owner) MUST re-engage the owner.
+    let owner = makeReadyCard(service, { title: 'join-owner', resourceGroup: 'impl' });
+    seedReturns(owner, [returnEvent({ kind: 'completed', correlationId: owner.id, terminal: true, routed: true })]);
+    let r2 = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(r2.reengaged.length, 1, 'a routed completion re-engages the owner');
+    assert.equal(r2.reengaged[0].cardId, owner.id);
+    assert.ok(service.getCard(owner.id).metadata.returns[0].consumedAt, 'the routed return is consumed once');
+  });
+
+  it('a dormant orchestrator resting in quality-audit is re-engaged out of it (governed rework)', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'enable recovery' });
+    let board = service.ensureBoard();
+
+    // A finished orchestrator rests in quality-audit (idle) carrying a routed join return to deliver, but
+    // NO escalation and NO failed audit — the rework-to-ready edge would block without the daemon's
+    // re-engagement authorization. The driver must still move it out of quality-audit to re-orchestrate.
+    let owner = makeReadyCard(service, { title: 'dormant-owner', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${owner.id}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${owner.id}`, value: {
+      ...base, columnId: 'quality-audit', lifecycle: 'idle',
+      metadata: { ...base.metadata, returns: [returnEvent({ kind: 'completed', correlationId: owner.id, terminal: true, routed: true })] },
+    } }], 'test:seed-dormant', { durable: true });
+
+    let r = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(r.reengaged.length, 1, 'the dormant orchestrator is re-engaged');
+    assert.notEqual(service.getCard(owner.id).columnId, 'quality-audit', 'the governed rework moved it out of quality-audit to re-orchestrate');
+  });
+
+  it('a human/agent transition cannot self-authorize the rework edge (daemon-only flag)', () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    let card = makeReadyCard(service, { title: 'no-self-rework', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${card.id}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: { ...base, columnId: 'quality-audit' } }], 'test:to-audit', { durable: true });
+
+    // A caller-supplied reworkAuthorized from a non-daemon principal must be IGNORED — the service only
+    // honors the flag for the daemon board-self-drive, so the backward rework stays governed and the
+    // card does not move (blocked at the rework gate, or earlier at the transition capability).
+    let res = service.requestWorkflowTransition({ cardId: card.id, toColumnId: 'ready', reason: 'try rework', reworkAuthorized: true });
+    assert.notEqual(res.status, 'accepted', 'a non-daemon rework is never accepted');
+    assert.equal(service.getCard(card.id).columnId, 'quality-audit', 'the card did not move');
   });
 
   it('a hard-interrupt return re-engages even when board recovery is NOT auto; a soft-only return does not', async () => {
