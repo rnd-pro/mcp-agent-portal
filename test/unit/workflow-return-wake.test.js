@@ -257,13 +257,14 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     assert.equal(service.getCard(card.id).columnId, 'quality-audit', 'the card did not move');
   });
 
-  it('a hard-interrupt return re-engages even when board recovery is NOT auto; a soft-only return does not', async () => {
+  it('a hard-interrupt return wakes regardless; a soft-only return is gated on returnWake', async () => {
     let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
     let service = makeService(ledger.proxy);
     relaxBoardPreChecks(service);
-    // Board recovery stays at its default (manual) — the gate is applied per-card.
+    // Hold BOTH gates manual: the hard-interrupt must still wake (D4), the soft return must stay gated.
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'manual', returnWake: 'manual' } }, actor: 'test', reason: 'manual gates' });
     let board = service.ensureBoard();
-    assert.notEqual(service.ensureBoard().automation?.recovery, 'auto', 'precondition: board recovery is not auto');
+    assert.notEqual(board.automation?.returnWake, 'auto', 'precondition: returnWake is not auto');
 
     // A blocked child folds onto metadata.escalation (the mint does this), so hasActiveEscalation is
     // true AND the inbox carries an unconsumed hard-interrupt entry.
@@ -281,18 +282,36 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
       },
     );
 
-    // A soft-only return (discovered) — actionable but NOT a hard-interrupt — must stay recovery-gated.
+    // A soft-only return (discovered) — actionable but NOT a hard-interrupt — must stay returnWake-gated.
     let soft = makeReadyCard(service, { title: 'soft-discovered', resourceGroup: 'impl' });
     seedReturns(soft, [returnEvent({ kind: 'discovered', detail: 'noticed a TODO', correlationId: soft.id })]);
 
     let result = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
     let reengagedIds = result.reengaged.map(item => item.cardId);
-    assert.ok(reengagedIds.includes(hard.id), 'the hard-interrupt card wakes regardless of recovery');
-    assert.ok(!reengagedIds.includes(soft.id), 'the soft-only return stays gated on recovery === auto');
+    assert.ok(reengagedIds.includes(hard.id), 'the hard-interrupt card wakes regardless of the gates');
+    assert.ok(!reengagedIds.includes(soft.id), 'the soft-only return stays gated while returnWake is manual');
 
-    // The soft card's return is left unconsumed (it was never delivered) — it retries when recovery flips.
+    // The soft card's return is left unconsumed (it was never delivered) — it retries when returnWake flips.
     assert.ok(!service.getCard(soft.id).metadata.returns[0].consumedAt, 'an undelivered soft return stays unconsumed');
     assert.ok(service.getCard(hard.id).metadata.returns[0].consumedAt, 'the delivered hard-interrupt return is consumed');
+  });
+
+  it('a soft return wakes the orchestrator on the DEFAULT board (returnWake auto, recovery manual)', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    let board = service.ensureBoard();
+    // Board defaults: recovery manual, returnWake auto. The return loop must wake a dormant orchestrator
+    // out of the box, WITHOUT the operator enabling recovery.
+    assert.equal(board.automation?.recovery, 'manual', 'precondition: default recovery is manual');
+    assert.equal(board.automation?.returnWake, 'auto', 'precondition: default returnWake is auto');
+
+    let owner = makeReadyCard(service, { title: 'returnwake-owner', resourceGroup: 'impl' });
+    seedReturns(owner, [returnEvent({ kind: 'discovered', detail: 'a finding to route', correlationId: owner.id })]);
+    let r = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(r.reengaged.length, 1, 'a soft return wakes via returnWake=auto without recovery=auto');
+    assert.equal(r.reengaged[0].cardId, owner.id);
+    assert.ok(service.getCard(owner.id).metadata.returns[0].consumedAt, 'the soft return is consumed on delivery');
   });
 
   it('a progress-only card (no actionable return) is never a driver candidate', async () => {

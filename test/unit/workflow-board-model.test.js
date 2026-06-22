@@ -2283,6 +2283,8 @@ links:
   });
 
   it('does not re-engage when board recovery is manual', async () => {
+    // A fully-manual board (recovery + returnWake both manual) re-engages nothing → reports skipped.
+    service.updateWorkflowBoard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, automation: { recovery: 'manual', returnWake: 'manual' } });
     let { card } = service.createOrUpdateCard({
       title: 'Manual recovery board', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
       owner: 'backend-engineer', acceptanceCriteria: ['x'], actor: 'test',
