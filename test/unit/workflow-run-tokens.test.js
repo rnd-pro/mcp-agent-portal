@@ -137,4 +137,25 @@ describe('workflow runtime reconcile — token aggregation', () => {
 
     assert.equal(sg.get('workflowRuns/run-late').tokens, 5000);
   });
+
+  it('backfills run.chatId from the run task so each pass links to its own chat', async () => {
+    let created = service.createOrUpdateCard({
+      id: 'chatlink', title: 'Chat link', body: 'x', columnId: 'quality-audit', projectId: 'agent-portal',
+      owner: 'orchestrator', assignedAgent: 'code-reviewer', acceptanceCriteria: ['Done'], actor: 'test',
+    });
+    sg.commit([
+      { op: 'set', path: 'workflowCards/chatlink', value: { ...created.card, columnId: 'quality-audit' } },
+      { op: 'set', path: 'workflowRuns/run-cl', value: {
+        schema: 'workflow-run/v1', id: 'run-cl', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'chatlink',
+        status: 'completed', taskIds: ['task-cl'], startedAt: 900, updatedAt: 1000, completedAt: 1000, chatId: null,
+      } },
+    ], 'test:plant-chatlink');
+    let runtimeTasks = new Map([
+      ['task-cl', { id: 'task-cl', status: 'completed', updatedAt: 1000, completedAt: 1000, chatId: 'chat-xyz' }],
+    ]);
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    assert.equal(sg.get('workflowRuns/run-cl').chatId, 'chat-xyz');
+  });
 });
