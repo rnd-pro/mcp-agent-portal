@@ -27,6 +27,7 @@ import {
   migrateWorkflowCardToV2,
   normalizeWorkflowReturnEvent,
   coalesceReturnEvents,
+  isWakeDrivingReturn,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
   validateWorkflowTransitionGraph,
@@ -995,7 +996,12 @@ export function createWorkflowBoardService(opts = {}) {
     if (!capabilityGate.ok) return capabilityGate;
     let card = getCard(request.cardId);
     let checks = getChecks(card.id);
-    let gateResult = evaluateRequest(board, card, checks, request);
+    // Rework authorization is the board's own return/escalation re-engagement waking a dormant
+    // orchestrator (e.g. quality-audit → ready). It is honored ONLY for the daemon board-self-drive —
+    // a caller-supplied flag from a human/agent transition is ignored, so the rework edge stays governed.
+    let reworkAuthorized = isDaemonPrincipal(principal)
+      && (input.reworkAuthorized === true || input.rework_authorized === true);
+    let gateResult = evaluateRequest(board, card, checks, { ...request, reworkAuthorized });
     let status = gateResult.ok ? 'accepted' : 'blocked';
     let ts = now();
     let eventId = textOrNull(input.id ?? input.eventId ?? input.event_id) ?? nextId(makeId, 'transition');
@@ -1967,7 +1973,7 @@ export function createWorkflowBoardService(opts = {}) {
         let eventId = `join-${crypto.createHash('sha256').update(joinCard.id).digest('hex').slice(0, 20)}`;
         let returnEvent = normalizeWorkflowReturnEvent(
           { kind: 'completed', payload: { join: joinCard.id, members } },
-          { now: ts, correlationId: ownerId, raisedBy: ESCALATION_ACTOR, eventId },
+          { now: ts, correlationId: ownerId, raisedBy: ESCALATION_ACTOR, eventId, routed: true },
         );
         let nextReturns = coalesceReturnEvents(owner.metadata?.returns, returnEvent);
         let ownerNext = normalizeWorkflowCardInput({
@@ -5275,8 +5281,12 @@ export function createWorkflowBoardService(opts = {}) {
   // the loop. `consumedAt` is stamped when the driver re-engages (delivered ⟺ consumed), so this goes
   // false until a NEW return is minted — the idempotent edge of the level-triggered wake (S9a/S9b).
   function hasQueuedActionableReturn(card = {}) {
+    // Wake-DRIVING returns only: an intermediate actionable return (the card needs routing/a reply) or a
+    // routed result delivered to this card (a join completion). A bare self-completion terminal return
+    // does NOT make a finished card a wake candidate — that flows to its owner, and it stops a card
+    // cycling through the audit stage from re-orchestrating itself on its own `completed` returns.
     let returns = card?.metadata?.returns;
-    return Array.isArray(returns) && returns.some(item => item?.actionable === true && !item?.consumedAt);
+    return Array.isArray(returns) && returns.some(item => isWakeDrivingReturn(item));
   }
 
   // A hard-interrupt return (a blocked / needs_decision / needs_permission child) must wake the
@@ -5288,32 +5298,34 @@ export function createWorkflowBoardService(opts = {}) {
     return Array.isArray(returns) && returns.some(item => item?.hardInterrupt === true && !item?.consumedAt);
   }
 
-  // Compact one-line-per-return summary of a card's unconsumed actionable returns, newest first and
-  // capped, folded into the re-engagement reason so the orchestrator wakes once and sees the batch
-  // (S10a). Reuses the existing reason field — no new transport.
+  // Compact one-line-per-return summary of the returns that actually DROVE this wake (wake-driving:
+  // intermediate actionable or routed), newest first and capped, folded into the re-engagement reason
+  // so the orchestrator wakes once and sees the batch (S10a). A bare self-completion terminal return is
+  // not wake-driving, so it is not presented as a wake cause. Reuses the reason field — no new transport.
   function summarizeQueuedReturns(card = {}, limit = 5) {
     let returns = card?.metadata?.returns;
     if (!Array.isArray(returns)) return '';
     let lines = returns
-      .filter(item => item?.actionable === true && !item?.consumedAt)
+      .filter(item => isWakeDrivingReturn(item))
       .slice(-limit)
       .reverse()
       .map(item => `- ${item.kind}${item.detail ? `: ${item.detail}` : ''}`);
     return lines.length ? `Queued returns (${lines.length}):\n${lines.join('\n')}` : '';
   }
 
-  // Stamp `consumedAt` on every actionable, currently-unconsumed return so it wakes the orchestrator
-  // ONCE, not every tick (S9b). History/audit survives (entries are marked, never deleted; the 12-cap
-  // still bounds growth). Returns the next metadata, unchanged when nothing is unconsumed.
+  // Stamp `consumedAt` on every wake-DRIVING return so it wakes the orchestrator ONCE, not every tick
+  // (S9b) — `consumedAt` then precisely means "this return drove a delivery". A bare self-completion
+  // terminal return is not wake-driving (it never re-engages its own card), so it is left untouched as a
+  // record. History survives (entries are marked, never deleted; the 12-cap bounds growth).
   function consumeActionableReturns(metadata, currentNow) {
     let returns = metadata?.returns;
-    if (!Array.isArray(returns) || !returns.some(item => item?.actionable === true && !item?.consumedAt)) {
+    if (!Array.isArray(returns) || !returns.some(item => isWakeDrivingReturn(item))) {
       return metadata;
     }
     return {
       ...metadata,
       returns: returns.map(item => (
-        item?.actionable === true && !item?.consumedAt ? { ...item, consumedAt: currentNow } : item
+        isWakeDrivingReturn(item) ? { ...item, consumedAt: currentNow } : item
       )),
     };
   }
@@ -5457,6 +5469,10 @@ export function createWorkflowBoardService(opts = {}) {
         escalation: accrued,
         delegate: args.delegate,
         notBefore: nextAttemptAt,
+        // Authorize the governed rework edge into `ready` when the woken card rests in a later column
+        // (a dormant orchestrator finished its run in quality-audit). Honored only because this driver
+        // runs as the daemon; a card carrying an active escalation already passes the gate without it.
+        reworkAuthorized: true,
       };
       let outcome = null;
       try {

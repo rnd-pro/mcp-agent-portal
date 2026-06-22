@@ -559,6 +559,7 @@ describe('workflow board task dependencies', () => {
     let returns = owner.metadata?.returns ?? [];
     let wake = returns.find(r => r.kind === 'completed' && r.correlationId === 'jo-owner');
     assert.ok(wake, 'a completed return was minted onto the owner inbox');
+    assert.equal(wake.routed, true, 'the owner return is routed, so it drives a wake despite being terminal');
     assert.equal(wake.payload?.join, joinId, 'the return names the join that satisfied');
     assert.deepEqual((wake.payload?.members ?? []).sort(), ['jo-m1', 'jo-m2']);
 
