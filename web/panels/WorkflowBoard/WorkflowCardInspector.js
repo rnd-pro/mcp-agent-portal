@@ -199,6 +199,18 @@ export class WorkflowCardInspector extends Symbiote {
         .join(' · ');
 
       item.append(dot, agent, meta);
+
+      let chatId = text(run.chatId) || text(card.entityRefs?.chatId);
+      if (chatId) {
+        let chatBtn = document.createElement('button');
+        chatBtn.type = 'button';
+        chatBtn.className = 'wci-run-chat';
+        chatBtn.textContent = '↗';
+        chatBtn.title = tPortal('inspector.openChat');
+        chatBtn.setAttribute('aria-label', tPortal('inspector.openChat'));
+        chatBtn.addEventListener('click', () => openChat(chatId));
+        item.append(chatBtn);
+      }
       list.append(item);
     }
   }

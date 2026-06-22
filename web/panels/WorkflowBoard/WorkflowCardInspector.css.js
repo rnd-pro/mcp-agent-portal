@@ -285,6 +285,24 @@ pg-workflow-card-inspector .wci-run-meta {
   white-space: nowrap;
 }
 
+pg-workflow-card-inspector .wci-run-chat {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--sn-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+pg-workflow-card-inspector .wci-run-chat:hover {
+  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+}
+
 pg-workflow-card-inspector .wci-body-section {
   flex: 1 1 auto;
   min-height: 120px;

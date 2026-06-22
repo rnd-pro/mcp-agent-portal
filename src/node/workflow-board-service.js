@@ -2955,6 +2955,7 @@ export function createWorkflowBoardService(opts = {}) {
         updatedAt: run.updatedAt ?? null,
         completedAt: run.completedAt ?? null,
         tokens: run.tokens ?? null,
+        chatId: run.chatId ?? null,
       }))[0] ?? null;
   }
 
@@ -3384,6 +3385,7 @@ export function createWorkflowBoardService(opts = {}) {
           tokens: Number.isFinite(Number(task.tokens ?? task.result?.stats?.total_tokens ?? task.stats?.total_tokens))
             ? Math.floor(Number(task.tokens ?? task.result?.stats?.total_tokens ?? task.stats?.total_tokens))
             : null,
+          chatId: textOrNull(task.chatId ?? task.chat_id ?? chat?.id),
         }],
         lease: null,
         events: runtimeTaskEvents(id, task),
@@ -3640,6 +3642,18 @@ export function createWorkflowBoardService(opts = {}) {
     return seen ? total : null;
   }
 
+  // The chat a run's worker ran in (its own subagent chat), resolved from the run's first task.
+  // A card keeps only the latest chat in entityRefs, so this lets each pass link to its own chat.
+  function runtimeTaskChatId(run, runtimeTasks) {
+    if (!(runtimeTasks instanceof Map)) return null;
+    for (let taskId of uniqueArray(run.taskIds)) {
+      let task = runtimeTasks.get(taskId);
+      let chatId = textOrNull(task?.chatId ?? task?.chat_id);
+      if (chatId) return chatId;
+    }
+    return null;
+  }
+
   function runtimeColumnForCard(card, runStatus) {
     if (runStatus === 'running' && card.columnId === 'ready') return 'in-progress';
     if (TERMINAL_RUN_STATUSES.has(runStatus) && ['ready', 'in-progress'].includes(card.columnId)) {
@@ -3681,14 +3695,13 @@ export function createWorkflowBoardService(opts = {}) {
       // still readable. Idempotent — only runs still missing a token total are touched.
       for (let run of allRuns) {
         if (RUNNING_RUN_STATUSES.has(run.status)) continue;
-        if (run.tokens != null) continue;
-        let tokens = runtimeTaskTokenTotal(run, runtimeTasks);
-        if (tokens != null) {
-          ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: normalizeWorkflowRunInput(
-            { ...run, tokens },
-            { id: run.id, now: currentNow, updatedAt: run.updatedAt ?? currentNow },
-          ) });
-        }
+        let tokens = run.tokens == null ? runtimeTaskTokenTotal(run, runtimeTasks) : null;
+        let chatId = run.chatId ? null : runtimeTaskChatId(run, runtimeTasks);
+        if (tokens == null && chatId == null) continue;
+        ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: normalizeWorkflowRunInput(
+          { ...run, tokens: tokens ?? run.tokens ?? null, chatId: run.chatId ?? chatId },
+          { id: run.id, now: currentNow, updatedAt: run.updatedAt ?? currentNow },
+        ) });
       }
       let runs = allRuns.filter(run => RUNNING_RUN_STATUSES.has(run.status));
       if (!runs.length) continue;
@@ -3764,6 +3777,7 @@ export function createWorkflowBoardService(opts = {}) {
           status: nextStatus,
           completedAt: terminal ? completedAt : run.completedAt,
           tokens: runtimeTaskTokenTotal(run, runtimeTasks) ?? run.tokens ?? null,
+          chatId: run.chatId ?? runtimeTaskChatId(run, runtimeTasks),
         }, {
           id: run.id,
           now: currentNow,
