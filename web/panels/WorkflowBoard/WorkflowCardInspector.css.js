@@ -58,6 +58,39 @@ pg-workflow-card-inspector .wci-badge[data-kind="error"] { background: rgba(226,
 pg-workflow-card-inspector .wci-badge[data-kind="warning"] { background: rgba(239, 159, 39, 0.18); color: #ef9f27; }
 pg-workflow-card-inspector .wci-badge[data-kind="ok"] { background: rgba(29, 158, 117, 0.18); color: #1d9e75; }
 
+@keyframes wci-spin { to { transform: rotate(360deg); } }
+pg-workflow-card-inspector .wci-spinner {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--sn-node-border);
+  border-top-color: var(--sn-accent, #7f77dd);
+  border-radius: 50%;
+  animation: wci-spin 0.8s linear infinite;
+}
+
+pg-workflow-card-inspector .wci-held {
+  margin: 0 12px 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: rgba(239, 159, 39, 0.15);
+  color: #ef9f27;
+  border: 1px solid rgba(239, 159, 39, 0.3);
+}
+
+pg-workflow-card-inspector .wci-history-actor {
+  flex: 0 0 auto;
+  color: var(--sn-text-dim);
+  font-family: var(--sn-font-mono);
+  font-size: 10px;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 pg-workflow-card-inspector .wci-empty {
   flex: 1 1 auto;
   display: flex;
@@ -202,6 +235,72 @@ pg-workflow-card-inspector .wci-history-time {
   color: var(--sn-text-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
+}
+
+pg-workflow-card-inspector .wci-runs-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+pg-workflow-card-inspector .wci-run-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+pg-workflow-card-inspector .wci-run-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sn-text-dim);
+}
+pg-workflow-card-inspector .wci-run-item[data-kind="error"] .wci-run-dot { background: #e24b4a; }
+pg-workflow-card-inspector .wci-run-item[data-kind="warning"] .wci-run-dot { background: #ef9f27; }
+pg-workflow-card-inspector .wci-run-item[data-kind="ok"] .wci-run-dot { background: #1d9e75; }
+
+pg-workflow-card-inspector .wci-run-agent {
+  flex: 0 0 auto;
+  font-weight: 500;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pg-workflow-card-inspector .wci-run-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: end;
+  color: var(--sn-text-dim);
+  font-family: var(--sn-font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pg-workflow-card-inspector .wci-run-chat {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--sn-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+pg-workflow-card-inspector .wci-run-chat:hover {
+  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
 }
 
 pg-workflow-card-inspector .wci-body-section {
