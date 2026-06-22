@@ -215,50 +215,56 @@ export class StateGraph extends EventEmitter {
     this._snapshotVersion = 0;
 
     // ── Single-writer ownership guard (opt-in) ──
-    // When two long-lived backends point at the same snapshot, both rewrite + compact it from their
-    // own in-memory state, clobbering each other and dropping the other's un-snapshotted commits. The
-    // guard makes the NEWEST instance the owner (claims on load); a superseded instance refuses to
-    // write/compact and emits 'ownership-lost' so the process can self-exit. Identity is a per-instance
-    // token (so two same-pid instances in a test still differ); liveness uses the recorded pid.
+    // When two long-lived backends point at the same snapshot, both rewrite + compact it from their own
+    // in-memory state, clobbering each other and dropping the other's un-snapshotted commits. The guard
+    // makes the NEWEST instance the owner (claims on load); a superseded instance refuses to write and
+    // self-exits. Identity is a per-instance token; the recorded `pid` is only a liveness signal for a
+    // DIFFERENT owner. `instancePid`/`isPidAlive` are injectable so a test can simulate two distinct live
+    // processes inside one OS process (production uses the real pid + isProcessAlive).
     this._ownershipGuard = opts.ownershipGuard === true;
     this._ownerToken = opts.instanceToken || crypto.randomBytes(8).toString('hex');
+    this._ownerPid = Number.isInteger(opts.instancePid) ? opts.instancePid : process.pid;
+    this._isPidAlive = typeof opts.isPidAlive === 'function' ? opts.isPidAlive : isProcessAlive;
     this._ownerPath = this._snapshotPath + '.owner';
     this._ownershipLostEmitted = false;
+    this._ownershipLost = false;   // in-memory short-circuit for the write hot path (set on detection)
     this._ownerHeartbeat = null;
   }
 
   // ── Single-writer ownership ────────────────────────────
 
   // Stamp this instance as the snapshot owner (atomic tmp+rename). The newest claimant wins; an older
-  // instance detects the change and steps down. Best-effort: a failed claim leaves us fail-open.
+  // instance detects the change and steps down. A failed claim is LOGGED (not swallowed) — but it still
+  // leaves us fail-open, because _ownsSnapshot reclaims a record carrying our own pid (see below).
   _claimOwnership() {
     if (!this._ownershipGuard) return;
     try {
-      let rec = JSON.stringify({ pid: process.pid, token: this._ownerToken, startedAt: Date.now() });
-      let tmp = this._ownerPath + '.tmp';
+      let rec = JSON.stringify({ pid: this._ownerPid, token: this._ownerToken, startedAt: Date.now() });
+      let tmp = `${this._ownerPath}.${this._ownerToken}.tmp`;
       fs.writeFileSync(tmp, rec);
       fs.renameSync(tmp, this._ownerPath);
-    } catch { /* fail-open: see _ownsSnapshot */ }
+    } catch (err) {
+      console.error('[StateGraph] Failed to claim snapshot ownership:', err.message);
+    }
   }
 
-  // May this instance write/compact the snapshot? Fail-open by design: ONLY a different, still-alive
-  // owner blocks us. A missing/unreadable record or a dead owner is reclaimed and we proceed — the
-  // legitimate single backend must never silently stop persisting.
+  // May this instance write/compact the snapshot? Fail-open by design: a record is only honored as a
+  // blocking owner when it carries a DIFFERENT token AND a DIFFERENT, still-alive pid. A missing/
+  // unreadable/dead owner — OR a foreign-token record bearing OUR OWN pid (a stale self-record from a
+  // failed re-claim) — is reclaimed and we proceed, so the legitimate single backend never fail-closes.
   _ownsSnapshot() {
     if (!this._ownershipGuard) return true;
     let rec = null;
     try { rec = JSON.parse(fs.readFileSync(this._ownerPath, 'utf8')); } catch { rec = null; }
     if (!rec || !rec.token) { this._claimOwnership(); return true; }
     if (rec.token === this._ownerToken) return true;
-    // A different token owns it: stay down only if that owner is still alive (live newer process, or a
-    // newer same-pid instance as in tests). Otherwise the owner is gone — reclaim.
-    if (rec.pid && rec.pid !== process.pid && isProcessAlive(rec.pid)) return false;
-    if (rec.pid === process.pid) return false;
+    if (rec.pid !== this._ownerPid && this._isPidAlive(rec.pid)) return false; // a different live owner
     this._claimOwnership();
     return true;
   }
 
   _signalOwnershipLost() {
+    this._ownershipLost = true; // short-circuits the write hot path immediately (cheap, in-memory)
     if (this._ownershipLostEmitted) return;
     this._ownershipLostEmitted = true;
     if (this._ownerHeartbeat) { clearInterval(this._ownerHeartbeat); this._ownerHeartbeat = null; }
@@ -266,13 +272,13 @@ export class StateGraph extends EventEmitter {
   }
 
   // Idle superseded instances write no snapshot, so they would never notice the takeover; a light
-  // unref'd heartbeat lets them step down promptly. Data safety does not depend on it (the write-time
-  // guard already prevents clobbering) — it only makes self-exit timely.
+  // unref'd heartbeat lets them step down promptly (and bounds the multi-writer window for the WAL hot
+  // path, which short-circuits on the `_ownershipLost` flag this sets).
   _startOwnershipHeartbeat() {
     if (!this._ownershipGuard || this._ownerHeartbeat) return;
     this._ownerHeartbeat = setInterval(() => {
       if (!this._ownsSnapshot()) this._signalOwnershipLost();
-    }, 5000);
+    }, 2000);
     if (this._ownerHeartbeat.unref) this._ownerHeartbeat.unref();
   }
 
@@ -581,6 +587,9 @@ export class StateGraph extends EventEmitter {
   // Flush pending WAL entries to disk (async).
   async _flushWal() {
     this._walTimer = null;
+    // A superseded instance must never append to the shared WAL — its abandoned commits would collide
+    // on version with the live owner's and drop one on replay. Drop the queue; this instance is exiting.
+    if (this._ownershipLost) { this._walQueue = []; return; }
     if (this._walQueue.length === 0 || this._walFlushing) return;
 
     this._walFlushing = true;
@@ -611,6 +620,9 @@ export class StateGraph extends EventEmitter {
       clearTimeout(this._walTimer);
       this._walTimer = null;
     }
+    // Superseded instance: never write the shared WAL (see _flushWal). The instance is exiting, so the
+    // durable-before-side-effect guarantee is moot — a superseded writer must not perform the side effect.
+    if (this._ownershipLost) { this._walQueue = []; return; }
     if (this._walQueue.length === 0) return;
     let batch = this._walQueue.splice(0);
     let dir = path.dirname(this._walPath);
