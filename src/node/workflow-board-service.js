@@ -2954,6 +2954,7 @@ export function createWorkflowBoardService(opts = {}) {
         startedAt: run.startedAt ?? null,
         updatedAt: run.updatedAt ?? null,
         completedAt: run.completedAt ?? null,
+        tokens: run.tokens ?? null,
       }))[0] ?? null;
   }
 
@@ -3380,6 +3381,9 @@ export function createWorkflowBoardService(opts = {}) {
           taskIds: [id],
           startedAt: task.startedAt ?? task.started_at ?? null,
           updatedAt: timestamp,
+          tokens: Number.isFinite(Number(task.tokens ?? task.result?.stats?.total_tokens ?? task.stats?.total_tokens))
+            ? Math.floor(Number(task.tokens ?? task.result?.stats?.total_tokens ?? task.stats?.total_tokens))
+            : null,
         }],
         lease: null,
         events: runtimeTaskEvents(id, task),
@@ -3614,6 +3618,28 @@ export function createWorkflowBoardService(opts = {}) {
     return stamps.length ? Math.max(...stamps) : null;
   }
 
+  // Sum the run-level token total reported by each of the run's runtime tasks (task.tokens is
+  // persisted by the task router from the agent's final summary; stats fallbacks cover other
+  // runners). Returns null when no task reports tokens so the run keeps any prior value.
+  function runtimeTaskTokenTotal(run, runtimeTasks) {
+    if (!(runtimeTasks instanceof Map)) return null;
+    let total = 0;
+    let seen = false;
+    for (let taskId of uniqueArray(run.taskIds)) {
+      let task = runtimeTasks.get(taskId);
+      let tokens = Number(
+        task?.tokens
+        ?? task?.result?.stats?.total_tokens
+        ?? task?.stats?.total_tokens,
+      );
+      if (Number.isFinite(tokens) && tokens >= 0) {
+        total += tokens;
+        seen = true;
+      }
+    }
+    return seen ? total : null;
+  }
+
   function runtimeColumnForCard(card, runStatus) {
     if (runStatus === 'running' && card.columnId === 'ready') return 'in-progress';
     if (TERMINAL_RUN_STATUSES.has(runStatus) && ['ready', 'in-progress'].includes(card.columnId)) {
@@ -3721,6 +3747,7 @@ export function createWorkflowBoardService(opts = {}) {
           ...run,
           status: nextStatus,
           completedAt: terminal ? completedAt : run.completedAt,
+          tokens: runtimeTaskTokenTotal(run, runtimeTasks) ?? run.tokens ?? null,
         }, {
           id: run.id,
           now: currentNow,

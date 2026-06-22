@@ -645,7 +645,7 @@ describe('portal shell theme contract', () => {
     let template = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowBoard.tpl.js'), 'utf8');
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowBoard.js'), 'utf8');
     let styles = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowBoard.css.js'), 'utf8');
-    let markdownPanel = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowCardMarkdown.js'), 'utf8');
+    let inspectorPanel = fs.readFileSync(path.join(ROOT, 'web/panels/WorkflowBoard/WorkflowCardInspector.js'), 'utf8');
     let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
     let service = fs.readFileSync(path.join(ROOT, 'web/services/workflow-board.js'), 'utf8');
 
@@ -687,9 +687,9 @@ describe('portal shell theme contract', () => {
     assert.ok(source.includes('goalId'), 'WorkflowBoard must support goal-scoped workflow card filtering');
     assert.ok(source.includes('chatId'), 'WorkflowBoard must support chat-scoped workflow card filtering');
     assert.ok(source.includes('dashState.activeProjectId'), 'WorkflowBoard must derive project scope from the active workspace like chats');
-    assert.ok(router.includes("'workflow-card-markdown'"), 'WorkflowBoard route must include a separate markdown layout panel');
-    assert.ok(markdownPanel.includes('selectionEvents'), 'WorkflowCardMarkdown must follow shared workflow card selection state');
-    assert.ok(markdownPanel.includes('getWorkflowBoardSelection'), 'WorkflowCardMarkdown must render the last atomic workflow card selection');
+    assert.ok(router.includes("'workflow-card-inspector'"), 'WorkflowBoard route must include a separate card inspector layout panel');
+    assert.ok(inspectorPanel.includes('selectionEvents'), 'WorkflowCardInspector must follow shared workflow card selection state');
+    assert.ok(inspectorPanel.includes('getWorkflowBoardSelection'), 'WorkflowCardInspector must render the last atomic workflow card selection');
     assert.ok(service.includes("'/api/workflow-board/markdown/import'"), 'Workflow service must use the Portal markdown import endpoint');
     assert.ok(service.includes("'/api/workflow-board/delete'"), 'Workflow service must use the Portal delete endpoint');
     assert.ok(service.includes("'/api/workflow-board/automation'"), 'Workflow service must use the Portal board automation endpoint');

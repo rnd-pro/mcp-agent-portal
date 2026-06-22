@@ -628,6 +628,12 @@ function positiveVersion(value, fallback = 1) {
   return Math.floor(version);
 }
 
+function nonNegativeIntOrNull(value) {
+  let n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.floor(n);
+}
+
 function normalizeKnownValue(value, supported, fallback) {
   let text = textOrNull(value);
   if (!text) return fallback;
@@ -902,6 +908,7 @@ export function normalizeWorkflowRunInput(input = {}, opts = {}) {
     startedAt: input.startedAt ?? input.started_at ?? now,
     updatedAt: opts.updatedAt ?? input.updatedAt ?? input.updated_at ?? now,
     completedAt: input.completedAt ?? input.completed_at ?? null,
+    tokens: nonNegativeIntOrNull(input.tokens ?? input.token_total ?? input.totalTokens),
   };
 }
 

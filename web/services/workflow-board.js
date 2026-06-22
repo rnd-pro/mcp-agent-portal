@@ -249,6 +249,9 @@ function normalizeRun(raw = {}) {
     startedAt: normalizeTimestamp(run.startedAt || run.started_at),
     updatedAt: normalizeTimestamp(run.updatedAt || run.updated_at),
     completedAt: normalizeTimestamp(run.completedAt || run.completed_at),
+    tokens: Number.isFinite(Number(run.tokens ?? run.token_total ?? run.totalTokens))
+      ? Math.floor(Number(run.tokens ?? run.token_total ?? run.totalTokens))
+      : null,
     raw: run,
   };
 }
