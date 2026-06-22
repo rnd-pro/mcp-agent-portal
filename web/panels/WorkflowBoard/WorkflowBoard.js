@@ -25,6 +25,13 @@ import {
 import template from './WorkflowBoard.tpl.js';
 import cssLocal from './WorkflowBoard.css.js';
 import { setWorkflowBoardSelection } from './workflow-board-selection.js';
+import { openChat } from '../../common/open-chat.js';
+import {
+  latestRun,
+  agentName,
+  formatDuration,
+  formatTokens,
+} from './workflow-card-telemetry.js';
 
 const DEFAULT_SCOPE = 'home';
 const BOARD_VIEWS = new Set(['kanban', 'graph']);
@@ -919,6 +926,10 @@ export class WorkflowBoard extends Symbiote {
   #toKanbanCard(card) {
     let nextColumn = getAdjacentColumn(this.#board, card.columnId, 1);
     let runtimeOnly = isRuntimeOnlyCard(card);
+    let run = latestRun(card);
+    let agent = agentName(card, run);
+    let duration = formatDuration(run);
+    let tokens = formatTokens(run?.tokens);
     return {
       id: card.id,
       columnId: card.columnId,
@@ -931,8 +942,10 @@ export class WorkflowBoard extends Symbiote {
       ].filter(Boolean),
       footer: [
         card.status ? { label: card.status, kind: statusKind(card.status) } : null,
-        card.lease?.leaseOwner ? { label: card.lease.leaseOwner, kind: 'status' } : null,
-        ...card.flags.slice(0, 3).map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) })),
+        agent ? { label: agent, kind: 'status' } : null,
+        duration ? { label: duration, kind: 'status' } : null,
+        tokens ? { label: `${tokens} tok`, kind: 'status' } : null,
+        ...card.flags.slice(0, 2).map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) })),
       ].filter(Boolean),
       actions: this.#cardActions(card, nextColumn, runtimeOnly),
       draggable: !runtimeOnly,
@@ -1079,9 +1092,11 @@ export class WorkflowBoard extends Symbiote {
     }
     if (actionId === 'open:chat') {
       let card = this.#cardById(cardId);
+      let chatId = card?.entityRefs?.chatId;
+      openChat(chatId);
       this.#dispatch('workflow-card-open', eventDetail(this.#board, card, {
         refType: 'chat',
-        refId: card?.entityRefs?.chatId,
+        refId: chatId,
       }));
     }
   }

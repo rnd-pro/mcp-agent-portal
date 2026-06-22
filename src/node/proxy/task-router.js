@@ -613,7 +613,12 @@ export class TaskRouter {
       let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
       if (toolsMatch) meta.tools = parseInt(toolsMatch[1], 10);
       let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
-      if (tokensMatch) meta.tokens = parseInt(tokensMatch[1], 10);
+      if (tokensMatch) {
+        meta.tokens = parseInt(tokensMatch[1], 10);
+        // Persist the run-level token total onto the task record so the workflow board can
+        // aggregate it onto the card's run at reconcile time (the chat meta alone is ephemeral).
+        try { sg.merge(`tasks/${taskId}`, { tokens: meta.tokens }); } catch { /* best effort */ }
+      }
       let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
       if (costMatch) meta.cost = parseFloat(costMatch[1]);
       let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
