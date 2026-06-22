@@ -190,4 +190,17 @@ export default`
     <div class="pm-grid-body" ref="directoryList"></div>
   </div>
 </sn-card>
+
+<sn-card class="stg-reset-section" ref="resetCard">
+  <span slot="title">Reset / Clear Data</span>
+  <div class="stg-reset-note">Clears all boards, cards, chats, goals, tasks and runtime state so the app looks freshly installed. Your settings are kept.</div>
+  <label class="pg-settings-toggle">
+    <input type="checkbox" ref="resetKeepSettingsInput" checked>
+    <span>Keep my settings</span>
+  </label>
+  <div class="stg-actions">
+    <sn-button variant="danger" ref="resetDataBtn"><span class="material-symbols-outlined">delete_sweep</span>Clear all data</sn-button>
+  </div>
+  <div ref="resetStatus" class="stg-status"></div>
+</sn-card>
 `;
