@@ -27,6 +27,10 @@ export default html`
         <span class="wci-metric-value" ref="mTokens">—</span>
       </div>
     </section>
+    <section class="wci-section" ref="runsSection" hidden>
+      <div class="wci-section-label" ref="lblRuns"></div>
+      <ul class="wci-runs-list" ref="runsList"></ul>
+    </section>
     <section class="wci-section" ref="historySection" hidden>
       <div class="wci-section-label" ref="lblHistory"></div>
       <ul class="wci-history-list" ref="historyList"></ul>

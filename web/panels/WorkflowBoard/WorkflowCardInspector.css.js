@@ -204,6 +204,54 @@ pg-workflow-card-inspector .wci-history-time {
   font-size: 10px;
 }
 
+pg-workflow-card-inspector .wci-runs-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+pg-workflow-card-inspector .wci-run-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+pg-workflow-card-inspector .wci-run-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sn-text-dim);
+}
+pg-workflow-card-inspector .wci-run-item[data-kind="error"] .wci-run-dot { background: #e24b4a; }
+pg-workflow-card-inspector .wci-run-item[data-kind="warning"] .wci-run-dot { background: #ef9f27; }
+pg-workflow-card-inspector .wci-run-item[data-kind="ok"] .wci-run-dot { background: #1d9e75; }
+
+pg-workflow-card-inspector .wci-run-agent {
+  flex: 0 0 auto;
+  font-weight: 500;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pg-workflow-card-inspector .wci-run-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: end;
+  color: var(--sn-text-dim);
+  font-family: var(--sn-font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 pg-workflow-card-inspector .wci-body-section {
   flex: 1 1 auto;
   min-height: 120px;
