@@ -140,6 +140,15 @@ describe('return classifiers + supersede/coalesce (S2)', () => {
     }
     assert.equal(big.length, 12);
   });
+
+  it('coalesce is idempotent by eventId (re-minting a stable marker is a no-op)', () => {
+    let inbox = coalesceReturnEvents([], normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: 'c', eventId: 'ret-abc' }));
+    assert.equal(inbox.length, 1);
+    inbox = coalesceReturnEvents(inbox, normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: 'c', eventId: 'ret-abc' }));
+    assert.equal(inbox.length, 1, 'same eventId+correlationId deduped');
+    inbox = coalesceReturnEvents(inbox, normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: 'c', eventId: 'ret-def' }));
+    assert.equal(inbox.length, 2, 'a distinct eventId still lands');
+  });
 });
 
 describe('subscription normalizer (S3)', () => {
