@@ -522,6 +522,9 @@ export class MCPProxyManager {
             // Route task notifications to chat WebSocket clients
             if (msg.method === 'notifications/task/event') {
               if (this.taskRouter) this.taskRouter.route(msg);
+              // Edge-trigger the workflow reconcile: a task status change / WORKFLOW_RETURN marker wakes
+              // the orchestrator without waiting for the periodic tick (debounced; the tick is the backstop).
+              this.workflowBoardService?.reconcileTick?.requestTick?.();
             }
 
             for (let cb of this.multiplexerCallbacks) {

@@ -4,7 +4,6 @@
  *
  * @module api-routes
  */
-import { setPortalRoot } from '../adapters/index.js';
 import { createAgentPortalRoutes } from './routes/agent-portal-routes.js';
 import { createCoreRoutes } from './routes/core-routes.js';
 import { createOperationRoutes } from './routes/operation-routes.js';
@@ -20,8 +19,6 @@ import { createWorkflowBoardRoutes } from './routes/workflow-board-routes.js';
  * @returns {Record<string, (req: any, res: any) => void | Promise<void>>}
  */
 export function createRoutes(ctx) {
-  setPortalRoot(ctx.projectRoot);
-
   return {
     ...createCoreRoutes(ctx),
     ...createProjectGraphRoutes(ctx),

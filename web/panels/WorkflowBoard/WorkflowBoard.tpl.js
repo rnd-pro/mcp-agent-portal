@@ -11,6 +11,28 @@ export default html`
       <span class="wb-board-readout" ref="boardReadout"></span>
     </div>
     <div class="wb-control-actions">
+      <div class="wb-view-toggle" role="group" aria-label="Board view">
+        <sn-button
+          ref="kanbanViewBtn"
+          variant="icon"
+          class="wb-view-toggle-btn"
+          data-view="kanban"
+          aria-pressed="true"
+          title="Kanban view"
+          aria-label="Kanban view">
+          <span class="material-symbols-outlined">view_kanban</span>
+        </sn-button>
+        <sn-button
+          ref="graphViewBtn"
+          variant="icon"
+          class="wb-view-toggle-btn"
+          data-view="graph"
+          aria-pressed="false"
+          title="Graph view"
+          aria-label="Graph view">
+          <span class="material-symbols-outlined">account_tree</span>
+        </sn-button>
+      </div>
       <sn-button
         ref="pauseBoardBtn"
         variant="icon"
@@ -120,7 +142,7 @@ export default html`
   </section>
 
   <main class="wb-main">
-    <section class="wb-board-region" aria-label="Workflow columns">
+    <section class="wb-board-region" ref="kanbanRegion" aria-label="Workflow columns">
       <sn-kanban-board
         class="wb-board"
         ref="boardView"
@@ -129,6 +151,18 @@ export default html`
       <sn-empty-state class="wb-empty" ref="emptyState" hidden>
         No workflow cards in this scope. Import markdown work items or reconcile recovery
         from the board controls.
+      </sn-empty-state>
+    </section>
+    <section class="wb-graph-region" ref="graphRegion" aria-label="Workflow graph" hidden>
+      <div class="wb-graph-toolbar">
+        <sn-button class="wb-graph-btn" ref="graphFitBtn" variant="icon" title="Fit view" aria-label="Fit view">
+          <span class="material-symbols-outlined">fit_screen</span>
+        </sn-button>
+        <span class="wb-graph-stats" ref="graphStats"></span>
+      </div>
+      <canvas-graph class="wb-graph-canvas" ref="graphCanvas"></canvas-graph>
+      <sn-empty-state class="wb-graph-empty" ref="graphEmpty" hidden>
+        No workflow cards in this scope to graph.
       </sn-empty-state>
     </section>
   </main>

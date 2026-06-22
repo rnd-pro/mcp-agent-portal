@@ -2,10 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  ACTIVE_RECOVERY_COLUMN_IDS,
   checkPassed,
+  classifyWorkflowGraph,
   DEFAULT_WORKFLOW_BOARD_ID,
-  DEFAULT_WORKFLOW_COLUMN_IDS,
   createDefaultWorkflowBoard,
   evaluateWorkflowTransitionGates,
   hasActiveEscalation,
@@ -16,15 +15,29 @@ import {
   normalizeWorkflowBoardMode,
   normalizeWorkflowCardInput,
   normalizeWorkflowChecksInput,
+  normalizeWorkflowDependsOn,
   normalizeWorkflowLeaseInput,
+  normalizeWorkflowLifecycle,
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
+  normalizeWorkflowSubscription,
+  isFloorGateMonotonic,
+  isWorkflowLifecycleTransitionAllowed,
+  migrateWorkflowBoardToV2,
+  migrateWorkflowCardToV2,
+  normalizeWorkflowReturnEvent,
+  coalesceReturnEvents,
+  isWakeDrivingReturn,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
+  validateWorkflowTransitionGraph,
+  WORKFLOW_GATE_VOCABULARY,
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
+import { CAP, daemonPrincipal, derivePrincipal, evaluateIntent, INTENT_CAPABILITY } from './server/principal.js';
 import { getStateGraph } from './state-graph.js';
+import { getTeamMemoryRoot } from '../../packages/agent-pool-mcp/src/runtime/paths.js';
 
 const WORKFLOW_SOURCE = 'workflow-board';
 const DEFAULT_EVENT_LIMIT = 50;
@@ -40,6 +53,8 @@ const COMPACT_ACTIVE_COLUMN_IDS = new Set([
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
 const DEFAULT_RECONCILE_TICK_MS = 60 * 1000;
+// Edge-trigger debounce: a burst of agent-pool task events collapses into one near-immediate reconcile.
+const DEFAULT_RECONCILE_TRIGGER_GAP_MS = 1000;
 // Escalation channel: the re-engagement loop owns attempt accrual + backoff. ESCALATION_ACTOR
 // labels channel-driven transitions/runs for board visibility. The cap bounds the loop — after
 // this many re-engagements without a completed run the card is handed to a human (blocked + a
@@ -52,8 +67,20 @@ const ESCALATION_KIND_PATTERN = /ESCALATION_KIND:\s*([a-z_]+)/i;
 const ESCALATION_DETAIL_PATTERN = /ESCALATION_DETAIL:\s*(.+)/i;
 const ESCALATION_SUGGESTION_PATTERN = /ESCALATION_SUGGESTION:\s*(.+)/i;
 const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
-const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
+// Intermediate-return marker: a worker emits `WORKFLOW_RETURN: <kind>` (optionally trailed by a JSON
+// object) in its final message/output, mirroring how escalation markers are emitted. The reconcile
+// folds the parsed return into the per-card inbox (card.metadata.returns) — see computeIntermediateReturn.
+const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
+const DEFAULT_WORKFLOW_POLICY_VERSION = 5;
+// Persisted board/card schema version. The iso normalizers are always-forward, so a single
+// one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
+// no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
+const WORKFLOW_SCHEMA_VERSION = 2;
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
+// Execution-class column actions: a card in a column with one of these actions can carry an
+// in-flight run that needs recovery (orchestrate/execute/audit/publish each spawn or require a
+// run). The passive intake/close actions (classify/scope/close) never strand a run.
+const EXECUTION_COLUMN_ACTIONS = new Set(['orchestrate', 'execute', 'audit', 'publish']);
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
 const RUNTIME_DONE_STATUSES = new Set(['done', 'finished', 'complete', 'completed', 'success']);
 const RUNTIME_READY_STATUSES = new Set(['queued', 'pending', 'requested', 'created']);
@@ -61,6 +88,78 @@ const RUNTIME_RUNNING_STATUSES = new Set(['running', 'active', 'started', 'strea
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'error', 'failed', 'cancelled', 'stopped']);
 const KNOWN_WORKFLOW_PROOF_MARKERS = ['COMPLETION_PROOF', 'RELEASE_AUTH_PACKET'];
 const PROOF_MARKER_PATTERN = /\b([A-Z][A-Z0-9_]{2,})\s*:\s*(?:\*|PASS|FAIL)(?=$|[^A-Z0-9_])/g;
+// Floor check keys (inv 33): the concrete `workflowChecks` keys consumed by the audit/hygiene
+// floor gates (audit_pass_or_explicit_waiver / clean_diff_and_hygiene). Writing any of these is a
+// separated-duty signature — it requires AUDIT (intent checks.write.floor), never plain WRITE_CARD.
+const FLOOR_CHECK_KEYS = new Set([
+  'audit',
+  'auditWaiver',
+  'cleanDiff',
+  'hygiene',
+  'publicHygiene',
+  'packageHygiene',
+]);
+// Card rights fields (inv 13): mutating any of these is policy authorship (intent policy.author),
+// gated by AUTHOR. A non-author write is held for approval and the field is dropped from the patch.
+const CARD_RIGHTS_FIELDS = ['approvalMode', 'resourceGroup', 'assignedAgent', 'proposedLane'];
+// ── Scheduler / admission constants (WS-B1, v5 Decision 1) ──────────────────────────────────────
+// The board-admission lease (D1.5) is short-lived with a heartbeat; it is DISTINCT from the 30-min
+// per-card work lease (DEFAULT_LEASE_TTL_MS). One admitter per board holds it across a drain pass.
+const ADMISSION_LEASE_TTL_MS = 15 * 1000;
+const ADMISSION_LEASE_HEARTBEAT_MS = 5 * 1000;
+// inv 44 (v5): ADMISSION_INFLIGHT_GRACE_MS >= board_lease_TTL + heartbeat + worst_case_delegate +
+// clock_skew, measured on WALL-clock (cross-process post-restart cannot trust a monotonic clock).
+// 15s TTL + 5s heartbeat + 600s worst-case delegate (the delegate_task spawn budget) + 30s skew
+// = 650s. A live-but-slow admitter inside this window is never reclaimed; reclaim also requires the
+// lease epoch to be stale (a newer holder bumped it), so a healthy heartbeating admitter is safe.
+const ADMISSION_LEASE_TTL_BUDGET_MS = ADMISSION_LEASE_TTL_MS;
+const ADMISSION_WORST_CASE_DELEGATE_MS = 600 * 1000;
+const ADMISSION_CLOCK_SKEW_MS = 30 * 1000;
+const ADMISSION_INFLIGHT_GRACE_MS = ADMISSION_LEASE_TTL_BUDGET_MS
+  + ADMISSION_LEASE_HEARTBEAT_MS
+  + ADMISSION_WORST_CASE_DELEGATE_MS
+  + ADMISSION_CLOCK_SKEW_MS;
+// Bounded admission budget per drain pass (inv 5: serial recount, no unbounded loop).
+const DEFAULT_DRAIN_BUDGET = 32;
+// Priority enum → ordinal for the fairness comparator (higher = admitted first; inv 6).
+const WORKFLOW_PRIORITY_ORDER = { critical: 3, high: 2, normal: 1, low: 0 };
+// Max time a card may sit `blocked` on an unsatisfied dependency before the release/reconcile tick
+// escalates it to a typed `needs_decision` (inv 24: never a silent permanent block). The blocked-age
+// clock is `card.metadata.dependencyBlock.blockedAt`, stamped when the dependency path blocks it.
+const MAX_BLOCKED_AGE_MS = 24 * 60 * 60 * 1000;
+
+function priorityOrdinal(priority) {
+  let key = textOrNull(priority);
+  if (key && Object.hasOwn(WORKFLOW_PRIORITY_ORDER, key)) return WORKFLOW_PRIORITY_ORDER[key];
+  return WORKFLOW_PRIORITY_ORDER.normal;
+}
+
+// Inverse of priorityOrdinal: map an ordinal back to its label (used to lift a synthetic join card's
+// priority to the max member ordinal). An out-of-range ordinal collapses to `normal`.
+function priorityLabel(ordinal) {
+  let entry = Object.entries(WORKFLOW_PRIORITY_ORDER).find(([, value]) => value === ordinal);
+  return entry ? entry[0] : 'normal';
+}
+
+// Deterministic code-unit string comparison (inv 6): locale-independent so the admission order is
+// restart-stable across hosts, unlike `localeCompare` whose collation varies by ICU/locale.
+function compareCodeUnits(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// Deterministic, reconstructable admissionId (AD-2 / D1.1): a stable hash of the immutable enqueue
+// identity. The same (boardId, cardId, enqueuedAt, queueEpoch) always yields the same id, so a
+// re-drive under a new lease epoch produces the SAME admissionId — the ledger and agent-pool dedup
+// on it, so zero extra reservations and zero extra spawns (inv 41).
+function computeAdmissionId(boardId, cardId, enqueuedAt, queueEpoch) {
+  let material = JSON.stringify([
+    textOrNull(boardId) ?? '',
+    textOrNull(cardId) ?? '',
+    Number(enqueuedAt) || 0,
+    Number(queueEpoch) || 0,
+  ]);
+  return `adm-${crypto.createHash('sha256').update(material).digest('hex').slice(0, 24)}`;
+}
 
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -111,9 +210,14 @@ function nextId(makeId, prefix) {
   return `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 }
 
-function sourceFor(actor) {
-  let suffix = textOrNull(actor);
+function sourceForPrincipal(principal) {
+  let suffix = textOrNull(principal?.label);
   return suffix ? `${WORKFLOW_SOURCE}:${suffix}` : WORKFLOW_SOURCE;
+}
+
+function isPrincipal(value) {
+  return Boolean(value && typeof value === 'object' && typeof value.label === 'string'
+    && Array.isArray(value.capabilities));
 }
 
 function formatControlAction(value = '') {
@@ -179,11 +283,6 @@ function firstText(value) {
   return textArray(value)[0] ?? null;
 }
 
-function hasDestructiveMove(fromColumnId, toColumnId) {
-  if (toColumnId === 'done') return true;
-  return fromColumnId === 'in-progress' && ['ideas', 'backlog', 'ready'].includes(toColumnId);
-}
-
 function slugSegment(value, fallback = 'item') {
   let text = textOrNull(value) ?? fallback;
   return text.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || fallback;
@@ -234,6 +333,15 @@ function extractTaskIdFromDelegateResult(result) {
     ?? result?.taskId
     ?? result?.task_id
     ?? null;
+}
+
+// A delegate failure is a CAPACITY rejection (no slot granted; the scheduler re-queues) iff its
+// message is the agent-pool slot-ledger at-capacity / ledger-busy signal. Any other delegation
+// error is a hard failure that surfaces as a failed run rather than looping in the admission queue.
+function isCapacityRejectionError(message) {
+  let text = textOrNull(message);
+  if (!text) return false;
+  return /at capacity|group_at_capacity|host_at_capacity|ledger_busy|ledger_error/i.test(text);
 }
 
 function recoverySummary(cards) {
@@ -386,9 +494,83 @@ export function createWorkflowBoardService(opts = {}) {
     proxyManager = null,
     reconcileTickMs = DEFAULT_RECONCILE_TICK_MS,
     onReconcileTickError = () => {},
+    // Trusted-embedder seam. `defaultPrincipal` is the committing identity for direct,
+    // in-process callers (and the unit-test harness) that do not flow through the HTTP/MCP
+    // seams. PRODUCTION wiring (web-server routes, MCP tool handler) never sets it, so the
+    // seam-derived `context.principal` stays authoritative and an unauthenticated request
+    // still fail-closes to anonymous (inv 45 preserved). It is NOT a way to grant rights to
+    // an untrusted caller — only an embedder that already owns the process supplies it.
+    defaultPrincipal = null,
   } = opts;
   if (!stateGraph) {
     throw new Error('Workflow board service requires a StateGraph instance.');
+  }
+  let embedderPrincipal = isPrincipal(defaultPrincipal) ? defaultPrincipal : null;
+  // Per-instance fast-path for the one-time schema migration. The service is constructed
+  // per-request on some paths, so this flag is NOT authoritative for correctness — the durable
+  // `workflowSchema` marker is. It only skips the single marker `get` on repeat calls within one
+  // long-lived instance once we have observed the marker is current.
+  let schemaMigrated = false;
+
+  // Fail-closed identity: every mutator obtains its committing principal from the per-call
+  // context (the HTTP/MCP seams put it on `context.principal`). Absent that, a trusted
+  // in-process embedder's `defaultPrincipal` is used; otherwise the anonymous least-privilege
+  // floor — never a privileged default identity.
+  function resolvePrincipal(context = {}) {
+    if (isPrincipal(context?.principal)) return context.principal;
+    if (embedderPrincipal) return embedderPrincipal;
+    return derivePrincipal({ channel: 'unknown' });
+  }
+
+  // Standard blocked verdict, shaped exactly like the transition path's blocked result so the
+  // gate is indistinguishable from a failed transition gate to every caller. A mutator calls
+  // `gate(type, principal, extra)` and, on a non-ok verdict, returns this WITHOUT committing.
+  function gate(type, principal, extra = {}) {
+    let verdict = evaluateIntent({ type, ...extra }, principal);
+    if (verdict.ok) return { ok: true };
+    return {
+      ok: false,
+      status: verdict.verdict === 'pendingApproval' ? 'pendingApproval' : 'blocked',
+      failures: [{ gate: 'capability', reason: verdict.reason, capability: verdict.capability }],
+    };
+  }
+
+  // The daemon drives the board's own self-healing/seed commits; its writes are bookkeeping, not a
+  // human/agent card edit. Operational mutators map a daemon principal to `daemon.bookkeeping` (DAEMON)
+  // and everyone else to the intent the operation actually represents.
+  function isDaemonPrincipal(principal) {
+    return principal?.kind === 'daemon';
+  }
+
+  // One-time forward migration to schema v2 (AD-8; inv 16). The durable `workflowSchema` marker is
+  // authoritative: if it already reports the current version this is a single `get` no-op on the hot
+  // path. Otherwise sweep every persisted board + card through the always-forward iso migrators
+  // once, commit only the entries that actually changed plus the marker in one commit, and never
+  // branch on a v1 schema again at read time. Idempotent: a second call hits the marker no-op.
+  function ensureWorkflowSchemaMigrated() {
+    if (schemaMigrated) return;
+    if (stateGraph.get('workflowSchema')?.version === WORKFLOW_SCHEMA_VERSION) {
+      schemaMigrated = true;
+      return;
+    }
+    let ops = [];
+    let boards = getCollection(stateGraph, 'workflowBoards');
+    for (let [id, board] of Object.entries(boards)) {
+      let migrated = migrateWorkflowBoardToV2(board);
+      if (JSON.stringify(board) !== JSON.stringify(migrated)) {
+        ops.push({ op: 'set', path: `workflowBoards/${id}`, value: migrated });
+      }
+    }
+    let cards = getCollection(stateGraph, 'workflowCards');
+    for (let [id, card] of Object.entries(cards)) {
+      let migrated = migrateWorkflowCardToV2(card);
+      if (JSON.stringify(card) !== JSON.stringify(migrated)) {
+        ops.push({ op: 'set', path: `workflowCards/${id}`, value: migrated });
+      }
+    }
+    ops.push({ op: 'set', path: 'workflowSchema', value: { version: WORKFLOW_SCHEMA_VERSION } });
+    stateGraph.commit(ops, sourceForPrincipal(daemonPrincipal()));
+    schemaMigrated = true;
   }
 
   function refreshDefaultBoardPolicy(existing, id) {
@@ -403,16 +585,21 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: board.createdAt ?? ts,
       updatedAt: board.updatedAt ?? ts,
     });
+    // Fill-only policy refresh (inv 17): a customized column/transition is never clobbered. For a
+    // default column that already exists, current values win and defaults only fill gaps; a default
+    // column missing from the board is added wholesale (a legitimate fill). Same for transitions by
+    // from->to key. inv 19 still holds: an MVP-era board gains every missing v2 column/transition.
     let currentColumns = Array.isArray(board.columns) ? board.columns : [];
     let columnsById = new Map(currentColumns.map(column => [textOrNull(column?.id), column]));
     let defaultColumnIds = new Set(defaults.columns.map(column => column.id));
     let nextColumns = defaults.columns.map((defaultColumn) => {
-      let current = asObject(columnsById.get(defaultColumn.id));
+      let current = columnsById.get(defaultColumn.id);
+      if (!current) return { ...defaultColumn, automation: { ...defaultColumn.automation } };
       return {
         ...current,
         id: defaultColumn.id,
-        title: defaultColumn.title,
-        automation: { ...defaultColumn.automation },
+        title: textOrNull(current.title) ?? defaultColumn.title,
+        automation: { ...defaultColumn.automation, ...asObject(current.automation) },
       };
     });
     for (let column of currentColumns) {
@@ -425,12 +612,11 @@ export function createWorkflowBoardService(opts = {}) {
     let transitionsByKey = new Map(currentTransitions.map(transition => [transitionKey(transition), transition]));
     let defaultTransitionKeys = new Set(defaults.transitions.map(transitionKey));
     let nextTransitions = defaults.transitions.map((defaultTransition) => {
-      let current = asObject(transitionsByKey.get(transitionKey(defaultTransition)));
-      return {
-        ...current,
-        ...defaultTransition,
-        gates: textArray(defaultTransition.gates ?? defaultTransition.gate),
-      };
+      let current = transitionsByKey.get(transitionKey(defaultTransition));
+      if (!current) {
+        return { ...defaultTransition, gates: textArray(defaultTransition.gates ?? defaultTransition.gate) };
+      }
+      return current;
     });
     for (let transition of currentTransitions) {
       if (!defaultTransitionKeys.has(transitionKey(transition))) nextTransitions.push(transition);
@@ -454,11 +640,12 @@ export function createWorkflowBoardService(opts = {}) {
       version: Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) + 1 : 1,
       updatedAt: ts,
     };
-    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: next }], sourceFor('default-policy'));
+    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: next }], sourceForPrincipal(daemonPrincipal()));
     return clone(next);
   }
 
   function ensureBoard(boardId = DEFAULT_WORKFLOW_BOARD_ID) {
+    ensureWorkflowSchemaMigrated();
     let id = textOrNull(boardId) ?? DEFAULT_WORKFLOW_BOARD_ID;
     let existing = stateGraph.get(`workflowBoards/${id}`);
     if (existing) return refreshDefaultBoardPolicy(existing, id);
@@ -467,7 +654,7 @@ export function createWorkflowBoardService(opts = {}) {
     }
     let board = createDefaultWorkflowBoard({ id, now: now() });
     board.metadata = { defaultPolicyVersion: DEFAULT_WORKFLOW_POLICY_VERSION };
-    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: board }], WORKFLOW_SOURCE);
+    stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: board }], sourceForPrincipal(daemonPrincipal()));
     return board;
   }
 
@@ -484,8 +671,37 @@ export function createWorkflowBoardService(opts = {}) {
     return clone(card);
   }
 
-  function createOrUpdateCard(input = {}) {
-    let actor = textOrNull(input.actor) ?? 'system';
+  // A check write is a FLOOR write iff it touches any floor check key (audit/hygiene). A mixed
+  // write (floor + basic keys) is treated as floor-wide (the stricter gate wins). The intent
+  // type maps to checks.write.floor (AUDIT) or checks.write.basic (WRITE_CARD) accordingly.
+  function checkWriteIntent(checksInput) {
+    // Resolve the checks record EXACTLY as normalizeWorkflowChecksInput does — a nested `checks`
+    // key is only unwrapped when it is an object, otherwise the outer object IS the record. This
+    // keeps the floor classification from ever disagreeing with what gets persisted (a non-object
+    // `checks` wrapper key was a floor-check self-grant bypass).
+    let record = checksInput?.checks && typeof checksInput.checks === 'object'
+      ? checksInput.checks
+      : checksInput;
+    let keys = Object.keys(asObject(record));
+    let isFloor = keys.some(key => FLOOR_CHECK_KEYS.has(key));
+    return isFloor ? 'checks.write.floor' : 'checks.write.basic';
+  }
+
+  // Rights fields present in an input that actually CHANGE the card's current value. Unchanged
+  // pass-throughs (e.g. an update_item that re-sends the whole card) are not a rights mutation.
+  function changedRightsFields(input, current) {
+    let changed = [];
+    for (let field of CARD_RIGHTS_FIELDS) {
+      if (!(field in input)) continue;
+      let nextValue = textOrNull(input[field]);
+      let currentValue = textOrNull(current?.[field]);
+      if (nextValue !== currentValue) changed.push(field);
+    }
+    return changed;
+  }
+
+  function createOrUpdateCard(input = {}, principal = resolvePrincipal()) {
+    let actor = principal.label;
     let id = textOrNull(input.id ?? input.cardId ?? input.card_id) ?? nextId(makeId, 'card');
     let current = stateGraph.get(`workflowCards/${id}`);
     let boardId = textOrNull(input.boardId ?? input.board_id ?? current?.boardId)
@@ -499,9 +715,31 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
 
+    // Gate the card-body write (non-rights fields). A daemon self-heal/seed commit is bookkeeping
+    // (DAEMON); a human/agent edit is card.write (WRITE_CARD).
+    let daemonWrite = isDaemonPrincipal(principal);
+    let bodyGate = gate(daemonWrite ? 'daemon.bookkeeping' : 'card.write', principal, { boardId: board.id, cardId: id });
+    if (!bodyGate.ok) return { ...bodyGate, board, card: current ? clone(current) : null, checks: getChecks(id) };
+
+    // Rights-field authorship (inv 13). A rights field that changes a card value is a policy.author
+    // intent (AUTHOR). A non-author write is held: the rights field is dropped, never applied; the
+    // body write proceeds. `proposedLane` is advisory unless applied by a board-author here. The
+    // daemon does not author rights — it never reaches this branch with a rights change in practice.
+    let requestedRights = daemonWrite ? [] : changedRightsFields(input, current);
+    let deniedRights = [];
+    let scrubbedInput = input;
+    if (requestedRights.length) {
+      let rightsGate = gate('policy.author', principal, { boardId: board.id, cardId: id });
+      if (!rightsGate.ok) {
+        deniedRights = requestedRights;
+        scrubbedInput = { ...input };
+        for (let field of requestedRights) delete scrubbedInput[field];
+      }
+    }
+
     let ts = now();
     let merged = mergeDefined(current ?? {}, {
-      ...input,
+      ...scrubbedInput,
       id,
       boardId: board.id,
       version: current ? current.version + 1 : 1,
@@ -509,6 +747,13 @@ export function createWorkflowBoardService(opts = {}) {
       updatedAt: ts,
       updatedBy: actor,
     });
+    // executedBy is service-owned (separated-duty integrity, inv 47). It is stamped only by the
+    // run/delegate path; a caller can never set or clear it through metadata input, or it could
+    // wipe its own executor record and then sign its card's audit.
+    merged.metadata = {
+      ...asObject(merged.metadata),
+      executedBy: textArray(current?.metadata?.executedBy),
+    };
     let card = normalizeWorkflowCardInput(merged, {
       id,
       actor,
@@ -517,10 +762,74 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: current?.createdAt ?? ts,
       updatedAt: ts,
     });
+
+    // Board-driven column authority (S5 carry-over). The iso normalizer is board-agnostic, so the
+    // board's own column set is the authority here: a card may land in any default or
+    // define_column-added column the board actually has, and a genuinely-unknown column is rejected.
+    assertBoardColumn(board, card.columnId);
+
+    // Narrow-only automation (inv 12). A card automation may only narrow (add to) a column's floor
+    // gates, never drop one. Checked on the raw input automation (the card normalizer does not carry
+    // a `gates` override) at the merge point — iso stays frozen. A non-monotonic override is rejected
+    // without committing.
+    let monotonic = cardAutomationIsMonotonic(board, card.columnId, asObject(scrubbedInput.automation));
+    if (!monotonic.ok) {
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{ gate: 'narrow_only_automation', reason: monotonic.reason }],
+        board,
+        card: current ? clone(current) : null,
+        checks: getChecks(id),
+      };
+    }
+
+    // Import/write-time dependency cycle re-check (inv 23): a card written (created, updated, or
+    // imported/normalized-on-read) with `dependsOn` edges must not close a cycle. Each new upstream
+    // edge is rejected if this card is already reachable from that upstream in the committed closure.
+    // Rejected without committing — the link path enforces the same at edit time.
+    for (let dep of card.dependsOn) {
+      if (wouldCreateDependencyCycle(board.id, card.id, dep.cardId)) {
+        return {
+          ok: false,
+          status: 'blocked',
+          failures: [{ gate: 'dependency_cycle', reason: `Dependency ${card.id} → ${dep.cardId} would create a cycle.` }],
+          board,
+          card: current ? clone(current) : null,
+          checks: getChecks(id),
+        };
+      }
+    }
+
     let ops = [{ op: 'set', path: `workflowCards/${card.id}`, value: card }];
     let checks = getChecks(card.id);
 
     if (input.checks !== undefined) {
+      // Separated-duty gated check-writing (inv 33, 47). Classify the write: a floor-gate check
+      // (audit/hygiene) needs AUDIT; a basic check needs only WRITE_CARD. An executor (its id in
+      // card.executedBy) can never sign a floor check for its own card, even with AUDIT.
+      let intentType = daemonWrite ? 'daemon.bookkeeping' : checkWriteIntent(input.checks);
+      let checksGate = gate(intentType, principal, { boardId: board.id, cardId: id });
+      if (!checksGate.ok) {
+        return { ...checksGate, board, card: current ? clone(current) : null, checks };
+      }
+      if (intentType === 'checks.write.floor') {
+        let executedBy = textArray(current?.metadata?.executedBy);
+        if (executedBy.includes(principal.id)) {
+          return {
+            ok: false,
+            status: 'blocked',
+            failures: [{
+              gate: 'separated_duty',
+              reason: `Principal "${principal.id}" executed card ${id} and cannot sign its own floor-gate (audit/hygiene) check.`,
+              capability: CAP.AUDIT,
+            }],
+            board,
+            card: current ? clone(current) : null,
+            checks,
+          };
+        }
+      }
       let record = normalizeWorkflowChecksInput(input.checks, {
         cardId: card.id,
         actor,
@@ -531,17 +840,105 @@ export function createWorkflowBoardService(opts = {}) {
       ops.push({ op: 'set', path: `workflowChecks/${card.id}`, value: record });
     }
 
-    stateGraph.commit(ops, sourceFor(actor));
-    return { board, card, checks };
+    stateGraph.commit(ops, sourceForPrincipal(principal));
+
+    // F-DEP-1(a): enforce dependency satisfaction on the PRIMARY write path. Enforcement otherwise
+    // lived only in linkDependency→recomputeDependencyLifecycle, so a card written here with a
+    // populated `dependsOn` (create, update, import, decompose) stayed `idle`, enqueued, and admitted
+    // with deps unmet. Recompute now: a not-yet-queued card with an unsatisfied edge → `blocked`.
+    // The scheduler still owns queued/admitting/running, so those lifecycles are left untouched.
+    let resultCard = card;
+    if (card.dependsOn.length && ['idle', 'blocked'].includes(normalizeWorkflowLifecycle(card.lifecycle))) {
+      let outcome = recomputeDependencyLifecycle(board, card, principal);
+      resultCard = outcome.card;
+    }
+    return { ok: true, board, card: resultCard, checks, ...(deniedRights.length ? { deniedRightsFields: deniedRights } : {}) };
+  }
+
+  // Narrow-only floor-gate check (inv 12): a card's `automation.gates` override may only NARROW the
+  // column's floor gates (add gates), never drop a floor (audit/hygiene) gate. Cards without a gate
+  // override are unconstrained here — the column gates apply unchanged.
+  function cardAutomationIsMonotonic(board, columnId, cardAutomation) {
+    let cardGates = textArray(cardAutomation.gates ?? cardAutomation.gate);
+    if (!cardGates.length) return { ok: true };
+    let columnGates = textArray(columnAutomation(board, columnId).gates);
+    if (!columnGates.length) return { ok: true };
+    if (isFloorGateMonotonic(columnGates, cardGates)) return { ok: true };
+    return {
+      ok: false,
+      reason: `Card automation may only narrow column "${columnId}" floor gates, not drop them.`,
+    };
   }
 
   function createFailure(gate, reason) {
     return { gate, reason };
   }
 
+  // Classifier + validator are pure over (columns, transitions); memoize per board id+version so a
+  // single evaluateRequest (or any hot path) classifies once. The cache holds one entry per board id
+  // and is invalidated by version, so a board edit (which bumps version) recomputes on next use.
+  let graphCache = new Map();
+  function boardGraph(board) {
+    let id = textOrNull(board?.id) ?? DEFAULT_WORKFLOW_BOARD_ID;
+    let version = Number(board?.version);
+    let key = Number.isFinite(version) ? version : 'unversioned';
+    let cached = graphCache.get(id);
+    if (cached && cached.key === key) return cached.value;
+    let value = {
+      classifier: classifyWorkflowGraph(board),
+      validation: validateWorkflowTransitionGraph(board),
+    };
+    graphCache.set(id, { key, value });
+    return value;
+  }
+
+  // Board-aware destructive-move detection (replaces the former hardcoded set). A move is destructive
+  // when it (1) enters a terminal column, (2) is flagged destructive by the classifier for an existing
+  // graph edge (a backward move out of a terminal stage), or (3) — the not-an-edge fallback — is a
+  // rank-decreasing backward move out of the execution stage (`automation.action === 'execute'`).
+  // Anything backward into/out of a terminal that the classifier does not already cover is caught by
+  // the rank/terminal fallback, so an unknown move is never silently treated as non-destructive.
+  function hasDestructiveMove(board, fromColumnId, toColumnId) {
+    let classifier = board?.classifier ?? boardGraph(board).classifier;
+    if (classifier.isTerminal(toColumnId)) return true;
+    let edgeDestructive = classifier.edges.some(
+      edge => edge.from === fromColumnId && edge.to === toColumnId && edge.destructive,
+    );
+    if (edgeDestructive) return true;
+    let fromRank = classifier.rankOf(fromColumnId);
+    let toRank = classifier.rankOf(toColumnId);
+    let backward = fromRank >= 0 && toRank >= 0 && toRank < fromRank;
+    if (!backward) return false;
+    let fromAction = textOrNull(columnAutomation(board, fromColumnId).action);
+    return fromAction === 'execute' || classifier.isTerminal(fromColumnId);
+  }
+
+  // Board-derived active/recovery columns (inv 18, replaces the former hardcoded id list): a column is
+  // active/recovery iff it is NON-terminal and its automation action is an execution-class action — a
+  // card there can have an in-flight run needing recovery.
+  function activeRecoveryColumnIds(board) {
+    let classifier = boardGraph(board).classifier;
+    return (Array.isArray(board?.columns) ? board.columns : [])
+      .filter(column => !classifier.isTerminal(column.id))
+      .filter(column => EXECUTION_COLUMN_ACTIONS.has(textOrNull(column?.automation?.action)))
+      .map(column => column.id);
+  }
+
   function evaluateRequest(board, card, checks, request) {
     let failures = [];
-    if (!DEFAULT_WORKFLOW_COLUMN_IDS.includes(request.toColumnId)) {
+    let { classifier, validation } = boardGraph(board);
+    // inv 11: a structurally-invalid custom board cannot be operated. The shipped default board is
+    // verified valid, so this never fires for it. Surface the first validator error code + detail.
+    if (!validation.ok) {
+      let first = validation.errors[0];
+      failures.push(createFailure(
+        'invalid_board_graph',
+        `Board ${board.id} transition graph is invalid (${first.code}): ${first.detail}`,
+      ));
+    }
+    // Data-driven column existence: a custom board accepts its own column ids; the default set is no
+    // longer the authority.
+    if (!board.columns.some(column => column.id === request.toColumnId)) {
       failures.push(createFailure(
         'known_column',
         `Unknown workflow column "${request.toColumnId}".`,
@@ -562,13 +959,14 @@ export function createWorkflowBoardService(opts = {}) {
     if (board.mode === 'paused') {
       failures.push(createFailure('board_mode', 'Board is paused.'));
     }
-    if (hasDestructiveMove(card.columnId, request.toColumnId) && !request.reason) {
+    let destructive = hasDestructiveMove({ ...board, classifier }, card.columnId, request.toColumnId);
+    if (destructive && !request.reason) {
       failures.push(createFailure('reason_required', 'Destructive workflow moves require a reason.'));
     }
     // A destructive move must not strand an active run. activeRunForCard is a hoisted function
     // declaration (do not refactor it to a const arrow — that would TDZ here). Pass force to
     // override (the caller is expected to finalize/stop the run first).
-    if (hasDestructiveMove(card.columnId, request.toColumnId) && !request.force) {
+    if (destructive && !request.force) {
       let liveRun = activeRunForCard(card.id);
       if (liveRun) {
         failures.push(createFailure(
@@ -586,12 +984,24 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function requestTransition(input = {}) {
-    let request = normalizeWorkflowTransitionRequest(input);
+  function requestTransition(input = {}, principal = resolvePrincipal()) {
+    let actor = principal.label;
+    let request = normalizeWorkflowTransitionRequest({ ...input, actor });
     let board = ensureBoard(request.boardId);
+    let capabilityGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.transition',
+      principal,
+      { boardId: request.boardId, cardId: request.cardId, toColumnId: request.toColumnId },
+    );
+    if (!capabilityGate.ok) return capabilityGate;
     let card = getCard(request.cardId);
     let checks = getChecks(card.id);
-    let gateResult = evaluateRequest(board, card, checks, request);
+    // Rework authorization is the board's own return/escalation re-engagement waking a dormant
+    // orchestrator (e.g. quality-audit → ready). It is honored ONLY for the daemon board-self-drive —
+    // a caller-supplied flag from a human/agent transition is ignored, so the rework edge stays governed.
+    let reworkAuthorized = isDaemonPrincipal(principal)
+      && (input.reworkAuthorized === true || input.rework_authorized === true);
+    let gateResult = evaluateRequest(board, card, checks, { ...request, reworkAuthorized });
     let status = gateResult.ok ? 'accepted' : 'blocked';
     let ts = now();
     let eventId = textOrNull(input.id ?? input.eventId ?? input.event_id) ?? nextId(makeId, 'transition');
@@ -603,10 +1013,10 @@ export function createWorkflowBoardService(opts = {}) {
         columnId: request.toColumnId,
         version: card.version + 1,
         updatedAt: ts,
-        updatedBy: request.actor,
+        updatedBy: actor,
       }, {
         id: card.id,
-        actor: request.actor,
+        actor,
         now: ts,
         version: card.version + 1,
         createdAt: card.createdAt,
@@ -629,7 +1039,7 @@ export function createWorkflowBoardService(opts = {}) {
       ops.push({ op: 'set', path: `workflowCards/${card.id}`, value: nextCard });
     }
 
-    stateGraph.commit(ops, sourceFor(request.actor));
+    stateGraph.commit(ops, sourceForPrincipal(principal));
     return { ...event, card: status === 'accepted' ? nextCard : card };
   }
 
@@ -694,21 +1104,22 @@ export function createWorkflowBoardService(opts = {}) {
   function activeFileScopeConflicts(board, card, args = {}) {
     let files = cardFileScope(card, args);
     if (!files.length) return [];
+    let activeColumnIds = new Set(activeRecoveryColumnIds(board));
     return Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(candidate => candidate.id !== card.id)
       .filter(candidate => candidate.boardId === board.id)
       .filter(candidate => !card.projectId || candidate.projectId === card.projectId)
-      .filter(candidate => ACTIVE_RECOVERY_COLUMN_IDS.includes(candidate.columnId))
+      .filter(candidate => activeColumnIds.has(candidate.columnId))
       .map((candidate) => {
         let candidateFiles = cardFileScope(candidate);
         let overlappingFiles = files.filter(file => candidateFiles.some(candidateFile => fileScopesOverlap(file, candidateFile)));
         return overlappingFiles.length
           ? {
-              cardId: candidate.id,
-              title: candidate.title,
-              columnId: candidate.columnId,
-              files: overlappingFiles,
-            }
+            cardId: candidate.id,
+            title: candidate.title,
+            columnId: candidate.columnId,
+            files: overlappingFiles,
+          }
           : null;
       })
       .filter(Boolean);
@@ -781,7 +1192,7 @@ export function createWorkflowBoardService(opts = {}) {
     if (card.columnId === 'ready' && !readyCardHasExecutionContract(card)) {
       return { ok: false, reason: 'ready cards require owner and acceptance criteria before orchestration', automation };
     }
-    let gateResult = readyOrchestrationGate(board, card, textOrNull(args.actor) ?? 'workflow-board');
+    let gateResult = readyOrchestrationGate(board, card);
     if (!gateResult.ok) {
       return {
         ok: false,
@@ -812,6 +1223,1601 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, automation, capacity, boardCapacity, fileConflicts };
   }
 
+  // ── Admission scheduler (WS-B1; v5 Decision 1, AD-2/9/10/13/14/16/17) ──────────────────────────
+  // Storage shapes (all durable in StateGraph):
+  //   workflowQueueEpoch/{boardId}        → monotonic int; the commitCAS fence epoch for this board
+  //   workflowQueueEntries/{admissionId}  → { cardId, boardId, columnId, groupKey, priority,
+  //                                           enqueuedAt, queueEpoch, admissionId, notBefore }
+  //   workflowQueueCursor/{boardId}       → { groupKey } persisted round-robin cursor
+  //   workflowAdmissionLease/{boardId}    → { owner, leaseEpoch, startedAt, heartbeatAt, ttlMs }
+  //   workflowAdmissionResolution/{cardId}→ { cardId, leaseEpoch, admissionId, phase, startedAt }
+  // The queue ENTRY overlaps the card lifecycle/run until `running` is durable (AD-2: never a gap).
+
+  // groupKey = capacity-governing resource group, fallback projectId, then a board-wide bucket.
+  function resolveGroupKey(card = {}) {
+    return textOrNull(card.resourceGroup)
+      ?? textOrNull(card.projectId)
+      ?? `board:${textOrNull(card.boardId) ?? DEFAULT_WORKFLOW_BOARD_ID}`;
+  }
+
+  function readQueueEpoch(boardId) {
+    let raw = stateGraph.get(`workflowQueueEpoch/${boardId}`);
+    return (raw === undefined || raw === null) ? 0 : Number(raw) || 0;
+  }
+
+  function listQueueEntries(boardId) {
+    return Object.values(getCollection(stateGraph, 'workflowQueueEntries'))
+      .filter(entry => entry.boardId === boardId);
+  }
+
+  function liveQueueEntryForCard(boardId, cardId) {
+    return listQueueEntries(boardId).find(entry => entry.cardId === cardId) ?? null;
+  }
+
+  // Enqueue (inv 3, 4, 31; AD-2). Appends a durable queue entry and sets lifecycle=queued in ONE
+  // commitCAS frame on the board queue epoch. inv 31: at most one live entry per card — a re-enqueue
+  // of an already-queued card is a no-op that returns the existing entry. enqueuedAt/queueEpoch are
+  // immutable for a live entry. Returns { ok, entry, deduped?, reason? }.
+  function enqueueWorkItem(board, card, opts = {}) {
+    let existing = liveQueueEntryForCard(board.id, card.id);
+    if (existing) return { ok: true, entry: existing, deduped: true };
+    let principal = daemonPrincipal();
+    let gateResult = gate('daemon.bookkeeping', principal, { boardId: board.id, cardId: card.id });
+    if (!gateResult.ok) return { ok: false, reason: 'enqueue_gate_blocked', gate: gateResult };
+    let enqueuedAt = now();
+    let queueEpoch = readQueueEpoch(board.id);
+    let admissionId = computeAdmissionId(board.id, card.id, enqueuedAt, queueEpoch);
+    let notBefore = finiteNumber(opts.notBefore);
+    // Priority inheritance (AD-5, inv 24): the admission-ordering priority is the MAX of this card's
+    // own priority and every transitive downstream waiter's priority, so an upstream feeding a
+    // high-priority dependent is admitted ahead of unrelated low-priority cards and never starved.
+    // This is the enqueue-time snapshot; admissionOrder recomputes the inheritance LIVE at order time
+    // so a dependent linked AFTER enqueue still lifts the frozen value (effectiveAdmissionPrioritiesFor).
+    let entry = {
+      schema: 'workflow-queue-entry/v1',
+      admissionId,
+      cardId: card.id,
+      boardId: board.id,
+      columnId: card.columnId,
+      groupKey: resolveGroupKey(card),
+      priority: effectiveAdmissionPriority(card, board),
+      basePriority: priorityOrdinal(card.priority),
+      priorityLabel: textOrNull(card.priority) ?? 'normal',
+      enqueuedAt,
+      queueEpoch,
+      notBefore: notBefore ?? null,
+    };
+    let queued = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'queued',
+      version: card.version + 1,
+      updatedAt: enqueuedAt,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: enqueuedAt,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: enqueuedAt,
+    });
+    // inv 36: the enqueue write is commitCAS-guarded on the queue epoch and durable; a stale-epoch
+    // racer writes nothing. The one-live-entry uniqueness is enforced by the existing-entry check
+    // above plus the synchronous CAS frame (no await between read and write).
+    let res = stateGraph.commitCAS(
+      `workflowQueueEpoch/${board.id}`,
+      queueEpoch,
+      [
+        { op: 'set', path: `workflowQueueEntries/${admissionId}`, value: entry },
+        { op: 'set', path: `workflowCards/${card.id}`, value: queued },
+      ],
+      sourceForPrincipal(principal),
+      { durable: true },
+    );
+    if (!res.ok) return { ok: false, reason: 'queue_contended', currentEpoch: res.currentEpoch };
+    return { ok: true, entry, card: queued };
+  }
+
+  // Deterministic, restart-stable admission order (inv 6): group round-robin off the persisted
+  // cursor → priority desc → enqueuedAt asc → cardId asc. The cursor names the LAST group admitted;
+  // groups after it (wrapping) sort first, so the next pass starts a different group — round-robin.
+  function admissionOrder(boardId, entries) {
+    let cursorGroup = textOrNull(stateGraph.get(`workflowQueueCursor/${boardId}`)?.groupKey);
+    // inv 24 (live): recompute priority inheritance at order time so an upstream that gained a
+    // high-priority dependent AFTER it was enqueued is no longer starved behind its frozen-low
+    // entry.priority. Compute the transitive-max for every card once and override the comparison with
+    // the live ordinal (falling back to the frozen value if a card is somehow absent from the board).
+    let { effective: livePriority } = effectiveAdmissionPrioritiesFor(ensureBoard(boardId));
+    let groups = [...new Set(entries.map(entry => entry.groupKey))].sort(compareCodeUnits);
+    let rank = new Map();
+    if (groups.length) {
+      // F-SCH-5: round-robin fairness. The cursor names the last-admitted group; the next pass starts
+      // at the group AFTER it. When that group has since drained (absent from `groups`), do not reset
+      // to group 0 (which re-starves whatever was already served) — continue from the position the
+      // cursor occupied by inserting it into the sorted order and resuming at the next index.
+      let start;
+      if (!cursorGroup) {
+        start = 0;
+      } else {
+        let idx = groups.indexOf(cursorGroup);
+        if (idx >= 0) {
+          start = idx + 1;
+        } else {
+          // Cursor group drained: find where it WOULD sit and continue from the next surviving group.
+          let insertAt = groups.findIndex(group => compareCodeUnits(group, cursorGroup) > 0);
+          start = insertAt < 0 ? 0 : insertAt;
+        }
+      }
+      for (let i = 0; i < groups.length; i += 1) {
+        rank.set(groups[(start + i) % groups.length], i);
+      }
+    }
+    return entries.slice().sort((a, b) => {
+      let groupDelta = (rank.get(a.groupKey) ?? 0) - (rank.get(b.groupKey) ?? 0);
+      if (groupDelta !== 0) return groupDelta;
+      let pa = livePriority.get(a.cardId) ?? a.priority;
+      let pb = livePriority.get(b.cardId) ?? b.priority;
+      if (pa !== pb) return pb - pa;
+      if (a.enqueuedAt !== b.enqueuedAt) return a.enqueuedAt - b.enqueuedAt;
+      // F-SCH-4: deterministic code-unit tiebreak (locale-independent, restart-stable across hosts).
+      return compareCodeUnits(a.cardId, b.cardId);
+    });
+  }
+
+  // ── Board-native task dependencies (WS-B2; AD-5, inv 21-24) ───────────────────────────────────
+  // A card's `dependsOn: [{ cardId, releaseWhen, onUpstreamFailure }]` (frozen iso vocabulary) gates
+  // its admission: while any upstream edge is unsatisfied the dependent sits `idle↔blocked` (the only
+  // lifecycle transition this path owns — the scheduler still owns queued→admitting→running). The
+  // release tick (releaseDependencies) runs at the TOP of every admission pass, before drain: a
+  // blocked card whose every edge is satisfied is enqueued (blocked→queued via the S8 enqueue path).
+  // Failure propagation (an upstream terminal-failure or deletion) resolves each downstream edge per
+  // its `onUpstreamFailure` so a dependent is never left silently blocked forever (inv 22). Cycles are
+  // rejected at link (and re-checked at import + admission, inv 23). Priority inheritance lifts an
+  // upstream's admission priority to the max over its transitive waiters so a chain feeding a
+  // high-priority card is not starved (inv 24).
+
+  function boardCardsFor(boardId) {
+    return Object.values(getCollection(stateGraph, 'workflowCards')).filter(card => card.boardId === boardId);
+  }
+
+  function cardDependsOn(card) {
+    return normalizeWorkflowDependsOn(card?.dependsOn ?? card?.depends_on);
+  }
+
+  // Is one `dependsOn` edge satisfied? `releaseWhen` selects the signal; a missing/deleted upstream is
+  // NOT "satisfied" here — the failure path (propagateUpstreamResolution) owns that resolution.
+  function dependencyEdgeSatisfied(dep, upstreamCard, upstreamRuns, upstreamChecks, classifier) {
+    if (!upstreamCard) return false;
+    switch (dep.releaseWhen) {
+      case 'run_success':
+        // Data-driven success signal. NOTE (inv 21): `run_success` is unsafe while the upstream can
+        // still bounce backward via `rework_authorized` — a successful run does not pin the card in a
+        // terminal column, so the release may fire before the upstream's work is durably done. It is
+        // offered as an explicit opt-in; `card_done` is the safe default.
+        return (upstreamRuns ?? []).some(run => ['success', 'completed'].includes(textOrNull(run.status)));
+      case 'audit_passed':
+        // Audit floor check signed off (reuse the iso `checkPassed` truth table).
+        return checkPassed((upstreamChecks ?? {}).audit);
+      case 'card_done':
+      default:
+        // Safe default: the upstream card reached a TERMINAL column. The terminal set is data-driven
+        // off the board's `automation.action:'close'` classification — never the hardcoded 'done' id.
+        return classifier.isTerminal(upstreamCard.columnId);
+    }
+  }
+
+  // Is every edge of a dependent satisfied? An edge whose upstream resolved via `release`-on-failure
+  // is treated as satisfied (recorded on the dependent's dependencyBlock.releasedEdges). A join card
+  // carries `metadata.joinPolicy` (S5); the per-edge truth is folded by that policy instead of a flat
+  // AND. A normal card has no joinPolicy, so the AND fast path below is byte-identical to before.
+  function allDependenciesSatisfied(card, board, classifier, releasedEdges) {
+    let deps = cardDependsOn(card);
+    if (!deps.length) return true;
+    let released = releasedEdges instanceof Set ? releasedEdges : new Set(releasedEdges ?? []);
+    let policy = card?.metadata?.joinPolicy;
+    if (policy) return joinPolicySatisfied(card, deps, released, classifier, policy);
+    for (let dep of deps) {
+      if (released.has(dep.cardId)) continue;
+      let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
+      let satisfied = dependencyEdgeSatisfied(
+        dep,
+        upstream,
+        upstream ? getRunsForCard(upstream.id) : [],
+        upstream ? getChecks(upstream.id) : {},
+        classifier,
+      );
+      if (!satisfied) return false;
+    }
+    return true;
+  }
+
+  // Per-edge satisfaction reduced by a join policy. The per-edge boolean is computed ONCE here (same
+  // `dependencyEdgeSatisfied` / `released.has` truth the AND loop uses) and folded by `policy.type`:
+  // `all` mirrors the flat AND; `any` needs one edge; `quorum` needs >= policy.k; `all_settled` needs
+  // every edge to be either edge-satisfied OR released (a released edge = settled-by-failure), i.e. no
+  // edge still pending. Pure/read-only.
+  function joinPolicySatisfied(card, deps, released, classifier, policy) {
+    let satisfiedCount = 0;
+    let settledCount = 0;
+    // A released edge = settled-by-failure (its onUpstreamFailure resolved to `release`); for the
+    // materialized join, an all_settled subscription maps failures to `release`, so a failed member
+    // arrives here already released. (A non-release/escalating edge is governed by failure propagation,
+    // not by this count.)
+    for (let dep of deps) {
+      let isReleased = released.has(dep.cardId);
+      let edgeSatisfied = isReleased;
+      if (!isReleased) {
+        let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
+        edgeSatisfied = dependencyEdgeSatisfied(
+          dep,
+          upstream,
+          upstream ? getRunsForCard(upstream.id) : [],
+          upstream ? getChecks(upstream.id) : {},
+          classifier,
+        );
+      }
+      if (edgeSatisfied) satisfiedCount += 1;
+      if (edgeSatisfied || isReleased) settledCount += 1;
+    }
+    switch (policy.type) {
+      case 'any':
+        return satisfiedCount >= 1;
+      case 'quorum':
+        return satisfiedCount >= (Number(policy.k) || deps.length);
+      case 'all_settled':
+        return settledCount === deps.length;
+      case 'all':
+      default:
+        return satisfiedCount === deps.length;
+    }
+  }
+
+  function dependencyBlockState(card) {
+    let block = card?.metadata?.dependencyBlock;
+    return block && typeof block === 'object' ? block : null;
+  }
+
+  function releasedEdgesFor(card) {
+    let block = dependencyBlockState(card);
+    return new Set(Array.isArray(block?.releasedEdges) ? block.releasedEdges : []);
+  }
+
+  // Cycle check (inv 23). Linking `dependent → upstream` closes a cycle iff `dependent` is already
+  // reachable FROM `upstream` in the current dependency closure (transitive DFS, not depth-1). A
+  // self-link is trivially a cycle.
+  function wouldCreateDependencyCycle(boardId, dependentCardId, upstreamCardId) {
+    if (dependentCardId === upstreamCardId) return true;
+    let seen = new Set();
+    let stack = [upstreamCardId];
+    while (stack.length) {
+      let next = stack.pop();
+      if (next === dependentCardId) return true;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      for (let dep of cardDependsOn(stateGraph.get(`workflowCards/${next}`))) {
+        stack.push(dep.cardId);
+      }
+    }
+    return false;
+  }
+
+  // Does `card`'s current dependency closure contain a cycle (any card reachable from itself)? Used as
+  // the defensive admission guard (inv 23) — a card whose closure is cyclic must not be admitted.
+  function dependencyClosureIsCyclic(cardId) {
+    let seen = new Set();
+    let stack = [cardId];
+    let first = true;
+    while (stack.length) {
+      let next = stack.pop();
+      if (!first && next === cardId) return true;
+      first = false;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      for (let dep of cardDependsOn(stateGraph.get(`workflowCards/${next}`))) {
+        stack.push(dep.cardId);
+      }
+    }
+    return false;
+  }
+
+  // Priority inheritance (inv 24). An upstream's effective admission priority is the MAX of its own
+  // priority and every transitive downstream waiter's priority, so a chain feeding a high-priority
+  // card is admitted with the inherited (elevated) priority and never starved while blocked cards sit
+  // outside the queue. Bounded by the cycle-safe `seen` guard.
+  function effectiveAdmissionPriority(card, board) {
+    let boardId = board?.id ?? card.boardId;
+    let cards = boardCardsFor(boardId);
+    // downstream adjacency: upstreamId → [dependent cards that wait on it]
+    let waitersOf = new Map();
+    for (let dependent of cards) {
+      for (let dep of cardDependsOn(dependent)) {
+        if (!waitersOf.has(dep.cardId)) waitersOf.set(dep.cardId, []);
+        waitersOf.get(dep.cardId).push(dependent);
+      }
+    }
+    let best = priorityOrdinal(card.priority);
+    let seen = new Set([card.id]);
+    let stack = [...(waitersOf.get(card.id) ?? [])];
+    while (stack.length) {
+      let waiter = stack.pop();
+      if (seen.has(waiter.id)) continue;
+      seen.add(waiter.id);
+      best = Math.max(best, priorityOrdinal(waiter.priority));
+      for (let next of waitersOf.get(waiter.id) ?? []) {
+        if (!seen.has(next.id)) stack.push(next);
+      }
+    }
+    return best;
+  }
+
+  // inv 24 (live): effective admission priorities for every card on the board, computed in one pass so
+  // admissionOrder reflects priority inheritance recomputed live at order time (not just the value
+  // frozen into entry.priority at enqueue). Builds the downstream `waitersOf` adjacency once (same
+  // construction as effectiveAdmissionPriority) and memoizes each card's transitive-max over the shared
+  // map — bounded O(cards + edges) total, cycle-safe via the per-walk `seen` guard. Returns a Map
+  // cardId → effective ordinal.
+  function effectiveAdmissionPrioritiesFor(board) {
+    let cards = boardCardsFor(board.id);
+    let waitersOf = new Map();
+    for (let dependent of cards) {
+      for (let dep of cardDependsOn(dependent)) {
+        if (!waitersOf.has(dep.cardId)) waitersOf.set(dep.cardId, []);
+        waitersOf.get(dep.cardId).push(dependent);
+      }
+    }
+    let byId = new Map(cards.map(card => [card.id, card]));
+    let memo = new Map();
+    function effectiveFor(card) {
+      let cached = memo.get(card.id);
+      if (cached !== undefined) return cached;
+      let best = priorityOrdinal(card.priority);
+      let seen = new Set([card.id]);
+      let stack = [...(waitersOf.get(card.id) ?? [])];
+      while (stack.length) {
+        let waiter = stack.pop();
+        if (seen.has(waiter.id)) continue;
+        seen.add(waiter.id);
+        best = Math.max(best, priorityOrdinal(waiter.priority));
+        for (let next of waitersOf.get(waiter.id) ?? []) {
+          if (!seen.has(next.id)) stack.push(next);
+        }
+      }
+      memo.set(card.id, best);
+      return best;
+    }
+    for (let card of cards) effectiveFor(card);
+    return { byId, effective: memo };
+  }
+
+  function dependencyLifecycleCard(card, lifecycle, principal, ts, metadata) {
+    return normalizeWorkflowCardInput({
+      ...card,
+      lifecycle,
+      metadata: metadata ?? card.metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+  }
+
+  // Persist the dependent into `blocked` (idle→blocked), stamping the blocked-age clock so the
+  // max-blocked-age escalation has a durable start time. Idempotent if already blocked.
+  function commitDependencyBlock(board, card, principal) {
+    if (normalizeWorkflowLifecycle(card.lifecycle) === 'blocked') return card;
+    if (!isWorkflowLifecycleTransitionAllowed(card.lifecycle, 'blocked', 'dependency')) return card;
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card) ?? {};
+    metadata.dependencyBlock = {
+      blockedAt: Number(block.blockedAt) || ts,
+      releasedEdges: Array.isArray(block.releasedEdges) ? block.releasedEdges : [],
+    };
+    let blocked = dependencyLifecycleCard(card, 'blocked', principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: blocked }], sourceForPrincipal(principal));
+    return blocked;
+  }
+
+  // Persist the dependent out of `blocked` back to `idle` (blocked→idle), clearing the blocked-age
+  // clock. The release tick / auto-admit path then decides whether to enqueue.
+  function commitDependencyUnblock(card, principal) {
+    if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked') return card;
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    delete metadata.dependencyBlock;
+    let idle = dependencyLifecycleCard(card, 'idle', principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: idle }], sourceForPrincipal(principal));
+    return idle;
+  }
+
+  // Build the frozen-channel pieces of a typed `needs_decision` escalation: the normalized escalation
+  // state (folded onto `card.metadata.escalation`) plus the `escalation` transition event for board
+  // visibility. Returns the next metadata + event without committing, so callers can fold both into
+  // their own (possibly CAS-fenced) frame. Shared by the release/max-blocked-age path and the
+  // admission-time cycle guard (inv 22) so every escalation uses one vocabulary.
+  function buildDependencyEscalation(board, card, principal, detail, suggestedResolution, ts) {
+    let escalation = normalizeWorkflowEscalation(
+      { kind: 'needs_decision', detail, suggestedResolution, raisedBy: principal.label },
+      { now: ts },
+    );
+    let existing = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : null;
+    let state = normalizeWorkflowEscalationState({
+      lastEscalation: escalation,
+      attemptCount: existing?.attemptCount ?? 0,
+      firstAt: existing?.firstAt ?? ts,
+      lastAt: ts,
+      nextAttemptAt: existing?.nextAttemptAt ?? ts,
+      humanEscalated: existing?.humanEscalated ?? false,
+      history: [
+        ...(existing?.history ?? []),
+        { kind: 'needs_decision', detail, runId: null, at: ts },
+      ],
+    });
+    let metadata = { ...(card.metadata ?? {}), escalation: state };
+    let escId = nextId(makeId, 'escalation');
+    let event = normalizeWorkflowTransitionEvent({
+      id: escId,
+      eventType: 'escalation',
+      boardId: board.id,
+      cardId: card.id,
+      fromColumnId: card.columnId,
+      toColumnId: card.columnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason: detail,
+      status: 'accepted',
+      sideEffects: [{ type: 'escalation', status: 'raised', kind: 'needs_decision', detail }],
+    }, { id: escId, now: ts });
+    return { metadata, event };
+  }
+
+  // Raise a typed `needs_decision` escalation on a card (the dependency-failure / max-blocked-age
+  // path), keeping the card's current lifecycle. Returns the updated card.
+  function raiseDependencyEscalation(board, card, principal, detail, suggestedResolution) {
+    let ts = now();
+    let { metadata, event } = buildDependencyEscalation(board, card, principal, detail, suggestedResolution, ts);
+    let next = dependencyLifecycleCard(card, card.lifecycle, principal, ts, metadata);
+    stateGraph.commit([
+      { op: 'set', path: `workflowCards/${card.id}`, value: next },
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceForPrincipal(principal));
+    return next;
+  }
+
+  // Cancel a dependent (the `cancel_self` failure resolution): drive it to the board's terminal
+  // (close) column and clear its dependency block. Best-effort — if the board has no terminal column
+  // the lifecycle is still cleared so the card is not left silently blocked.
+  function cancelDependentCard(board, card, principal, reason) {
+    let ts = now();
+    let classifier = classifyWorkflowGraph(board);
+    let terminalColumn = board.columns.find(column => classifier.isTerminal(column.id));
+    let metadata = { ...(card.metadata ?? {}) };
+    delete metadata.dependencyBlock;
+    let cancelled = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'idle',
+      columnId: terminalColumn ? terminalColumn.id : card.columnId,
+      metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    let eventId = nextId(makeId, 'dependency');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId,
+      eventType: 'transition',
+      boardId: board.id,
+      cardId: card.id,
+      fromColumnId: card.columnId,
+      toColumnId: cancelled.columnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason,
+      status: 'accepted',
+      sideEffects: [{ type: 'dependency_resolution', resolution: 'cancel_self', detail: reason }],
+    }, { id: eventId, now: ts });
+    stateGraph.commit([
+      { op: 'set', path: `workflowCards/${card.id}`, value: cancelled },
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceForPrincipal(principal));
+    return cancelled;
+  }
+
+  // Record an edge as `release`-resolved on the dependent so allDependenciesSatisfied treats it as
+  // satisfied without waiting for the (failed/deleted) upstream's normal signal.
+  function commitReleasedEdge(card, upstreamCardId, principal) {
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card) ?? {};
+    let releasedEdges = new Set(Array.isArray(block.releasedEdges) ? block.releasedEdges : []);
+    releasedEdges.add(upstreamCardId);
+    metadata.dependencyBlock = {
+      blockedAt: Number(block.blockedAt) || ts,
+      releasedEdges: [...releasedEdges],
+    };
+    let next = dependencyLifecycleCard(card, card.lifecycle, principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: next }], sourceForPrincipal(principal));
+    return next;
+  }
+
+  // Is an upstream card already in a settled terminal-failure state? (F-DEP-2 level check.) True when
+  // its latest run terminal-FAILED (error|failed|cancelled) and nothing is still in flight that could
+  // clear it (no requested/running/recovering run). This is the level-triggered counterpart of the
+  // reconcile edge-trigger (which only fires on a status TRANSITION): an upstream that was already
+  // failed when the edge was linked never transitions, so the dependent would otherwise sit blocked
+  // until the 24h max-blocked-age tick. A terminal SUCCESS is satisfaction, not failure, and is not
+  // reported here.
+  function upstreamInTerminalFailure(upstreamCard) {
+    if (!upstreamCard) return false;
+    let runs = getRunsForCard(upstreamCard.id);
+    if (!runs.length) return false;
+    if (runs.some(run => RUNNING_RUN_STATUSES.has(run.status))) return false;
+    let latest = runs[runs.length - 1];
+    return ['error', 'failed', 'cancelled'].includes(textOrNull(latest.status));
+  }
+
+  // Failure propagation (inv 22): an upstream reaching a terminal-failure or being deleted resolves
+  // every downstream edge that points at it, per the dependent's `onUpstreamFailure`. Fan-in fast-fail:
+  // a dependent with multiple edges resolves the moment ANY required edge terminal-fails (we do not
+  // wait for the others). Never a silent permanent block.
+  function propagateUpstreamResolution(upstreamCard, board, kind) {
+    let principal = daemonPrincipal();
+    let resolved = [];
+    let detailKind = kind === 'deleted' ? 'was deleted' : 'reached a terminal failure';
+    for (let dependent of boardCardsFor(board.id)) {
+      let deps = cardDependsOn(dependent);
+      let edge = deps.find(dep => dep.cardId === upstreamCard.id);
+      if (!edge) continue;
+      let live = clone(stateGraph.get(`workflowCards/${dependent.id}`));
+      if (!live) continue;
+      let detail = `Upstream dependency ${upstreamCard.id} ${detailKind}; resolving edge on ${dependent.id} per onUpstreamFailure=${edge.onUpstreamFailure}.`;
+      if (edge.onUpstreamFailure === 'release') {
+        commitReleasedEdge(live, upstreamCard.id, principal);
+        resolved.push({ cardId: dependent.id, resolution: 'release' });
+      } else if (edge.onUpstreamFailure === 'cancel_self') {
+        cancelDependentCard(board, live, principal, detail);
+        resolved.push({ cardId: dependent.id, resolution: 'cancel_self' });
+      } else {
+        // block_and_escalate (default): a typed needs_decision on the dependent — never a silent block.
+        raiseDependencyEscalation(board, live, principal, detail, 'Decide whether to release, reroute, or cancel the dependent.');
+        resolved.push({ cardId: dependent.id, resolution: 'block_and_escalate' });
+      }
+    }
+    return resolved;
+  }
+
+  // Release tick (inv 21, 24): for each `blocked` card on the board, if every edge is satisfied →
+  // enqueue it (blocked→queued via the S8 enqueue path). A card blocked past MAX_BLOCKED_AGE_MS
+  // escalates to needs_decision (never a silent permanent block). Runs at the TOP of the admission
+  // pass, before drain, and in the reconcile loop.
+  function releaseDependencies(boardId) {
+    let board = ensureBoard(boardId);
+    let classifier = classifyWorkflowGraph(board);
+    let principal = daemonPrincipal();
+    let released = [];
+    let escalated = [];
+    let currentNow = now();
+    for (let card of boardCardsFor(board.id)) {
+      // Process blocked cards plus any JOIN card that has not yet woken its owner — a join whose
+      // members were already satisfied at materialization is created `idle`, so the plain blocked
+      // guard would skip it and the owner would never be woken.
+      let pendingJoin = card.kind === 'join' && !card.metadata?.ownerNotifiedAt;
+      if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked' && !pendingJoin) continue;
+      let live = clone(card);
+      let releasedEdges = releasedEdgesFor(live);
+      // F-DEP-2: level-trigger onUpstreamFailure. Before the satisfaction check, resolve any edge
+      // whose upstream is ALREADY in a settled terminal-failure (the edge-triggered reconcile path
+      // only fires on a status transition, so an already-failed upstream at link time never escalates
+      // until the 24h tick). Apply the edge's policy now: release marks the edge satisfied,
+      // cancel_self cancels the dependent, block_and_escalate raises needs_decision. After resolution
+      // the dependent's state may change, so re-read it before the satisfaction check below.
+      let resolvedAny = false;
+      for (let dep of cardDependsOn(live)) {
+        if (releasedEdges.has(dep.cardId)) continue;
+        let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
+        if (!upstreamInTerminalFailure(upstream)) continue;
+        let detail = `Upstream dependency ${dep.cardId} reached a terminal failure; resolving edge on ${card.id} per onUpstreamFailure=${dep.onUpstreamFailure}.`;
+        if (dep.onUpstreamFailure === 'release') {
+          commitReleasedEdge(live, dep.cardId, principal);
+        } else if (dep.onUpstreamFailure === 'cancel_self') {
+          cancelDependentCard(board, live, principal, detail);
+        } else {
+          raiseDependencyEscalation(board, live, principal, detail, 'Decide whether to release, reroute, or cancel the dependent.');
+        }
+        resolvedAny = true;
+      }
+      if (resolvedAny) {
+        let refreshed = stateGraph.get(`workflowCards/${card.id}`);
+        // cancel_self moved the card off `blocked` (to its terminal column) — nothing more to do.
+        if (!refreshed || normalizeWorkflowLifecycle(refreshed.lifecycle) !== 'blocked') continue;
+        live = clone(refreshed);
+        releasedEdges = releasedEdgesFor(live);
+      }
+      if (allDependenciesSatisfied(live, board, classifier, releasedEdges)) {
+        // A satisfied JOIN card is not work to admit — it is a coordination barrier. Its release
+        // wakes the owner through the return-loop (mint a `completed` return onto the owner) and
+        // retires the join card, instead of enqueuing the synthetic card as a runnable item.
+        if (live.kind === 'join') {
+          let woke = wakeJoinOwner(board, live, principal);
+          released.push({ cardId: card.id, join: true, ownerCardId: textOrNull(live.parentCardId), ownerWoken: woke });
+          continue;
+        }
+        let idle = commitDependencyUnblock(live, principal);
+        let enqueued = enqueueWorkItem(board, idle);
+        if (enqueued.ok) released.push({ cardId: card.id, admissionId: enqueued.entry?.admissionId });
+        continue;
+      }
+      let block = dependencyBlockState(live);
+      let blockedAt = Number(block?.blockedAt);
+      if (Number.isFinite(blockedAt) && (currentNow - blockedAt) >= MAX_BLOCKED_AGE_MS && !hasActiveEscalation(live)) {
+        raiseDependencyEscalation(
+          board,
+          live,
+          principal,
+          `Card ${card.id} has been blocked on an unsatisfied dependency for over ${Math.floor(MAX_BLOCKED_AGE_MS / 3600000)}h.`,
+          'Decide whether to release, reroute, or cancel the blocked card.',
+        );
+        escalated.push({ cardId: card.id });
+      }
+    }
+    return { ok: true, boardId: board.id, released, escalated };
+  }
+
+  // Materialize a `join` subscription as a synthetic dependent card (S5). The join `dependsOn` every
+  // member (releaseWhen: card_done); the per-member `onUpstreamFailure` is mapped from the
+  // subscription's onFailure — `all_settled` => `release` (a failed member counts as settled, so the
+  // all_settled / quorum / any policies release once a member is done-or-failed), and the default
+  // `fail_fast` => `block_and_escalate` (a failed member hard-interrupts the join). The joinPolicy is
+  // stored on `metadata.joinPolicy` so allDependenciesSatisfied folds the member edges by policy.
+  // Reuses the createOrUpdateCard write path (which re-checks the cycle guard) and lifts the join's
+  // priority to the max member priority via effectiveAdmissionPriority. Returns the created card, or
+  // `{ ok:false, reason }` on a self-referential/cyclic join.
+  function materializeJoinCard(board, subscription, ownerCardId, principal = resolvePrincipal()) {
+    let normalized = normalizeWorkflowSubscription(subscription);
+    if (!normalized || normalized.mode !== 'join') return { ok: false, reason: 'not_a_join' };
+    let ensuredBoard = ensureBoard(board?.id ?? board ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let onUpstreamFailure = normalized.onFailure === 'all_settled' ? 'release' : 'block_and_escalate';
+    let releaseWhen = normalized.releaseWhen ?? 'card_done';
+    let dependsOn = normalized.members.map(cardId => ({
+      cardId,
+      releaseWhen,
+      onUpstreamFailure,
+    }));
+    let joinId = nextId(makeId, 'join');
+    // Reject a self-referential or cyclic join before committing (a member equal to the join, or a
+    // member that already reaches the join in the dependency closure).
+    for (let dep of dependsOn) {
+      if (wouldCreateDependencyCycle(ensuredBoard.id, joinId, dep.cardId)) {
+        return { ok: false, reason: 'dependency_cycle', upstreamCardId: dep.cardId };
+      }
+    }
+    // Lift the join's priority to the max member priority so a join feeding on a high-priority member
+    // inherits the elevated admission ordinal (reuses effectiveAdmissionPriority's ordinal model).
+    let liftedOrdinal = normalized.members.reduce((best, memberId) => {
+      let member = stateGraph.get(`workflowCards/${memberId}`);
+      let lifted = member ? effectiveAdmissionPriority(member, ensuredBoard) : 0;
+      return Math.max(best, lifted);
+    }, 0);
+    let owner = stateGraph.get(`workflowCards/${ownerCardId}`);
+    let created = createOrUpdateCard({
+      id: joinId,
+      boardId: ensuredBoard.id,
+      columnId: 'backlog',
+      kind: 'join',
+      title: `Join: ${ownerCardId ?? joinId}`,
+      priority: priorityLabel(liftedOrdinal),
+      parentCardId: ownerCardId ?? null,
+      projectId: owner?.projectId ?? null,
+      domain: owner?.domain ?? null,
+      owner: owner?.owner ?? 'orchestrator',
+      dependsOn,
+      metadata: { joinPolicy: normalized.joinPolicy, subscription: normalized },
+    }, principal);
+    if (!created.ok) {
+      return { ok: false, reason: created.failures?.[0]?.gate ?? 'join_create_failed', detail: created };
+    }
+    return created.card;
+  }
+
+  // A released JOIN card wakes its owner (S5): mint a `completed` return onto the owner's inbox so the
+  // orchestrator re-engages through the SAME return-loop driver (reconcileWorkflowEscalations), then
+  // retire the join card to a terminal column. Idempotent — `metadata.ownerNotifiedAt` plus the
+  // deterministic per-join eventId guard against any double-wake. Returns whether an owner was woken.
+  function wakeJoinOwner(board, joinCard, principal) {
+    let ts = now();
+    if (joinCard.metadata?.ownerNotifiedAt) {
+      commitDependencyUnblock(joinCard, principal);
+      return false;
+    }
+    let ownerId = textOrNull(joinCard.parentCardId);
+    let members = cardDependsOn(joinCard).map(dep => dep.cardId);
+    let terminalColumnId = (board.columns ?? []).find(col => col?.automation?.action === 'close')?.id
+      ?? (board.columns ?? []).find(col => col?.id === 'done')?.id
+      ?? joinCard.columnId;
+    let retiredMetadata = { ...(joinCard.metadata ?? {}), ownerNotifiedAt: ts };
+    delete retiredMetadata.dependencyBlock;
+    let retired = normalizeWorkflowCardInput({
+      ...joinCard,
+      columnId: terminalColumnId,
+      lifecycle: 'idle',
+      metadata: retiredMetadata,
+      version: joinCard.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: joinCard.id,
+      actor: principal.label,
+      now: ts,
+      version: joinCard.version + 1,
+      createdAt: joinCard.createdAt,
+      updatedAt: ts,
+    });
+    let ops = [{ op: 'set', path: `workflowCards/${joinCard.id}`, value: retired }];
+    let ownerWoken = false;
+    if (ownerId) {
+      let owner = stateGraph.get(`workflowCards/${ownerId}`);
+      if (owner) {
+        let eventId = `join-${crypto.createHash('sha256').update(joinCard.id).digest('hex').slice(0, 20)}`;
+        let returnEvent = normalizeWorkflowReturnEvent(
+          { kind: 'completed', payload: { join: joinCard.id, members } },
+          { now: ts, correlationId: ownerId, raisedBy: ESCALATION_ACTOR, eventId, routed: true },
+        );
+        let nextReturns = coalesceReturnEvents(owner.metadata?.returns, returnEvent);
+        let ownerNext = normalizeWorkflowCardInput({
+          ...owner,
+          metadata: { ...(owner.metadata && typeof owner.metadata === 'object' ? owner.metadata : {}), returns: nextReturns },
+          version: owner.version + 1,
+          updatedAt: ts,
+          updatedBy: principal.label,
+        }, {
+          id: owner.id,
+          actor: principal.label,
+          now: ts,
+          version: owner.version + 1,
+          createdAt: owner.createdAt,
+          updatedAt: ts,
+        });
+        ops.push({ op: 'set', path: `workflowCards/${ownerId}`, value: ownerNext });
+        ownerWoken = true;
+      }
+    }
+    let eventId = nextId(makeId, 'join');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId,
+      eventType: 'join',
+      boardId: board.id,
+      cardId: joinCard.id,
+      fromColumnId: joinCard.columnId,
+      toColumnId: terminalColumnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason: ownerWoken ? `Join satisfied; woke owner ${ownerId}.` : 'Join satisfied; no owner to wake.',
+      status: 'accepted',
+      sideEffects: [{ type: 'join_release', ownerCardId: ownerId, members }],
+    }, { id: eventId, now: ts });
+    ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
+    stateGraph.commit(ops, sourceForPrincipal(principal));
+    return ownerWoken;
+  }
+
+  // Link a dependency: set/extend the dependent's `dependsOn` with `{ cardId|dependsOnCardId }`
+  // upstream edges. Gated as a card mutation (card.write). Rejects (no commit) on a cycle (inv 23).
+  // After link, recompute the dependent's lifecycle: an unsatisfied edge on an idle/blocked card →
+  // blocked; an already-satisfied set leaves it idle for the release tick (or immediate enqueue if its
+  // column auto-admits).
+  function linkDependency(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    if (!cardId) throw new Error('linkDependency requires cardId.');
+    let linkGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!linkGate.ok) return linkGate;
+    let card = getCard(cardId);
+    let board = ensureBoard(card.boardId);
+    let additions = normalizeWorkflowDependsOn(args.dependsOn ?? args.depends_on);
+    if (!additions.length) return { ok: false, reason: 'no_dependencies', card };
+    for (let dep of additions) {
+      if (!stateGraph.get(`workflowCards/${dep.cardId}`)) {
+        return { ok: false, reason: 'upstream_not_found', upstreamCardId: dep.cardId, card };
+      }
+      if (wouldCreateDependencyCycle(board.id, cardId, dep.cardId)) {
+        return { ok: false, reason: 'dependency_cycle', upstreamCardId: dep.cardId, card };
+      }
+    }
+    let byCardId = new Map(cardDependsOn(card).map(dep => [dep.cardId, dep]));
+    for (let dep of additions) byCardId.set(dep.cardId, dep);
+    let nextDependsOn = [...byCardId.values()];
+    let ts = now();
+    let linked = normalizeWorkflowCardInput({
+      ...card,
+      dependsOn: nextDependsOn,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: linked }], sourceForPrincipal(principal));
+    let outcome = recomputeDependencyLifecycle(board, linked, principal);
+    return { ok: true, card: outcome.card, dependsOn: outcome.card.dependsOn, lifecycle: outcome.card.lifecycle, ...outcome.extra };
+  }
+
+  // Unlink a dependency: remove the `{ cardId|dependsOnCardId }` upstream edge(s) from the dependent.
+  // Gated as a card mutation. After unlink, recompute lifecycle (a now-fully-satisfied card clears to
+  // idle/enqueues; a still-blocked card stays blocked).
+  function unlinkDependency(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    if (!cardId) throw new Error('unlinkDependency requires cardId.');
+    let unlinkGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!unlinkGate.ok) return unlinkGate;
+    let card = getCard(cardId);
+    let board = ensureBoard(card.boardId);
+    let removeIds = new Set(
+      normalizeWorkflowDependsOn(
+        args.dependsOn ?? args.depends_on ?? args.dependsOnCardId ?? args.depends_on_card_id ?? args.upstreamCardId,
+      ).map(dep => dep.cardId),
+    );
+    if (!removeIds.size) return { ok: false, reason: 'no_dependencies', card };
+    let nextDependsOn = cardDependsOn(card).filter(dep => !removeIds.has(dep.cardId));
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card);
+    if (block && Array.isArray(block.releasedEdges)) {
+      let releasedEdges = block.releasedEdges.filter(id => !removeIds.has(id));
+      metadata.dependencyBlock = { ...block, releasedEdges };
+    }
+    let unlinked = normalizeWorkflowCardInput({
+      ...card,
+      dependsOn: nextDependsOn,
+      metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: unlinked }], sourceForPrincipal(principal));
+    let outcome = recomputeDependencyLifecycle(board, unlinked, principal);
+    return { ok: true, card: outcome.card, dependsOn: outcome.card.dependsOn, lifecycle: outcome.card.lifecycle, ...outcome.extra };
+  }
+
+  // ── Board-policy authoring surface (WS-C; inv 8, 11) ──────────────────────────────────────────
+  // Authoring a column/transition/gate is policy.define (DEFINE → pendingApproval for a non-author).
+  // Every mutation re-runs validateWorkflowTransitionGraph on the proposed next board and REJECTS
+  // (without committing) if the graph is invalid, so the board can never be authored into an
+  // unoperable state (inv 11). A successful author commits durably and bumps the board version.
+
+  function bumpBoardVersion(board) {
+    return Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) + 1 : 1;
+  }
+
+  // A define mutation: validate the proposed next board, reject on the first validator error without
+  // committing, else commit the board and return the durable clone. The gate has already passed.
+  function commitDefinedBoard(nextBoard, principal, extra = {}) {
+    let validation = validateWorkflowTransitionGraph(nextBoard);
+    if (!validation.ok) {
+      let first = validation.errors[0];
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{ gate: 'invalid_board_graph', code: first.code, reason: first.detail }],
+      };
+    }
+    stateGraph.commit(
+      [{ op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard }],
+      sourceForPrincipal(principal),
+    );
+    return { ok: true, board: clone(nextBoard), ...extra };
+  }
+
+  // define_column: add OR update a board column. Gate policy.define. Apply to board.columns (insert at
+  // `after`/`position` for a new column; in-place update for an existing one), re-validate the graph,
+  // commit durably, bump version.
+  function defineWorkflowColumn(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let columnId = textOrNull(args.columnId ?? args.column_id ?? args.id);
+    if (!columnId) throw new Error('defineWorkflowColumn requires columnId.');
+    let ts = now();
+    let columns = Array.isArray(board.columns) ? board.columns.slice() : [];
+    let index = columns.findIndex(column => column.id === columnId);
+    let title = textOrNull(args.title);
+    let automationPatch = asObject(args.automation);
+    if (index >= 0) {
+      let current = columns[index];
+      columns[index] = {
+        ...current,
+        title: title ?? current.title,
+        automation: Object.keys(automationPatch).length
+          ? normalizeWorkflowAutomation({ ...asObject(current.automation), ...automationPatch })
+          : asObject(current.automation),
+      };
+    } else {
+      let column = {
+        id: columnId,
+        title: title ?? columnId,
+        automation: normalizeWorkflowAutomation(automationPatch),
+      };
+      let position = resolveColumnInsertIndex(columns, args, columns.length);
+      columns.splice(position, 0, column);
+    }
+    let nextBoard = {
+      ...board,
+      columns,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+      metadata: { ...asObject(board.metadata), columnSettingsUpdatedAt: ts },
+    };
+    let outcome = commitDefinedBoard(nextBoard, principal, {
+      column: clone(columns.find(column => column.id === columnId)),
+    });
+    return outcome;
+  }
+
+  // Insertion index for a NEW column: after `args.after` (column id), else at `args.position` (clamped),
+  // else appended. The default board keeps `done` terminal at the end; an author inserting before it
+  // simply passes a position/after that lands earlier.
+  function resolveColumnInsertIndex(columns, args, fallback) {
+    let after = textOrNull(args.after);
+    if (after) {
+      let idx = columns.findIndex(column => column.id === after);
+      if (idx >= 0) return idx + 1;
+    }
+    let position = Number(args.position);
+    if (Number.isFinite(position)) return Math.max(0, Math.min(columns.length, Math.floor(position)));
+    return fallback;
+  }
+
+  // Validate a proposed gate list against the closed iso vocabulary. Returns the deduped gate id array
+  // or throws on an unknown gate (fail-closed; the validator would also reject it, this is the early,
+  // precise error).
+  function normalizeDefinedGates(gates) {
+    let ids = textArray(gates);
+    for (let id of ids) {
+      if (!WORKFLOW_GATE_VOCABULARY.includes(id)) {
+        throw new Error(`Unknown workflow gate "${id}". Supported: ${WORKFLOW_GATE_VOCABULARY.join(', ')}`);
+      }
+    }
+    return ids;
+  }
+
+  let transitionEdgeKey = transition => `${textOrNull(transition?.from) ?? ''}->${textOrNull(transition?.to) ?? ''}`;
+
+  // define_transition: add/update a transition edge {from, to, gates}. Gate policy.define. The gates
+  // must be a subset of the closed vocabulary (reject unknown). Apply to board.transitions, re-validate,
+  // commit durably.
+  function defineWorkflowTransition(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let from = textOrNull(args.from);
+    let to = textOrNull(args.to);
+    if (!from || !to) throw new Error('defineWorkflowTransition requires from and to.');
+    let gates = normalizeDefinedGates(args.gates ?? args.gate);
+    let ts = now();
+    let transitions = Array.isArray(board.transitions) ? board.transitions.slice() : [];
+    let edge = { from, to, gates };
+    let index = transitions.findIndex(transition => transitionEdgeKey(transition) === `${from}->${to}`);
+    if (index >= 0) transitions[index] = { ...transitions[index], from, to, gates };
+    else transitions.push(edge);
+    let nextBoard = {
+      ...board,
+      transitions,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+    };
+    return commitDefinedBoard(nextBoard, principal, {
+      transition: clone(transitions.find(transition => transitionEdgeKey(transition) === `${from}->${to}`)),
+    });
+  }
+
+  // define_gate: set/replace the gate list on an EXISTING transition (a focused alias of
+  // define_transition that only touches gates). Gate policy.define. Same closed-vocabulary rule, plus
+  // floor-gate monotonicity: a redefinition may not WEAKEN a floor gate on a forward edge. Re-validate,
+  // commit durably.
+  function defineWorkflowGate(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let from = textOrNull(args.from);
+    let to = textOrNull(args.to);
+    if (!from || !to) throw new Error('defineWorkflowGate requires from and to.');
+    let gates = normalizeDefinedGates(args.gates ?? args.gate);
+    let transitions = Array.isArray(board.transitions) ? board.transitions.slice() : [];
+    let index = transitions.findIndex(transition => transitionEdgeKey(transition) === `${from}->${to}`);
+    if (index < 0) throw new Error(`Workflow transition not found: ${from} -> ${to}.`);
+    let current = transitions[index];
+    // Floor-gate monotonicity (inv 9, 10): a forward edge's redefinition may not drop a floor
+    // (audit/hygiene) gate it currently carries. A backward (rank-decreasing) edge is not a forward
+    // edge, so monotonicity does not apply there. The classifier tells us the edge class.
+    let classifier = classifyWorkflowGraph(board);
+    let edgeClass = classifier.edgeClass(from, to);
+    let currentGates = textArray(current.gates ?? current.gate);
+    if (edgeClass === 'forward' && !isFloorGateMonotonic(currentGates, gates)) {
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{
+          gate: 'floor_gate_monotonic',
+          reason: `Gate redefinition for forward edge ${from} -> ${to} may not weaken a floor (audit/hygiene) gate.`,
+        }],
+      };
+    }
+    transitions[index] = { ...current, from, to, gates };
+    let ts = now();
+    let nextBoard = {
+      ...board,
+      transitions,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+    };
+    return commitDefinedBoard(nextBoard, principal, {
+      transition: clone(transitions[index]),
+    });
+  }
+
+  // enqueue (WS-C public action): resolve the card, gate card.transition (enqueue is an admission
+  // request), then call the internal enqueueWorkItem. Returns the enqueue result (admissionId,
+  // lifecycle). This is the explicit `enqueue` action — distinct from the auto-orchestrate reroute.
+  function enqueueWorkflowCard(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let cardId = normalizeCardId(args);
+    let admissionGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.transition',
+      principal,
+      { cardId },
+    );
+    if (!admissionGate.ok) return admissionGate;
+    let card = getCard(cardId);
+    let board = ensureBoard(card.boardId);
+    let notBefore = args.notBefore ?? args.not_before;
+    let enqueued = enqueueWorkItem(board, card, { notBefore });
+    if (!enqueued.ok) return { ok: false, reason: enqueued.reason, ...(enqueued.gate ? { gate: enqueued.gate } : {}) };
+    let nextCard = enqueued.card ?? getCard(cardId);
+    return {
+      ok: true,
+      boardId: board.id,
+      cardId: nextCard.id,
+      admissionId: enqueued.entry?.admissionId ?? null,
+      lifecycle: nextCard.lifecycle,
+      deduped: enqueued.deduped ?? false,
+      entry: enqueued.entry,
+    };
+  }
+
+  // After a link/unlink, recompute the dependent's idle↔blocked lifecycle (the only transition this
+  // path owns). An unsatisfied edge on a not-yet-queued card → blocked. A fully-satisfied set on a
+  // blocked card → idle, then enqueue immediately if its column auto-admits (else leave for the
+  // release tick). A card already queued/admitting/running is left to the scheduler.
+  function recomputeDependencyLifecycle(board, card, principal) {
+    let classifier = classifyWorkflowGraph(board);
+    let lifecycle = normalizeWorkflowLifecycle(card.lifecycle);
+    let releasedEdges = releasedEdgesFor(card);
+    let satisfied = allDependenciesSatisfied(card, board, classifier, releasedEdges);
+    if (['queued', 'admitting', 'running'].includes(lifecycle)) {
+      return { card, extra: {} };
+    }
+    if (!satisfied) {
+      let blocked = commitDependencyBlock(board, card, principal);
+      return { card: blocked, extra: { blocked: true } };
+    }
+    // All edges satisfied. If it was blocked, clear to idle; then enqueue when the column auto-admits.
+    let cleared = lifecycle === 'blocked' ? commitDependencyUnblock(card, principal) : card;
+    if (columnAutoAdmits(board, cleared.columnId)) {
+      let enqueued = enqueueWorkItem(board, cleared);
+      if (enqueued.ok) {
+        return { card: enqueued.card ?? getCard(cleared.id), extra: { enqueued: true, admissionId: enqueued.entry?.admissionId } };
+      }
+    }
+    return { card: cleared, extra: {} };
+  }
+
+  // A column auto-admits iff its automation trigger fires on entry without a manual gate (the S8 auto
+  // path). Used to decide whether a freshly-satisfied dependent enqueues immediately or waits for the
+  // release tick.
+  function columnAutoAdmits(board, columnId) {
+    let automation = columnAutomation(board, columnId);
+    return automation.mode === 'auto' && (automation.trigger === 'on_enter' || automation.trigger === 'lease_required');
+  }
+
+  // ── Board-admission lease (D1.5, inv 31, 35; AD-10/16) ────────────────────────────────────────
+  function readAdmissionLease(boardId) {
+    return clone(stateGraph.get(`workflowAdmissionLease/${boardId}`) ?? null);
+  }
+
+  function admissionLeaseEpochPath(boardId) {
+    return `workflowAdmissionLease/${boardId}/leaseEpoch`;
+  }
+
+  // Acquire the board-admission lease, making the admit path single-writer per board. Reclaim of a
+  // held lease requires the prior lease to be epoch-bumpable AND past its TTL+grace on wall-clock.
+  // commitCAS on the lease epoch fences two contending admitters: only one bumps the epoch. Returns
+  // { ok, owner, leaseEpoch } or { ok:false, reason }.
+  function acquireAdmissionLease(boardId, owner) {
+    let current = readAdmissionLease(boardId);
+    let currentNow = now();
+    let leaseEpoch = Number(current?.leaseEpoch) || 0;
+    if (current && current.owner && current.owner !== owner) {
+      let heartbeatAt = Number(current.heartbeatAt ?? current.startedAt) || 0;
+      let ttlMs = Number(current.ttlMs) || ADMISSION_LEASE_TTL_MS;
+      let healthy = currentNow <= heartbeatAt + ttlMs;
+      if (healthy) return { ok: false, reason: 'admission_lease_held', owner: current.owner };
+    }
+    let nextLease = {
+      schema: 'workflow-admission-lease/v1',
+      owner,
+      leaseEpoch: leaseEpoch + 1,
+      startedAt: currentNow,
+      heartbeatAt: currentNow,
+      ttlMs: ADMISSION_LEASE_TTL_MS,
+    };
+    let res = stateGraph.commitCAS(
+      admissionLeaseEpochPath(boardId),
+      leaseEpoch,
+      [{ op: 'set', path: `workflowAdmissionLease/${boardId}`, value: nextLease }],
+      sourceForPrincipal(daemonPrincipal()),
+      { durable: true },
+    );
+    if (!res.ok) return { ok: false, reason: 'admission_lease_contended' };
+    return { ok: true, owner, leaseEpoch: nextLease.leaseEpoch };
+  }
+
+  function heartbeatAdmissionLease(boardId, owner, leaseEpoch) {
+    let current = readAdmissionLease(boardId);
+    if (!current || current.owner !== owner || Number(current.leaseEpoch) !== leaseEpoch) return false;
+    let next = { ...current, heartbeatAt: now() };
+    stateGraph.commit(
+      [{ op: 'set', path: `workflowAdmissionLease/${boardId}`, value: next }],
+      sourceForPrincipal(daemonPrincipal()),
+      { durable: true },
+    );
+    return true;
+  }
+
+  function releaseAdmissionLease(boardId, owner, leaseEpoch) {
+    let current = readAdmissionLease(boardId);
+    if (!current || current.owner !== owner || Number(current.leaseEpoch) !== leaseEpoch) return false;
+    stateGraph.commit(
+      [{ op: 'delete', path: `workflowAdmissionLease/${boardId}` }],
+      sourceForPrincipal(daemonPrincipal()),
+      { durable: true },
+    );
+    return true;
+  }
+
+  // Detect a stranded `admitting` card whose admitter is gone: lease epoch-stale (a newer lease
+  // exists or the lease is absent) AND wall-clock grace elapsed since the admission started. This is
+  // the recovery barrier of AD-16 — recovery never reclaims an in-flight admission inside the grace.
+  function admissionLeaseStranded(boardId, admittingStartedAt) {
+    let current = readAdmissionLease(boardId);
+    let started = Number(admittingStartedAt) || 0;
+    let graceElapsed = now() > started + ADMISSION_INFLIGHT_GRACE_MS;
+    if (!current) return graceElapsed;
+    let healthy = now() <= (Number(current.heartbeatAt ?? current.startedAt) || 0) + (Number(current.ttlMs) || ADMISSION_LEASE_TTL_MS);
+    if (healthy) return false;
+    return graceElapsed;
+  }
+
+  // ── Drain / admission pass (D1.1-D1.5, inv 1-7, 36, 41-44) ────────────────────────────────────
+  // The SOLE owner of queued→admitting→running + lease grant, run under the board-admission lease.
+  // INLINE (best-effort after an enqueue) and the scheduler LOOP call the same code path.
+  async function drainWorkflowQueue(boardId, opts = {}, context = {}) {
+    let board = ensureBoard(boardId);
+    // Release tick first (AD-5 admission pseudocode: releaseDependencies() then drain). Blocked cards
+    // whose every edge is satisfied are enqueued before this pass picks the admission order, and a
+    // card blocked past max-blocked-age escalates. Skipped only when the board mode forbids release.
+    if (!['stopped', 'maintenance'].includes(board.mode)) {
+      releaseDependencies(board.id);
+    }
+    let owner = textOrNull(opts.owner) ?? `drain-${slugSegment(board.id)}-${nextId(makeId, 'pass')}`;
+    let budget = Number.isFinite(Number(opts.budget)) && Number(opts.budget) > 0
+      ? Math.floor(Number(opts.budget))
+      : DEFAULT_DRAIN_BUDGET;
+    let admitted = [];
+    let rolledBack = [];
+    let skipped = [];
+
+    let lease = acquireAdmissionLease(board.id, owner);
+    if (!lease.ok) {
+      return { ok: true, drained: false, reason: lease.reason, admitted, rolledBack, skipped };
+    }
+    try {
+      let entries = admissionOrder(board.id, listQueueEntries(board.id));
+      let processed = 0;
+      let lastHeartbeat = now();
+      for (let entry of entries) {
+        if (processed >= budget) break;
+        // Re-read board mode per card (AD-16): a mode flip mid-pass must take effect immediately.
+        let liveBoard = ensureBoard(board.id);
+        if (['paused', 'draining', 'stopped', 'maintenance', 'recovery_only'].includes(liveBoard.mode)) {
+          skipped.push({ admissionId: entry.admissionId, reason: `board_mode_${liveBoard.mode}` });
+          break;
+        }
+        if (entry.notBefore !== null && now() < entry.notBefore) {
+          skipped.push({ admissionId: entry.admissionId, reason: 'not_before' });
+          continue;
+        }
+        processed += 1;
+        if (now() - lastHeartbeat >= ADMISSION_LEASE_HEARTBEAT_MS) {
+          heartbeatAdmissionLease(board.id, owner, lease.leaseEpoch);
+          lastHeartbeat = now();
+        }
+        let outcome = await admitQueueEntry(liveBoard, entry, lease, opts, context);
+        if (outcome.admitted) admitted.push(outcome);
+        else if (outcome.rolledBack) rolledBack.push(outcome);
+        else skipped.push(outcome);
+      }
+    } finally {
+      releaseAdmissionLease(board.id, owner, lease.leaseEpoch);
+    }
+    return { ok: true, drained: true, owner, admitted, rolledBack, skipped };
+  }
+
+  // Admit one queue entry. (1) commitCAS-fenced admission write (D1.3, inv 36): in one durable frame
+  // write the admission record carrying admissionId + set lifecycle=admitting. (2) Reserve the slot
+  // by delegating with admission_id (D1.1/D1.2): agent-pool acquires the ledger slot keyed by
+  // admissionId and persists its dedup record before ack. (3) On grant → lifecycle=running + remove
+  // the queue entry. On at-capacity/not-granted → rollback to queued (head of class, enqueuedAt
+  // preserved). A stale-epoch admitter's CAS fails and it writes nothing (no late compensation).
+  async function admitQueueEntry(board, entry, lease, opts = {}, context = {}) {
+    let card = stateGraph.get(`workflowCards/${entry.cardId}`);
+    if (!card) {
+      // Card vanished — drop the orphan entry under the same epoch fence.
+      let epoch = readQueueEpoch(board.id);
+      stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
+        [{ op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` }],
+        sourceForPrincipal(daemonPrincipal()), { durable: true });
+      return { admissionId: entry.admissionId, reason: 'card_missing' };
+    }
+    card = clone(card);
+    // Defensive admission-time cycle guard (inv 23): refuse to admit a card whose dependency closure
+    // is cyclic. The link path already rejects cycles, but a malformed import or a concurrent edit
+    // could slip a cycle in; admitting one would risk a non-terminating release/inheritance walk.
+    // inv 22 (never a silent permanent block): a cycle will NOT self-resolve via the release tick, so
+    // dropping the entry alone would strand the card with no entry, no trigger, and no escalation.
+    // Escalate it instead — set lifecycle→idle (recoverable, mirroring the hard-failure path) and raise
+    // the same typed `needs_decision` escalation the release path uses, so a human/auditor sees it. The
+    // card set, escalation event, and entry delete land in ONE durable CAS under the queue epoch fence.
+    if (dependencyClosureIsCyclic(entry.cardId)) {
+      let principal = daemonPrincipal();
+      let ts = now();
+      let detail = `Card ${card.id} cannot be admitted: its dependency closure is cyclic.`;
+      let { metadata, event } = buildDependencyEscalation(
+        board, card, principal, detail, 'Break the dependency cycle, then re-enqueue the card.', ts,
+      );
+      let escalated = normalizeWorkflowCardInput({
+        ...clone(card),
+        lifecycle: 'idle',
+        metadata,
+        version: card.version + 1,
+        updatedAt: ts,
+        updatedBy: principal.label,
+      }, {
+        id: card.id,
+        actor: principal.label,
+        now: ts,
+        version: card.version + 1,
+        createdAt: card.createdAt,
+        updatedAt: ts,
+      });
+      let epoch = readQueueEpoch(board.id);
+      stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
+        [
+          { op: 'set', path: `workflowCards/${card.id}`, value: escalated },
+          { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+          { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+        ],
+        sourceForPrincipal(principal), { durable: true });
+      return { admissionId: entry.admissionId, cardId: card.id, reason: 'dependency_cycle' };
+    }
+    // F-DEP-1(b): defense in depth. The queue must never run a card with unsatisfied dependencies,
+    // even if one slipped past the write-path recompute (a concurrent edit, a stale enqueue, or an
+    // upstream that regressed after enqueue). Re-block the card and drop its queue entry under the
+    // epoch fence; the release tick re-enqueues it once every edge is satisfied.
+    {
+      let depClassifier = classifyWorkflowGraph(board);
+      let depReleased = releasedEdgesFor(card);
+      if (!allDependenciesSatisfied(card, board, depClassifier, depReleased)) {
+        let epoch = readQueueEpoch(board.id);
+        let reblocked = normalizeWorkflowCardInput({
+          ...clone(card),
+          lifecycle: 'blocked',
+          version: card.version + 1,
+          updatedAt: now(),
+          updatedBy: daemonPrincipal().label,
+        }, {
+          id: card.id,
+          actor: daemonPrincipal().label,
+          now: now(),
+          version: card.version + 1,
+          createdAt: card.createdAt,
+          updatedAt: now(),
+        });
+        stateGraph.commitCAS(`workflowQueueEpoch/${board.id}`, epoch,
+          [
+            { op: 'set', path: `workflowCards/${card.id}`, value: reblocked },
+            { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+          ],
+          sourceForPrincipal(daemonPrincipal()), { durable: true });
+        return { admissionId: entry.admissionId, cardId: card.id, reason: 'dependencies_unsatisfied' };
+      }
+    }
+    let principal = daemonPrincipal();
+    let admittingStartedAt = now();
+    let admissionRecord = {
+      schema: 'workflow-admission/v1',
+      admissionId: entry.admissionId,
+      cardId: entry.cardId,
+      boardId: board.id,
+      groupKey: entry.groupKey,
+      leaseEpoch: lease.leaseEpoch,
+      queueEpoch: entry.queueEpoch,
+      enqueuedAt: entry.enqueuedAt,
+      startedAt: admittingStartedAt,
+      phase: 'admitting',
+    };
+    let admittingCard = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'admitting',
+      version: card.version + 1,
+      updatedAt: admittingStartedAt,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: admittingStartedAt,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: admittingStartedAt,
+    });
+    // (1) Fenced admission write. The queue epoch is the owning epoch: a concurrent drain that read
+    // a stale epoch fails here and writes nothing (inv 36, the CAS fence). The bump also invalidates
+    // any in-flight admitter that captured the older epoch.
+    let queueEpoch = readQueueEpoch(board.id);
+    let fenced = stateGraph.commitCAS(
+      `workflowQueueEpoch/${board.id}`,
+      queueEpoch,
+      [
+        { op: 'set', path: `workflowAdmissions/${entry.admissionId}`, value: admissionRecord },
+        { op: 'set', path: `workflowCards/${card.id}`, value: admittingCard },
+      ],
+      sourceForPrincipal(principal),
+      { durable: true },
+    );
+    if (!fenced.ok) {
+      return { admissionId: entry.admissionId, reason: 'admission_cas_conflict', currentEpoch: fenced.currentEpoch };
+    }
+
+    // (2) Reserve the slot + spawn via the delegate path, threading admission_id. orchestrateWorkItem
+    // grants the per-card WORK lease (durable) and creates the run; the delegate passes admission_id
+    // to agent-pool, which acquires the ledger slot keyed by it (idempotent) and persists the dedup
+    // record before ack. A capacity rejection surfaces as a delegate isError → run not started.
+    let automation = cardAutomation(board, card);
+    let agent = chooseStageAgent(automation, card, opts);
+    let orchestrateResult;
+    try {
+      orchestrateResult = await orchestrateWorkItem({
+        ...opts,
+        boardId: board.id,
+        cardId: card.id,
+        admission_id: entry.admissionId,
+        expectedVersion: undefined,
+        expected_version: undefined,
+        mode: automation.mode ?? 'auto',
+        agent,
+        leaseOwner: textOrNull(opts.leaseOwner ?? opts.lease_owner) ?? agent,
+        approval_mode: opts.approval_mode ?? automation.approvalMode,
+        resource_group: opts.resource_group ?? automation.resourceGroup,
+        reason: textOrNull(opts.reason) ?? `Admission of card ${card.id}.`,
+      }, { ...context, principal });
+    } catch (error) {
+      orchestrateResult = { ok: false, error: error.message, sideEffects: [] };
+    }
+
+    // F-SCH-3: re-validate that THIS pass still owns the admission lease before any promote/rollback
+    // CAS write. The orchestrate await can block up to the worst-case delegate budget (≫ the 15s lease
+    // TTL) with no heartbeat, so a second admitter may have reclaimed the lease and re-admitted this
+    // entry meanwhile. If we were displaced, write nothing and return a benign result — the new lease
+    // holder (and, failing that, recovery) owns the outcome. Combined with the idempotent-grant below,
+    // the re-admit converges instead of double-writing or stranding.
+    let liveLease = readAdmissionLease(board.id);
+    if (!liveLease || liveLease.owner !== lease.owner || Number(liveLease.leaseEpoch) !== lease.leaseEpoch) {
+      return { admissionId: entry.admissionId, cardId: card.id, displaced: true, reason: 'admission_lease_displaced' };
+    }
+
+    // F-SCH-1: a grant is the run being durably running OR an idempotent existing ACTIVE run.
+    // orchestrateWorkItem returns `{ ok, idempotent:true, run }` when activeRunForCard finds an
+    // existing run, and RUNNING_RUN_STATUSES includes `requested`/`recovering`. Such a run is already
+    // being handled, so treat it as granted: promote lifecycle→running and drop the entry. Without
+    // this, an idempotent `requested`/`recovering` run gave granted=false + slotRejected=false → the
+    // hard-failure branch deleted the entry+record and stranded the card in `admitting` forever.
+    let granted = Boolean(orchestrateResult?.ok)
+      && (orchestrateResult?.run?.status === 'running'
+        || (orchestrateResult?.idempotent
+          && orchestrateResult?.run
+          && RUNNING_RUN_STATUSES.has(orchestrateResult.run.status)));
+    if (!granted) {
+      // A capacity rejection (no slot granted) re-queues the card; any other delegation failure is a
+      // hard error that orchestrateWorkItem already recorded as a failed run + needs_audit. A thrown
+      // error (no result) is treated as transient and re-queued too.
+      let slotRejected = orchestrateResult?.slotRejected !== false
+        && (orchestrateResult?.slotRejected === true || !orchestrateResult?.ok);
+      if (!slotRejected) {
+        // (3a-hard) Hard delegation failure (a non-capacity error, e.g. unknown resource group).
+        // orchestrateWorkItem already recorded the failed run + needs_audit recovery flag.
+        // F-SCH-2: if agent-pool reserved a slot before the spawn failed, that slot is orphaned the
+        // moment we delete the admission record (recovery can no longer see it). Release it first
+        // (idempotent — a no-op when nothing was reserved).
+        await releaseSlotForAdmission(entry.admissionId, context);
+        // F-SCH-1 (defense): never leave the card in `admitting` with no admission record — that is
+        // unrecoverable (reconcile only resolves `admitting` cards that still have a record). Demote
+        // lifecycle→idle in the SAME frame that drops the entry + record, keeping the failed run and
+        // needs_audit flag so a human/auditor can re-engage. A stuck card is then always recoverable.
+        let failedCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+        let recoverableCard = normalizeWorkflowCardInput({
+          ...clone(failedCard),
+          lifecycle: 'idle',
+          version: failedCard.version + 1,
+          updatedAt: now(),
+          updatedBy: principal.label,
+        }, {
+          id: card.id,
+          actor: principal.label,
+          now: now(),
+          version: failedCard.version + 1,
+          createdAt: failedCard.createdAt,
+          updatedAt: now(),
+        });
+        let removeEpoch = readQueueEpoch(board.id);
+        stateGraph.commitCAS(
+          `workflowQueueEpoch/${board.id}`,
+          removeEpoch,
+          [
+            { op: 'set', path: `workflowCards/${card.id}`, value: recoverableCard },
+            { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+            { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
+          ],
+          sourceForPrincipal(principal),
+          { durable: true },
+        );
+        return {
+          admissionId: entry.admissionId,
+          cardId: card.id,
+          result: orchestrateResult,
+          failed: true,
+          reason: orchestrateResult?.error ?? 'delegation_failed',
+        };
+      }
+      // (3a-capacity) Rollback (inv 2): lifecycle→queued at the head of its fairness class, enqueuedAt
+      // preserved (the entry was never removed). No slot was granted, so there is nothing to release;
+      // releaseSlot remains the reconcile/recovery path's single-owner duty. admitting record cleared.
+      let rolledCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+      let nextCard = normalizeWorkflowCardInput({
+        ...clone(rolledCard),
+        lifecycle: 'queued',
+        version: rolledCard.version + 1,
+        updatedAt: now(),
+        updatedBy: principal.label,
+      }, {
+        id: card.id,
+        actor: principal.label,
+        now: now(),
+        version: rolledCard.version + 1,
+        createdAt: rolledCard.createdAt,
+        updatedAt: now(),
+      });
+      let rollbackEpoch = readQueueEpoch(board.id);
+      stateGraph.commitCAS(
+        `workflowQueueEpoch/${board.id}`,
+        rollbackEpoch,
+        [
+          { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
+          { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
+        ],
+        sourceForPrincipal(principal),
+        { durable: true },
+      );
+      return {
+        admissionId: entry.admissionId,
+        cardId: card.id,
+        rolledBack: true,
+        reason: orchestrateResult?.error ?? 'slot_not_granted',
+      };
+    }
+
+    // (3b) Granted: the run is durable (running) and the per-card lease is held. Promote
+    // lifecycle→running and REMOVE the queue entry + admission record now that running is durable
+    // (AD-2: the overlap ends only here). Advance the round-robin cursor to this group.
+    let runningCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+    let promotedCard = normalizeWorkflowCardInput({
+      ...clone(runningCard),
+      lifecycle: 'running',
+      version: runningCard.version + 1,
+      updatedAt: now(),
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: now(),
+      version: runningCard.version + 1,
+      createdAt: runningCard.createdAt,
+      updatedAt: now(),
+    });
+    let promoteEpoch = readQueueEpoch(board.id);
+    stateGraph.commitCAS(
+      `workflowQueueEpoch/${board.id}`,
+      promoteEpoch,
+      [
+        { op: 'set', path: `workflowCards/${card.id}`, value: promotedCard },
+        { op: 'set', path: `workflowQueueCursor/${board.id}`, value: { groupKey: entry.groupKey } },
+        { op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` },
+        { op: 'delete', path: `workflowAdmissions/${entry.admissionId}` },
+      ],
+      sourceForPrincipal(principal),
+      { durable: true },
+    );
+    return {
+      admissionId: entry.admissionId,
+      cardId: card.id,
+      admitted: true,
+      agent,
+      result: orchestrateResult,
+    };
+  }
+
+  // Reroute (inv 31; v2 "enqueues a card; never jumps the admission queue"). What was the immediate
+  // orchestrate trigger now ENQUEUES (lifecycle→queued) and then INLINE-DRAINS best-effort, so a card
+  // that fits capacity is still admitted in the same request (today's responsiveness preserved). It
+  // NEVER calls orchestrateWorkItem directly — the drain is the sole admission owner. The return
+  // shape mirrors the legacy orchestrate result so existing callers keep reading
+  // `orchestration.result.{card,run,lease}` and `orchestration.agent`.
   async function maybeAutoOrchestrateCard(board, card, args = {}, context = {}) {
     let candidate = autoOrchestrationCandidate(board, card, args);
     if (!candidate.ok) {
@@ -827,31 +2833,77 @@ export function createWorkflowBoardService(opts = {}) {
       };
     }
     let automation = candidate.automation;
-    let agent = chooseStageAgent(automation, card, args);
-    let result = await orchestrateWorkItem({
-      ...args,
-      boardId: board.id,
-      cardId: card.id,
-      expectedVersion: undefined,
-      expected_version: undefined,
-      actor: textOrNull(args.actor) ?? 'workflow-board',
-      mode: automation.mode ?? 'auto',
-      agent,
-      leaseOwner: textOrNull(args.leaseOwner ?? args.lease_owner) ?? agent,
-      approval_mode: args.approval_mode ?? automation.approvalMode,
-      resource_group: args.resource_group ?? automation.resourceGroup,
-      reason: textOrNull(args.reason) ?? `Card entered ${card.columnId}.`,
-    }, context);
+    let enqueued = enqueueWorkItem(board, card, { notBefore: args.notBefore ?? args.not_before });
+    if (!enqueued.ok) {
+      return {
+        ok: false,
+        skipped: true,
+        enqueued: false,
+        reason: enqueued.reason,
+        automation,
+        capacity: candidate.capacity,
+        boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
+        sideEffects: [],
+      };
+    }
+    let admissionId = enqueued.entry.admissionId;
+    // Inline best-effort drain (capacity-gated). Same code path as the scheduler loop.
+    let drain = await drainWorkflowQueue(board.id, { ...args }, context);
+    let mine = drain.admitted.find(item => item.admissionId === admissionId);
+    if (mine) {
+      let result = mine.result;
+      return {
+        ok: true,
+        skipped: false,
+        enqueued: true,
+        admissionId,
+        automation,
+        capacity: candidate.capacity,
+        boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
+        agent: mine.agent,
+        result,
+        drain,
+        sideEffects: result.sideEffects || [],
+      };
+    }
+    // Hard delegation failure on this card's admission (not a capacity re-queue): admitQueueEntry
+    // returns a non-admitted result with `failed:true`, which the drain collects into `skipped`.
+    // Surface the failed run so the caller sees the failure rather than a silently-queued card.
+    let mineHardFail = (drain.skipped ?? []).find(item => item.admissionId === admissionId && item.failed);
+    if (mineHardFail?.result) {
+      return {
+        ok: true,
+        skipped: false,
+        enqueued: true,
+        failed: true,
+        admissionId,
+        automation,
+        capacity: candidate.capacity,
+        boardCapacity: candidate.boardCapacity,
+        fileConflicts: candidate.fileConflicts,
+        agent: mineHardFail.agent ?? chooseStageAgent(automation, card, args),
+        result: mineHardFail.result,
+        drain,
+        sideEffects: mineHardFail.result.sideEffects || [],
+      };
+    }
+    // Enqueued but not admitted this pass (at capacity, deferred, or a concurrent admitter holds the
+    // lease). The card stays `queued`; a later drain admits it. This is a successful enqueue, not a
+    // failure — callers see ok:true, enqueued:true, and no started run.
     return {
       ok: true,
       skipped: false,
+      enqueued: true,
+      queued: true,
+      admissionId,
       automation,
       capacity: candidate.capacity,
       boardCapacity: candidate.boardCapacity,
       fileConflicts: candidate.fileConflicts,
-      agent,
-      result,
-      sideEffects: result.sideEffects || [],
+      drain,
+      sideEffects: [],
     };
   }
 
@@ -976,6 +3028,8 @@ export function createWorkflowBoardService(opts = {}) {
     let activeLeases = activeCards.filter(card => Boolean(card.lease));
     let runningTaskCount = runtimeState.runtime?.runningTaskCount
       ?? compactRuntimeSummary(runtimeState.tasks).runningTaskCount;
+    let queue = asObject(projection.queue);
+    let telemetry = asObject(projection.telemetry);
     return {
       boardMode: projection.board.mode,
       globalParallelLimit: finiteNumber(projection.board.automation?.globalParallelLimit),
@@ -984,6 +3038,16 @@ export function createWorkflowBoardService(opts = {}) {
       activeRunCount: activeRuns.length,
       activeLeaseCount: activeLeases.length,
       runningTaskCount,
+      // Admission backpressure at a glance for the L1 monitor (read from the full projection's
+      // queue/telemetry; the compact view never recomputes them).
+      queue: {
+        depth: finiteNumber(queue.depth ?? telemetry.queueDepth) ?? 0,
+        blockedOnDependencyCount: finiteNumber(
+          queue.blockedOnDependencyCount ?? telemetry.blockedOnDependencyCount,
+        ) ?? 0,
+        admissions: finiteNumber(telemetry.admissions) ?? 0,
+        admissionFailures: finiteNumber(telemetry.admissionFailures) ?? 0,
+      },
     };
   }
 
@@ -1126,6 +3190,7 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function getBoardProjection(filter = {}, runtimeTasks = null) {
+    ensureWorkflowSchemaMigrated();
     let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let projectId = textOrNull(filter.projectId ?? filter.project_id);
     let goalId = textOrNull(filter.goalId ?? filter.goal_id);
@@ -1161,16 +3226,18 @@ export function createWorkflowBoardService(opts = {}) {
     let cards = [...persistedBoardCards, ...runtimeCards]
       .filter(card => !goalId || card.entityRefs?.goalId === goalId)
       .filter(card => !chatId || card.entityRefs?.chatId === chatId)
-      .sort((a, b) => (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+      .sort((a, b) => (a.createdAt - b.createdAt) || a.id.localeCompare(b.id))
+      .map(projectCardV2);
     let columns = board.columns.map((column) => ({
       ...column,
       cards: cards.filter(card => card.columnId === column.id),
     }));
 
+    let blockedOnDependencyCount = cards.filter(card => card.lifecycle === 'blocked').length;
     let includeCards = filter.includeCards ?? filter.include_cards;
     let includeEvents = filter.includeEvents ?? filter.include_events;
     let projection = {
-      schema: 'workflow-board-projection/v1',
+      schema: 'workflow-board-projection/v2',
       board,
       boardId: board.id,
       scope: { projectId, goalId, chatId },
@@ -1179,6 +3246,20 @@ export function createWorkflowBoardService(opts = {}) {
         : columns,
       cards: includeCards === false ? [] : cards,
       counts: Object.fromEntries(columns.map(column => [column.id, column.cards.length])),
+      queue: {
+        depth: 0,
+        oldestEnqueuedAt: null,
+        perGroupDepth: {},
+        blockedOnDependencyCount,
+      },
+      telemetry: {
+        queueDepth: 0,
+        oldestEnqueuedAt: null,
+        blockedOnDependencyCount,
+        admissions: 0,
+        admissionFailures: 0,
+        drains: 0,
+      },
       events: includeEvents === false
         ? []
         : listEvents({ boardId: board.id, limit: filter.eventLimit ?? filter.event_limit ?? 20 }),
@@ -1189,11 +3270,33 @@ export function createWorkflowBoardService(opts = {}) {
       : projection;
   }
 
+  // projection-v2 (AD-12): stamp every projected card with the frozen lifecycle / dependsOn / queue
+  // shape. lifecycle and dependsOn are normalized (idle / [] defaults via the iso normalizers). The
+  // per-card queue slot is all-null until the scheduler (S8) populates it; existing values on the
+  // card are surfaced, never invented.
+  function projectCardV2(card) {
+    let queueSource = card.queue ?? {};
+    return {
+      ...card,
+      lifecycle: normalizeWorkflowLifecycle(card.lifecycle),
+      dependsOn: normalizeWorkflowDependsOn(card.dependsOn ?? card.depends_on),
+      queue: {
+        enqueuedAt: queueSource.enqueuedAt ?? null,
+        queueEpoch: queueSource.queueEpoch ?? null,
+        admissionId: queueSource.admissionId ?? null,
+        priority: queueSource.priority ?? null,
+        position: queueSource.position ?? null,
+      },
+    };
+  }
+
   async function getBoardProjectionWithRuntime(filter = {}, context = {}) {
     await seedWorkflowWorkItemsForProjection(filter);
     let runtimeState = await readRuntimeState(context);
     if (filter.reconcileRuntime === true || filter.reconcile_runtime === true) {
-      reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
+      // Read-side reconcile is side-effect-light: drive defaults off so a projection read never
+      // spawns an agent. Autonomous on_enter drive belongs to the reconcile loop (drive: true).
+      await reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
     }
     let projection = getBoardProjection({
       ...filter,
@@ -1203,10 +3306,10 @@ export function createWorkflowBoardService(opts = {}) {
     }, runtimeState.tasks);
     return wantsCompactProjection(filter)
       ? compactBoardProjection(projection, {
-          tasks: runtimeState.tasks,
-          systemLoad: runtimeState.systemLoad,
-          runtime: compactRuntimeSummary(runtimeState.tasks),
-        })
+        tasks: runtimeState.tasks,
+        systemLoad: runtimeState.systemLoad,
+        runtime: compactRuntimeSummary(runtimeState.tasks),
+      })
       : projection;
   }
 
@@ -1231,7 +3334,7 @@ export function createWorkflowBoardService(opts = {}) {
       let status = runtimeTaskStatus(task);
       let timestamp = runtimeTaskTimestamp(task) ?? now();
       return [{
-        schema: 'workflow-card/v1',
+        schema: 'workflow-card/v2',
         id: `runtime-${slugSegment(id)}`,
         boardId: board.id,
         title: runtimeTaskTitle(id, task),
@@ -1414,6 +3517,63 @@ export function createWorkflowBoardService(opts = {}) {
     return { metadata: { ...metadata, escalation: nextState }, status: 'raised', kind: escalation.kind, detail: escalation.detail };
   }
 
+  // Parse a typed intermediate return from the latest task output of a still-live run. A worker emits
+  // `WORKFLOW_RETURN: <kind>` (optionally trailed by a JSON object) in its final message; we read that
+  // text the same way computeTerminalEscalation does (workerFinalAnswerText → chat tail / runtime task
+  // events). Returns a normalized return event, or null when there is no marker — zero cost on the
+  // common no-marker reconcile pass. Wrapped so a parse failure degrades to null, never a thrown reconcile.
+  function computeIntermediateReturn(card, run, runtimeTasks, currentNow) {
+    try {
+      let text = workerFinalAnswerText(run, runtimeTasks);
+      if (!text) return null;
+      let match = text.match(RETURN_MARKER_PATTERN);
+      if (!match) return null;
+      let kind = match[1].toLowerCase();
+      let parsed = {};
+      if (match[2]) {
+        try { parsed = JSON.parse(match[2]); } catch { parsed = {}; }
+      }
+      // Deterministic eventId so re-parsing the SAME marker on a still-running run is idempotent
+      // (coalesceReturnEvents drops the duplicate) — the inbox holds one entry per distinct marker.
+      let eventId = `ret-${crypto.createHash('sha256').update(`${run.id}:${match[0]}`).digest('hex').slice(0, 24)}`;
+      return normalizeWorkflowReturnEvent(
+        { kind, ...(parsed && typeof parsed === 'object' ? parsed : {}) },
+        { now: currentNow, correlationId: card.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, raisedBy: ESCALATION_ACTOR, eventId },
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  // Fold a minted return into the escalation state when it is a hard-interrupt (needs_decision | blocked
+  // | needs_permission). A hard-interrupt return must keep hasActiveEscalation(card) true so the existing
+  // re-engagement driver re-engages it — we write the SAME escalation-state shape buildDependencyEscalation
+  // produces, mapping the return's escalationKind onto the channel. A non-hard-interrupt return never
+  // touches metadata.escalation. Returns the next metadata, unchanged when not a hard interrupt.
+  function foldReturnEscalation(metadata, event, currentNow) {
+    if (!event || event.hardInterrupt !== true) return metadata;
+    let existing = metadata.escalation ? normalizeWorkflowEscalationState(metadata.escalation) : null;
+    let escalation = normalizeWorkflowEscalation(
+      { kind: event.escalationKind, detail: event.detail, raisedBy: ESCALATION_ACTOR },
+      { now: currentNow, runId: event.runId, taskId: event.taskId },
+    );
+    if (!escalation) return metadata;
+    let state = normalizeWorkflowEscalationState({
+      lastEscalation: escalation,
+      attemptCount: existing?.attemptCount ?? 0, // re-engagement owns accrual; never bump here
+      firstAt: existing?.firstAt ?? currentNow,
+      lastAt: currentNow,
+      nextAttemptAt: existing?.nextAttemptAt ?? currentNow, // first episode is re-engageable now
+      humanEscalated: existing?.humanEscalated ?? false,
+      lastRunId: event.runId,
+      history: [
+        ...(existing?.history ?? []),
+        { kind: escalation.kind, detail: escalation.detail, runId: event.runId, at: currentNow },
+      ],
+    });
+    return { ...metadata, escalation: state };
+  }
+
   function workflowRunStatusFromRuntime(run, runtimeTasks) {
     let taskIds = uniqueArray(run.taskIds);
     if (!taskIds.length) return null;
@@ -1455,13 +3615,23 @@ export function createWorkflowBoardService(opts = {}) {
     return card.columnId;
   }
 
-  function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks()) {
+  async function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks(), { drive = false } = {}) {
+    // Schedule/projection-driven board self-reconciliation: the board's own automation
+    // commits these runtime transitions, so the committing identity is the daemon.
+    let principal = daemonPrincipal();
     let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let projectId = textOrNull(filter.projectId ?? filter.project_id);
     let goalId = textOrNull(filter.goalId ?? filter.goal_id);
     let chatId = textOrNull(filter.chatId ?? filter.chat_id);
     let currentNow = now();
     let ops = [];
+    // Upstream cards whose run reached a terminal-failure this pass — their downstream dependency
+    // edges are resolved after the reconcile commit (inv 22) so the upstream's failed status is
+    // already durable when propagation reads it.
+    let failedUpstreamIds = new Set();
+    // Cards auto-advanced into a new column this pass (e.g. in-progress→quality-audit). After the
+    // commit lands, the destination column's on_enter automation is driven for these (drive only).
+    let advanced = [];
 
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id) continue;
@@ -1498,8 +3668,44 @@ export function createWorkflowBoardService(opts = {}) {
           }
         }
 
+        // Intermediate-return mint (S6): a still-live run may emit a `WORKFLOW_RETURN: <kind>` marker
+        // before it terminalizes. Parse it BEFORE the no-status-change continue so a progress/discovered/
+        // needs_decision return on a card whose run status is unchanged still lands in the inbox. Most
+        // passes have no marker → computeIntermediateReturn returns null (zero cost).
+        let returnEvent = !TERMINAL_RUN_STATUSES.has(nextStatus)
+          ? computeIntermediateReturn(latestCard, run, runtimeTasks, currentNow)
+          : null;
+        if (returnEvent && nextStatus === run.status) {
+          // No run-status transition this pass, but a return was minted: fold it (and, for a
+          // hard-interrupt, its escalation) into the card and commit, then move to the next run.
+          let nextReturns = coalesceReturnEvents(latestCard.metadata?.returns, returnEvent);
+          let returnMetadata = foldReturnEscalation(
+            { ...(latestCard.metadata && typeof latestCard.metadata === 'object' ? latestCard.metadata : {}), returns: nextReturns },
+            returnEvent,
+            currentNow,
+          );
+          latestCard = normalizeWorkflowCardInput({
+            ...latestCard,
+            metadata: returnMetadata,
+            version: latestCard.version + 1,
+            updatedAt: currentNow,
+            updatedBy: principal.label,
+          }, {
+            id: latestCard.id,
+            actor: principal.label,
+            now: currentNow,
+            version: latestCard.version + 1,
+            createdAt: latestCard.createdAt,
+            updatedAt: currentNow,
+          });
+          cardChanged = true;
+          continue;
+        }
+
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
+        // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution.
+        if (['error', 'failed', 'cancelled'].includes(nextStatus)) failedUpstreamIds.add(card.id);
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
         let nextRun = normalizeWorkflowRunInput({
           ...run,
@@ -1524,22 +3730,47 @@ export function createWorkflowBoardService(opts = {}) {
           ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
+        // Terminal-return mint (S7): a run reaching a final status mints a completed|failed return. A
+        // non-terminal status change (e.g. requested→running) carries any intermediate return parsed
+        // above. Fold the minted return into the inbox (coalesce drops a late progress after a terminal,
+        // so no extra logic) so it lands in the SAME card update / commit as the rest of the reconcile.
+        let mintedReturn = terminal
+          ? normalizeWorkflowReturnEvent(
+            { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
+            { now: currentNow, correlationId: latestCard.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, seq: nextRun.version ?? null, raisedBy: ESCALATION_ACTOR },
+          )
+          : returnEvent;
+        if (mintedReturn) {
+          let baseMetadata = nextMetadata && typeof nextMetadata === 'object' ? nextMetadata : {};
+          let nextReturns = coalesceReturnEvents(latestCard.metadata?.returns, mintedReturn);
+          // S8: a hard-interrupt return ALSO folds onto metadata.escalation (same writer as the
+          // escalation reconcile) so hasActiveEscalation stays true and the driver re-engages it.
+          nextMetadata = foldReturnEscalation({ ...baseMetadata, returns: nextReturns }, mintedReturn, currentNow);
+        }
+        // A terminated run leaves no live lifecycle; normalize stale `running` back to `idle`
+        // (valid per WORKFLOW_CARD_LIFECYCLE_STATES) so bookkeeping reflects the ended run.
+        let nextLifecycle = terminal ? 'idle' : latestCard.lifecycle;
         let needsCardUpdate = nextColumnId !== latestCard.columnId
           || nextFlags.join('|') !== normalizeRecoveryFlags(latestCard.recoveryFlags).join('|')
-          || escalationDelta !== null;
+          || escalationDelta !== null
+          || mintedReturn !== null
+          || (terminal && latestCard.lifecycle === 'running');
 
         if (needsCardUpdate) {
+          // Record an auto-advance so on_enter automation can be driven post-commit (inv: drive).
+          if (nextColumnId !== latestCard.columnId) advanced.push({ cardId: latestCard.id, toColumnId: nextColumnId });
           latestCard = normalizeWorkflowCardInput({
             ...latestCard,
             columnId: nextColumnId,
+            lifecycle: nextLifecycle,
             recoveryFlags: nextFlags,
             metadata: nextMetadata,
             version: latestCard.version + 1,
             updatedAt: completedAt ?? currentNow,
-            updatedBy: 'workflow-runtime',
+            updatedBy: principal.label,
           }, {
             id: latestCard.id,
-            actor: 'workflow-runtime',
+            actor: principal.label,
             now: currentNow,
             version: latestCard.version + 1,
             createdAt: latestCard.createdAt,
@@ -1557,7 +3788,7 @@ export function createWorkflowBoardService(opts = {}) {
             cardId: latestCard.id,
             fromColumnId: latestCard.columnId,
             toColumnId: latestCard.columnId,
-            actor: ESCALATION_ACTOR,
+            actor: principal.label,
             mode: 'auto',
             reason: escalationDelta.status === 'cleared'
               ? `Escalation resolved by completed run ${run.id}.`
@@ -1589,7 +3820,7 @@ export function createWorkflowBoardService(opts = {}) {
           cardId: latestCard.id,
           fromColumnId: card.columnId,
           toColumnId: latestCard.columnId,
-          actor: 'workflow-runtime',
+          actor: principal.label,
           mode: 'auto',
           reason: `Workflow run ${run.id} reconciled from runtime task status ${nextStatus}.`,
           status: 'accepted',
@@ -1608,8 +3839,51 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
 
-    if (ops.length) stateGraph.commit(ops, sourceFor('runtime'));
-    return { ok: true, updated: ops.length };
+    let committed = false;
+    if (ops.length) {
+      // The daemon's self-driven reconcile is slot/step/lease bookkeeping — gated on
+      // daemon.bookkeeping (DAEMON). A non-daemon principal here would fail the gate and
+      // the reconcile would not commit (fail-closed).
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) {
+        stateGraph.commit(ops, sourceForPrincipal(principal));
+        committed = true;
+      }
+    }
+    // on_enter drive (opt-in): an auto-advanced card (e.g. into quality-audit) only fires its
+    // destination column's on_enter automation on the explicit transition/create paths today. The
+    // autonomous reconcile loop owns this drive so a runtime-completed card actually starts its audit
+    // instead of sitting needs_audit forever. Best-effort and idempotent — maybeAutoOrchestrateCard's
+    // candidate gate (board mode/pickup, audit-already-passed) is the authority, and we skip a card
+    // that still has a live run. Read-side projection callers pass drive=false (no agent spawns).
+    let driven = [];
+    if (drive && committed) {
+      for (let entry of advanced) {
+        let card = stateGraph.get(`workflowCards/${entry.cardId}`);
+        if (!card) continue;
+        let automation = cardAutomation(board, card);
+        if (automation.trigger !== 'on_enter' || !['orchestrate', 'audit'].includes(automation.action)) continue;
+        if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+        let outcome = null;
+        try {
+          outcome = await maybeAutoOrchestrateCard(board, clone(card), {}, { principal });
+        } catch {
+          // best-effort autonomous drive — a failed on_enter must not abort the reconcile pass.
+        }
+        driven.push({ cardId: card.id, toColumnId: entry.toColumnId, ok: Boolean(outcome?.ok), skipped: outcome?.skipped ?? null });
+      }
+    }
+    // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
+    // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
+    // fast-fail — a dependent resolves the moment ANY required edge terminal-fails.
+    let propagated = [];
+    for (let upstreamId of failedUpstreamIds) {
+      let upstream = stateGraph.get(`workflowCards/${upstreamId}`);
+      if (upstream) propagated.push(...propagateUpstreamResolution(clone(upstream), board, 'terminal_failure'));
+    }
+    return drive
+      ? { ok: true, updated: ops.length, propagated, advanced, driven }
+      : { ok: true, updated: ops.length, propagated, advanced };
   }
 
   function deriveRecoveryCard(card, currentNow) {
@@ -1638,15 +3912,17 @@ export function createWorkflowBoardService(opts = {}) {
   function getRecoveryState(filter = {}) {
     let projection = getBoardProjection(filter);
     let currentNow = now();
+    let activeColumnIds = activeRecoveryColumnIds(projection.board);
+    let activeColumnIdSet = new Set(activeColumnIds);
     let cards = projection.cards
-      .filter(card => ACTIVE_RECOVERY_COLUMN_IDS.includes(card.columnId))
+      .filter(card => activeColumnIdSet.has(card.columnId))
       .map(card => deriveRecoveryCard(card, currentNow))
       .filter(card => card.recoveryFlags.length > 0);
     return {
       schema: 'workflow-recovery/v1',
       boardId: projection.boardId,
       scope: projection.scope,
-      activeColumnIds: ACTIVE_RECOVERY_COLUMN_IDS,
+      activeColumnIds,
       cards,
       summary: recoverySummary(cards),
       checkedAt: currentNow,
@@ -1675,8 +3951,10 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function createWorkItem(args = {}, context = {}) {
-    let result = createOrUpdateCard(args);
-    let orchestration = await maybeAutoOrchestrateCard(result.board, result.card, args, context);
+    let principal = resolvePrincipal(context);
+    let result = createOrUpdateCard(args, principal);
+    if (result.ok === false) return result;
+    let orchestration = await maybeAutoOrchestrateCard(result.board, result.card, args, { ...context, principal });
     return {
       ok: true,
       ...result,
@@ -1686,7 +3964,8 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function updateWorkItem(args = {}) {
+  function updateWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
     let patch = args.patch && typeof args.patch === 'object' ? args.patch : {};
     let current = getCard(cardId);
@@ -1702,10 +3981,10 @@ export function createWorkflowBoardService(opts = {}) {
       ...contentPatch,
       id: cardId,
       columnId: current.columnId,
-      actor: args.actor,
       expectedVersion: args.expectedVersion ?? args.expected_version,
       checks: args.checks,
-    });
+    }, principal);
+    if (result.ok === false) return result;
     return { ok: true, ...result };
   }
 
@@ -1725,8 +4004,15 @@ export function createWorkflowBoardService(opts = {}) {
     });
   }
 
-  function decomposeWorkItem(args = {}) {
+  function decomposeWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
+    let decomposeGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!decomposeGate.ok) return decomposeGate;
     let parent = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -1735,8 +4021,9 @@ export function createWorkflowBoardService(opts = {}) {
         throw new Error(`Workflow card version conflict for ${cardId}. Reload the card and retry.`);
       }
     }
-    let actor = textOrNull(args.actor) ?? 'orchestrator';
+    let actor = principal.label;
     let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
+    let board = ensureBoard(parent.boardId);
     let ts = now();
     let children = childItemsFromArgs(args).map((item) => {
       let childContext = textArray(item.context);
@@ -1745,11 +4032,16 @@ export function createWorkflowBoardService(opts = {}) {
       if (stateGraph.get(`workflowCards/${id}`)) {
         throw new Error(`Workflow decomposition child card already exists: ${id}`);
       }
+      let columnId = textOrNull(item.columnId ?? item.column_id) ?? childColumnId;
+      // Board-driven column authority (S5 carry-over): a child card from untrusted childItems may only
+      // land in a column the board actually has. The iso normalizer is board-agnostic, so this is the
+      // chokepoint that rejects a genuinely-unknown column.
+      assertBoardColumn(board, columnId);
       return normalizeWorkflowCardInput({
         ...item,
         id,
         boardId: parent.boardId,
-        columnId: textOrNull(item.columnId ?? item.column_id) ?? childColumnId,
+        columnId,
         parentCardId: parent.id,
         projectId: textOrNull(item.projectId ?? item.project_id) ?? parent.projectId,
         domain: textOrNull(item.domain) ?? parent.domain,
@@ -1770,7 +4062,6 @@ export function createWorkflowBoardService(opts = {}) {
         updatedAt: ts,
       });
     });
-    let board = ensureBoard(parent.boardId);
     let eventId = textOrNull(args.eventId ?? args.event_id) ?? nextId(makeId, 'decomposition');
     let event = normalizeWorkflowTransitionEvent({
       id: eventId,
@@ -1796,7 +4087,7 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       ...children.map(child => ({ op: 'set', path: `workflowCards/${child.id}`, value: child })),
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return {
       ok: true,
       board,
@@ -1807,8 +4098,16 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function updateWorkflowColumn(args = {}) {
+  function updateWorkflowColumn(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    // Column definition is policy authorship (inv 8): a non-DEFINE principal is held for approval.
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
     let columnId = textOrNull(args.columnId ?? args.column_id ?? args.id);
     if (!columnId) throw new Error('Workflow column id is required.');
     let expectedVersion = args.expectedVersion ?? args.expected_version;
@@ -1849,7 +4148,7 @@ export function createWorkflowBoardService(opts = {}) {
         columnSettingsUpdatedAt: ts,
       },
     };
-    stateGraph.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: nextBoard }], sourceFor(args.actor ?? 'column-settings'));
+    stateGraph.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: nextBoard }], sourceForPrincipal(principal));
     return {
       ok: true,
       board: clone(nextBoard),
@@ -1861,7 +4160,7 @@ export function createWorkflowBoardService(opts = {}) {
     return Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) : 0;
   }
 
-  function boardEvent(board, args = {}, options = {}) {
+  function boardEvent(board, principal, args = {}, options = {}) {
     let ts = now();
     let eventId = textOrNull(args.eventId ?? args.event_id ?? options.id) ?? nextId(makeId, 'board-event');
     return normalizeWorkflowTransitionEvent({
@@ -1869,7 +4168,7 @@ export function createWorkflowBoardService(opts = {}) {
       eventType: options.eventType ?? 'board_control',
       boardId: board.id,
       cardId: null,
-      actor: textOrNull(args.actor) ?? 'system',
+      actor: principal.label,
       mode: 'manual',
       reason: textOrNull(args.reason) ?? options.reason,
       status: options.status ?? 'accepted',
@@ -1885,7 +4184,15 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function updateWorkflowBoard(args = {}, options = {}) {
+    let principal = resolvePrincipal(options);
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    // Board automation is policy authorship. `controlWorkflowBoard` already gated the caller on
+    // board.control before routing the mode change here (options.gatedBy='board.control'), so it is
+    // not re-gated; a direct automation edit is gated on policy.define (held for non-DEFINE callers).
+    if (options.gatedBy !== 'board.control' && !isDaemonPrincipal(principal)) {
+      let policyGate = gate('policy.define', principal, { boardId: board.id });
+      if (!policyGate.ok) return policyGate;
+    }
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
       let version = Number(expectedVersion);
@@ -1923,7 +4230,7 @@ export function createWorkflowBoardService(opts = {}) {
         automationUpdatedAt: ts,
       },
     };
-    let event = boardEvent(nextBoard, args, {
+    let event = boardEvent(nextBoard, principal, args, {
       eventType: options.eventType ?? 'board_update',
       reason: textOrNull(args.reason) ?? 'Updated workflow board automation.',
       sideEffects: [
@@ -1938,7 +4245,7 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard },
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-    ], sourceFor(args.actor ?? 'board-automation'));
+    ], sourceForPrincipal(principal));
     return { ok: true, board: clone(nextBoard), event: clone(event) };
   }
 
@@ -1971,8 +4278,15 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function controlWorkflowBoard(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let childContext = { ...context, principal };
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let controlGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'board.control',
+      principal,
+      { boardId: board.id },
+    );
+    if (!controlGate.ok) return controlGate;
     let action = textOrNull(args.action ?? args.control) ?? 'pause';
     if (!['pause', 'resume', 'drain', 'stop', 'maintenance', 'manual', 'recovery_only', 'arm'].includes(action)) {
       throw new Error('Workflow board control action must be pause, resume, drain, stop, maintenance, manual, recovery_only, or arm.');
@@ -1986,9 +4300,8 @@ export function createWorkflowBoardService(opts = {}) {
           boardId: board.id,
           cardId: card.id,
           action: cardAction,
-          actor,
           reason: textOrNull(args.reason) ?? `${formatControlAction(action)} from workflow board automation.`,
-        }, context);
+        }, childContext);
         affectedCards.push(card.id);
         sideEffects.push({
           type: 'card_control',
@@ -2003,9 +4316,8 @@ export function createWorkflowBoardService(opts = {}) {
         let result = resumeWorkItem({
           boardId: board.id,
           cardId: card.id,
-          actor,
           reason: textOrNull(args.reason) ?? 'Resume from workflow board automation.',
-        });
+        }, childContext);
         affectedCards.push(card.id);
         sideEffects.push({
           type: 'card_resume',
@@ -2018,9 +4330,10 @@ export function createWorkflowBoardService(opts = {}) {
     let result = updateWorkflowBoard({
       boardId: board.id,
       mode,
-      actor,
       reason: textOrNull(args.reason) ?? `${formatControlAction(action)} board automation.`,
     }, {
+      principal,
+      gatedBy: 'board.control',
       eventType: 'board_control',
       sideEffects: [
         {
@@ -2043,12 +4356,13 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function requestWorkflowTransition(args = {}, context = {}) {
-    let transition = requestTransition(args);
+    let principal = resolvePrincipal(context);
+    let transition = requestTransition(args, principal);
     if (transition.status !== 'accepted') {
       return { ok: true, ...transition, orchestration: null, sideEffects: [] };
     }
     let board = ensureBoard(transition.boardId);
-    let orchestration = await maybeAutoOrchestrateCard(board, transition.card, args, context);
+    let orchestration = await maybeAutoOrchestrateCard(board, transition.card, args, { ...context, principal });
     return {
       ok: true,
       ...transition,
@@ -2058,9 +4372,15 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  function deleteWorkItem(args = {}) {
+  function deleteWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let deleteGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!deleteGate.ok) return deleteGate;
     let card = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -2076,13 +4396,25 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'delete', path: `workflowCards/${cardId}` },
       { op: 'delete', path: `workflowLeases/${cardId}` },
-    ], sourceFor(actor));
-    return { ok: true, card, deleted: true };
+    ], sourceForPrincipal(principal));
+    // Delete is an upstream-resolution trigger (inv 22): a deleted upstream resolves every downstream
+    // edge that pointed at it per the dependent's onUpstreamFailure — never a silent permanent block.
+    let board = ensureBoard(card.boardId);
+    let propagated = propagateUpstreamResolution(card, board, 'deleted');
+    return { ok: true, card, deleted: true, ...(propagated.length ? { propagated } : {}) };
   }
 
-  function claimWorkItem(args = {}) {
+  function claimWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    // Lease control over a card run. Daemon lease bookkeeping maps to daemon.bookkeeping; a
+    // human/agent claim is card.control (both hold CONTROL).
+    let claimGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!claimGate.ok) return claimGate;
     let card = getCard(cardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
     if (expectedVersion !== undefined && expectedVersion !== null) {
@@ -2097,24 +4429,40 @@ export function createWorkflowBoardService(opts = {}) {
       boardId: args.boardId ?? args.board_id ?? card.boardId,
       cardId,
       runId: args.runId ?? args.run_id,
-      leaseOwner: args.leaseOwner ?? args.lease_owner ?? actor,
+      leaseOwner: args.leaseOwner ?? args.lease_owner ?? principal.label,
       leaseExpiresAt: Number.isFinite(ttlMs) && ttlMs > 0 ? ts + ttlMs : null,
     }, { cardId, updatedAt: ts });
-    stateGraph.commit([{ op: 'set', path: `workflowLeases/${cardId}`, value: lease }], sourceFor(actor));
+    stateGraph.commit([{ op: 'set', path: `workflowLeases/${cardId}`, value: lease }], sourceForPrincipal(principal));
     return { ok: true, card, lease };
   }
 
-  function releaseWorkItem(args = {}) {
+  function releaseWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let releaseGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!releaseGate.ok) return releaseGate;
     let card = getCard(cardId);
-    stateGraph.commit([{ op: 'delete', path: `workflowLeases/${cardId}` }], sourceFor(actor));
+    stateGraph.commit([{ op: 'delete', path: `workflowLeases/${cardId}` }], sourceForPrincipal(principal));
     return { ok: true, card, released: true };
   }
 
   function columnAutomation(board, columnId) {
     let column = board.columns.find(item => item.id === columnId);
     return asObject(column?.automation);
+  }
+
+  // Board-driven column existence check (S5 carry-over). The iso card normalizer is board-agnostic;
+  // a card's columnId is authoritative against the BOARD's own columns (default or define_column-added),
+  // not the global default-id constant. Throws a clear, board-scoped error for an unknown column.
+  function assertBoardColumn(board, columnId) {
+    let supported = (Array.isArray(board?.columns) ? board.columns : []).map(column => column.id);
+    if (!supported.includes(columnId)) {
+      throw new Error(`Unknown workflow column "${columnId}". Supported: ${supported.join(', ')}`);
+    }
   }
 
   function cardAutomation(board, card) {
@@ -2188,46 +4536,46 @@ export function createWorkflowBoardService(opts = {}) {
     let isAudit = card.columnId === 'quality-audit' || textOrNull(args.action) === 'audit';
     let auditBlock = isAudit
       ? [
-          '',
-          '',
-          'Quality audit task:',
-          '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
-          '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
-          '- Record the verdict via the public `workflow_board` action `update_item` with a `checks` object: set `audit` to `passed` or `failed` (use `auditWaiver` only for an explicit human waiver).',
-          '- Do not advance the card yourself; the gate moves it once the audit check passes.',
-        ].join('\n')
+        '',
+        '',
+        'Quality audit task:',
+        '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
+        '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
+        '- Record the verdict via the public `workflow_board` action `update_item` with a `checks` object: set `audit` to `passed` or `failed` (use `auditWaiver` only for an explicit human waiver).',
+        '- Do not advance the card yourself; the gate moves it once the audit check passes.',
+      ].join('\n')
       : '';
     let escalationState = card.metadata?.escalation
       ? normalizeWorkflowEscalationState(card.metadata.escalation)
       : null;
     let escalationBlock = escalationState && hasActiveEscalation(card)
       ? [
-          '',
-          '',
-          `Escalation re-engagement (attempt ${escalationState.attemptCount}). A prior run could not self-resolve and routed this card back for re-routing.`,
-          `- Escalation kind: ${escalationState.kind}`,
-          escalationState.detail ? `- Detail: ${escalationState.detail}` : '',
-          textOrNull(escalationState.lastEscalation?.suggestedResolution)
-            ? `- Suggested resolution: ${escalationState.lastEscalation.suggestedResolution}`
-            : '',
-          textOrNull(escalationState.lastEscalation?.proposedLane)
-            ? `- Proposed lane (advisory only): ${escalationState.lastEscalation.proposedLane}`
-            : '',
-          '- Route by kind:',
-          '  - insufficient_permission: PROPOSE a capable lane (resource group / agent) and let the board gate or a human approve it. Never self-grant rights or approval.',
-          '  - insufficient_context: gather and attach the missing context, or decompose an investigation child card, then re-delegate.',
-          '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
-          '  - rework: re-delegate the fix with the audit findings as acceptance criteria.',
-          '- Permission and approval policy stay board/human-owned; this channel only proposes.',
-        ].filter(Boolean).join('\n')
+        '',
+        '',
+        `Escalation re-engagement (attempt ${escalationState.attemptCount}). A prior run could not self-resolve and routed this card back for re-routing.`,
+        `- Escalation kind: ${escalationState.kind}`,
+        escalationState.detail ? `- Detail: ${escalationState.detail}` : '',
+        textOrNull(escalationState.lastEscalation?.suggestedResolution)
+          ? `- Suggested resolution: ${escalationState.lastEscalation.suggestedResolution}`
+          : '',
+        textOrNull(escalationState.lastEscalation?.proposedLane)
+          ? `- Proposed lane (advisory only): ${escalationState.lastEscalation.proposedLane}`
+          : '',
+        '- Route by kind:',
+        '  - insufficient_permission: PROPOSE a capable lane (resource group / agent) and let the board gate or a human approve it. Never self-grant rights or approval.',
+        '  - insufficient_context: gather and attach the missing context, or decompose an investigation child card, then re-delegate.',
+        '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
+        '  - rework: re-delegate the fix with the audit findings as acceptance criteria.',
+        '- Permission and approval policy stay board/human-owned; this channel only proposes.',
+      ].filter(Boolean).join('\n')
       : '';
     let proofMarkers = requiredProofMarkersForWorkItem(card, args);
     let proofMarkerContract = proofMarkers.length
       ? [
-          '- Required proof marker lines:',
-          ...proofMarkers.map(marker => `  - \`${marker}:PASS\` or \`${marker}:FAIL\``),
-          '- Place required proof marker lines after the report body and before any `WORKFLOW_RESULT:` line.',
-        ].join('\n')
+        '- Required proof marker lines:',
+        ...proofMarkers.map(marker => `  - \`${marker}:PASS\` or \`${marker}:FAIL\``),
+        '- Place required proof marker lines after the report body and before any `WORKFLOW_RESULT:` line.',
+      ].join('\n')
       : '';
     let outputContract = [
       '',
@@ -2337,6 +4685,20 @@ export function createWorkflowBoardService(opts = {}) {
       agent_slug: desiredAgent,
       context_mode: args.context_mode === 'off' ? 'off' : 'auto',
     };
+    // Admission slot key (D1.1/D1.2). The board-minted admissionId is passed through to agent-pool,
+    // which acquires the ledger slot keyed by it (idempotent) and persists its dedup record before
+    // ack. prepareDelegateTaskCall forwards unknown fields unchanged.
+    let admissionId = textOrNull(args.admission_id ?? args.admissionId);
+    if (admissionId) delegateArgs.admission_id = admissionId;
+    // D2.1 (parent side): the board declares the server-assigned slug for the spawned task so the
+    // portal's connection→{taskId, serverAssignedSlug} principal map can be established when the
+    // agent's MCP connection initializes. The per-task SECRET that makes this unforgeable is minted
+    // and injected by agent-pool at spawn, then presented at MCP `initialize`. That mint/present
+    // pipeline is agent-pool-side and OUT OF SCOPE here. SEAM: agent-pool must (a) mint a per-task
+    // secret keyed by this `verified_slug`/admissionId at spawn and inject it as a non-overridable
+    // credential, and (b) the MCP initialize handler must resolve that secret to this slug. Until
+    // that lands, MCP principals still fall back to the WS-AUTH-P least-privilege default.
+    if (desiredAgent) delegateArgs.verified_slug = desiredAgent;
     let approvalMode = textOrNull(args.approval_mode ?? card.approvalMode);
     if (approvalMode) delegateArgs.approval_mode = approvalMode;
     let resourceGroup = textOrNull(args.resource_group ?? card.resourceGroup);
@@ -2391,8 +4753,15 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function orchestrateWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let orchestrateGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.orchestrate',
+      principal,
+      { cardId },
+    );
+    if (!orchestrateGate.ok) return orchestrateGate;
+    let actor = principal.label;
     let card = getCard(cardId);
     let board = ensureBoard(args.boardId ?? args.board_id ?? card.boardId);
     let expectedVersion = args.expectedVersion ?? args.expected_version;
@@ -2464,7 +4833,7 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'set', path: `workflowRuns/${run.id}`, value: run },
       { op: 'set', path: `workflowLeases/${card.id}`, value: lease },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
 
     let delegated = args.delegate === false
       ? { ok: false, sideEffects: [], taskIds: [], chatId: card.entityRefs.chatId, goalId: card.entityRefs.goalId }
@@ -2491,6 +4860,12 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     let delegationFailed = args.delegate !== false && !delegated.ok;
+    // Slot-rejection vs hard failure (D1.1/D1.2): a capacity rejection from agent-pool means NO slot
+    // was granted — the admission scheduler re-queues this card (transient). Any OTHER delegation
+    // failure is a hard error (e.g. unknown resource group) that surfaces as a failed run + needs_audit
+    // so it does not loop in the queue. `slotRejected` lets the drain branch on exactly this.
+    let delegateError = textOrNull(delegated.sideEffects?.[0]?.error);
+    let slotRejected = Boolean(delegationFailed && delegateError && isCapacityRejectionError(delegateError));
     let taskIds = uniqueArray([...run.taskIds, ...delegated.taskIds]);
     let nextRun = normalizeWorkflowRunInput({
       ...run,
@@ -2498,12 +4873,28 @@ export function createWorkflowBoardService(opts = {}) {
       taskIds,
     }, { id: run.id, now: ts, updatedAt: now() });
     let nextColumnId = delegated.ok && card.columnId === 'ready' ? 'in-progress' : card.columnId;
+    // Execution attribution (inv 47): the principal that drove this run is recorded durably on
+    // card.metadata.executedBy (dedup). A floor-check write later checks this list — an executor
+    // cannot sign the audit/hygiene of a card it executed (separated duty).
+    let nextExecutedBy = uniqueArray([...textArray(card.metadata?.executedBy), principal.id]);
+    // A delegated card may carry an orchestrator-return subscription (S5). Persist the NORMALIZED
+    // record on metadata.subscription beside the entityRefs merge; this only records the subscription
+    // (a memberless join normalizes to null and is dropped) — join materialization is an explicit
+    // materializeJoinCard call, not an auto-spawn here.
+    let normalizedSubscription = effectiveArgs.subscription
+      ? normalizeWorkflowSubscription(effectiveArgs.subscription)
+      : null;
     let nextCard = normalizeWorkflowCardInput({
       ...card,
       columnId: nextColumnId,
       recoveryFlags: delegationFailed
         ? uniqueArray([...normalizeRecoveryFlags(card.recoveryFlags), 'needs_audit'])
         : card.recoveryFlags,
+      metadata: {
+        ...asObject(card.metadata),
+        executedBy: nextExecutedBy,
+        ...(normalizedSubscription ? { subscription: normalizedSubscription } : {}),
+      },
       entityRefs: {
         ...card.entityRefs,
         chatId: delegated.chatId,
@@ -2547,13 +4938,34 @@ export function createWorkflowBoardService(opts = {}) {
       }, { id: eventId, now: ts });
       ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
     }
-    stateGraph.commit(ops, sourceFor(actor));
-    return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, sideEffects: delegated.sideEffects };
+    stateGraph.commit(ops, sourceForPrincipal(principal));
+    // S5 wiring: a persisted JOIN subscription materializes a synthetic join card that depends on the
+    // members; when the join policy is satisfied its release wakes THIS owner through the return-loop
+    // (see releaseDependencies). Idempotent — a re-orchestrate of the same owner reuses its join card.
+    let joinCard = null;
+    if (normalizedSubscription?.mode === 'join') {
+      let existingJoin = boardCardsFor(board.id).find(
+        other => other.kind === 'join' && other.parentCardId === card.id,
+      );
+      joinCard = existingJoin ?? null;
+      if (!existingJoin) {
+        let made = materializeJoinCard(board, normalizedSubscription, card.id, principal);
+        if (made?.id) joinCard = made;
+      }
+    }
+    return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, slotRejected, joinCardId: joinCard?.id ?? null, sideEffects: delegated.sideEffects };
   }
 
-  function resumeWorkItem(args = {}) {
+  function resumeWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let resumeGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!resumeGate.ok) return resumeGate;
+    let actor = principal.label;
     let card = getCard(cardId);
     let ts = now();
     let runId = textOrNull(args.runId ?? args.run_id) ?? nextId(makeId, 'run');
@@ -2589,13 +5001,20 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit([
       { op: 'set', path: `workflowRuns/${run.id}`, value: run },
       { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return { ok: true, card: nextCard, run };
   }
 
   async function controlWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'system';
+    let controlGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.control',
+      principal,
+      { cardId },
+    );
+    if (!controlGate.ok) return controlGate;
+    let actor = principal.label;
     let action = textOrNull(args.action) ?? 'pause';
     if (!['pause', 'stop', 'cancel'].includes(action)) {
       throw new Error('Workflow control action must be pause, stop, or cancel.');
@@ -2656,7 +5075,7 @@ export function createWorkflowBoardService(opts = {}) {
       ...runOps,
       { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
       ...(action === 'pause' ? [] : [{ op: 'delete', path: `workflowLeases/${card.id}` }]),
-    ], sourceFor(actor));
+    ], sourceForPrincipal(principal));
     return { ok: true, action, card: nextCard, sideEffects };
   }
 
@@ -2793,15 +5212,20 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   async function reconcileWorkflowRecovery(args = {}, context = {}) {
-    let actor = textOrNull(args.actor) ?? 'recovery';
+    // Recovery reconcile is board self-healing — the board recomputing its own recovery flags.
+    // Identity is the daemon (consistent with runtime/escalation reconcile), so the periodic
+    // tick (no per-call principal) and a public trigger both commit as bookkeeping.
+    let principal = daemonPrincipal();
+    let actor = principal.label;
     await seedWorkflowWorkItemsForProjection(args);
     let projection = getBoardProjection(args);
     let runtimeTasks = await readRuntimeTasks(context);
     let currentNow = now();
     let reconciled = [];
     let ops = [];
+    let activeColumnIds = new Set(activeRecoveryColumnIds(projection.board));
 
-    for (let card of projection.cards.filter(item => ACTIVE_RECOVERY_COLUMN_IDS.includes(item.columnId))) {
+    for (let card of projection.cards.filter(item => activeColumnIds.has(item.columnId))) {
       let current = getCard(card.id);
       let flags = derivePersistentRecoveryFlags(current, runtimeTasks, currentNow);
       let runs = getRunsForCard(current.id);
@@ -2841,7 +5265,10 @@ export function createWorkflowBoardService(opts = {}) {
       reconciled.push({ card: nextCard, run, flags });
     }
 
-    if (ops.length) stateGraph.commit(ops, sourceFor(actor));
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: projection.board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
     return {
       ok: true,
       reconciled,
@@ -2849,18 +5276,79 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
+  // A queued, undelivered actionable return waiting to wake the orchestrator. The inbox holds at most
+  // 12 entries (coalesceReturnEvents); a soft `progress`/`partial` is not actionable, so it never wakes
+  // the loop. `consumedAt` is stamped when the driver re-engages (delivered ⟺ consumed), so this goes
+  // false until a NEW return is minted — the idempotent edge of the level-triggered wake (S9a/S9b).
+  function hasQueuedActionableReturn(card = {}) {
+    // Wake-DRIVING returns only: an intermediate actionable return (the card needs routing/a reply) or a
+    // routed result delivered to this card (a join completion). A bare self-completion terminal return
+    // does NOT make a finished card a wake candidate — that flows to its owner, and it stops a card
+    // cycling through the audit stage from re-orchestrating itself on its own `completed` returns.
+    let returns = card?.metadata?.returns;
+    return Array.isArray(returns) && returns.some(item => isWakeDrivingReturn(item));
+  }
+
+  // A hard-interrupt return (a blocked / needs_decision / needs_permission child) must wake the
+  // orchestrator regardless of the board's `recovery` setting — a stuck child cannot self-clear, so
+  // gating it on `recovery === 'auto'` would stall it forever (S9c, D4). Detected off the inbox so the
+  // gate is per-card, not a single board-level early return.
+  function hasUnconsumedHardInterrupt(card = {}) {
+    let returns = card?.metadata?.returns;
+    return Array.isArray(returns) && returns.some(item => item?.hardInterrupt === true && !item?.consumedAt);
+  }
+
+  // Compact one-line-per-return summary of the returns that actually DROVE this wake (wake-driving:
+  // intermediate actionable or routed), newest first and capped, folded into the re-engagement reason
+  // so the orchestrator wakes once and sees the batch (S10a). A bare self-completion terminal return is
+  // not wake-driving, so it is not presented as a wake cause. Reuses the reason field — no new transport.
+  function summarizeQueuedReturns(card = {}, limit = 5) {
+    let returns = card?.metadata?.returns;
+    if (!Array.isArray(returns)) return '';
+    let lines = returns
+      .filter(item => isWakeDrivingReturn(item))
+      .slice(-limit)
+      .reverse()
+      .map(item => `- ${item.kind}${item.detail ? `: ${item.detail}` : ''}`);
+    return lines.length ? `Queued returns (${lines.length}):\n${lines.join('\n')}` : '';
+  }
+
+  // Stamp `consumedAt` on every wake-DRIVING return so it wakes the orchestrator ONCE, not every tick
+  // (S9b) — `consumedAt` then precisely means "this return drove a delivery". A bare self-completion
+  // terminal return is not wake-driving (it never re-engages its own card), so it is left untouched as a
+  // record. History survives (entries are marked, never deleted; the 12-cap bounds growth).
+  function consumeActionableReturns(metadata, currentNow) {
+    let returns = metadata?.returns;
+    if (!Array.isArray(returns) || !returns.some(item => isWakeDrivingReturn(item))) {
+      return metadata;
+    }
+    return {
+      ...metadata,
+      returns: returns.map(item => (
+        isWakeDrivingReturn(item) ? { ...item, consumedAt: currentNow } : item
+      )),
+    };
+  }
+
   // Escalation re-engagement loop. This is the ONLY place the attempt counter advances — it bumps
   // the count and pushes the backoff window in the same durable commit, BEFORE re-engaging the
-  // orchestrator, so the cap is always reachable regardless of how the re-engaged run resolves.
+  // orchestrator, so the cap is always reachable regardless of how the re-engaged run resolves. The
+  // same loop drains queued actionable returns through the SAME driver (the event-driven wake): a
+  // hard-interrupt return wakes regardless of `recovery` (S9c), a soft actionable return only on an
+  // `auto` board, and the successful re-engagement stamps `consumedAt` in the same durable commit so a
+  // return wakes the orchestrator exactly once (S9b).
   // Gate-resident: re-engagement routes the card back to `ready` (governed rework edge) so the
   // orchestrate automation re-routes by escalation kind — never a direct out-of-gate write, never
   // a silent rights grant. Opt-in per board via `automation.recovery === 'auto'`.
   async function reconcileWorkflowEscalations(args = {}, context = {}) {
+    // Board-internal re-engagement automation: every commit here is the board driving
+    // itself, so identity is the daemon. Re-engagement re-enters the gate as the daemon.
+    let principal = daemonPrincipal();
+    let daemonContext = { ...context, principal };
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
-    if (boardAutomation.recovery !== 'auto' && !args.force) {
-      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}`, reengaged: [], escalatedToHuman: [] };
-    }
+    let recoveryAuto = boardAutomation.recovery === 'auto';
+    let returnWakeAuto = boardAutomation.returnWake === 'auto';
     let projectId = textOrNull(args.projectId ?? args.project_id);
     let currentNow = now();
     let maxAttempts = Number(args.maxAttempts ?? args.max_attempts);
@@ -2868,12 +5356,23 @@ export function createWorkflowBoardService(opts = {}) {
     let reengaged = [];
     let escalatedToHuman = [];
 
+    // S9a: a queued actionable return is a driver candidate alongside an active escalation, so a
+    // return drives the orchestrator through this SAME re-engagement driver.
     let cards = Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(card => card.boardId === board.id)
       .filter(card => !projectId || card.projectId === projectId)
-      .filter(card => hasActiveEscalation(card));
+      .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card));
 
     for (let card of cards) {
+      // Per-card wake gate (D4 + returnWake), applied PER-CARD not as a board-level early return:
+      //   - an unconsumed hard-interrupt (a blocked child) wakes regardless — it cannot self-clear;
+      //   - otherwise a queued wake-driving (soft) return is NEW actionable work, gated on `returnWake`
+      //     (auto by default, so the return loop wakes a dormant orchestrator out of the box);
+      //   - a card driven only by an escalation (stuck/recovering work) stays gated on `recovery`.
+      if (!args.force && !hasUnconsumedHardInterrupt(card)) {
+        let gateOpen = hasQueuedActionableReturn(card) ? returnWakeAuto : recoveryAuto;
+        if (!gateOpen) continue;
+      }
       let state = normalizeWorkflowEscalationState(card.metadata.escalation);
       if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
@@ -2892,10 +5391,10 @@ export function createWorkflowBoardService(opts = {}) {
           metadata: { ...card.metadata, escalation: humanState },
           version: card.version + 1,
           updatedAt: currentNow,
-          updatedBy: ESCALATION_ACTOR,
+          updatedBy: principal.label,
         }, {
           id: card.id,
-          actor: ESCALATION_ACTOR,
+          actor: principal.label,
           now: currentNow,
           version: card.version + 1,
           createdAt: card.createdAt,
@@ -2909,7 +5408,7 @@ export function createWorkflowBoardService(opts = {}) {
           cardId: card.id,
           fromColumnId: card.columnId,
           toColumnId: card.columnId,
-          actor: ESCALATION_ACTOR,
+          actor: principal.label,
           mode: 'auto',
           reason: blocker,
           status: 'accepted',
@@ -2918,53 +5417,251 @@ export function createWorkflowBoardService(opts = {}) {
         stateGraph.commit([
           { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
           { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-        ], sourceFor(ESCALATION_ACTOR));
+        ], sourceForPrincipal(principal));
         escalatedToHuman.push({ cardId: card.id, kind: state.kind, attempts: state.attemptCount, blocker });
         continue;
       }
 
-      // Accrue FIRST, durably, before re-engaging — the central loop-safety invariant.
-      let attemptCount = state.attemptCount + 1;
-      let nextAttemptAt = currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1);
-      let accrued = normalizeWorkflowEscalationState({ ...state, attemptCount, nextAttemptAt });
+      // Accrue FIRST, durably, before re-engaging — the central loop-safety invariant. An escalation
+      // card bumps its attempt counter and pushes the backoff window; a card driven purely by a queued
+      // return (no active escalation) accrues no phantom escalation state — `consumedAt` below is its
+      // idempotency mechanism, and it re-engages immediately (no backoff).
+      let escalated = hasActiveEscalation(card);
+      let attemptCount = escalated ? state.attemptCount + 1 : 0;
+      let nextAttemptAt = escalated
+        ? currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1)
+        : null;
+      let accrued = escalated
+        ? normalizeWorkflowEscalationState({ ...state, attemptCount, nextAttemptAt })
+        : null;
+      let escalationMetadata = accrued
+        ? { ...card.metadata, escalation: accrued }
+        : { ...card.metadata };
+      // S9b: stamp `consumedAt` on every actionable, unconsumed return in the SAME durable commit as
+      // the attempt accrual / re-engagement progress, so consumed ⟺ delivered. If no run is started
+      // (the guards above `continue` before this point), the returns stay unconsumed and retry next
+      // tick; once stamped, `hasQueuedActionableReturn` returns false until a NEW return is minted.
+      let consumedMetadata = consumeActionableReturns(escalationMetadata, currentNow);
       let accruedCard = normalizeWorkflowCardInput({
         ...card,
-        metadata: { ...card.metadata, escalation: accrued },
+        metadata: consumedMetadata,
         version: card.version + 1,
         updatedAt: currentNow,
-        updatedBy: ESCALATION_ACTOR,
+        updatedBy: principal.label,
       }, {
         id: card.id,
-        actor: ESCALATION_ACTOR,
+        actor: principal.label,
         now: currentNow,
         version: card.version + 1,
         createdAt: card.createdAt,
         updatedAt: currentNow,
       });
-      stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: accruedCard }], sourceFor(ESCALATION_ACTOR));
+      stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: accruedCard }], sourceForPrincipal(principal));
 
+      // Re-engagement enqueues through the same admission queue (AD-17, inv 26): the accrued
+      // backoff window becomes the queue entry's `notBefore`, so the card never jumps the queue and
+      // the shipped escalation backoff pacing is preserved exactly. Attempt accrual already happened
+      // durably above, so a dropped/contended enqueue does not burn an extra attempt here. S10a folds a
+      // compact batch of the queued returns into the reason field the driver already builds so the
+      // orchestrator wakes once and sees them all (no new transport).
+      let returnSummary = summarizeQueuedReturns(card);
+      let reengageReason = escalated
+        ? `Escalation re-engagement #${attemptCount} (${accrued.kind}).`
+        : 'Return re-engagement.';
       let reengageArgs = {
         boardId: board.id,
         cardId: card.id,
-        actor: ESCALATION_ACTOR,
-        reason: `Escalation re-engagement #${attemptCount} (${accrued.kind}).`,
+        reason: returnSummary ? `${reengageReason}\n${returnSummary}` : reengageReason,
         escalation: accrued,
         delegate: args.delegate,
+        notBefore: nextAttemptAt,
+        // Authorize the governed rework edge into `ready` when the woken card rests in a later column
+        // (a dormant orchestrator finished its run in quality-audit). Honored only because this driver
+        // runs as the daemon; a card carrying an active escalation already passes the gate without it.
+        reworkAuthorized: true,
       };
       let outcome = null;
       try {
         if (accruedCard.columnId === 'ready') {
-          outcome = await maybeAutoOrchestrateCard(board, accruedCard, reengageArgs, context);
+          outcome = await maybeAutoOrchestrateCard(board, accruedCard, reengageArgs, daemonContext);
         } else {
-          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: 'ready' }, context);
+          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: 'ready' }, daemonContext);
         }
       } catch (error) {
         outcome = { ok: false, error: error.message };
       }
-      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued.kind, ok: Boolean(outcome?.ok) });
+      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued?.kind ?? null, ok: Boolean(outcome?.ok) });
     }
 
+    // A fully-manual board (neither recovery nor returnWake auto) still reports `skipped` when nothing
+    // escaped the per-card gate (no hard-interrupt passthrough, no escalation/return re-engaged),
+    // preserving the board-level contract.
+    if (!recoveryAuto && !returnWakeAuto && !args.force && reengaged.length === 0 && escalatedToHuman.length === 0) {
+      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}, returnWake is ${boardAutomation.returnWake}`, reengaged, escalatedToHuman };
+    }
     return { ok: true, reengaged, escalatedToHuman };
+  }
+
+  // ── Admission recovery / D1.4 resolution-from-phase (inv 25, 43; AD-11) ───────────────────────
+  // Runs in the reconcile loop. It NEVER takes the board-admission lease (AD-16): it operates on a
+  // read snapshot plus the lifecycle guard, so the two loops cannot deadlock. releaseSlot is owned
+  // here only (single-owner). A `queued`+no-run card is legitimately queued — kept. A stranded
+  // `admitting` card (admission lease epoch-stale + grace-elapsed) is resolved by an idempotent,
+  // ordered, replayable sequence over a durable resolution record so a second crash re-drives from
+  // the persisted phase. The displaced stale-epoch admitter performs no late compensation (D1.5):
+  // its writes are CAS-rejected, so this loop is the sole cleanup owner.
+
+  // Best-effort slot release through the agent-pool proxy. The agent-pool exposes no release tool
+  // today (only the durable dead-pid liveness sweep on acquire/activeCount self-heals a leaked
+  // slot), so this is the PARENT seam: it releases if a tool is wired, else relies on the sweep.
+  // Idempotent on admissionId (inv 41/43). SEAM: agent-pool `release_slot` tool not yet exposed.
+  async function releaseSlotForAdmission(admissionId, context = {}) {
+    let pm = context.proxyManager ?? proxyManager;
+    if (!pm?.requestFromChild) return { released: false, reason: 'proxy_unavailable' };
+    try {
+      let result = await pm.requestFromChild('agent-pool', 'tools/call', {
+        name: 'release_slot',
+        arguments: { admission_id: admissionId },
+      }, 30_000);
+      if (result?.isError) return { released: false, reason: 'release_tool_error' };
+      return { released: true };
+    } catch {
+      // No release tool wired — the dead-pid liveness sweep reclaims the slot. Not an error.
+      return { released: false, reason: 'release_tool_unavailable_sweep_owns' };
+    }
+  }
+
+  // Drive a single resolution record forward from its persisted phase. Canonical phase order:
+  //   'admitting' → 'rolled_back' (StateGraph run→terminal + lifecycle→queued + lease delete)
+  //               → 'slot_released' (idempotent releaseSlot(admissionId))
+  //               → cleared (resolution + admission records deleted).
+  // Each step is idempotent and re-readable, so a second crash mid-resolution re-drives from here.
+  async function driveAdmissionResolution(boardId, resolution, context = {}) {
+    let principal = daemonPrincipal();
+    let { cardId, admissionId } = resolution;
+    let phase = resolution.phase ?? 'admitting';
+
+    if (phase === 'admitting') {
+      // Run→terminal, lifecycle admitting→queued (head, enqueuedAt preserved via the live entry),
+      // per-card lease delete. The queue entry persisted across the crash (AD-2 overlap), so the
+      // card returns to its fairness class without re-enqueue. Bump phase in the same durable frame.
+      let card = stateGraph.get(`workflowCards/${cardId}`);
+      let ops = [];
+      if (card) {
+        let cardCopy = clone(card);
+        let lifecycle = normalizeWorkflowLifecycle(cardCopy.lifecycle);
+        if (lifecycle === 'admitting') {
+          let nextCard = normalizeWorkflowCardInput({
+            ...cardCopy,
+            lifecycle: 'queued',
+            version: cardCopy.version + 1,
+            updatedAt: now(),
+            updatedBy: principal.label,
+          }, {
+            id: cardId,
+            actor: principal.label,
+            now: now(),
+            version: cardCopy.version + 1,
+            createdAt: cardCopy.createdAt,
+            updatedAt: now(),
+          });
+          ops.push({ op: 'set', path: `workflowCards/${cardId}`, value: nextCard });
+        }
+      }
+      for (let run of getRunsForCard(cardId)) {
+        if (RUNNING_RUN_STATUSES.has(run.status) && run.cardId === cardId) {
+          let terminal = normalizeWorkflowRunInput({
+            ...run,
+            status: 'stopped',
+          }, { id: run.id, now: now(), updatedAt: now() });
+          ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: terminal });
+        }
+      }
+      // Clear an orphaned per-card lease ONLY for an admitting-resolution card whose lifecycle is
+      // returning to queued — the lease was granted mid-admission and is now stale. (The general
+      // reconcile rule clears leases only for {running,idle}; admitting resolution is the explicit
+      // exception that re-queues the card and so must drop the half-granted lease.)
+      let lease = stateGraph.get(`workflowLeases/${cardId}`);
+      if (lease) ops.push({ op: 'delete', path: `workflowLeases/${cardId}` });
+      ops.push({
+        op: 'set',
+        path: `workflowAdmissionResolution/${cardId}`,
+        value: { ...resolution, phase: 'rolled_back', updatedAt: now() },
+      });
+      stateGraph.commit(ops, sourceForPrincipal(principal), { durable: true });
+      phase = 'rolled_back';
+    }
+
+    if (phase === 'rolled_back') {
+      await releaseSlotForAdmission(admissionId, context);
+      stateGraph.commit([
+        { op: 'set', path: `workflowAdmissionResolution/${cardId}`, value: { ...resolution, phase: 'slot_released', updatedAt: now() } },
+      ], sourceForPrincipal(principal), { durable: true });
+      phase = 'slot_released';
+    }
+
+    if (phase === 'slot_released') {
+      stateGraph.commit([
+        { op: 'delete', path: `workflowAdmissionResolution/${cardId}` },
+        { op: 'delete', path: `workflowAdmissions/${admissionId}` },
+      ], sourceForPrincipal(principal), { durable: true });
+      phase = 'cleared';
+    }
+    return { cardId, admissionId, phase };
+  }
+
+  async function reconcileWorkflowAdmissions(args = {}, context = {}) {
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let resolved = [];
+    let kept = [];
+
+    // 1. Re-drive any in-progress resolution record from its persisted phase (second-crash safe).
+    let inflight = Object.values(getCollection(stateGraph, 'workflowAdmissionResolution'))
+      .filter(record => record.boardId === board.id);
+    for (let record of inflight) {
+      let result = await driveAdmissionResolution(board.id, record, context);
+      resolved.push(result);
+    }
+
+    // 2. Scan admission records for stranded `admitting` cards (lease epoch-stale + grace-elapsed).
+    let admissions = Object.values(getCollection(stateGraph, 'workflowAdmissions'))
+      .filter(record => record.boardId === board.id && record.phase === 'admitting');
+    for (let record of admissions) {
+      let card = stateGraph.get(`workflowCards/${record.cardId}`);
+      if (!card) continue;
+      let lifecycle = normalizeWorkflowLifecycle(card.lifecycle);
+      if (lifecycle !== 'admitting') continue;
+      if (stateGraph.get(`workflowAdmissionResolution/${record.cardId}`)) continue; // already driving
+      if (!admissionLeaseStranded(board.id, record.startedAt)) {
+        kept.push({ cardId: record.cardId, reason: 'admission_in_flight' });
+        continue;
+      }
+      let resolution = {
+        schema: 'workflow-admission-resolution/v1',
+        cardId: record.cardId,
+        boardId: board.id,
+        leaseEpoch: record.leaseEpoch,
+        admissionId: record.admissionId,
+        phase: 'admitting',
+        startedAt: now(),
+      };
+      stateGraph.commit([
+        { op: 'set', path: `workflowAdmissionResolution/${record.cardId}`, value: resolution },
+      ], sourceForPrincipal(daemonPrincipal()), { durable: true });
+      let result = await driveAdmissionResolution(board.id, resolution, context);
+      resolved.push(result);
+    }
+
+    // 3. A `queued`+no-run card with a live queue entry is legitimately queued — keep it.
+    for (let entry of listQueueEntries(board.id)) {
+      let card = stateGraph.get(`workflowCards/${entry.cardId}`);
+      let lifecycle = normalizeWorkflowLifecycle(card?.lifecycle);
+      if (lifecycle === 'queued' && !activeRunForCard(entry.cardId)) {
+        kept.push({ cardId: entry.cardId, reason: 'legitimately_queued' });
+      }
+    }
+
+    return { ok: true, resolved, kept };
   }
 
   function escalationHumanBlocker(state, maxAttempts) {
@@ -2977,11 +5674,13 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function workspaceRoot() {
-    return path.join(projectRoot, '.agent-portal', 'workspace');
+    let teamMemoryRoot = getTeamMemoryRoot();
+    return teamMemoryRoot ? path.join(teamMemoryRoot, 'workspace') : null;
   }
 
   async function listWorkItemFiles(args = {}) {
     let root = workspaceRoot();
+    if (!root) return [];
     let projectId = textOrNull(args.projectId ?? args.project_id);
     let projects = projectId ? [slugSegment(projectId)] : [];
     if (!projects.length) {
@@ -3076,12 +5775,11 @@ export function createWorkflowBoardService(opts = {}) {
     return importWorkflowWorkItems({
       boardId: filter.boardId ?? filter.board_id,
       projectId: filter.projectId ?? filter.project_id,
-      actor: textOrNull(filter.actor) ?? 'projection-seed-import',
-    });
+    }, { principal: daemonPrincipal() });
   }
 
-  async function importWorkflowWorkItems(args = {}) {
-    let actor = textOrNull(args.actor) ?? 'markdown-import';
+  async function importWorkflowWorkItems(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let files = await listWorkItemFiles(args);
     let imported = [];
     let skipped = [];
@@ -3106,10 +5804,16 @@ export function createWorkflowBoardService(opts = {}) {
         });
         continue;
       }
-      let result = createOrUpdateCard({
-        ...cardInput,
-        actor,
-      });
+      let result = createOrUpdateCard(cardInput, principal);
+      if (result.ok === false) {
+        skipped.push({
+          cardId: cardInput.id,
+          title: cardInput.title,
+          markdownPath: cardInput.metadata.markdownPath,
+          reason: result.status === 'pendingApproval' ? 'pending_approval' : 'blocked',
+        });
+        continue;
+      }
       imported.push({
         cardId: result.card.id,
         title: result.card.title,
@@ -3120,19 +5824,31 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, imported, skipped, count: imported.length };
   }
 
-  async function exportWorkflowWorkItem(args = {}) {
+  async function exportWorkflowWorkItem(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let actor = textOrNull(args.actor) ?? 'markdown-export';
+    let exportGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'card.write',
+      principal,
+      { cardId },
+    );
+    if (!exportGate.ok) return exportGate;
+    let actor = principal.label;
     let card = getCard(cardId);
     let projectId = textOrNull(args.projectId ?? args.project_id ?? card.projectId) ?? 'global';
     let root = workspaceRoot();
+    if (!root) {
+      throw new Error(
+        'Team memory is not configured. Set agentPortal.teamMemoryRoot or AGENT_PORTAL_MEMORY_ROOT.',
+      );
+    }
     let markdownPath = textOrNull(args.markdownPath ?? args.markdown_path ?? card.metadata?.markdownPath)
       ?? path.join(slugSegment(projectId), 'plans', 'work-items', `${slugSegment(card.id)}.md`);
     let absPath = path.isAbsolute(markdownPath)
       ? markdownPath
       : path.join(root, markdownPath);
     if (!safeRelativePath(absPath, root)) {
-      throw new Error('Workflow markdown export path must stay inside .agent-portal/workspace.');
+      throw new Error('Workflow markdown export path must stay inside team-memory workspace.');
     }
     let frontmatter = {
       id: card.id,
@@ -3182,7 +5898,7 @@ export function createWorkflowBoardService(opts = {}) {
       createdAt: card.createdAt,
       updatedAt: now(),
     });
-    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: nextCard }], sourceFor(actor));
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: nextCard }], sourceForPrincipal(principal));
     return { ok: true, card: nextCard, markdownPath: relPath };
   }
 
@@ -3196,30 +5912,58 @@ export function createWorkflowBoardService(opts = {}) {
 
   // Periodic self-healing: run reconcile on a timer so a board that is never read still has its
   // leases/recovery flags reconciled. Heals via the shared StateGraph; not auto-started.
-  function createReconcileTick({ intervalMs = DEFAULT_RECONCILE_TICK_MS, onError = () => {} } = {}) {
+  function createReconcileTick({ intervalMs = DEFAULT_RECONCILE_TICK_MS, triggerGapMs = DEFAULT_RECONCILE_TRIGGER_GAP_MS, onError = () => {} } = {}) {
     let timer = null;
+    let triggerTimer = null;
     let running = false;
+    let pending = false;
+    async function runCycle() {
+      let { boards } = listWorkflowBoards({ includeArchived: false });
+      for (let board of boards) {
+        try {
+          await reconcileWorkflowRuntimeTasks({ boardId: board.id }, undefined, { drive: true });
+          await reconcileWorkflowAdmissions({ boardId: board.id });
+          await reconcileWorkflowRecovery({ boardId: board.id });
+          await reconcileWorkflowEscalations({ boardId: board.id });
+          // Dependency release tick (AD-5): enqueue blocked cards whose edges are satisfied and
+          // escalate any card blocked past max-blocked-age, before the admission pass. The drain
+          // also runs it, but the reconcile loop covers modes that drain skips.
+          if (!['stopped', 'maintenance'].includes(board.mode)) releaseDependencies(board.id);
+          // Scheduler loop: a bounded admission pass drains the queue under the board-admission
+          // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
+          await drainWorkflowQueue(board.id, {});
+        } catch (err) {
+          onError(err, board.id);
+        }
+      }
+      return boards.length;
+    }
+    // Single-flight with a coalesced trailing edge: a tickOnce requested while a cycle is running sets
+    // `pending` and the cycle re-runs ONCE more after it, so a burst of edge-triggers collapses into
+    // one extra pass and the last task event is never dropped between periodic ticks.
     async function tickOnce() {
-      if (running) return { ok: true, skipped: true };
+      if (running) { pending = true; return { ok: true, coalesced: true }; }
       running = true;
       try {
-        let { boards } = listWorkflowBoards({ includeArchived: false });
-        for (let board of boards) {
-          try {
-            reconcileWorkflowRuntimeTasks({ boardId: board.id });
-            await reconcileWorkflowRecovery({ boardId: board.id });
-            await reconcileWorkflowEscalations({ boardId: board.id });
-          } catch (err) {
-            onError(err, board.id);
-          }
-        }
-        return { ok: true, boards: boards.length };
+        let boards = 0;
+        do { pending = false; boards = await runCycle(); } while (pending);
+        return { ok: true, boards };
       } finally {
         running = false;
       }
     }
+    // Edge-trigger entry: an agent-pool task event (status change / WORKFLOW_RETURN marker) requests a
+    // near-immediate reconcile so a return wakes the orchestrator without waiting for the periodic tick.
+    // Debounced by `triggerGapMs` so a stream of events collapses into one pass; the periodic
+    // setInterval remains the DURABLE backstop — a dropped/lost edge-trigger self-heals next interval.
+    function requestTick() {
+      if (triggerTimer) return;
+      triggerTimer = setTimeout(() => { triggerTimer = null; tickOnce().catch(onError); }, triggerGapMs);
+      if (typeof triggerTimer.unref === 'function') triggerTimer.unref();
+    }
     return {
       tickOnce,
+      requestTick,
       start() {
         if (timer) return;
         timer = setInterval(() => { tickOnce().catch(onError); }, intervalMs);
@@ -3227,6 +5971,7 @@ export function createWorkflowBoardService(opts = {}) {
       },
       stop() {
         if (timer) { clearInterval(timer); timer = null; }
+        if (triggerTimer) { clearTimeout(triggerTimer); triggerTimer = null; }
       },
       get active() { return timer !== null; },
     };
@@ -3256,9 +6001,22 @@ export function createWorkflowBoardService(opts = {}) {
     claimWorkItem,
     releaseWorkItem,
     orchestrateWorkItem,
+    enqueueWorkItem,
+    enqueueWorkflowCard,
+    listQueueEntries,
+    admissionOrder,
+    drainWorkflowQueue,
+    linkDependency,
+    unlinkDependency,
+    materializeJoinCard,
+    defineWorkflowColumn,
+    defineWorkflowTransition,
+    defineWorkflowGate,
+    releaseDependencies,
     resumeWorkItem,
     controlWorkItem,
     reconcileWorkflowRuntimeTasks,
+    reconcileWorkflowAdmissions,
     reconcileWorkflowRecovery,
     reconcileWorkflowEscalations,
     parseRunEscalation,

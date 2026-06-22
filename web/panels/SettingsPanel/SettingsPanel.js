@@ -249,6 +249,7 @@ export class SettingsPanel extends Symbiote {
   }
 
   _applyAgentPortalSettings(raw) {
+    this.ref.teamMemoryRootInput.value = raw.teamMemoryRoot || '';
     this.ref.openLibraryPathInput.value = raw.openLibraryPath || '';
     this.ref.teamLibraryRepoInput.value = raw.teamLibraryRepo || '';
     this.ref.teamLibraryBranchInput.value = raw.teamLibraryBranch || 'main';
@@ -259,6 +260,7 @@ export class SettingsPanel extends Symbiote {
     let current = this._settings.agentPortal || {};
     return {
       ...current,
+      teamMemoryRoot: this.ref.teamMemoryRootInput.value.trim(),
       openLibraryPath: this.ref.openLibraryPathInput.value.trim(),
       teamLibraryRepo: this.ref.teamLibraryRepoInput.value.trim(),
       teamLibraryBranch: this.ref.teamLibraryBranchInput.value.trim() || 'main',

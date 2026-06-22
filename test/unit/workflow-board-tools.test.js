@@ -116,7 +116,16 @@ describe('workflow board MCP tool', () => {
     assert.equal(schema.properties.childItems.type, 'array');
     assert.equal(schema.properties.childColumnId.type, 'string');
     assert.equal(schema.properties.compact.type, 'boolean');
-    assert.deepEqual(schema.properties.view.enum, ['status']);
+    assert.deepEqual(schema.properties.view.enum, ['status', 'queue']);
+    assert.equal(schema.properties.action.enum.includes('enqueue'), true);
+    assert.equal(schema.properties.action.enum.includes('queue'), true);
+    assert.equal(schema.properties.action.enum.includes('link_dependency'), true);
+    assert.equal(schema.properties.action.enum.includes('define_column'), true);
+    assert.equal(schema.properties.action.enum.includes('define_transition'), true);
+    assert.equal(schema.properties.action.enum.includes('define_gate'), true);
+    assert.equal(schema.properties.gates.items.type, 'string');
+    assert.equal(schema.properties.from.type, 'string');
+    assert.equal(schema.properties.to.type, 'string');
   });
 
   it('returns a built-in help contract without requiring the workflow service', async () => {
@@ -255,7 +264,12 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[11].args.action, 'pause');
   });
 
-  it('forwards workflow_board calls to the live project backend owner', async () => {
+  it('forwards read-only workflow_board calls to the live project backend but never a mutation (F-SEC)', async () => {
+    // A read-only projection may be forwarded to the live loopback backend (no privilege to launder).
+    // A MUTATING action must NOT be forwarded: the loopback route derives a full human principal for
+    // any 127.0.0.1 request, so forwarding an agent's mutation there would execute it as the local
+    // human (identity laundering). The mutating action is pinned to the in-process identity-aware
+    // service instead — proven here by the loopback backend receiving zero mutation requests.
     let requests = [];
     let projectRoot = '/workspace/agent-portal';
     let server = http.createServer(async (req, res) => {
@@ -313,11 +327,14 @@ describe('workflow board MCP tool', () => {
       );
       let boardPayload = parseResult(boardResult);
 
+      // Read-only get_board still forwards to the live backend.
       assert.equal(boardPayload.result.projection.cards[0].id, 'live-card');
       assert.equal(requests[0].path, '/api/workflow-board');
       assert.equal(requests[0].query.projectId, 'agent-portal');
       assert.equal(requests[0].query.compact, 'true');
 
+      // The mutating transition is NOT forwarded — the in-process identity-aware service handles it.
+      // A stub backend that DID receive the forward would record a second request; it must not.
       let transitionResult = await handleWorkflowBoardTool(
         proxyManager,
         'workflow_board',
@@ -331,13 +348,13 @@ describe('workflow board MCP tool', () => {
         'test-source',
         options,
       );
-      let transitionPayload = parseResult(transitionResult);
-
-      assert.equal(transitionPayload.result.status, 'accepted');
-      assert.equal(transitionPayload.result.card.columnId, 'quality-audit');
-      assert.equal(requests[1].path, '/api/workflow-board/transition');
-      assert.equal(requests[1].body.cardId, 'live-card');
-      assert.equal(requests[1].body.expectedVersion, 3);
+      // Whatever the in-process result is, the loopback backend must have seen no mutation request.
+      assert.ok(transitionResult);
+      assert.equal(
+        requests.filter(r => r.path === '/api/workflow-board/transition').length,
+        0,
+        'a mutating action must never be forwarded to the loopback-human route',
+      );
     } finally {
       await close(server);
     }

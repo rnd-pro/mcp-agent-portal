@@ -12,6 +12,10 @@ function makeReq(method, url, body) {
   let req = new EventEmitter();
   req.method = method;
   req.url = url;
+  // Same-uid loopback request: the route seam derives the bootstrap local-human principal
+  // (board-author caps) from this, so mutating route handlers pass the S6 capability gate.
+  req.socket = { remoteAddress: '127.0.0.1' };
+  req.headers = {};
   req.destroy = (err) => req.emit('error', err);
   process.nextTick(() => {
     if (body !== undefined) req.emit('data', JSON.stringify(body));
@@ -46,7 +50,9 @@ async function writeRouteWorkItemSeed(root, projectId, fileName, frontmatter) {
 
 describe('workflow board routes', () => {
   it('registers board, card, transition, event, and recovery handlers', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-board-routes-'));
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     let sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -103,6 +109,12 @@ seed_column: backlog
         'POST /api/workflow-board/cards/update',
         'POST /api/workflow-board/decompose',
         'POST /api/workflow-board/transition',
+        'POST /api/workflow-board/enqueue',
+        'POST /api/workflow-board/dependencies/link',
+        'POST /api/workflow-board/dependencies/unlink',
+        'POST /api/workflow-board/columns/define',
+        'POST /api/workflow-board/transitions/define',
+        'POST /api/workflow-board/gates/define',
         'POST /api/workflow-board/orchestrate',
         'POST /api/workflow-board/control',
         'POST /api/workflow-board/delete',
@@ -456,6 +468,90 @@ seed_column: backlog
     } finally {
       await sg.flushChatWrites();
       sg.flush();
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('serves the WS-C surface routes (enqueue, dependencies, board-policy authoring) as the loopback board-author', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-board-routes-wsc-'));
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    let seq = 0;
+    let routes = createWorkflowBoardRoutes({
+      stateGraph: sg,
+      now: () => 3000 + (seq += 1),
+      makeId: (prefix) => `${prefix}-wsc-${seq}`,
+      projectRoot: tmpDir,
+    });
+
+    let call = async (key, method, url, body) => {
+      let res = makeRes();
+      await routes[key](makeReq(method, url, body), res);
+      return res;
+    };
+
+    try {
+      // Two cards for a dependency edge.
+      let upRes = await call('POST /api/workflow-board/cards', 'POST', '/api/workflow-board/cards', {
+        id: 'route-up', title: 'Upstream', projectId: 'project-alpha', domain: 'backend',
+        columnId: 'ready', owner: 'orchestrator', acceptanceCriteria: ['Done'],
+      });
+      assert.equal(upRes.json().ok, true);
+      let downRes = await call('POST /api/workflow-board/cards', 'POST', '/api/workflow-board/cards', {
+        id: 'route-down', title: 'Downstream', projectId: 'project-alpha', domain: 'backend',
+        columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['Done'],
+      });
+      assert.equal(downRes.json().ok, true);
+
+      // link → blocked, then unlink.
+      let linkRes = await call('POST /api/workflow-board/dependencies/link', 'POST', '/api/workflow-board/dependencies/link', {
+        cardId: 'route-down', dependsOn: ['route-up'],
+      });
+      assert.equal(linkRes.status, 200);
+      assert.equal(linkRes.json().result.ok, true);
+      assert.equal(linkRes.json().result.lifecycle, 'blocked');
+
+      let unlinkRes = await call('POST /api/workflow-board/dependencies/unlink', 'POST', '/api/workflow-board/dependencies/unlink', {
+        cardId: 'route-down', dependsOn: ['route-up'],
+      });
+      assert.equal(unlinkRes.json().result.ok, true);
+      assert.deepEqual(unlinkRes.json().result.dependsOn, []);
+
+      // enqueue the ready card.
+      let enqRes = await call('POST /api/workflow-board/enqueue', 'POST', '/api/workflow-board/enqueue', {
+        cardId: 'route-up',
+      });
+      assert.equal(enqRes.status, 200);
+      assert.equal(enqRes.json().result.ok, true);
+      assert.equal(enqRes.json().result.lifecycle, 'queued');
+      assert.ok(enqRes.json().result.admissionId);
+
+      // Board-policy authoring: re-gate an existing forward edge (idempotent, stays valid).
+      let gateRes = await call('POST /api/workflow-board/gates/define', 'POST', '/api/workflow-board/gates/define', {
+        from: 'quality-audit', to: 'commit-publish', gates: ['audit_pass_or_explicit_waiver'],
+      });
+      assert.equal(gateRes.status, 200);
+      assert.equal(gateRes.json().result.ok, true);
+
+      // A lone new non-terminal column is rejected by the graph validator (dead-end).
+      let badColRes = await call('POST /api/workflow-board/columns/define', 'POST', '/api/workflow-board/columns/define', {
+        columnId: 'route-orphan', title: 'Orphan',
+      });
+      assert.equal(badColRes.status, 200);
+      assert.equal(badColRes.json().result.ok, false);
+      assert.equal(badColRes.json().result.failures[0].gate, 'invalid_board_graph');
+    } finally {
+      await sg.flushChatWrites();
+      sg.flush();
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });

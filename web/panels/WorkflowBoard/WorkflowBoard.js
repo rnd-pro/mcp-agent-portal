@@ -17,11 +17,17 @@ import {
   updateWorkflowBoardAutomation,
   updateWorkflowColumn,
 } from '../../services/workflow-board.js';
+import {
+  buildWorkflowBoardCanvasGraphModel,
+  buildWorkflowBoardGraphModel,
+  summarizeWorkflowBoardGraphModel,
+} from '../../services/board-graph.js';
 import template from './WorkflowBoard.tpl.js';
 import cssLocal from './WorkflowBoard.css.js';
 import { setWorkflowBoardSelection } from './workflow-board-selection.js';
 
 const DEFAULT_SCOPE = 'home';
+const BOARD_VIEWS = new Set(['kanban', 'graph']);
 const AUTO_REFRESH_INTERVAL_MS = 15_000;
 const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
 const ACTIVE_CONTROL_COLUMNS = new Set(['ready', 'in-progress', 'quality-audit', 'commit-publish']);
@@ -210,6 +216,51 @@ function eventDetail(board, card, extra = {}) {
   };
 }
 
+// Reconstruct a `workflow-board-projection/v2`-shaped object from the normalized board so the pure
+// board-graph adapter receives the frozen projection contract. The web normalizer keeps the original
+// projection card on `card.raw`, which carries `lifecycle` / `dependsOn` / `queue`; surface those here
+// without inventing values.
+function projectionFromBoard(board, columns, cards) {
+  let projectionCards = asArray(cards).map((card) => {
+    let raw = card.raw && typeof card.raw === 'object' ? card.raw : {};
+    return {
+      id: card.id,
+      columnId: card.columnId,
+      title: card.title,
+      priority: card.priority,
+      status: card.status,
+      lifecycle: raw.lifecycle ?? card.lifecycle ?? 'idle',
+      dependsOn: raw.dependsOn ?? raw.depends_on ?? card.dependsOn ?? [],
+      queue: raw.queue ?? card.queue ?? {},
+    };
+  });
+  return {
+    schema: 'workflow-board-projection/v2',
+    boardId: board?.boardId || board?.id || '',
+    board: {
+      id: board?.boardId || board?.id || '',
+      columns: asArray(columns).map(column => ({
+        id: column.id,
+        title: column.title,
+        description: column.description || '',
+        gate: column.gate || '',
+        automation: column.automation || {},
+      })),
+      transitions: asArray(board?.transitions),
+    },
+    columns: asArray(columns).map(column => ({
+      id: column.id,
+      title: column.title,
+      description: column.description || '',
+      gate: column.gate || '',
+      automation: column.automation || {},
+      cards: asArray(column.cards).map(card => projectionCards.find(item => item.id === card.id)).filter(Boolean),
+    })),
+    cards: projectionCards,
+    version: board?.version ?? null,
+  };
+}
+
 export class WorkflowBoard extends Symbiote {
   static get observedAttributes() {
     return ['scope', 'project-id', 'board-id', 'mode'];
@@ -222,6 +273,7 @@ export class WorkflowBoard extends Symbiote {
 
   #board = null;
   #selectedCardId = '';
+  #activeView = 'kanban';
   #abortController = null;
   #applyingAttributes = false;
   #lastLoadKey = '';
@@ -242,6 +294,10 @@ export class WorkflowBoard extends Symbiote {
     this.ref.boardView.addEventListener('sn-board-card-action', (event) => this.#onBoardCardAction(event));
     this.ref.boardView.addEventListener('sn-board-card-drop', (event) => this.#onBoardCardDrop(event));
     this.ref.boardView.addEventListener('click', (event) => this.#onBoardHeaderClick(event));
+    this.ref.kanbanViewBtn.onclick = () => this.setView('kanban');
+    this.ref.graphViewBtn.onclick = () => this.setView('graph');
+    this.ref.graphFitBtn.onclick = () => this.#fitGraph();
+    this.#syncViewControls();
     this.#routeSyncHandler = () => this.loadBoard({ reason: 'route-change' });
     globalThis.addEventListener?.('hashchange', this.#routeSyncHandler);
     this.#focusSyncHandler = () => this.loadBoard({ silent: true, reason: 'focus-sync' });
@@ -693,6 +749,60 @@ export class WorkflowBoard extends Symbiote {
     this.#renderBoardHistory();
     this.#renderStatusReadout();
     this.#renderColumns();
+    if (this.#activeView === 'graph') this.#renderGraph();
+  }
+
+  setView(view = 'kanban') {
+    let next = BOARD_VIEWS.has(view) ? view : 'kanban';
+    if (next === this.#activeView) return;
+    this.#activeView = next;
+    this.#syncViewControls();
+    if (next === 'graph') {
+      this.#renderGraph();
+      this.#fitGraph();
+    }
+  }
+
+  #syncViewControls() {
+    let isGraph = this.#activeView === 'graph';
+    this.ref.kanbanRegion.hidden = isGraph;
+    this.ref.graphRegion.hidden = !isGraph;
+    this.ref.kanbanViewBtn.setAttribute('aria-pressed', String(!isGraph));
+    this.ref.graphViewBtn.setAttribute('aria-pressed', String(isGraph));
+    this.ref.kanbanViewBtn.classList.toggle('is-active', !isGraph);
+    this.ref.graphViewBtn.classList.toggle('is-active', isGraph);
+  }
+
+  #renderGraph() {
+    let columns = this.#columnsWithVisibleCards();
+    let cards = this.#visibleCards();
+    let projection = projectionFromBoard(this.#board, columns, cards);
+    let graphModel = buildWorkflowBoardGraphModel(projection);
+    let canvasModel = buildWorkflowBoardCanvasGraphModel(projection);
+    let hasCards = cards.length > 0;
+    this.ref.graphEmpty.hidden = hasCards;
+    this.ref.graphCanvas.setGraphModel?.(canvasModel);
+    this.#renderGraphStats(graphModel);
+  }
+
+  #renderGraphStats(model) {
+    let summary = summarizeWorkflowBoardGraphModel(model);
+    let metadata = summary.metadata || {};
+    this.ref.graphStats.textContent = [
+      `${metadata.columnCount ?? 0} columns`,
+      `${metadata.cardCount ?? 0} cards`,
+      `${metadata.transitionCount ?? 0} transitions`,
+      metadata.dependencyCount ? `${metadata.dependencyCount} deps` : '',
+      metadata.blockedOnDependencyCount ? `${metadata.blockedOnDependencyCount} blocked` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  #fitGraph() {
+    if (this.#activeView !== 'graph') return;
+    requestAnimationFrame(() => {
+      let didFit = this.ref.graphCanvas.fitView?.({ padding: 48, animate: true });
+      if (!didFit) this.ref.graphCanvas.resetView?.();
+    });
   }
 
   #renderEmptyShell() {
@@ -703,6 +813,9 @@ export class WorkflowBoard extends Symbiote {
     this.#syncBoardAutomationControls();
     this.#renderBoardHistory();
     this.ref.emptyState.hidden = false;
+    this.ref.graphCanvas.setGraphModel?.({ nodes: [], edges: [], rootNodes: [] });
+    this.ref.graphStats.textContent = '';
+    this.ref.graphEmpty.hidden = false;
     this.#publishSelection('empty-shell');
   }
 

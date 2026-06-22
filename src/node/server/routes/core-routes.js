@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { readConfig } from '../../config-store.js';
+import { getTeamMemoryRoot } from '../../../../packages/agent-pool-mcp/src/runtime/paths.js';
 import { getStateGraph } from '../../state-graph.js';
 import { getFlywheelStats } from '../../mlops/flywheel.js';
 import { listAdapterTypes, getAgentList, invalidateAgentList } from '../../adapters/index.js';
@@ -55,14 +56,20 @@ function setFrontmatterScalar(content, key, value) {
   return `${before}---\n${nextLines.join('\n').replace(/\n+$/, '')}\n---\n${body}`;
 }
 
-async function updateAgentResourceGroup(projectRoot, agentSlug, resourceGroup) {
+async function updateAgentResourceGroup(agentSlug, resourceGroup) {
   let slug = normalizeAgentSlug(agentSlug);
   let group = normalizeAgentResourceGroup(resourceGroup);
-  let agentsDir = path.join(path.resolve(projectRoot), '.agent-portal', 'agents');
+  let teamMemoryRoot = getTeamMemoryRoot();
+  if (!teamMemoryRoot) {
+    throw new Error(
+      'Team memory is not configured. Set agentPortal.teamMemoryRoot or AGENT_PORTAL_MEMORY_ROOT.',
+    );
+  }
+  let agentsDir = path.join(teamMemoryRoot, 'agents');
   let agentPath = path.join(agentsDir, `${slug}.md`);
   let realDir = await fs.realpath(agentsDir);
   let targetDir = await fs.realpath(path.dirname(agentPath));
-  if (targetDir !== realDir) throw new Error('Agent path must stay inside .agent-portal/agents');
+  if (targetDir !== realDir) throw new Error('Agent path must stay inside team-memory agents');
   let stat = await fs.lstat(agentPath);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Agent file is not editable');
   let content = await fs.readFile(agentPath, 'utf8');
@@ -140,7 +147,6 @@ export function createCoreRoutes(ctx) {
       try {
         let body = await parseBody(req);
         let agent = await updateAgentResourceGroup(
-          projectRoot,
           body.agent || body.agentSlug || body.slug,
           body.resourceGroup || body.resource_group,
         );

@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Self-contained team-memory fixture (agents/) so resource-group assertions do
+// not depend on the user's configured team memory.
+const FIXTURE_MEMORY_ROOT = path.join(__dirname, 'fixtures', 'team-memory');
 
 let testStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adapters-registry-state-'));
 process.env.PORTAL_STATE_DIR = testStateDir;
@@ -88,7 +94,7 @@ describe('adapters-registry', () => {
 
   it('exposes agent resource groups without agent-owned runtime policy', async () => {
     let { setPortalRoot, listAdapterTypes } = await import('../../src/node/adapters/index.js');
-    setPortalRoot(process.cwd());
+    setPortalRoot(FIXTURE_MEMORY_ROOT);
 
     let { metadata } = listAdapterTypes();
     let agentOptions = metadata.pool.parameters.find(param => param.id === 'agent').options;
@@ -123,7 +129,7 @@ describe('adapters-registry', () => {
     try {
       process.env.AGENT_PORTAL_CONFIG_DIR = tmpDir;
       let { setPortalRoot, listAdapterTypes } = await import('../../src/node/adapters/index.js');
-      setPortalRoot(process.cwd());
+      setPortalRoot(tmpDir);
 
       let { metadata } = listAdapterTypes();
       let group = metadata._resourceGroupDefaults.groups.find(item => item.name === 'isolated-review');

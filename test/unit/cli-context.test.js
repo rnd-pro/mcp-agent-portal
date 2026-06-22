@@ -60,7 +60,11 @@ describe('CLI context resolve', () => {
       '--mode',
       'both',
       '--json',
-    ], { encoding: 'utf8', timeout: 3000 });
+    ], {
+      encoding: 'utf8',
+      timeout: 3000,
+      env: { ...process.env, AGENT_PORTAL_MEMORY_ROOT: path.join(cwd, '.agent-portal') },
+    });
 
     let parsed = JSON.parse(output);
 
