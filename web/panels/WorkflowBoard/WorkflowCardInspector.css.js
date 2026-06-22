@@ -6,6 +6,12 @@ pg-workflow-card-inspector {
   min-height: 0;
 }
 
+/* The [hidden] attribute toggles section visibility; an explicit display rule below would
+   otherwise win over the UA [hidden]{display:none}, so enforce it. */
+pg-workflow-card-inspector [hidden] {
+  display: none !important;
+}
+
 pg-workflow-card-inspector .wci-shell {
   display: flex;
   flex-direction: column;
