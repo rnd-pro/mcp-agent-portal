@@ -459,6 +459,7 @@ export const WORKFLOW_BOARD_TOOLS = [
           description: 'Structured file ownership scope for create_item, childItems, and orchestration.',
         },
         metadata: { type: 'object', description: 'Optional work-item metadata for create_item.' },
+        subscription: { type: 'object', description: 'Optional orchestrator return subscription (e.g. a join over members) for create_item or orchestrate. Persisted on the card so the join materializes on first orchestration, including by auto-pickup.' },
         patch: { type: 'object', description: 'Fields to patch for update_item.' },
         checks: { type: 'object', description: 'Optional gate checks for update_item.' },
         fromColumnId: { type: 'string', description: 'Expected current column for transition.' },
@@ -681,6 +682,7 @@ function serviceArgsForAction(action, args = {}) {
       blockers: args.blockers,
       files: args.files,
       metadata: args.metadata,
+      subscription: args.subscription,
     });
   }
   if (action === 'update_item') {
@@ -780,6 +782,7 @@ function serviceArgsForAction(action, args = {}) {
       approval_mode: args.approvalMode,
       cwd: args.cwd,
       files: args.files,
+      subscription: args.subscription,
     });
   }
   if (action === 'control') {
