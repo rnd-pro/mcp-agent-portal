@@ -930,11 +930,14 @@ export class WorkflowBoard extends Symbiote {
     let agent = agentName(card, run);
     let duration = formatDuration(run);
     let tokens = formatTokens(run?.tokens);
+    let busy = ['running', 'requested', 'recovering', 'active', 'started', 'streaming']
+      .includes(normalizeText(run?.status).toLowerCase());
     return {
       id: card.id,
       columnId: card.columnId,
       title: card.title,
       summary: card.summary || 'No summary provided.',
+      busy,
       meta: [
         card.projectId ? { label: card.projectId } : null,
         card.kind ? { label: card.kind } : null,
