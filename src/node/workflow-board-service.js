@@ -4034,7 +4034,19 @@ export function createWorkflowBoardService(opts = {}) {
   function updateWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
-    let patch = args.patch && typeof args.patch === 'object' ? args.patch : {};
+    // Accept the patch either nested under `patch` or as top-level content fields (parity with
+    // create_item). Without this, a top-level `{cardId, domain}` was silently ignored.
+    let patch;
+    if (args.patch && typeof args.patch === 'object') {
+      patch = args.patch;
+    } else {
+      let {
+        cardId: _c, card_id: _cs, id: _id, boardId: _b, board_id: _bs,
+        expectedVersion: _ev, expected_version: _evs, checks: _ch, reason: _r,
+        actor: _a, patch: _p, ...rest
+      } = args;
+      patch = rest;
+    }
     let current = getCard(cardId);
     let requestedColumnId = textOrNull(patch.columnId ?? patch.column_id);
     if (requestedColumnId && requestedColumnId !== current.columnId) {
