@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { startWebServer } from './web-server.js';
 import { writePortFile, removePortFile } from './backend-lifecycle.js';
+import { ensureGatewayAlive } from './local-gateway.js';
 
 const projectRoot = resolve(process.argv[2] || '.');
 
@@ -48,3 +49,11 @@ const checkInterval = setInterval(() => {
     writePortFile(projectRoot, addr.port, networkAccess);
   }
 }, 50);
+
+// Keep the local-gateway router (portal.local) alive independently of any single backend. ensureGatewayAlive
+// is a no-op when a live gateway already owns the listener and re-hosts it here otherwise, so if the backend
+// that happened to host the gateway dies, the next surviving backend re-hosts it within one heartbeat — and
+// routes stay fresh across backend restarts (portal.local no longer drops with the backend).
+ensureGatewayAlive();
+const gatewayHeartbeat = setInterval(ensureGatewayAlive, 10000);
+gatewayHeartbeat.unref();
