@@ -212,6 +212,8 @@ function normalizeEvent(raw = {}) {
     label: normalizeText(event.label || event.title || event.type || event.status, 'Event'),
     status: normalizeText(event.status || event.result),
     actor: normalizeText(event.actor || event.owner),
+    fromColumnId: normalizeText(event.fromColumnId || event.from_column_id || event.from),
+    toColumnId: normalizeText(event.toColumnId || event.to_column_id || event.to),
     timestamp: normalizeTimestamp(event.timestamp || event.createdAt || event.updatedAt || event.time),
     note: normalizeText(event.note || event.reason || event.message || event.summary),
   };
