@@ -5160,9 +5160,61 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
+  // A queued, undelivered actionable return waiting to wake the orchestrator. The inbox holds at most
+  // 12 entries (coalesceReturnEvents); a soft `progress`/`partial` is not actionable, so it never wakes
+  // the loop. `consumedAt` is stamped when the driver re-engages (delivered ⟺ consumed), so this goes
+  // false until a NEW return is minted — the idempotent edge of the level-triggered wake (S9a/S9b).
+  function hasQueuedActionableReturn(card = {}) {
+    let returns = card?.metadata?.returns;
+    return Array.isArray(returns) && returns.some(item => item?.actionable === true && !item?.consumedAt);
+  }
+
+  // A hard-interrupt return (a blocked / needs_decision / needs_permission child) must wake the
+  // orchestrator regardless of the board's `recovery` setting — a stuck child cannot self-clear, so
+  // gating it on `recovery === 'auto'` would stall it forever (S9c, D4). Detected off the inbox so the
+  // gate is per-card, not a single board-level early return.
+  function hasUnconsumedHardInterrupt(card = {}) {
+    let returns = card?.metadata?.returns;
+    return Array.isArray(returns) && returns.some(item => item?.hardInterrupt === true && !item?.consumedAt);
+  }
+
+  // Compact one-line-per-return summary of a card's unconsumed actionable returns, newest first and
+  // capped, folded into the re-engagement reason so the orchestrator wakes once and sees the batch
+  // (S10a). Reuses the existing reason field — no new transport.
+  function summarizeQueuedReturns(card = {}, limit = 5) {
+    let returns = card?.metadata?.returns;
+    if (!Array.isArray(returns)) return '';
+    let lines = returns
+      .filter(item => item?.actionable === true && !item?.consumedAt)
+      .slice(-limit)
+      .reverse()
+      .map(item => `- ${item.kind}${item.detail ? `: ${item.detail}` : ''}`);
+    return lines.length ? `Queued returns (${lines.length}):\n${lines.join('\n')}` : '';
+  }
+
+  // Stamp `consumedAt` on every actionable, currently-unconsumed return so it wakes the orchestrator
+  // ONCE, not every tick (S9b). History/audit survives (entries are marked, never deleted; the 12-cap
+  // still bounds growth). Returns the next metadata, unchanged when nothing is unconsumed.
+  function consumeActionableReturns(metadata, currentNow) {
+    let returns = metadata?.returns;
+    if (!Array.isArray(returns) || !returns.some(item => item?.actionable === true && !item?.consumedAt)) {
+      return metadata;
+    }
+    return {
+      ...metadata,
+      returns: returns.map(item => (
+        item?.actionable === true && !item?.consumedAt ? { ...item, consumedAt: currentNow } : item
+      )),
+    };
+  }
+
   // Escalation re-engagement loop. This is the ONLY place the attempt counter advances — it bumps
   // the count and pushes the backoff window in the same durable commit, BEFORE re-engaging the
-  // orchestrator, so the cap is always reachable regardless of how the re-engaged run resolves.
+  // orchestrator, so the cap is always reachable regardless of how the re-engaged run resolves. The
+  // same loop drains queued actionable returns through the SAME driver (the event-driven wake): a
+  // hard-interrupt return wakes regardless of `recovery` (S9c), a soft actionable return only on an
+  // `auto` board, and the successful re-engagement stamps `consumedAt` in the same durable commit so a
+  // return wakes the orchestrator exactly once (S9b).
   // Gate-resident: re-engagement routes the card back to `ready` (governed rework edge) so the
   // orchestrate automation re-routes by escalation kind — never a direct out-of-gate write, never
   // a silent rights grant. Opt-in per board via `automation.recovery === 'auto'`.
@@ -5173,9 +5225,7 @@ export function createWorkflowBoardService(opts = {}) {
     let daemonContext = { ...context, principal };
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
-    if (boardAutomation.recovery !== 'auto' && !args.force) {
-      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}`, reengaged: [], escalatedToHuman: [] };
-    }
+    let recoveryAuto = boardAutomation.recovery === 'auto';
     let projectId = textOrNull(args.projectId ?? args.project_id);
     let currentNow = now();
     let maxAttempts = Number(args.maxAttempts ?? args.max_attempts);
@@ -5183,12 +5233,18 @@ export function createWorkflowBoardService(opts = {}) {
     let reengaged = [];
     let escalatedToHuman = [];
 
+    // S9a: a queued actionable return is a driver candidate alongside an active escalation, so a
+    // return drives the orchestrator through this SAME re-engagement driver.
     let cards = Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(card => card.boardId === board.id)
       .filter(card => !projectId || card.projectId === projectId)
-      .filter(card => hasActiveEscalation(card));
+      .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card));
 
     for (let card of cards) {
+      // S9c (D4): the recovery gate is applied PER-CARD, not as a board-level early return. A card
+      // bearing an unconsumed hard-interrupt (a blocked child) wakes regardless of `recovery`; soft
+      // actionable returns and ordinary escalations stay gated on `recovery === 'auto'`.
+      if (!recoveryAuto && !args.force && !hasUnconsumedHardInterrupt(card)) continue;
       let state = normalizeWorkflowEscalationState(card.metadata.escalation);
       if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
@@ -5238,13 +5294,29 @@ export function createWorkflowBoardService(opts = {}) {
         continue;
       }
 
-      // Accrue FIRST, durably, before re-engaging — the central loop-safety invariant.
-      let attemptCount = state.attemptCount + 1;
-      let nextAttemptAt = currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1);
-      let accrued = normalizeWorkflowEscalationState({ ...state, attemptCount, nextAttemptAt });
+      // Accrue FIRST, durably, before re-engaging — the central loop-safety invariant. An escalation
+      // card bumps its attempt counter and pushes the backoff window; a card driven purely by a queued
+      // return (no active escalation) accrues no phantom escalation state — `consumedAt` below is its
+      // idempotency mechanism, and it re-engages immediately (no backoff).
+      let escalated = hasActiveEscalation(card);
+      let attemptCount = escalated ? state.attemptCount + 1 : 0;
+      let nextAttemptAt = escalated
+        ? currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1)
+        : null;
+      let accrued = escalated
+        ? normalizeWorkflowEscalationState({ ...state, attemptCount, nextAttemptAt })
+        : null;
+      let escalationMetadata = accrued
+        ? { ...card.metadata, escalation: accrued }
+        : { ...card.metadata };
+      // S9b: stamp `consumedAt` on every actionable, unconsumed return in the SAME durable commit as
+      // the attempt accrual / re-engagement progress, so consumed ⟺ delivered. If no run is started
+      // (the guards above `continue` before this point), the returns stay unconsumed and retry next
+      // tick; once stamped, `hasQueuedActionableReturn` returns false until a NEW return is minted.
+      let consumedMetadata = consumeActionableReturns(escalationMetadata, currentNow);
       let accruedCard = normalizeWorkflowCardInput({
         ...card,
-        metadata: { ...card.metadata, escalation: accrued },
+        metadata: consumedMetadata,
         version: card.version + 1,
         updatedAt: currentNow,
         updatedBy: principal.label,
@@ -5261,11 +5333,17 @@ export function createWorkflowBoardService(opts = {}) {
       // Re-engagement enqueues through the same admission queue (AD-17, inv 26): the accrued
       // backoff window becomes the queue entry's `notBefore`, so the card never jumps the queue and
       // the shipped escalation backoff pacing is preserved exactly. Attempt accrual already happened
-      // durably above, so a dropped/contended enqueue does not burn an extra attempt here.
+      // durably above, so a dropped/contended enqueue does not burn an extra attempt here. S10a folds a
+      // compact batch of the queued returns into the reason field the driver already builds so the
+      // orchestrator wakes once and sees them all (no new transport).
+      let returnSummary = summarizeQueuedReturns(card);
+      let reengageReason = escalated
+        ? `Escalation re-engagement #${attemptCount} (${accrued.kind}).`
+        : 'Return re-engagement.';
       let reengageArgs = {
         boardId: board.id,
         cardId: card.id,
-        reason: `Escalation re-engagement #${attemptCount} (${accrued.kind}).`,
+        reason: returnSummary ? `${reengageReason}\n${returnSummary}` : reengageReason,
         escalation: accrued,
         delegate: args.delegate,
         notBefore: nextAttemptAt,
@@ -5280,9 +5358,14 @@ export function createWorkflowBoardService(opts = {}) {
       } catch (error) {
         outcome = { ok: false, error: error.message };
       }
-      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued.kind, ok: Boolean(outcome?.ok) });
+      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued?.kind ?? null, ok: Boolean(outcome?.ok) });
     }
 
+    // A manual-recovery board still reports `skipped` when nothing escaped the per-card gate (no
+    // hard-interrupt passthrough, no escalation/return re-engaged), preserving the board-level contract.
+    if (!recoveryAuto && !args.force && reengaged.length === 0 && escalatedToHuman.length === 0) {
+      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}`, reengaged, escalatedToHuman };
+    }
     return { ok: true, reengaged, escalatedToHuman };
   }
 
