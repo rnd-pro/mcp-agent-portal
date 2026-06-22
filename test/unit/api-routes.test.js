@@ -186,8 +186,10 @@ describe('api-routes', () => {
   });
 
   it('updates agent resource group frontmatter and refreshes the agent catalog', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-resource-group-route-'));
-    let agentsDir = path.join(tmpDir, '.agent-portal', 'agents');
+    let memoryRoot = path.join(tmpDir, '.agent-portal');
+    let agentsDir = path.join(memoryRoot, 'agents');
     await fs.mkdir(agentsDir, { recursive: true });
     await fs.writeFile(path.join(agentsDir, 'orchestrator.md'), `---
 name: orchestrator
@@ -198,6 +200,7 @@ resource_group: reasoning-heavy
 
 Body
 `);
+    process.env.AGENT_PORTAL_MEMORY_ROOT = memoryRoot;
 
     try {
       let { createRoutes } = await import('../../src/node/server/api-routes.js');
@@ -237,6 +240,8 @@ Body
       let cleared = await fs.readFile(path.join(agentsDir, 'orchestrator.md'), 'utf8');
       assert.doesNotMatch(cleared, /^resource_group:/m);
     } finally {
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
@@ -992,86 +997,107 @@ Body
   });
 
   it('POST /api/agent-portal/file only writes editable public markdown or JSON content', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-tree-'));
+    let memoryRoot = path.join(tmpDir, '.agent-portal');
+    process.env.AGENT_PORTAL_MEMORY_ROOT = memoryRoot;
     let routes = createRoutes(makeRoutes(tmpDir));
 
-    let okReq = makeReq('POST', '/api/agent-portal/file', {
-      path: 'skills/code/example.md',
-      content: '# Example\n',
-    });
-    let okRes = makeRes();
-    await routes['POST /api/agent-portal/file'](okReq, okRes);
+    try {
+      let okReq = makeReq('POST', '/api/agent-portal/file', {
+        path: 'skills/code/example.md',
+        content: '# Example\n',
+      });
+      let okRes = makeRes();
+      await routes['POST /api/agent-portal/file'](okReq, okRes);
 
-    assert.equal(okRes.status, 200);
-    assert.equal(await fs.readFile(path.join(tmpDir, '.agent-portal/skills/code/example.md'), 'utf8'), '# Example\n');
+      assert.equal(okRes.status, 200);
+      assert.equal(await fs.readFile(path.join(memoryRoot, 'skills/code/example.md'), 'utf8'), '# Example\n');
 
-    let workspaceReq = makeReq('POST', '/api/agent-portal/file', {
-      path: 'workspace/demo/context.md',
-      content: '# Demo\n',
-    });
-    let workspaceRes = makeRes();
-    await routes['POST /api/agent-portal/file'](workspaceReq, workspaceRes);
+      let workspaceReq = makeReq('POST', '/api/agent-portal/file', {
+        path: 'workspace/demo/context.md',
+        content: '# Demo\n',
+      });
+      let workspaceRes = makeRes();
+      await routes['POST /api/agent-portal/file'](workspaceReq, workspaceRes);
 
-    assert.equal(workspaceRes.status, 200);
-    assert.equal(await fs.readFile(path.join(tmpDir, '.agent-portal/workspace/demo/context.md'), 'utf8'), '# Demo\n');
+      assert.equal(workspaceRes.status, 200);
+      assert.equal(await fs.readFile(path.join(memoryRoot, 'workspace/demo/context.md'), 'utf8'), '# Demo\n');
 
-    let deniedReq = makeReq('POST', '/api/agent-portal/file', {
-      path: 'runtime/state.json',
-      content: '{}',
-    });
-    let deniedRes = makeRes();
-    await routes['POST /api/agent-portal/file'](deniedReq, deniedRes);
+      let deniedReq = makeReq('POST', '/api/agent-portal/file', {
+        path: 'runtime/state.json',
+        content: '{}',
+      });
+      let deniedRes = makeRes();
+      await routes['POST /api/agent-portal/file'](deniedReq, deniedRes);
 
-    assert.equal(deniedRes.status, 400);
-    assert.match(deniedRes.json().error, /not editable public|local portal state/);
+      assert.equal(deniedRes.status, 400);
+      assert.match(deniedRes.json().error, /not editable public|local portal state/);
 
-    let unsafeReq = makeReq('POST', '/api/agent-portal/file', {
-      path: 'skills/code/unsafe.md',
-      content: `# Unsafe\n\n${['Bearer', 'abcdefghijklmnopqrstuvwxyz123456'].join(' ')}\n`,
-    });
-    let unsafeRes = makeRes();
-    await routes['POST /api/agent-portal/file'](unsafeReq, unsafeRes);
+      let unsafeReq = makeReq('POST', '/api/agent-portal/file', {
+        path: 'skills/code/unsafe.md',
+        content: `# Unsafe\n\n${['Bearer', 'abcdefghijklmnopqrstuvwxyz123456'].join(' ')}\n`,
+      });
+      let unsafeRes = makeRes();
+      await routes['POST /api/agent-portal/file'](unsafeReq, unsafeRes);
 
-    assert.equal(unsafeRes.status, 400);
-    assert.match(unsafeRes.json().error, /bearer token|secrets or local paths/);
+      assert.equal(unsafeRes.status, 400);
+      assert.match(unsafeRes.json().error, /bearer token|secrets or local paths/);
+    } finally {
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
-  it('rejects .agent-portal file symlinks that escape the project portal root', async () => {
+  it('rejects team-memory file symlinks that escape the configured root', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-symlink-'));
     let outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-outside-'));
-    let skillDir = path.join(tmpDir, '.agent-portal/skills/code');
+    let memoryRoot = path.join(tmpDir, '.agent-portal');
+    let skillDir = path.join(memoryRoot, 'skills/code');
     await fs.mkdir(skillDir, { recursive: true });
     await fs.writeFile(path.join(outsideDir, 'secret.md'), '# secret\n');
     await fs.symlink(path.join(outsideDir, 'secret.md'), path.join(skillDir, 'leak.md'));
+    process.env.AGENT_PORTAL_MEMORY_ROOT = memoryRoot;
 
-    let routes = createRoutes(makeRoutes(tmpDir));
-    let readReq = makeReq('GET', '/api/agent-portal/file?path=skills%2Fcode%2Fleak.md');
-    let readRes = makeRes();
-    await routes['GET /api/agent-portal/file'](readReq, readRes);
+    try {
+      let routes = createRoutes(makeRoutes(tmpDir));
+      let readReq = makeReq('GET', '/api/agent-portal/file?path=skills%2Fcode%2Fleak.md');
+      let readRes = makeRes();
+      await routes['GET /api/agent-portal/file'](readReq, readRes);
 
-    assert.equal(readRes.status, 400);
-    assert.match(readRes.json().error, /must stay inside configured root/);
+      assert.equal(readRes.status, 400);
+      assert.match(readRes.json().error, /must stay inside configured root/);
 
-    let writeReq = makeReq('POST', '/api/agent-portal/file', {
-      path: 'skills/code/leak.md',
-      content: '# overwritten\n',
-    });
-    let writeRes = makeRes();
-    await routes['POST /api/agent-portal/file'](writeReq, writeRes);
+      let writeReq = makeReq('POST', '/api/agent-portal/file', {
+        path: 'skills/code/leak.md',
+        content: '# overwritten\n',
+      });
+      let writeRes = makeRes();
+      await routes['POST /api/agent-portal/file'](writeReq, writeRes);
 
-    assert.equal(writeRes.status, 400);
-    assert.match(writeRes.json().error, /symbolic link/);
-    assert.equal(await fs.readFile(path.join(outsideDir, 'secret.md'), 'utf8'), '# secret\n');
+      assert.equal(writeRes.status, 400);
+      assert.match(writeRes.json().error, /symbolic link/);
+      assert.equal(await fs.readFile(path.join(outsideDir, 'secret.md'), 'utf8'), '# secret\n');
+    } finally {
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it('POST /api/agent-portal/open-library/install rejects non-public targets', async () => {
     let oldOpenLibrary = process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-install-'));
     let libDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-open-library-'));
     process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = libDir;
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     await fs.mkdir(path.join(libDir, 'skills/code'), { recursive: true });
     await fs.writeFile(path.join(libDir, 'skills/code/example.md'), '# Example\n');
     let unsafeLocalPath = ['# Unsafe', '', ['', 'Users', 'alice', 'private'].join('/')].join('\n');
@@ -1100,16 +1126,22 @@ Body
     } finally {
       if (oldOpenLibrary === undefined) delete process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
       else process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = oldOpenLibrary;
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.rm(libDir, { recursive: true, force: true });
     }
   });
 
   it('POST /api/agent-portal/open-library/install rejects source symlinks that escape the library root', async () => {
     let oldOpenLibrary = process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-agent-install-symlink-'));
     let libDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-open-library-symlink-'));
     let outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-open-library-outside-'));
     process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = libDir;
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     await fs.mkdir(path.join(libDir, 'skills/code'), { recursive: true });
     await fs.writeFile(path.join(outsideDir, 'secret.md'), '# secret\n');
     await fs.symlink(path.join(outsideDir, 'secret.md'), path.join(libDir, 'skills/code/leak.md'));
@@ -1127,6 +1159,11 @@ Body
     } finally {
       if (oldOpenLibrary === undefined) delete process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR;
       else process.env.AGENT_PORTAL_OPEN_LIBRARY_DIR = oldOpenLibrary;
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.rm(libDir, { recursive: true, force: true });
+      await fs.rm(outsideDir, { recursive: true, force: true });
     }
   });
 

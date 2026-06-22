@@ -144,6 +144,11 @@ export default`
 <sn-card class="pg-library-settings" ref="agentPortalCard">
   <span slot="title">Agent Portal Libraries</span>
   <sn-field variant="compact">
+    <span slot="label">Team Memory Root</span>
+    <input type="text" ref="teamMemoryRootInput" placeholder="/path/to/team-memory">
+  </sn-field>
+  <div class="pg-library-note">Absolute path to the shared team-memory directory holding agents, skills, contexts, and workflows. Leave empty when team memory is not configured.</div>
+  <sn-field variant="compact">
     <span slot="label">Open Library Path</span>
     <input type="text" ref="openLibraryPathInput" placeholder="/path/to/public-agent-portal-library">
   </sn-field>

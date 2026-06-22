@@ -3,10 +3,9 @@ import { createClaudeAdapter } from './claude.js';
 import { createCodexAdapter } from './codex.js';
 import { getStateGraph } from '../state-graph.js';
 import { listGroups } from '../../../packages/agent-pool-mcp/src/tools/groups.js';
+import { getTeamMemoryRoot } from '../../../packages/agent-pool-mcp/src/runtime/paths.js';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
 
 let ADAPTERS = {
@@ -199,32 +198,24 @@ function getEffectiveModels(provider) {
 }
 
 // ── Agent catalog ─────────────────────────────────────────
-// Cached agent list from .agent-portal/agents/*.md (refreshes every 5s).
+// Cached agent list from <team-memory>/agents/*.md (refreshes every 5s).
 let _agentCache = null;
 let _agentCacheTime = 0;
 let _portalRoot = null;
 let _agentCacheKey = '';
-const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-function getAgentRootCandidates() {
-  let candidates = [
-    process.env.AGENT_PORTAL_MEMORY_ROOT,
-    process.env.AGENT_PORTAL_AGENTS_ROOT,
-    _portalRoot,
-    process.cwd(),
-    MODULE_ROOT,
-  ].filter(Boolean).map(root => resolve(root));
-  return [...new Set(candidates)];
-}
-
+/**
+ * Resolve the team-memory content directory. A `setPortalRoot()` override wins;
+ * otherwise the unified resolver (env → config → null) decides. Returns null when
+ * team memory is unconfigured.
+ * @returns {string|null}
+ */
 function resolveAgentRoot() {
-  for (let root of getAgentRootCandidates()) {
-    if (existsSync(join(root, '.agent-portal', 'agents'))) return root;
-  }
-  return _portalRoot || process.cwd();
+  if (_portalRoot) return resolve(_portalRoot);
+  return getTeamMemoryRoot();
 }
 
-/** Set the portal root so agent-parser can find .agent-portal/ */
+/** Pin the team-memory content root so agent-parser can find agents/ and skills/. */
 export function setPortalRoot(root) {
   _portalRoot = root;
   _agentCache = null;
@@ -234,13 +225,15 @@ export function setPortalRoot(root) {
 
 /**
  * Get agent catalog (slug, icon, color, description, role). Cached 5s.
+ * Returns an empty list when team memory is unconfigured.
  * @returns {Array<object>}
  */
 export function getAgentList() {
   let root = resolveAgentRoot();
+  if (!root) return [];
   if (_agentCache && _agentCacheKey === root && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
-  let agentsDir = join(root, '.agent-portal', 'agents');
-  let skillsDir = join(root, '.agent-portal', 'skills');
+  let agentsDir = join(root, 'agents');
+  let skillsDir = join(root, 'skills');
   let agents = loadAgents(agentsDir, skillsDir);
   _agentCache = getAgentCatalog(agents);
   _agentCacheTime = Date.now();
@@ -265,7 +258,10 @@ export function invalidateAgentList() {
 function loadResourceGroupPreferences() {
   let result = { byProvider: {}, defaultModel: null, groups: [] };
   try {
-    let groups = listGroups(resolveAgentRoot());
+    // Resource groups live in the global config home; listGroups uses its argument
+    // only for the legacy in-project fallback, so fall back to cwd when team memory
+    // is unconfigured.
+    let groups = listGroups(resolveAgentRoot() || process.cwd());
     let seen = new Set();
     for (let group of groups) {
       let { name, ...config } = group;

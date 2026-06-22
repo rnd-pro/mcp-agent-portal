@@ -8,13 +8,22 @@ import {
   DEFAULT_WORKFLOW_BOARD_ID,
   DEFAULT_WORKFLOW_COLUMN_IDS,
   RECOVERY_FLAGS,
+  WORKFLOW_CARD_LIFECYCLE_STATES,
   WORKFLOW_ESCALATION_KINDS,
+  classifyWorkflowGraph,
   createDefaultWorkflowBoard,
+  isWorkflowLifecycleTransitionAllowed,
+  migrateWorkflowBoardToV2,
+  migrateWorkflowCardToV2,
   normalizeWorkflowCardInput,
+  normalizeWorkflowDependsOn,
   normalizeWorkflowEscalation,
+  normalizeWorkflowLifecycle,
+  validateWorkflowTransitionGraph,
 } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
+import { humanPrincipal } from '../../src/node/server/principal.js';
 
 function writeWorkItemSeed(root, projectId, fileName, frontmatter, body = 'Durable body.') {
   let dir = path.join(root, '.agent-portal', 'workspace', projectId, 'plans', 'work-items');
@@ -28,9 +37,12 @@ describe('workflow board model and service', () => {
   let now;
   let idSeq;
   let service;
+  let oldMemoryRoot;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-board-model-'));
+    oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
     sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -43,12 +55,18 @@ describe('workflow board model and service', () => {
       now: () => now++,
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
+      // These tests drive the service in-process as the trusted local human (board-author caps),
+      // so the ~hundreds of existing mutating assertions keep passing through the S6 gate. The
+      // harness sets the principal once here; production wiring never sets defaultPrincipal.
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
   });
 
   afterEach(async () => {
     await sg.flushChatWrites();
     sg.flush();
+    if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -66,7 +84,7 @@ describe('workflow board model and service', () => {
     }, { id: 'card-1', now: 456 });
 
     assert.equal(board.id, DEFAULT_WORKFLOW_BOARD_ID);
-    assert.equal(board.schema, 'workflow-board/v1');
+    assert.equal(board.schema, 'workflow-board/v2');
     assert.deepEqual(board.columns.map(column => column.id), DEFAULT_WORKFLOW_COLUMN_IDS);
     assert.equal(board.mode, 'armed');
     assert.equal(board.automation.pickup, 'auto');
@@ -95,7 +113,7 @@ describe('workflow board model and service', () => {
       board.columns.find(column => column.id === 'commit-publish').automation.agents,
       ['release-manager'],
     );
-    assert.equal(card.schema, 'workflow-card/v1');
+    assert.equal(card.schema, 'workflow-card/v2');
     assert.equal(card.id, 'card-1');
     assert.equal(card.columnId, 'ideas');
     assert.equal(card.cwd, '/workspace/agent-portal');
@@ -113,20 +131,20 @@ describe('workflow board model and service', () => {
     assert.deepEqual(sg.get('workflowLeases'), {});
   });
 
-  it('refreshes an existing default board to the current column automation policy', () => {
+  it('fill-only refreshes a default board: preserves customizations, adds missing defaults (inv 17, 19)', () => {
     let oldBoard = createDefaultWorkflowBoard({ now: 123 });
     oldBoard.version = 7;
     oldBoard.columns = oldBoard.columns.map((column) => (
       column.id === 'ready'
         ? {
-            ...column,
-            automation: {
-              trigger: 'on_enter',
-              action: 'orchestrate',
-              mode: 'gated',
-              agent: 'legacy-agent',
-            },
-          }
+          ...column,
+          automation: {
+            trigger: 'on_enter',
+            action: 'orchestrate',
+            mode: 'gated',
+            agent: 'legacy-agent',
+          },
+        }
         : column
     ));
     oldBoard.transitions = oldBoard.transitions.filter(transition => transition.to !== 'ready');
@@ -137,10 +155,14 @@ describe('workflow board model and service', () => {
     let readyColumn = board.columns.find(column => column.id === 'ready');
 
     assert.equal(board.version, 8);
-    assert.equal(readyColumn.automation.mode, 'auto');
+    // Fill-only (inv 17): the customized mode/agent survive the policy-version bump; they are NOT
+    // reset to the default `auto`/`orchestrator`. Only missing default keys (agents, parallelLimit)
+    // are filled in.
+    assert.equal(readyColumn.automation.mode, 'gated');
+    assert.equal(readyColumn.automation.agent, 'legacy-agent');
     assert.deepEqual(readyColumn.automation.agents, ['orchestrator']);
-    assert.equal(readyColumn.automation.agent, undefined);
     assert.equal(readyColumn.automation.parallelLimit, 4);
+    // inv 19: a missing default transition (the deleted backlog->ready) is still re-added.
     assert.ok(board.transitions.find(transition => transition.from === 'backlog' && transition.to === 'ready'));
     assert.equal(sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`).version, 8);
 
@@ -162,6 +184,182 @@ describe('workflow board model and service', () => {
     assert.equal(updated.column.automation.mode, 'gated');
     assert.deepEqual(reloadedReady.automation.agents, ['reviewer']);
     assert.equal(reloadedReady.automation.parallelLimit, 2);
+  });
+
+  it('fill-only refresh preserves a customized transition gate while adding a missing default (inv 17)', () => {
+    let oldBoard = createDefaultWorkflowBoard({ now: 123 });
+    // Customize an existing default transition's gates (a user-authored stricter gate) and delete a
+    // different default transition entirely so the refresh has a missing default to re-add.
+    oldBoard.transitions = oldBoard.transitions
+      .filter(transition => !(transition.from === 'backlog' && transition.to === 'ready'))
+      .map(transition => (
+        transition.from === 'quality-audit' && transition.to === 'commit-publish'
+          ? { ...transition, gate: 'custom_release_gate', gates: ['custom_release_gate'] }
+          : transition
+      ));
+    sg.commit([{ op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: oldBoard }], 'seed');
+
+    let board = service.getBoardProjection().board;
+    let customized = board.transitions.find(t => t.from === 'quality-audit' && t.to === 'commit-publish');
+    assert.deepEqual(customized.gates, ['custom_release_gate'], 'customized transition gates must survive the refresh');
+    assert.ok(
+      board.transitions.find(t => t.from === 'backlog' && t.to === 'ready'),
+      'missing default transition must be re-added (inv 19)',
+    );
+  });
+
+  it('runs a one-time forward schema-v2 migration over persisted boards and cards (AD-8, inv 16)', () => {
+    // Seed v1-shaped board + card directly: pre-v2 schema strings, no lifecycle/dependsOn on the card.
+    // No `workflowSchema` marker is seeded, so the one-time sweep must run on first access.
+    let v1Board = {
+      ...createDefaultWorkflowBoard({ now: 123 }),
+      schema: 'workflow-board/v1',
+    };
+    // A genuine v1-shaped card: a fully-normalized card with the v2-only fields stripped and the
+    // schema downgraded, so it differs from v2 exactly where the migrator fills (lifecycle/dependsOn).
+    let normalizedCard = normalizeWorkflowCardInput(
+      { title: 'Legacy card', boardId: DEFAULT_WORKFLOW_BOARD_ID, columnId: 'ideas' },
+      { id: 'card-v1', now: 100 },
+    );
+    let { lifecycle, dependsOn, ...rest } = normalizedCard;
+    let v1Card = { ...rest, schema: 'workflow-card/v1' };
+    sg.commit([
+      { op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: v1Board },
+      { op: 'set', path: 'workflowCards/card-v1', value: v1Card },
+    ], 'seed');
+    assert.equal(sg.get('workflowSchema'), undefined);
+
+    // Any board entry point triggers the one-time sweep.
+    service.getBoardProjection();
+
+    let migratedBoard = sg.get(`workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`);
+    let migratedCard = sg.get('workflowCards/card-v1');
+    assert.equal(migratedBoard.schema, 'workflow-board/v2');
+    assert.equal(migratedCard.schema, 'workflow-card/v2');
+    assert.equal(migratedCard.lifecycle, 'idle');
+    assert.deepEqual(migratedCard.dependsOn, []);
+    assert.deepEqual(sg.get('workflowSchema'), { version: 2 });
+
+    // Idempotency: with the migration settled (marker set, board policy refreshed), a further
+    // access must not re-commit. Capture version after a warm-up access, then assert the next
+    // access leaves it untouched — proving the migration is a steady-state no-op.
+    service.getBoardProjection();
+    let versionBefore = sg.version;
+    service.getBoardProjection();
+    assert.equal(sg.version, versionBefore, 'steady-state access must not re-commit the migration');
+
+    // No read-time schema branch: a migrated card reads identically on first and second access.
+    let first = service.getCard('card-v1');
+    let second = service.getCard('card-v1');
+    assert.deepEqual(first, second);
+    assert.equal(first.schema, 'workflow-card/v2');
+  });
+
+  it('a fresh service instance treats an already-migrated store as a marker no-op (durable guard)', () => {
+    // First instance migrates and sets the durable marker.
+    let legacy = normalizeWorkflowCardInput(
+      { title: 'Legacy', boardId: DEFAULT_WORKFLOW_BOARD_ID, columnId: 'ideas' },
+      { id: 'card-legacy', now: 1 },
+    );
+    let { lifecycle: _l, dependsOn: _d, ...legacyRest } = legacy;
+    sg.commit([{
+      op: 'set',
+      path: 'workflowCards/card-legacy',
+      value: { ...legacyRest, schema: 'workflow-card/v1' },
+    }], 'seed');
+    service.getBoardProjection();
+    assert.deepEqual(sg.get('workflowSchema'), { version: 2 });
+
+    // A second, freshly-constructed service (per-request seam) shares the StateGraph but starts with
+    // its own per-instance flag. The DURABLE marker — not the flag — must keep it a no-op.
+    let versionBefore = sg.version;
+    let freshService = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    freshService.getBoardProjection();
+    assert.equal(sg.version, versionBefore, 'a fresh instance must not re-migrate when the marker is current');
+  });
+
+  it('freezes the projection-v2 lifecycle / dependsOn / queue / telemetry shape', async () => {
+    let blocked = service.createOrUpdateCard({
+      title: 'Blocked on upstream',
+      columnId: 'ideas',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      lifecycle: 'blocked',
+      dependsOn: ['card-upstream'],
+      actor: 'test',
+    });
+    service.createOrUpdateCard({
+      title: 'Plain idle card',
+      columnId: 'ideas',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      actor: 'test',
+    });
+    // A standalone runtime task (not linked to any persisted card) synthesizes a runtime card.
+    sg.commit([{
+      op: 'set',
+      path: 'tasks/task-rt-projection',
+      value: { id: 'task-rt-projection', kind: 'workflow-task', status: 'running', projectId: 'agent-portal', updatedAt: 1500 },
+    }], 'seed');
+
+    let projection = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
+
+    assert.equal(projection.schema, 'workflow-board-projection/v2');
+
+    // Board-level queue + telemetry: frozen shape, dependency-derived counts are real, rest are placeholders.
+    assert.deepEqual(projection.queue, {
+      depth: 0,
+      oldestEnqueuedAt: null,
+      perGroupDepth: {},
+      blockedOnDependencyCount: 1,
+    });
+    assert.deepEqual(projection.telemetry, {
+      queueDepth: 0,
+      oldestEnqueuedAt: null,
+      blockedOnDependencyCount: 1,
+      admissions: 0,
+      admissionFailures: 0,
+      drains: 0,
+    });
+
+    // Every projected card carries lifecycle / dependsOn / a five-key null-default queue slot.
+    let queueKeys = ['enqueuedAt', 'queueEpoch', 'admissionId', 'priority', 'position'];
+    for (let card of projection.cards) {
+      assert.ok(WORKFLOW_CARD_LIFECYCLE_STATES.includes(card.lifecycle), `lifecycle ${card.lifecycle}`);
+      assert.ok(Array.isArray(card.dependsOn), 'dependsOn is an array');
+      assert.deepEqual(Object.keys(card.queue).sort(), [...queueKeys].sort());
+      for (let key of queueKeys) assert.equal(card.queue[key], null);
+    }
+    // The same per-card shape is present inside columns[].cards.
+    for (let column of projection.columns) {
+      for (let card of column.cards) {
+        assert.ok(WORKFLOW_CARD_LIFECYCLE_STATES.includes(card.lifecycle));
+        assert.deepEqual(Object.keys(card.queue).sort(), [...queueKeys].sort());
+      }
+    }
+
+    let blockedCard = projection.cards.find(card => card.id === blocked.card.id);
+    assert.equal(blockedCard.lifecycle, 'blocked');
+    assert.equal(blockedCard.dependsOn[0].cardId, 'card-upstream');
+
+    // Runtime-synthesized cards carry the frozen v2 fields with safe defaults.
+    let runtimeCard = projection.cards.find(card => card.id.startsWith('runtime-'));
+    assert.ok(runtimeCard, 'expected a runtime-synthesized card');
+    assert.equal(runtimeCard.lifecycle, 'idle');
+    assert.deepEqual(runtimeCard.dependsOn, []);
+    assert.deepEqual(runtimeCard.queue, {
+      enqueuedAt: null,
+      queueEpoch: null,
+      admissionId: null,
+      priority: null,
+      position: null,
+    });
   });
 
   it('blocks failed gates and optimistic version mismatches before accepting transitions', () => {
@@ -345,6 +543,8 @@ describe('workflow board model and service', () => {
       actor: 'test',
     });
 
+    // The unknown column is now rejected by the service's board-driven column check (the iso card
+    // normalizer is board-agnostic after S5 carry-over), and the decomposition is still atomic.
     assert.throws(
       () => service.decomposeWorkItem({
         cardId: parent.card.id,
@@ -354,7 +554,7 @@ describe('workflow board model and service', () => {
           { id: 'child-invalid', title: 'Invalid child', columnId: 'unknown-column' },
         ],
       }),
-      /Unknown workflow column/,
+      /Unknown workflow column "unknown-column"/,
     );
     assert.equal(service.getBoardProjection().cards.some(card => card.id === 'child-valid'), false);
     assert.equal(service.getBoardProjection().events.some(event => event.eventType === 'decomposition'), false);
@@ -440,6 +640,7 @@ describe('workflow board model and service', () => {
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let active = service.createOrUpdateCard({
       id: 'card-active',
@@ -552,6 +753,7 @@ describe('workflow board model and service', () => {
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     service.createOrUpdateCard({
       id: 'card-active',
@@ -600,6 +802,7 @@ describe('workflow board model and service', () => {
       now: () => now++,
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     writeWorkItemSeed(tmpDir, 'agent-portal', 'work-item-2026-06-18-agent-workflow-kanban-mvp.md', `
 schema: agent-workflow-card/v1
@@ -744,6 +947,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Implement workflow automation',
@@ -829,6 +1033,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Ready auto start',
@@ -859,10 +1064,20 @@ links:
     assert.equal(moved.orchestration.result.run.status, 'running');
     assert.equal(moved.orchestration.result.lease.leaseOwner, 'orchestrator');
     assert.deepEqual(moved.orchestration.result.run.taskIds, [taskId]);
+    // Reroute (WS-B1): the transition into the auto column ENQUEUED the card and INLINE-DRAINED it —
+    // the card was admitted through the queue, not orchestrated directly. The auto trigger now stamps
+    // a deterministic admissionId, threads it to the delegate, and the queue entry is consumed once
+    // `running` is durable (inv 31: no live entry remains for an admitted card).
+    assert.equal(moved.orchestration.enqueued, true);
+    assert.ok(moved.orchestration.admissionId?.startsWith('adm-'));
+    assert.equal(service.getCard(created.card.id).lifecycle, 'running');
+    assert.equal(Object.values(sg.get('workflowQueueEntries') || {}).filter(e => e.cardId === created.card.id).length, 0);
     let delegateCalls = calls.filter(call => call.server === 'agent-pool' && call.payload.name === 'delegate_task');
     assert.equal(delegateCalls.length, 1);
     let delegateArgs = delegateCalls[0].payload.arguments;
     assert.equal(delegateArgs.agent_slug, 'orchestrator');
+    assert.equal(delegateArgs.admission_id, moved.orchestration.admissionId, 'admissionId threaded to the delegate (D1.1)');
+    assert.equal(delegateArgs.verified_slug, 'orchestrator', 'D2.1 parent-side slug correlation passed through');
     assert.deepEqual(delegateArgs.files, ['src/node/ready-auto-start.js']);
     assert.match(delegateArgs.prompt, /Preferred agent: orchestrator/);
     assert.doesNotMatch(delegateArgs.prompt, /outside-stage-pool/);
@@ -892,6 +1107,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Ready invalid resource group',
@@ -931,7 +1147,12 @@ links:
     assert.equal(event.toColumnId, 'ready');
     assert.equal(event.sideEffects[0].status, 'failed');
     assert.match(event.sideEffects[0].error, /Resource group `audit` not found/);
-    assert.equal(calls.filter(call => call.server === 'agent-pool').length, 1);
+    // One delegate attempt, then one idempotent release_slot (F-SCH-2): the hard-failure branch
+    // releases the admission slot before deleting the admission record so a slot reserved before a
+    // non-capacity spawn failure is never orphaned.
+    let agentPoolCalls = calls.filter(call => call.server === 'agent-pool');
+    assert.equal(agentPoolCalls.length, 2);
+    assert.equal(agentPoolCalls[1].payload?.name, 'release_slot');
   });
 
   it('does not orchestrate blocked ready cards through auto or direct paths', async () => {
@@ -950,6 +1171,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Blocked ready card',
@@ -1035,6 +1257,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Thrown delegate error',
@@ -1129,6 +1352,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     service.createOrUpdateCard({
       title: 'Parent implementation',
@@ -1193,6 +1417,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Release authorization packet',
@@ -1234,6 +1459,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Repair workflow-kanban closure audit',
@@ -1277,6 +1503,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Runtime completion sync',
@@ -1335,6 +1562,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let rootChat = sg.createChat({
       name: 'Workflow root',
@@ -1477,6 +1705,7 @@ links:
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Manual pickup ready card',
@@ -1564,6 +1793,7 @@ links:
       now: () => now++,
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       id: 'work-item-md',
@@ -1596,6 +1826,7 @@ links:
       stateGraph: secondGraph,
       now: () => now++,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     try {
       let imported = await importingService.importWorkflowWorkItems({
@@ -1720,6 +1951,7 @@ links:
       now: () => bigNow++,
       makeId: (prefix) => `${prefix}-wc-${++idSeq}`,
       projectRoot: tmpDir,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = localService.createOrUpdateCard({
       title: 'Idle task',
@@ -1866,6 +2098,7 @@ links:
     };
     service = createWorkflowBoardService({
       stateGraph: sg, now: () => now++, makeId: (prefix) => `${prefix}-${++idSeq}`, projectRoot: tmpDir, proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     let created = service.createOrUpdateCard({
       title: 'Audit me', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
@@ -1931,6 +2164,7 @@ links:
   it('reconcileTick start/stop is idempotent and tracks the active flag', () => {
     let ticked = createWorkflowBoardService({
       stateGraph: sg, now: () => now++, makeId: (prefix) => `${prefix}-tick-${++idSeq}`, projectRoot: tmpDir, reconcileTickMs: 10_000_000,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
     assert.equal(ticked.reconcileTick.active, false);
     ticked.reconcileTick.start();
@@ -1942,12 +2176,15 @@ links:
     ticked.reconcileTick.stop();
   });
 
-  it('reconcileTick.tickOnce skips a concurrent re-entrant run', async () => {
+  it('reconcileTick.tickOnce coalesces a concurrent re-entrant call into a trailing pass', async () => {
     let results = await Promise.all([
       service.reconcileTick.tickOnce(),
       service.reconcileTick.tickOnce(),
     ]);
-    assert.equal(results.filter(r => r.skipped).length, 1, 'exactly one concurrent tick is skipped');
+    // Single-flight with a coalesced trailing edge: the re-entrant call is not dropped — it sets
+    // `pending` so the running cycle re-runs once more, and the call resolves `coalesced` (not skipped).
+    assert.equal(results.filter(r => r.coalesced).length, 1, 'exactly one concurrent tick is coalesced');
+    assert.equal(results.filter(r => r.ok).length, 2, 'both calls resolve ok (no drop, no error)');
   });
 
   // ── Unified escalation channel ──
@@ -2046,6 +2283,8 @@ links:
   });
 
   it('does not re-engage when board recovery is manual', async () => {
+    // A fully-manual board (recovery + returnWake both manual) re-engages nothing → reports skipped.
+    service.updateWorkflowBoard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, automation: { recovery: 'manual', returnWake: 'manual' } });
     let { card } = service.createOrUpdateCard({
       title: 'Manual recovery board', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
       owner: 'backend-engineer', acceptanceCriteria: ['x'], actor: 'test',
@@ -2111,6 +2350,115 @@ links:
     assert.equal(afterCap.reengaged.length, 0, 'human-escalated card stays put');
     assert.equal(afterCap.escalatedToHuman.length, 0, 'no repeated human handoff');
   });
+
+  // S5 (WS-B3): the service derives the closed column set, destructive moves, the active/recovery
+  // columns, and the structural-graph gate from the board itself — not a hardcoded constant. These
+  // three default-board anchors must hold so the generalization does not change shipped behavior.
+  function commitBoard(board) {
+    sg.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: board }], 'test');
+    return board;
+  }
+  function commitCard(card) {
+    let value = { schema: 'workflow-card/v2', version: 1, lifecycle: 'idle', dependsOn: [], blockers: [], recoveryFlags: [], acceptanceCriteria: [], owner: 'tester', ...card };
+    sg.commit([{ op: 'set', path: `workflowCards/${value.id}`, value }], 'test');
+    return value;
+  }
+
+  it('S5 anchor: default-board destructive set is into-done plus in-progress->ready/backlog/ideas', () => {
+    let card = service.createOrUpdateCard({
+      title: 'Destructive anchor', columnId: 'in-progress', projectId: 'agent-portal', owner: 'tooling-engineer', actor: 'test',
+    }).card;
+    // Backward moves out of the execute stage are destructive (need a reason).
+    for (let to of ['ready', 'backlog', 'ideas']) {
+      let blocked = service.requestTransition({ cardId: card.id, fromColumnId: 'in-progress', toColumnId: to, actor: 'test' });
+      assert.ok(
+        blocked.gateResult.failures.some(f => f.gate === 'reason_required'),
+        `in-progress -> ${to} must require a reason (destructive)`,
+      );
+    }
+    // A backward rework out of quality-audit (audit action, not execute) is NOT destructive — it is
+    // governed by rework_authorized instead, exactly as before.
+    let auditCard = service.createOrUpdateCard({
+      title: 'Audit rework', columnId: 'quality-audit', projectId: 'agent-portal', owner: 'qa-engineer', actor: 'test',
+    }).card;
+    let auditRework = service.requestTransition({ cardId: auditCard.id, fromColumnId: 'quality-audit', toColumnId: 'ready', actor: 'test' });
+    assert.equal(
+      auditRework.gateResult.failures.some(f => f.gate === 'reason_required'), false,
+      'quality-audit -> ready is not a destructive move',
+    );
+    // Entering the terminal column is destructive regardless of source.
+    let publishCard = service.createOrUpdateCard({
+      title: 'Publish anchor', columnId: 'commit-publish', projectId: 'agent-portal', owner: 'release-manager', actor: 'test',
+    }).card;
+    let toDone = service.requestTransition({ cardId: publishCard.id, fromColumnId: 'commit-publish', toColumnId: 'done', actor: 'test' });
+    assert.ok(toDone.gateResult.failures.some(f => f.gate === 'reason_required'), 'commit-publish -> done is destructive');
+  });
+
+  it('S5 anchor: default-board active/recovery columns are exactly the four execution columns', () => {
+    let recovery = service.getRecoveryState({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+    assert.deepEqual(
+      [...recovery.activeColumnIds].sort(),
+      ['commit-publish', 'in-progress', 'quality-audit', 'ready'],
+    );
+  });
+
+  it('S5 anchor: the default board is structurally valid, so a normal transition is not graph-blocked', () => {
+    let card = service.createOrUpdateCard({
+      title: 'Classify intake', columnId: 'ideas', projectId: 'agent-portal', domain: 'backend', actor: 'test',
+    }).card;
+    let accepted = service.requestTransition({
+      cardId: card.id, fromColumnId: 'ideas', toColumnId: 'backlog', expectedVersion: card.version, actor: 'test', reason: 'Classified.',
+    });
+    assert.equal(accepted.status, 'accepted');
+    assert.equal(accepted.gateResult.failures.some(f => f.gate === 'invalid_board_graph'), false);
+  });
+
+  it('S5 data-driven: a custom board accepts a transition into its own column but rejects an unknown one', () => {
+    let board = createDefaultWorkflowBoard({ id: 'custom-board' });
+    board.columns = [...board.columns, { id: 'staging', title: 'Staging', automation: { trigger: 'manual', action: 'execute', mode: 'gated' } }];
+    // The inbound edge to the custom column carries a gate the test card cannot pass, so the request
+    // stays blocked at the gate (the iso card normalizer only mints default columns — see findings),
+    // which is enough to prove the data-driven column-existence check no longer rejects "staging".
+    board.transitions = [
+      ...board.transitions,
+      { from: 'commit-publish', to: 'staging', gates: ['has_owner_and_acceptance'] },
+      { from: 'staging', to: 'done', gates: ['clean_diff_and_hygiene'] },
+    ];
+    commitBoard(board);
+    let card = commitCard({ id: 'custom-card', boardId: 'custom-board', title: 'Custom', columnId: 'commit-publish', acceptanceCriteria: [] });
+
+    let toCustom = service.requestTransition({
+      boardId: 'custom-board', cardId: card.id, fromColumnId: 'commit-publish', toColumnId: 'staging', actor: 'test', reason: 'Stage it.',
+    });
+    assert.equal(
+      toCustom.gateResult.failures.some(f => f.gate === 'known_column'), false,
+      'a board column id must be accepted as a transition target',
+    );
+    assert.equal(
+      toCustom.gateResult.failures.some(f => f.gate === 'invalid_board_graph'), false,
+      'the custom board is structurally valid',
+    );
+
+    let toUnknown = service.requestTransition({
+      boardId: 'custom-board', cardId: card.id, fromColumnId: 'commit-publish', toColumnId: 'nowhere', actor: 'test', reason: 'Bad target.',
+    });
+    assert.equal(toUnknown.status, 'blocked');
+    assert.ok(toUnknown.gateResult.failures.some(f => f.gate === 'known_column'));
+  });
+
+  it('S5 validator wiring: a structurally invalid board fails every transition with invalid_board_graph', () => {
+    let board = createDefaultWorkflowBoard({ id: 'broken-board' });
+    // Inbound-to-terminal edge missing the hygiene gate -> hygiene_cut_incomplete (inv 11 violation).
+    board.transitions = [...board.transitions, { from: 'quality-audit', to: 'done', gates: ['audit_pass_or_explicit_waiver'] }];
+    commitBoard(board);
+    let card = commitCard({ id: 'broken-card', boardId: 'broken-board', title: 'Broken', columnId: 'ideas', projectId: 'agent-portal', domain: 'backend' });
+
+    let result = service.requestTransition({
+      boardId: 'broken-board', cardId: card.id, fromColumnId: 'ideas', toColumnId: 'backlog', actor: 'test', reason: 'Classify.',
+    });
+    assert.equal(result.status, 'blocked');
+    assert.ok(result.gateResult.failures.some(f => f.gate === 'invalid_board_graph'));
+  });
 });
 
 describe('normalizeWorkflowEscalation', () => {
@@ -2143,5 +2491,306 @@ describe('normalizeWorkflowEscalation', () => {
     assert.equal(normalizeWorkflowEscalation({ kind: 'totally_made_up', detail: 'x' }), null);
     assert.equal(normalizeWorkflowEscalation({ detail: 'no kind' }), null);
     assert.equal(normalizeWorkflowEscalation({}), null);
+  });
+});
+
+describe('workflow card lifecycle (AD-4)', () => {
+  it('normalizes absent, unknown, and every valid lifecycle state', () => {
+    assert.equal(normalizeWorkflowLifecycle(undefined), 'idle');
+    assert.equal(normalizeWorkflowLifecycle(null), 'idle');
+    assert.equal(normalizeWorkflowLifecycle(''), 'idle');
+    assert.equal(normalizeWorkflowLifecycle('not-a-state'), 'idle');
+    for (let state of WORKFLOW_CARD_LIFECYCLE_STATES) {
+      assert.equal(normalizeWorkflowLifecycle(state), state);
+    }
+  });
+
+  it('defaults a normalized card lifecycle to idle and carries dependsOn', () => {
+    let card = normalizeWorkflowCardInput({ title: 'Lifecycle default' }, { id: 'card-lc' });
+    assert.equal(card.lifecycle, 'idle');
+    assert.deepEqual(card.dependsOn, []);
+  });
+
+  it('honors a provided lifecycle state on the card', () => {
+    let card = normalizeWorkflowCardInput({ title: 'Queued card', lifecycle: 'queued' }, { id: 'card-q' });
+    assert.equal(card.lifecycle, 'queued');
+  });
+
+  it('allows the scheduler-owned transitions and denies them to the dependency owner', () => {
+    let schedulerEdges = [
+      ['idle', 'queued'],
+      ['queued', 'admitting'],
+      ['admitting', 'running'],
+      ['running', 'idle'],
+      ['admitting', 'queued'],
+      ['running', 'queued'],
+    ];
+    for (let [from, to] of schedulerEdges) {
+      assert.equal(isWorkflowLifecycleTransitionAllowed(from, to, 'scheduler'), true, `${from}->${to} scheduler`);
+      assert.equal(isWorkflowLifecycleTransitionAllowed(from, to, 'dependency'), false, `${from}->${to} denied to dependency`);
+    }
+  });
+
+  it('lets only the dependency owner drive idle<->blocked', () => {
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'blocked', 'dependency'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('blocked', 'idle', 'dependency'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'blocked', 'scheduler'), false);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('blocked', 'idle', 'scheduler'), false);
+  });
+
+  it('allows same-state transitions (idempotent) and denies illegal edges', () => {
+    assert.equal(isWorkflowLifecycleTransitionAllowed('running', 'running', 'scheduler'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'idle', 'dependency'), true);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'running', 'scheduler'), false);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('queued', 'blocked', 'dependency'), false);
+    assert.equal(isWorkflowLifecycleTransitionAllowed('idle', 'queued', 'nobody'), false);
+  });
+});
+
+describe('workflow board-native dependencies (AD-5)', () => {
+  it('expands a string shorthand into a defaulted dependency object', () => {
+    assert.deepEqual(normalizeWorkflowDependsOn(['card-a']), [
+      { cardId: 'card-a', releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' },
+    ]);
+  });
+
+  it('coerces unknown enum values to their defaults', () => {
+    assert.deepEqual(
+      normalizeWorkflowDependsOn([
+        { cardId: 'card-b', releaseWhen: 'whenever', onUpstreamFailure: 'explode' },
+      ]),
+      [{ cardId: 'card-b', releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' }],
+    );
+  });
+
+  it('keeps known enum values and dedupes by cardId (last wins)', () => {
+    assert.deepEqual(
+      normalizeWorkflowDependsOn([
+        { cardId: 'card-c', releaseWhen: 'run_success' },
+        { cardId: 'card-c', releaseWhen: 'audit_passed', onUpstreamFailure: 'cancel_self' },
+      ]),
+      [{ cardId: 'card-c', releaseWhen: 'audit_passed', onUpstreamFailure: 'cancel_self' }],
+    );
+  });
+
+  it('drops entries with no cardId and returns [] for empty input', () => {
+    assert.deepEqual(normalizeWorkflowDependsOn([{ releaseWhen: 'card_done' }, '', null]), []);
+    assert.deepEqual(normalizeWorkflowDependsOn([]), []);
+    assert.deepEqual(normalizeWorkflowDependsOn(undefined), []);
+  });
+});
+
+describe('workflow graph classifier (AD-6)', () => {
+  it('ranks the default board stages in pipeline order', () => {
+    let classifier = classifyWorkflowGraph(createDefaultWorkflowBoard());
+    let order = ['ideas', 'backlog', 'ready', 'in-progress', 'quality-audit', 'commit-publish', 'done'];
+    for (let i = 1; i < order.length; i += 1) {
+      assert.ok(
+        classifier.rankOf(order[i - 1]) < classifier.rankOf(order[i]),
+        `${order[i - 1]} ranks before ${order[i]}`,
+      );
+    }
+    assert.equal(classifier.rankOf('does-not-exist'), -1);
+  });
+
+  it('classes the two rework edges as recovery + backward, and only done as terminal', () => {
+    let classifier = classifyWorkflowGraph(createDefaultWorkflowBoard());
+    let reworkEdges = classifier.edges.filter(edge => edge.to === 'ready' && edge.edgeClass === 'recovery');
+    assert.deepEqual(
+      reworkEdges.map(edge => edge.from).sort(),
+      ['in-progress', 'quality-audit'],
+    );
+    assert.ok(reworkEdges.every(edge => edge.backward === true));
+    assert.deepEqual([...classifier.terminals], ['done']);
+    assert.equal(classifier.isTerminal('done'), true);
+    assert.equal(classifier.isTerminal('ready'), false);
+    assert.equal(classifier.edgeClass('ideas', 'backlog'), 'forward');
+    assert.equal(classifier.edgeClass('in-progress', 'ready'), 'recovery');
+    assert.equal(classifier.edgeClass('nope', 'nope'), null);
+  });
+});
+
+describe('workflow transition-graph validator (AD-6)', () => {
+  function makeBoard(columns, transitions) {
+    return { schema: 'workflow-board/v2', id: 'test-board', columns, transitions };
+  }
+  function column(id, action) {
+    return { id, title: id, automation: action ? { action } : {} };
+  }
+
+  it('accepts the shipped default board (anchor)', () => {
+    let result = validateWorkflowTransitionGraph(createDefaultWorkflowBoard());
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it('flags a forward cycle', () => {
+    let board = makeBoard(
+      [column('a'), column('b', 'close')],
+      [
+        { from: 'a', to: 'b', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        { from: 'b', to: 'a', gates: ['no_active_blocker'] },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'forward_cycle'));
+  });
+
+  it('does not flag a governed rework recovery edge as a cycle', () => {
+    let board = makeBoard(
+      [column('start'), column('work'), column('audit'), column('done', 'close')],
+      [
+        { from: 'start', to: 'work', gate: 'no_active_blocker' },
+        { from: 'work', to: 'audit', gate: 'audit_pass_or_explicit_waiver' },
+        { from: 'audit', to: 'done', gate: 'clean_diff_and_hygiene' },
+        { from: 'audit', to: 'work', gate: 'rework_authorized' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.equal(result.classifier.edgeClass('audit', 'work'), 'recovery');
+  });
+
+  it('flags an audit-skipping one-hop terminal edge (audit_not_dominating)', () => {
+    let board = makeBoard(
+      [column('hotfix'), column('done', 'close')],
+      [{ from: 'hotfix', to: 'done', gate: 'clean_diff_and_hygiene' }],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'audit_not_dominating'));
+  });
+
+  it('flags a terminal with a non-hygiene inbound edge (hygiene_cut_incomplete)', () => {
+    let board = makeBoard(
+      [column('start'), column('audit'), column('done', 'close')],
+      [
+        { from: 'start', to: 'audit', gate: 'audit_pass_or_explicit_waiver' },
+        // Inbound to terminal carries audit but not hygiene -> P1 fails, P2 holds.
+        { from: 'audit', to: 'done', gate: 'audit_pass_or_explicit_waiver' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'hygiene_cut_incomplete'));
+  });
+
+  it('flags a dead-end non-terminal column', () => {
+    let board = makeBoard(
+      [column('start'), column('dead'), column('done', 'close')],
+      [
+        { from: 'start', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        { from: 'start', to: 'dead', gate: 'no_active_blocker' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'dead_end_column' && /dead/.test(error.detail)));
+  });
+
+  it('flags an orphan / unreachable terminal', () => {
+    let board = makeBoard(
+      [column('start'), column('mid'), column('done', 'close')],
+      [
+        // start -> mid is a forward path that never reaches done; done has no inbound edge.
+        { from: 'start', to: 'mid', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'dead_end_column' && /orphan/.test(error.detail)));
+  });
+
+  it('flags a transition referencing a bogus gate (unknown_gate)', () => {
+    let board = makeBoard(
+      [column('start'), column('done', 'close')],
+      [{ from: 'start', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene', 'totally_bogus'] }],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(error => error.code === 'unknown_gate'));
+  });
+
+  // F-DEP-3 regression: a recovery-classed (rework_authorized, rank-decreasing) edge INTO a terminal
+  // escapes the P1 hygiene inbound-cut and the P2 audit-domination check (both scan only forward
+  // edges), so a card could reach the close column crossing no hygiene/audit gate while the validator
+  // returns ok. The board below is otherwise fully valid; the ONLY defect is the recovery edge
+  // `b -> done` into the `done` terminal. Pre-fix this returned ok:true (the vulnerability).
+  it('rejects a recovery-classed edge that targets a terminal (recovery_edge_into_terminal)', () => {
+    let board = makeBoard(
+      [column('intake'), column('a'), column('b'), column('done', 'close'), column('release', 'close')],
+      [
+        // Early terminal reached at a low forward rank (P1 hygiene + P2 audit both satisfied).
+        { from: 'intake', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        // A longer forward chain to a second terminal so `b` outranks `done`.
+        { from: 'intake', to: 'a', gate: 'no_active_blocker' },
+        { from: 'a', to: 'b', gate: 'no_active_blocker' },
+        { from: 'b', to: 'release', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+        // The defect: a rework_authorized kickback from a higher-rank column INTO the `done` terminal.
+        { from: 'b', to: 'done', gate: 'rework_authorized' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    // The defect edge is classed `recovery` (recovery-gated + rank-decreasing).
+    assert.equal(result.classifier.edgeClass('b', 'done'), 'recovery');
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some(error => error.code === 'recovery_edge_into_terminal' && /b -> done/.test(error.detail)),
+      JSON.stringify(result.errors),
+    );
+  });
+
+  // F-DEP-3 guard: the recovery edge that is NOT into a terminal (the shipped pattern) stays valid.
+  it('still accepts a recovery edge into a non-terminal (the governed-rework pattern)', () => {
+    let board = makeBoard(
+      [column('start'), column('work'), column('audit'), column('done', 'close')],
+      [
+        { from: 'start', to: 'work', gate: 'no_active_blocker' },
+        { from: 'work', to: 'audit', gate: 'audit_pass_or_explicit_waiver' },
+        { from: 'audit', to: 'done', gate: 'clean_diff_and_hygiene' },
+        { from: 'audit', to: 'work', gate: 'rework_authorized' },
+      ],
+    );
+    let result = validateWorkflowTransitionGraph(board);
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.equal(result.classifier.edgeClass('audit', 'work'), 'recovery');
+  });
+});
+
+describe('workflow schema v2 migration (AD-8)', () => {
+  it('migrates a v1-shaped card to v2 with idle lifecycle and empty dependsOn', () => {
+    let v1Card = {
+      schema: 'workflow-card/v1',
+      id: 'card-old',
+      title: 'Legacy card',
+      columnId: 'ready',
+      owner: 'orchestrator',
+    };
+    let migrated = migrateWorkflowCardToV2(v1Card);
+    assert.equal(migrated.schema, 'workflow-card/v2');
+    assert.equal(migrated.lifecycle, 'idle');
+    assert.deepEqual(migrated.dependsOn, []);
+    assert.equal(migrated.owner, 'orchestrator');
+    assert.equal(migrated.title, 'Legacy card');
+  });
+
+  it('is idempotent on an already-v2 card', () => {
+    let v2Card = migrateWorkflowCardToV2({ id: 'card-v2', title: 'V2 card', lifecycle: 'queued', dependsOn: ['up-1'] });
+    assert.deepEqual(migrateWorkflowCardToV2(v2Card), v2Card);
+    assert.equal(v2Card.lifecycle, 'queued');
+    assert.deepEqual(v2Card.dependsOn, [
+      { cardId: 'up-1', releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' },
+    ]);
+  });
+
+  it('fills board v2 fields without overwriting a customized column title', () => {
+    let board = createDefaultWorkflowBoard();
+    board.schema = 'workflow-board/v1';
+    board.columns = board.columns.map(col => (col.id === 'ready' ? { ...col, title: 'Custom Ready' } : col));
+    let migrated = migrateWorkflowBoardToV2(board);
+    assert.equal(migrated.schema, 'workflow-board/v2');
+    assert.equal(migrated.columns.find(col => col.id === 'ready').title, 'Custom Ready');
+    assert.deepEqual(migrateWorkflowBoardToV2(migrated), migrated);
   });
 });

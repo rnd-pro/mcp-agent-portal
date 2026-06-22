@@ -27,6 +27,7 @@ import {
   normalizeChatGoalStatus,
 } from '../iso/chat-goals.js';
 import { resolveChatCreationAgent } from '../iso/chat-orchestration.js';
+import { isProcessAlive } from './ops/process.js';
 
 // ── Paths ────────────────────────────────────────────────
 const STATE_DIR = process.env.PORTAL_STATE_DIR || path.join(os.homedir(), '.agent-portal');
@@ -187,6 +188,7 @@ export class StateGraph extends EventEmitter {
     this._snapshotPath = opts.snapshotPath || SNAPSHOT_PATH;
     this._walPath = opts.walPath || WAL_PATH;
     this._chatsDir = opts.chatsDir || CHATS_DIR;
+    this._oldConfigPath = opts.oldConfigPath || OLD_CONFIG_PATH;
     this._state = defaultState();
     this._version = 0;
 
@@ -211,6 +213,73 @@ export class StateGraph extends EventEmitter {
     // ── Snapshot compaction tracking ──
     this._commitsSinceSnapshot = 0;
     this._snapshotVersion = 0;
+
+    // ── Single-writer ownership guard (opt-in) ──
+    // When two long-lived backends point at the same snapshot, both rewrite + compact it from their own
+    // in-memory state, clobbering each other and dropping the other's un-snapshotted commits. The guard
+    // makes the NEWEST instance the owner (claims on load); a superseded instance refuses to write and
+    // self-exits. Identity is a per-instance token; the recorded `pid` is only a liveness signal for a
+    // DIFFERENT owner. `instancePid`/`isPidAlive` are injectable so a test can simulate two distinct live
+    // processes inside one OS process (production uses the real pid + isProcessAlive).
+    this._ownershipGuard = opts.ownershipGuard === true;
+    this._ownerToken = opts.instanceToken || crypto.randomBytes(8).toString('hex');
+    this._ownerPid = Number.isInteger(opts.instancePid) ? opts.instancePid : process.pid;
+    this._isPidAlive = typeof opts.isPidAlive === 'function' ? opts.isPidAlive : isProcessAlive;
+    this._ownerPath = this._snapshotPath + '.owner';
+    this._ownershipLostEmitted = false;
+    this._ownershipLost = false;   // in-memory short-circuit for the write hot path (set on detection)
+    this._ownerHeartbeat = null;
+  }
+
+  // ── Single-writer ownership ────────────────────────────
+
+  // Stamp this instance as the snapshot owner (atomic tmp+rename). The newest claimant wins; an older
+  // instance detects the change and steps down. A failed claim is LOGGED (not swallowed) — but it still
+  // leaves us fail-open, because _ownsSnapshot reclaims a record carrying our own pid (see below).
+  _claimOwnership() {
+    if (!this._ownershipGuard) return;
+    try {
+      let rec = JSON.stringify({ pid: this._ownerPid, token: this._ownerToken, startedAt: Date.now() });
+      let tmp = `${this._ownerPath}.${this._ownerToken}.tmp`;
+      fs.writeFileSync(tmp, rec);
+      fs.renameSync(tmp, this._ownerPath);
+    } catch (err) {
+      console.error('[StateGraph] Failed to claim snapshot ownership:', err.message);
+    }
+  }
+
+  // May this instance write/compact the snapshot? Fail-open by design: a record is only honored as a
+  // blocking owner when it carries a DIFFERENT token AND a DIFFERENT, still-alive pid. A missing/
+  // unreadable/dead owner — OR a foreign-token record bearing OUR OWN pid (a stale self-record from a
+  // failed re-claim) — is reclaimed and we proceed, so the legitimate single backend never fail-closes.
+  _ownsSnapshot() {
+    if (!this._ownershipGuard) return true;
+    let rec = null;
+    try { rec = JSON.parse(fs.readFileSync(this._ownerPath, 'utf8')); } catch { rec = null; }
+    if (!rec || !rec.token) { this._claimOwnership(); return true; }
+    if (rec.token === this._ownerToken) return true;
+    if (rec.pid !== this._ownerPid && this._isPidAlive(rec.pid)) return false; // a different live owner
+    this._claimOwnership();
+    return true;
+  }
+
+  _signalOwnershipLost() {
+    this._ownershipLost = true; // short-circuits the write hot path immediately (cheap, in-memory)
+    if (this._ownershipLostEmitted) return;
+    this._ownershipLostEmitted = true;
+    if (this._ownerHeartbeat) { clearInterval(this._ownerHeartbeat); this._ownerHeartbeat = null; }
+    try { this.emit('ownership-lost', { ownerPath: this._ownerPath }); } catch { /* listener error */ }
+  }
+
+  // Idle superseded instances write no snapshot, so they would never notice the takeover; a light
+  // unref'd heartbeat lets them step down promptly (and bounds the multi-writer window for the WAL hot
+  // path, which short-circuits on the `_ownershipLost` flag this sets).
+  _startOwnershipHeartbeat() {
+    if (!this._ownershipGuard || this._ownerHeartbeat) return;
+    this._ownerHeartbeat = setInterval(() => {
+      if (!this._ownsSnapshot()) this._signalOwnershipLost();
+    }, 2000);
+    if (this._ownerHeartbeat.unref) this._ownerHeartbeat.unref();
   }
 
   // ── Public Read API ────────────────────────────────────
@@ -268,9 +337,14 @@ export class StateGraph extends EventEmitter {
    *
    * @param {Array<{ op: string, path: string, value?: any }>} ops
    * @param {string} [source='unknown'] — who made this mutation (for audit)
+   * @param {{ durable?: boolean }} [opts] — when `durable`, the WAL entry is
+   *        written synchronously with an fsync barrier before this call
+   *        returns (durable-before-side-effect; e.g. admission before a spawn).
+   *        Throws if the durable write fails, so the caller never proceeds on
+   *        a commit that is not on stable storage.
    * @returns {number} assigned version number
    */
-  commit(ops, source = 'unknown') {
+  commit(ops, source = 'unknown', opts = {}) {
     if (!Array.isArray(ops) || ops.length === 0) return this._version;
 
     // Validate ops
@@ -307,9 +381,15 @@ export class StateGraph extends EventEmitter {
       this._ring.shift();
     }
 
-    // 5. Queue for async WAL write
+    // 5. Persist the WAL entry — async group-commit by default, or a
+    //    synchronous fsync barrier when the caller needs durability before a
+    //    side effect (admission must be on stable storage before delegating).
     this._walQueue.push(JSON.stringify(entry));
-    this._scheduleWalFlush();
+    if (opts.durable) {
+      this._flushWalDurable();
+    } else {
+      this._scheduleWalFlush();
+    }
 
     // 6. Track for snapshot compaction
     this._commitsSinceSnapshot++;
@@ -321,6 +401,39 @@ export class StateGraph extends EventEmitter {
     this.emit('commit', { v: this._version, ops, source });
 
     return this._version;
+  }
+
+  /**
+   * Compare-and-set commit. Reads the monotonic epoch at `epochPath`; if it
+   * equals `expectedEpoch`, applies `ops` AND bumps the epoch by one in the
+   * SAME synchronous frame — Node's single thread makes the read→check→apply
+   * atomic, there is no await between them. On mismatch nothing is written.
+   *
+   * With `{ durable: true }` the CAS and the fsync barrier fuse into one
+   * indivisible step: the epoch bump and the durable WAL write land in a single
+   * commit, never two. This is the epoch-fence for admission writes
+   * (workflow scheduler v5 AD-2/AD-14): a stale-epoch holder writes nothing.
+   *
+   * @param {string} epochPath — slash path to the monotonic epoch counter
+   * @param {number} expectedEpoch — the epoch the caller observed
+   * @param {Array<{ op: string, path: string, value?: any }>} [ops]
+   * @param {string} [source]
+   * @param {{ durable?: boolean }} [opts]
+   * @returns {{ ok: boolean, conflict: boolean, currentEpoch: number, version: number, epoch?: number }}
+   */
+  commitCAS(epochPath, expectedEpoch, ops = [], source = 'unknown', opts = {}) {
+    if (!epochPath || typeof epochPath !== 'string') {
+      throw new Error('commitCAS: missing epochPath');
+    }
+    let raw = _getPath(this._state, epochPath);
+    let currentEpoch = (raw === undefined || raw === null) ? 0 : raw;
+    if (currentEpoch !== expectedEpoch) {
+      return { ok: false, conflict: true, currentEpoch, version: this._version };
+    }
+    let nextEpoch = currentEpoch + 1;
+    let allOps = [...ops, { op: 'set', path: epochPath, value: nextEpoch }];
+    let version = this.commit(allOps, source, opts);
+    return { ok: true, conflict: false, currentEpoch, epoch: nextEpoch, version };
   }
 
   // ── Convenience write helpers ──────────────────────────
@@ -359,11 +472,15 @@ export class StateGraph extends EventEmitter {
 
   // ── Persistence: Load ──────────────────────────────────
 
-   // Load state from snapshot + replay WAL.
-   // Call once on startup.
+  // Load state from snapshot + replay WAL.
+  // Call once on startup.
   load() {
     let dir = path.dirname(this._snapshotPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // Claim snapshot ownership up front so any older instance steps down while we read the latest
+    // state, then load from that fresh snapshot+WAL — the newest writer always has the freshest base.
+    this._claimOwnership();
 
     let snapshotLoaded = false;
 
@@ -383,24 +500,28 @@ export class StateGraph extends EventEmitter {
       }
     }
 
-    // 2. Replay WAL entries
+    // 2. Replay WAL entries — version-sorted, so replay is order-independent.
+    //    Durable synchronous writes and async group-commits append to the same
+    //    WAL and can interleave on disk; sorting by version keeps recovery
+    //    correct regardless of physical order.
     if (fs.existsSync(this._walPath)) {
       try {
         let lines = fs.readFileSync(this._walPath, 'utf8').split('\n').filter(Boolean);
-        let replayed = 0;
+        let entries = [];
         for (let line of lines) {
-          try {
-            let entry = JSON.parse(line);
-            if (entry.v > this._version) {
-              for (let op of entry.ops) _applyOp(this._state, op);
-              this._version = entry.v;
-              this._state._v = entry.v;
-              this._state._ts = entry.ts;
-              // Also populate ring buffer for immediate delta sync
-              this._ring.push(entry);
-              replayed++;
-            }
-          } catch { /* skip corrupt line */ }
+          try { entries.push(JSON.parse(line)); }
+          catch { /* skip corrupt line */ }
+        }
+        entries.sort((a, b) => (a.v || 0) - (b.v || 0));
+        for (let entry of entries) {
+          if (entry.v > this._version) {
+            for (let op of entry.ops) _applyOp(this._state, op);
+            this._version = entry.v;
+            this._state._v = entry.v;
+            this._state._ts = entry.ts;
+            // Also populate ring buffer for immediate delta sync
+            this._ring.push(entry);
+          }
         }
       } catch (err) {
         console.error('[StateGraph] WAL replay failed:', err.message);
@@ -408,7 +529,7 @@ export class StateGraph extends EventEmitter {
     }
 
     // 3. Migrate from old config if no snapshot exists
-    if (!snapshotLoaded && this._version === 0 && fs.existsSync(OLD_CONFIG_PATH)) {
+    if (!snapshotLoaded && this._version === 0 && fs.existsSync(this._oldConfigPath)) {
       this._migrateFromOldConfig();
       this._writeSnapshotSync();
     }
@@ -449,6 +570,9 @@ export class StateGraph extends EventEmitter {
       this._version++;
       this._state._v = this._version;
     }
+
+    // Step down promptly if a newer instance later takes over (idle instances write no snapshot).
+    this._startOwnershipHeartbeat();
   }
 
   // ── Persistence: WAL (Async Group Commit) ──────────────
@@ -463,6 +587,9 @@ export class StateGraph extends EventEmitter {
   // Flush pending WAL entries to disk (async).
   async _flushWal() {
     this._walTimer = null;
+    // A superseded instance must never append to the shared WAL — its abandoned commits would collide
+    // on version with the live owner's and drop one on replay. Drop the queue; this instance is exiting.
+    if (this._ownershipLost) { this._walQueue = []; return; }
     if (this._walQueue.length === 0 || this._walFlushing) return;
 
     this._walFlushing = true;
@@ -483,10 +610,71 @@ export class StateGraph extends EventEmitter {
     }
   }
 
+  // Synchronously flush pending WAL entries with an fsync barrier.
+  // writeSync + fsyncSync forces the bytes to stable storage, not just the OS
+  // page cache, so a hard crash cannot lose a durable commit. Replay is
+  // version-sorted, so this may interleave on disk with the async group-commit
+  // without breaking recovery.
+  _flushWalDurable() {
+    if (this._walTimer) {
+      clearTimeout(this._walTimer);
+      this._walTimer = null;
+    }
+    // Superseded instance: never write the shared WAL (see _flushWal). The instance is exiting, so the
+    // durable-before-side-effect guarantee is moot — a superseded writer must not perform the side effect.
+    if (this._ownershipLost) { this._walQueue = []; return; }
+    if (this._walQueue.length === 0) return;
+    let batch = this._walQueue.splice(0);
+    let dir = path.dirname(this._walPath);
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      let existedBefore = fs.existsSync(this._walPath);
+      let fd = fs.openSync(this._walPath, 'a');
+      try {
+        fs.writeSync(fd, batch.join('\n') + '\n');
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      // On first creation the WAL's directory entry must also be durable, or a
+      // crash can lose the whole file (fsync(fd) persists data + inode, not the
+      // parent-directory link).
+      if (!existedBefore) this._fsyncDir(dir);
+    } catch (err) {
+      // Re-queue and surface: a durable commit must never report success when
+      // the bytes are not on disk.
+      this._walQueue.unshift(...batch);
+      throw new Error(`Durable WAL write failed: ${err.message}`);
+    }
+  }
+
+  // Best-effort fsync of a directory entry (local filesystems only; directory
+  // fsync is unsupported on some platforms/filesystems).
+  _fsyncDir(dir) {
+    let dfd;
+    try {
+      dfd = fs.openSync(dir, 'r');
+      fs.fsyncSync(dfd);
+    } catch { /* best-effort: not all platforms allow directory fsync */ }
+    finally {
+      if (dfd !== undefined) { try { fs.closeSync(dfd); } catch { /* ignore */ } }
+    }
+  }
+
   // ── Persistence: Snapshot Compaction ────────────────────
 
-  // Async snapshot write + WAL truncation.
+  // Async snapshot write + WAL truncation — power-failure durable.
+  // Mirrors the fsync barriers and ordering of _writeSnapshotSync() while
+  // staying async (called fire-and-forget from commit(), so it must not block
+  // the event loop with synchronous fsync on large state). The ordering is
+  // load-bearing: the snapshot (and its directory entry) must be durable on
+  // disk BEFORE the WAL is truncated, otherwise a power failure can land the
+  // truncation while the snapshot's data blocks are still in cache — losing
+  // every commit since the previous snapshot.
   async _writeSnapshot() {
+    // Single-writer guard: a superseded instance must NOT rewrite/compact the shared snapshot — that
+    // is the multi-backend clobber that drops the live owner's un-snapshotted commits.
+    if (!this._ownsSnapshot()) { this._signalOwnershipLost(); return; }
     this._commitsSinceSnapshot = 0;
     let snap = JSON.stringify(this._state, null, 2);
     let v = this._version;
@@ -494,19 +682,54 @@ export class StateGraph extends EventEmitter {
     try {
       let dir = path.dirname(this._snapshotPath);
       await fsp.mkdir(dir, { recursive: true }).catch(() => {});
-      // Flush pending WAL first
+
+      // 1. Flush pending WAL durably (append + fsync) so nothing committed
+      //    since the last flush is lost before we truncate below.
       if (this._walQueue.length > 0) {
         let batch = this._walQueue.splice(0);
-        await fsp.appendFile(this._walPath, batch.join('\n') + '\n');
+        let wfh = await fsp.open(this._walPath, 'a');
+        try {
+          await wfh.write(batch.join('\n') + '\n');
+          await wfh.sync();
+        } finally { await wfh.close(); }
       }
 
-      // Write snapshot atomically (write to tmp, then rename)
+      // 2. Write the snapshot to tmp and fsync it BEFORE the rename, so the
+      //    rename can only ever publish fully-durable bytes.
       let tmpPath = this._snapshotPath + '.tmp';
-      await fsp.writeFile(tmpPath, snap);
-      await fsp.rename(tmpPath, this._snapshotPath);
+      let sfh = await fsp.open(tmpPath, 'w');
+      try {
+        await sfh.write(snap);
+        await sfh.sync();
+      } finally { await sfh.close(); }
 
-      // Truncate WAL (all entries are now in snapshot)
-      await fsp.writeFile(this._walPath, '');
+      // 3. Atomically publish, then fsync the directory so the new file's
+      //    directory entry is durable. Only after this is the snapshot truly
+      //    durable on disk.
+      await fsp.rename(tmpPath, this._snapshotPath);
+      await this._fsyncDirAsync(dir);
+
+      // 4. Compact the WAL. A durable commit (version > v) can land on the WAL
+      //    file during the async writes above — truncating to empty would lose
+      //    it, since it is not in this snapshot. Read-filter-rewrite
+      //    SYNCHRONOUSLY so no commit can interleave between the read and the
+      //    rewrite, keep only entries newer than the snapshot, and fsync so the
+      //    compaction is itself crash-safe. Everything <= v is now durable in
+      //    the snapshot.
+      let kept = [];
+      if (fs.existsSync(this._walPath)) {
+        for (let line of fs.readFileSync(this._walPath, 'utf8').split('\n')) {
+          if (!line) continue;
+          let keep = false;
+          try { keep = JSON.parse(line).v > v; } catch { keep = false; }
+          if (keep) kept.push(line);
+        }
+      }
+      let wfd = fs.openSync(this._walPath, 'w');
+      try {
+        fs.writeSync(wfd, kept.length ? kept.join('\n') + '\n' : '');
+        fs.fsyncSync(wfd);
+      } finally { fs.closeSync(wfd); }
 
       this._snapshotVersion = v;
     } catch (err) {
@@ -514,20 +737,48 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-  // Synchronous snapshot write (for process exit).
-  _writeSnapshotSync() {
+  // Best-effort async fsync of a directory entry (local filesystems only;
+  // directory fsync is unsupported on some platforms/filesystems).
+  async _fsyncDirAsync(dir) {
+    let dfh;
     try {
-      fs.mkdirSync(path.dirname(this._snapshotPath), { recursive: true });
+      dfh = await fsp.open(dir, 'r');
+      await dfh.sync();
+    } catch { /* best-effort: not all platforms allow directory fsync */ }
+    finally {
+      if (dfh !== undefined) { try { await dfh.close(); } catch { /* ignore */ } }
+    }
+  }
+
+  // Synchronous snapshot write (for process exit) with fsync barriers.
+  _writeSnapshotSync() {
+    // Same single-writer guard as the async path: a superseded instance exiting must not clobber the
+    // owner's snapshot on its way out.
+    if (!this._ownsSnapshot()) { this._signalOwnershipLost(); return; }
+    try {
+      let snapDir = path.dirname(this._snapshotPath);
+      fs.mkdirSync(snapDir, { recursive: true });
       fs.mkdirSync(path.dirname(this._walPath), { recursive: true });
-      // Flush pending WAL synchronously
+      // Flush pending WAL synchronously with an fsync barrier.
       if (this._walQueue.length > 0) {
-        fs.appendFileSync(this._walPath, this._walQueue.join('\n') + '\n');
+        let wfd = fs.openSync(this._walPath, 'a');
+        try {
+          fs.writeSync(wfd, this._walQueue.join('\n') + '\n');
+          fs.fsyncSync(wfd);
+        } finally { fs.closeSync(wfd); }
         this._walQueue = [];
       }
 
+      // Write the snapshot durably: tmp + fsync, atomic rename, fsync dir.
       let tmpPath = this._snapshotPath + '.tmp';
-      fs.writeFileSync(tmpPath, JSON.stringify(this._state, null, 2));
+      let sfd = fs.openSync(tmpPath, 'w');
+      try {
+        fs.writeSync(sfd, JSON.stringify(this._state, null, 2));
+        fs.fsyncSync(sfd);
+      } finally { fs.closeSync(sfd); }
       fs.renameSync(tmpPath, this._snapshotPath);
+      this._fsyncDir(snapDir);
+      // WAL is now compacted into the snapshot.
       fs.writeFileSync(this._walPath, '');
       this._snapshotVersion = this._version;
       this._commitsSinceSnapshot = 0;
@@ -537,7 +788,7 @@ export class StateGraph extends EventEmitter {
     }
   }
 
-   // Flush all pending writes and snapshot. Call on process exit.
+  // Flush all pending writes and snapshot. Call on process exit.
   flush() {
     if (this._walTimer) {
       clearTimeout(this._walTimer);
@@ -555,7 +806,7 @@ export class StateGraph extends EventEmitter {
   // Migrate from old config-store format.
   _migrateFromOldConfig() {
     try {
-      let old = JSON.parse(fs.readFileSync(OLD_CONFIG_PATH, 'utf8'));
+      let old = JSON.parse(fs.readFileSync(this._oldConfigPath, 'utf8'));
       let ops = [];
 
       // Settings
@@ -1423,8 +1674,18 @@ let _instance = null;
  */
 export function getStateGraph() {
   if (!_instance) {
-    _instance = new StateGraph();
+    // Only the long-lived backend process (PORTAL_BACKEND=1) enforces single-writer ownership; ephemeral
+    // CLI invocations that read state must not claim it.
+    let ownershipGuard = process.env.PORTAL_BACKEND === '1';
+    _instance = new StateGraph({ ownershipGuard });
     _instance.load();
+
+    if (ownershipGuard) {
+      _instance.on('ownership-lost', () => {
+        console.error('[portal] Another backend has taken ownership of the state snapshot; this instance is a stale duplicate and is exiting to avoid clobbering shared state.');
+        process.exit(0);
+      });
+    }
 
     process.on('beforeExit', () => _instance.flush());
     process.on('SIGINT', () => { _instance.flush(); process.exit(0); });

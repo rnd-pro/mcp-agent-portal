@@ -219,13 +219,13 @@ npx mcp-agent-portal --connect wss://...   # client — joins a master node
 
 ## MCP Ecosystem
 
-Agent Portal manages the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and `.agent-portal` are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration. Public servers are discoverable through `discover_tools`; `agent-pool-mcp` is the internal execution runtime behind Agent Portal chat orchestration.
+Agent Portal manages the RND-PRO MCP ecosystem. `project-graph-mcp`, `agent-pool-mcp`, and the shared team memory are part of the core local workspace; additional MCP servers are installed through the marketplace or local configuration. Public servers are discoverable through `discover_tools`; `agent-pool-mcp` is the internal execution runtime behind Agent Portal chat orchestration.
 
 | Server | Description | Status |
 |--------|-------------|--------|
 | [project-graph-mcp](https://npmjs.com/package/project-graph-mcp) | AST-based codebase analysis, navigation, documentation | ✅ Production |
 | [agent-pool-mcp](https://npmjs.com/package/agent-pool-mcp) | Internal execution runtime for Agent Portal chat orchestration, resource groups, pipelines, scheduling, and peer review | ✅ Production |
-| `.agent-portal` skills | Project-local skills, agents, and workflows | ✅ Production |
+| Team memory | Shared skills, agents, and workflows (configured directory) | ✅ Production |
 | Optional marketplace MCP servers | Browser, terminal, SaaS, and domain tools configured per workspace | Configurable |
 
 ### Local Development
@@ -240,26 +240,26 @@ npm start
 
 `npm run build` creates the production browser bundle in `dist/web`. Normal MCP/server starts use that bundle when it is present and fall back to `web/` when it is not. Use `npm run dev` for source-module development against `web/`, or set `AGENT_PORTAL_WEB_ROOT` to serve an explicit UI directory in container builds.
 
-If `.agent-portal` is configured as a private skills submodule, set its local remote before initializing submodules:
+Initialize the product submodules:
 
 ```bash
-git config submodule..agent-portal.url <private-agent-portal-skills-remote>
-git submodule update --init .agent-portal
 git submodule update --init packages/agent-pool-mcp packages/project-graph-mcp
 ```
 
-### Agent Portal Skills (`.agent-portal/`)
+### Agent Portal Skills (team memory)
 
-Agent Portal reads project-local skills, agents, and workflows from the `.agent-portal/` directory in your project root.
+Agent Portal reads shared skills, agents, contexts, and workflows from **team memory**: a single clone of the private skills remote, kept once on your machine as a visible directory.
 
-The skills directory can be configured as a private submodule. Set the private remote in local Git config before initializing it:
+Clone it once, then point Agent Portal at it. There is **no** per-project `.agent-portal` directory, **no** symlink, and **no** git submodule.
 
 ```bash
-git config submodule..agent-portal.url <private-agent-portal-skills-remote>
-git submodule update --init .agent-portal
+# once, in a visible location (e.g. one directory level above your projects)
+git clone <private-agent-portal-skills-remote> team-memory
 ```
 
-See `.agent-portal/README.md` when project-local skills are installed.
+Then set the **Team Memory Root** to that clone, either in the Agent Portal Settings panel (`agentPortal.teamMemoryRoot`) or via the `AGENT_PORTAL_MEMORY_ROOT` environment override. Agent Portal uses the resolved path directly as the content directory; until it is configured, the dashboard shows a "configure team memory" state.
+
+Edits, commits, and pushes happen once in that shared clone — there is no per-project pointer to bump. See the team-memory `README.md` for the layout.
 
 ## Related Projects
 

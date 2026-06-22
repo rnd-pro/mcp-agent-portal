@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getAgentPortalConfig } from '../../config-store.js';
+import { getTeamMemoryRoot } from '../../../../packages/agent-pool-mcp/src/runtime/paths.js';
 import {
   buildDevelopmentMap,
   parseTaskStateResult,
@@ -52,8 +53,8 @@ const PUBLIC_CONTENT_PATTERNS = [
 const TREE_MAX_DEPTH = 8;
 const TREE_MAX_NODES = 1000;
 
-function getAgentPortalRoot(projectRoot) {
-  return path.join(path.resolve(projectRoot), '.agent-portal');
+function getAgentPortalRoot() {
+  return getTeamMemoryRoot();
 }
 
 function getOpenLibraryRoot() {
@@ -63,32 +64,25 @@ function getOpenLibraryRoot() {
   return configured ? path.resolve(configured) : null;
 }
 
-function resolveProjectRoot(projectRoot, projectId) {
-  if (!projectId) return projectRoot;
-  let project = getStateGraph().getProjectHistory().find(p => p.id === projectId);
-  if (!project?.path) throw new Error(`Unknown project: ${projectId}`);
-  return project.path;
-}
-
-function resolveRequestProjectRoot(req, projectRoot, body = null) {
-  let url = new URL(req.url, 'http://localhost');
-  return resolveProjectRoot(projectRoot, url.searchParams.get('project') || body?.projectId || null);
-}
-
 function isPublicAgentPortalPath(relativePath = '') {
   let [first] = String(relativePath || '').split(/[\\/]+/).filter(Boolean);
   return !first || !LOCAL_AGENT_PORTAL_NAMES.has(first);
 }
 
-function resolveAgentPortalPath(projectRoot, relativePath = '') {
-  let root = getAgentPortalRoot(projectRoot);
+function resolveAgentPortalPath(relativePath = '') {
+  let root = getAgentPortalRoot();
+  if (!root) {
+    throw new Error(
+      'Team memory is not configured. Set agentPortal.teamMemoryRoot or AGENT_PORTAL_MEMORY_ROOT.',
+    );
+  }
   let cleanPath = String(relativePath || '').replace(/^[/\\]+/, '');
   if (!isPublicAgentPortalPath(cleanPath)) {
-    throw new Error('Path is local portal state, not public .agent-portal content');
+    throw new Error('Path is local portal state, not public team-memory content');
   }
   let targetPath = path.resolve(root, cleanPath);
   if (targetPath !== root && !targetPath.startsWith(root + path.sep)) {
-    throw new Error('Path must stay inside .agent-portal');
+    throw new Error('Path must stay inside team memory');
   }
   return { root, targetPath, cleanPath };
 }
@@ -260,11 +254,11 @@ async function readDevelopmentMapTaskState(proxyManager) {
 }
 
 /**
- * @param {{ projectRoot: string, proxyManager?: any, stateGraph?: any }} ctx
+ * @param {{ proxyManager?: any, stateGraph?: any }} ctx
  * @returns {Record<string, (req: any, res: any) => Promise<void>>}
  */
 export function createAgentPortalRoutes(ctx) {
-  let { projectRoot, proxyManager = null, stateGraph = null } = ctx;
+  let { proxyManager = null, stateGraph = null } = ctx;
   let getGraph = () => stateGraph || proxyManager?.stateGraph || getStateGraph();
 
   return {
@@ -290,12 +284,15 @@ export function createAgentPortalRoutes(ctx) {
       }
     },
 
-    'GET /api/agent-portal/tree': async (req, res) => {
+    'GET /api/agent-portal/tree': async (_req, res) => {
       try {
-        let activeProjectRoot = resolveRequestProjectRoot(req, projectRoot);
-        let root = getAgentPortalRoot(activeProjectRoot);
+        let root = getAgentPortalRoot();
+        if (!root) {
+          json(res, { ok: true, configured: false, root: null, tree: [] });
+          return;
+        }
         let tree = await listAgentPortalTree(root);
-        json(res, { ok: true, root, tree });
+        json(res, { ok: true, configured: true, root, tree });
       } catch (err) {
         json(res, { error: err.message }, 400);
       }
@@ -335,12 +332,11 @@ export function createAgentPortalRoutes(ctx) {
       try {
         let body = await parseBody(req, 5 * 1024 * 1024);
         if (!body.sourcePath) throw new Error('Missing sourcePath');
-        let activeProjectRoot = resolveRequestProjectRoot(req, projectRoot, body);
         let source = resolveOpenLibraryPath(body.sourcePath);
         let targetRelPath = body.targetPath || source.cleanPath;
         assertWritableAgentPortalPath(targetRelPath);
         assertWritableAgentPortalPath(source.cleanPath);
-        let target = resolveAgentPortalPath(activeProjectRoot, targetRelPath);
+        let target = resolveAgentPortalPath(targetRelPath);
         await assertRealPathInside(source.root, source.targetPath, 'Source path');
         await assertSafeWriteTarget(target.root, target.targetPath);
         let stat = await fs.stat(source.targetPath);
@@ -359,8 +355,7 @@ export function createAgentPortalRoutes(ctx) {
         let url = new URL(req.url, 'http://localhost');
         let relPath = url.searchParams.get('path') || '';
         if (!relPath) throw new Error('Missing path');
-        let activeProjectRoot = resolveProjectRoot(projectRoot, url.searchParams.get('project') || null);
-        let { root, targetPath, cleanPath } = resolveAgentPortalPath(activeProjectRoot, relPath);
+        let { root, targetPath, cleanPath } = resolveAgentPortalPath(relPath);
         await assertRealPathInside(root, targetPath, 'Path');
         let stat = await fs.stat(targetPath);
         if (!stat.isFile()) throw new Error('Path is not a file');
@@ -376,9 +371,8 @@ export function createAgentPortalRoutes(ctx) {
         let body = await parseBody(req, 5 * 1024 * 1024);
         if (!body.path) throw new Error('Missing path');
         if (typeof body.content !== 'string') throw new Error('Missing content');
-        let activeProjectRoot = resolveRequestProjectRoot(req, projectRoot, body);
         assertWritableAgentPortalPath(body.path);
-        let { root, targetPath, cleanPath } = resolveAgentPortalPath(activeProjectRoot, body.path);
+        let { root, targetPath, cleanPath } = resolveAgentPortalPath(body.path);
         await assertSafeWriteTarget(root, targetPath);
         assertPublicAgentPortalContent(body.content);
         await writeTextAtomic(targetPath, body.content);

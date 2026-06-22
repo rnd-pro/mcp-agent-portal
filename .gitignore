@@ -13,3 +13,4 @@ patch.js
 output.txt
 coverage/
 dist/
+.agent-portal
