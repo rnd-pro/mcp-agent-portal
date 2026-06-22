@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import { getRoute, parseQuery, sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import 'symbiote-ui/board';
 import { state as dashState } from '../../dashboard-state.js';
+import { stateSync } from '../../state-sync.js';
 import {
   fetchWorkflowBoard,
   controlWorkflowCard,
@@ -35,7 +36,9 @@ import {
 
 const DEFAULT_SCOPE = 'home';
 const BOARD_VIEWS = new Set(['kanban', 'graph']);
-const AUTO_REFRESH_INTERVAL_MS = 15_000;
+const FALLBACK_REFRESH_INTERVAL_MS = 60_000;
+const REALTIME_DEBOUNCE_MS = 200;
+const REALTIME_STATE_KEYS = ['workflowCards', 'workflowRuns', 'workflowLeases', 'workflowTransitions', 'tasks'];
 const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
 const ACTIVE_CONTROL_COLUMNS = new Set(['ready', 'in-progress', 'quality-audit', 'commit-publish']);
 const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
@@ -285,9 +288,11 @@ export class WorkflowBoard extends Symbiote {
   #applyingAttributes = false;
   #lastLoadKey = '';
   #routeSyncHandler = null;
-  #autoRefreshTimer = null;
+  #fallbackRefreshTimer = null;
   #focusSyncHandler = null;
   #visibilitySyncHandler = null;
+  #realtimeUnsubscribers = [];
+  #realtimeRefreshTimer = null;
 
   initCallback() {
     this.ref.pauseBoardBtn.onclick = () => this.controlBoard('pause');
@@ -313,7 +318,8 @@ export class WorkflowBoard extends Symbiote {
     };
     globalThis.addEventListener?.('focus', this.#focusSyncHandler);
     globalThis.document?.addEventListener?.('visibilitychange', this.#visibilitySyncHandler);
-    this.#startAutoRefresh();
+    this.#subscribeRealtime();
+    this.#startFallbackRefresh();
     this.loadBoard();
   }
 
@@ -333,9 +339,15 @@ export class WorkflowBoard extends Symbiote {
       globalThis.document?.removeEventListener?.('visibilitychange', this.#visibilitySyncHandler);
       this.#visibilitySyncHandler = null;
     }
-    if (this.#autoRefreshTimer) {
-      globalThis.clearInterval?.(this.#autoRefreshTimer);
-      this.#autoRefreshTimer = null;
+    if (this.#fallbackRefreshTimer) {
+      globalThis.clearInterval?.(this.#fallbackRefreshTimer);
+      this.#fallbackRefreshTimer = null;
+    }
+    for (let unsubscribe of this.#realtimeUnsubscribers) unsubscribe?.();
+    this.#realtimeUnsubscribers = [];
+    if (this.#realtimeRefreshTimer) {
+      globalThis.clearTimeout?.(this.#realtimeRefreshTimer);
+      this.#realtimeRefreshTimer = null;
     }
   }
 
@@ -424,12 +436,36 @@ export class WorkflowBoard extends Symbiote {
     }
   }
 
-  #startAutoRefresh() {
-    if (this.#autoRefreshTimer) globalThis.clearInterval?.(this.#autoRefreshTimer);
-    this.#autoRefreshTimer = globalThis.setInterval?.(() => {
+  #subscribeRealtime() {
+    let ready = false;
+    let onPatch = () => {
+      // Ignore the synchronous initial delivery emitted while subscribing; the
+      // first board load is driven by loadBoard() in initCallback.
+      if (ready) this.#scheduleRealtimeRefresh();
+    };
+    for (let key of REALTIME_STATE_KEYS) {
+      this.#realtimeUnsubscribers.push(stateSync.on(key, onPatch));
+    }
+    ready = true;
+  }
+
+  #scheduleRealtimeRefresh() {
+    // Coalesce a burst of patches (e.g. a multi-card transition) into one refresh.
+    if (this.#realtimeRefreshTimer) return;
+    this.#realtimeRefreshTimer = globalThis.setTimeout?.(() => {
+      this.#realtimeRefreshTimer = null;
       if (!this.isConnected || globalThis.document?.hidden) return;
-      this.loadBoard({ silent: true, reason: 'auto-sync' });
-    }, AUTO_REFRESH_INTERVAL_MS) || null;
+      this.loadBoard({ silent: true, reason: 'realtime-sync' });
+    }, REALTIME_DEBOUNCE_MS) || null;
+  }
+
+  #startFallbackRefresh() {
+    // Heartbeat fallback only; realtime ws/state patches drive normal updates.
+    if (this.#fallbackRefreshTimer) globalThis.clearInterval?.(this.#fallbackRefreshTimer);
+    this.#fallbackRefreshTimer = globalThis.setInterval?.(() => {
+      if (!this.isConnected || globalThis.document?.hidden) return;
+      this.loadBoard({ silent: true, reason: 'fallback-sync' });
+    }, FALLBACK_REFRESH_INTERVAL_MS) || null;
   }
 
   async requestTransition(options = {}) {

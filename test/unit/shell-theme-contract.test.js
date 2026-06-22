@@ -657,6 +657,8 @@ describe('portal shell theme contract', () => {
     assert.ok(template.includes('ref="stopBoardBtn"'), 'WorkflowBoard must expose board-level stop automation control');
     assert.ok(template.includes('ref="boardSettings"'), 'WorkflowBoard must expose compact board automation settings');
     assert.ok(template.includes('ref="boardHistory"'), 'WorkflowBoard board automation settings must expose recent board event history');
+    assert.ok(source.includes("stateSync.on(") && source.includes("REALTIME_STATE_KEYS"), 'WorkflowBoard must subscribe to ws/state realtime patches, not poll on a short interval');
+    assert.equal(source.includes('AUTO_REFRESH_INTERVAL_MS'), false, 'WorkflowBoard must not keep the old 15s auto-refresh poll once realtime is wired');
     assert.ok(source.includes('importWorkflowWorkItems'), 'WorkflowBoard must call the shared workflow service import action');
     assert.ok(source.includes('updateWorkflowColumn'), 'WorkflowBoard must persist column settings through the shared workflow service');
     assert.ok(source.includes('controlWorkflowBoard'), 'WorkflowBoard must route board-level controls through the shared workflow service');
