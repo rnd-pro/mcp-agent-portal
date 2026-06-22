@@ -909,6 +909,7 @@ export function normalizeWorkflowRunInput(input = {}, opts = {}) {
     updatedAt: opts.updatedAt ?? input.updatedAt ?? input.updated_at ?? now,
     completedAt: input.completedAt ?? input.completed_at ?? null,
     tokens: nonNegativeIntOrNull(input.tokens ?? input.token_total ?? input.totalTokens),
+    chatId: textOrNull(input.chatId ?? input.chat_id),
   };
 }
 

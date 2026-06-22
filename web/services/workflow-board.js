@@ -254,6 +254,7 @@ function normalizeRun(raw = {}) {
     tokens: Number.isFinite(Number(run.tokens ?? run.token_total ?? run.totalTokens))
       ? Math.floor(Number(run.tokens ?? run.token_total ?? run.totalTokens))
       : null,
+    chatId: normalizeText(run.chatId || run.chat_id),
     raw: run,
   };
 }
