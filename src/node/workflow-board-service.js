@@ -1805,7 +1805,11 @@ export function createWorkflowBoardService(opts = {}) {
     let escalated = [];
     let currentNow = now();
     for (let card of boardCardsFor(board.id)) {
-      if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked') continue;
+      // Process blocked cards plus any JOIN card that has not yet woken its owner — a join whose
+      // members were already satisfied at materialization is created `idle`, so the plain blocked
+      // guard would skip it and the owner would never be woken.
+      let pendingJoin = card.kind === 'join' && !card.metadata?.ownerNotifiedAt;
+      if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked' && !pendingJoin) continue;
       let live = clone(card);
       let releasedEdges = releasedEdgesFor(live);
       // F-DEP-2: level-trigger onUpstreamFailure. Before the satisfaction check, resolve any edge
@@ -1837,6 +1841,14 @@ export function createWorkflowBoardService(opts = {}) {
         releasedEdges = releasedEdgesFor(live);
       }
       if (allDependenciesSatisfied(live, board, classifier, releasedEdges)) {
+        // A satisfied JOIN card is not work to admit — it is a coordination barrier. Its release
+        // wakes the owner through the return-loop (mint a `completed` return onto the owner) and
+        // retires the join card, instead of enqueuing the synthetic card as a runnable item.
+        if (live.kind === 'join') {
+          let woke = wakeJoinOwner(board, live, principal);
+          released.push({ cardId: card.id, join: true, ownerCardId: textOrNull(live.parentCardId), ownerWoken: woke });
+          continue;
+        }
         let idle = commitDependencyUnblock(live, principal);
         let enqueued = enqueueWorkItem(board, idle);
         if (enqueued.ok) released.push({ cardId: card.id, admissionId: enqueued.entry?.admissionId });
@@ -1872,9 +1884,10 @@ export function createWorkflowBoardService(opts = {}) {
     if (!normalized || normalized.mode !== 'join') return { ok: false, reason: 'not_a_join' };
     let ensuredBoard = ensureBoard(board?.id ?? board ?? DEFAULT_WORKFLOW_BOARD_ID);
     let onUpstreamFailure = normalized.onFailure === 'all_settled' ? 'release' : 'block_and_escalate';
+    let releaseWhen = normalized.releaseWhen ?? 'card_done';
     let dependsOn = normalized.members.map(cardId => ({
       cardId,
-      releaseWhen: 'card_done',
+      releaseWhen,
       onUpstreamFailure,
     }));
     let joinId = nextId(makeId, 'join');
@@ -1911,6 +1924,87 @@ export function createWorkflowBoardService(opts = {}) {
       return { ok: false, reason: created.failures?.[0]?.gate ?? 'join_create_failed', detail: created };
     }
     return created.card;
+  }
+
+  // A released JOIN card wakes its owner (S5): mint a `completed` return onto the owner's inbox so the
+  // orchestrator re-engages through the SAME return-loop driver (reconcileWorkflowEscalations), then
+  // retire the join card to a terminal column. Idempotent — `metadata.ownerNotifiedAt` plus the
+  // deterministic per-join eventId guard against any double-wake. Returns whether an owner was woken.
+  function wakeJoinOwner(board, joinCard, principal) {
+    let ts = now();
+    if (joinCard.metadata?.ownerNotifiedAt) {
+      commitDependencyUnblock(joinCard, principal);
+      return false;
+    }
+    let ownerId = textOrNull(joinCard.parentCardId);
+    let members = cardDependsOn(joinCard).map(dep => dep.cardId);
+    let terminalColumnId = (board.columns ?? []).find(col => col?.automation?.action === 'close')?.id
+      ?? (board.columns ?? []).find(col => col?.id === 'done')?.id
+      ?? joinCard.columnId;
+    let retiredMetadata = { ...(joinCard.metadata ?? {}), ownerNotifiedAt: ts };
+    delete retiredMetadata.dependencyBlock;
+    let retired = normalizeWorkflowCardInput({
+      ...joinCard,
+      columnId: terminalColumnId,
+      lifecycle: 'idle',
+      metadata: retiredMetadata,
+      version: joinCard.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: joinCard.id,
+      actor: principal.label,
+      now: ts,
+      version: joinCard.version + 1,
+      createdAt: joinCard.createdAt,
+      updatedAt: ts,
+    });
+    let ops = [{ op: 'set', path: `workflowCards/${joinCard.id}`, value: retired }];
+    let ownerWoken = false;
+    if (ownerId) {
+      let owner = stateGraph.get(`workflowCards/${ownerId}`);
+      if (owner) {
+        let eventId = `join-${crypto.createHash('sha256').update(joinCard.id).digest('hex').slice(0, 20)}`;
+        let returnEvent = normalizeWorkflowReturnEvent(
+          { kind: 'completed', payload: { join: joinCard.id, members } },
+          { now: ts, correlationId: ownerId, raisedBy: ESCALATION_ACTOR, eventId },
+        );
+        let nextReturns = coalesceReturnEvents(owner.metadata?.returns, returnEvent);
+        let ownerNext = normalizeWorkflowCardInput({
+          ...owner,
+          metadata: { ...(owner.metadata && typeof owner.metadata === 'object' ? owner.metadata : {}), returns: nextReturns },
+          version: owner.version + 1,
+          updatedAt: ts,
+          updatedBy: principal.label,
+        }, {
+          id: owner.id,
+          actor: principal.label,
+          now: ts,
+          version: owner.version + 1,
+          createdAt: owner.createdAt,
+          updatedAt: ts,
+        });
+        ops.push({ op: 'set', path: `workflowCards/${ownerId}`, value: ownerNext });
+        ownerWoken = true;
+      }
+    }
+    let eventId = nextId(makeId, 'join');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId,
+      eventType: 'join',
+      boardId: board.id,
+      cardId: joinCard.id,
+      fromColumnId: joinCard.columnId,
+      toColumnId: terminalColumnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason: ownerWoken ? `Join satisfied; woke owner ${ownerId}.` : 'Join satisfied; no owner to wake.',
+      status: 'accepted',
+      sideEffects: [{ type: 'join_release', ownerCardId: ownerId, members }],
+    }, { id: eventId, now: ts });
+    ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
+    stateGraph.commit(ops, sourceForPrincipal(principal));
+    return ownerWoken;
   }
 
   // Link a dependency: set/extend the dependent's `dependsOn` with `{ cardId|dependsOnCardId }`
@@ -4839,7 +4933,21 @@ export function createWorkflowBoardService(opts = {}) {
       ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
     }
     stateGraph.commit(ops, sourceForPrincipal(principal));
-    return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, slotRejected, sideEffects: delegated.sideEffects };
+    // S5 wiring: a persisted JOIN subscription materializes a synthetic join card that depends on the
+    // members; when the join policy is satisfied its release wakes THIS owner through the return-loop
+    // (see releaseDependencies). Idempotent — a re-orchestrate of the same owner reuses its join card.
+    let joinCard = null;
+    if (normalizedSubscription?.mode === 'join') {
+      let existingJoin = boardCardsFor(board.id).find(
+        other => other.kind === 'join' && other.parentCardId === card.id,
+      );
+      joinCard = existingJoin ?? null;
+      if (!existingJoin) {
+        let made = materializeJoinCard(board, normalizedSubscription, card.id, principal);
+        if (made?.id) joinCard = made;
+      }
+    }
+    return { ok: true, card: nextCard, run: nextRun, lease, capacity, boardCapacity, slotRejected, joinCardId: joinCard?.id ?? null, sideEffects: delegated.sideEffects };
   }
 
   function resumeWorkItem(args = {}, context = {}) {

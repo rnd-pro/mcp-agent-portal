@@ -260,7 +260,10 @@ export function normalizeWorkflowSubscription(input = {}) {
   let source = objectOrEmpty(input);
   let mode = normalizeKnownValue(source.mode, WORKFLOW_SUBSCRIPTION_MODES, 'final');
   let onFailure = normalizeKnownValue(source.onFailure ?? source.on_failure, WORKFLOW_SUBSCRIPTION_ON_FAILURE, 'fail_fast');
-  if (mode !== 'join') return { schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure };
+  // The synthetic join edge's release signal (S5). `card_done` is the safe default; `run_success`
+  // releases as soon as a member's run succeeds (useful when members never reach a terminal column).
+  let releaseWhen = normalizeKnownValue(source.releaseWhen ?? source.release_when, WORKFLOW_RELEASE_WHEN, 'card_done');
+  if (mode !== 'join') return { schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure, releaseWhen };
   let members = [...new Set(
     (Array.isArray(source.members) ? source.members : [])
       .map(member => textOrNull(member && typeof member === 'object' ? (member.cardId ?? member.id) : member))
@@ -273,7 +276,7 @@ export function normalizeWorkflowSubscription(input = {}) {
   let quorumK = type === 'quorum' && Number.isFinite(k) && k >= 1 && k <= members.length ? Math.floor(k) : null;
   if (type === 'quorum' && quorumK === null) type = 'all';   // fail-safe: never under-wait
   return {
-    schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure, members,
+    schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure, releaseWhen, members,
     joinPolicy: { type, ...(quorumK !== null ? { k: quorumK } : {}) },
   };
 }
