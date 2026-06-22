@@ -227,6 +227,13 @@ export function returnEventSupersedes(incoming, prior) {
 export function coalesceReturnEvents(events, incoming, limit = 12) {
   let list = Array.isArray(events) ? events : [];
   if (!incoming) return list.slice(-limit);
+  // Idempotent re-mint: an incoming whose eventId already sits in the inbox (e.g. the reconcile
+  // re-parsed a stable WORKFLOW_RETURN marker on a still-running run) is a no-op — the orchestrator
+  // wakes once per DISTINCT return, not once per reconcile pass.
+  if (incoming.eventId
+    && list.some(prior => prior.eventId === incoming.eventId && prior.correlationId === incoming.correlationId)) {
+    return list.slice(-limit);
+  }
   // A coalesce-only incoming is dropped when a terminal for its correlationId already landed.
   if (!incoming.actionable && !incoming.terminal
     && list.some(prior => prior.correlationId === incoming.correlationId && prior.terminal)) {

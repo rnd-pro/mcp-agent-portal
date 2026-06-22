@@ -25,6 +25,8 @@ import {
   isWorkflowLifecycleTransitionAllowed,
   migrateWorkflowBoardToV2,
   migrateWorkflowCardToV2,
+  normalizeWorkflowReturnEvent,
+  coalesceReturnEvents,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
   validateWorkflowTransitionGraph,
@@ -62,6 +64,10 @@ const ESCALATION_KIND_PATTERN = /ESCALATION_KIND:\s*([a-z_]+)/i;
 const ESCALATION_DETAIL_PATTERN = /ESCALATION_DETAIL:\s*(.+)/i;
 const ESCALATION_SUGGESTION_PATTERN = /ESCALATION_SUGGESTION:\s*(.+)/i;
 const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
+// Intermediate-return marker: a worker emits `WORKFLOW_RETURN: <kind>` (optionally trailed by a JSON
+// object) in its final message/output, mirroring how escalation markers are emitted. The reconcile
+// folds the parsed return into the per-card inbox (card.metadata.returns) — see computeIntermediateReturn.
+const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
 const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
@@ -3409,6 +3415,63 @@ export function createWorkflowBoardService(opts = {}) {
     return { metadata: { ...metadata, escalation: nextState }, status: 'raised', kind: escalation.kind, detail: escalation.detail };
   }
 
+  // Parse a typed intermediate return from the latest task output of a still-live run. A worker emits
+  // `WORKFLOW_RETURN: <kind>` (optionally trailed by a JSON object) in its final message; we read that
+  // text the same way computeTerminalEscalation does (workerFinalAnswerText → chat tail / runtime task
+  // events). Returns a normalized return event, or null when there is no marker — zero cost on the
+  // common no-marker reconcile pass. Wrapped so a parse failure degrades to null, never a thrown reconcile.
+  function computeIntermediateReturn(card, run, runtimeTasks, currentNow) {
+    try {
+      let text = workerFinalAnswerText(run, runtimeTasks);
+      if (!text) return null;
+      let match = text.match(RETURN_MARKER_PATTERN);
+      if (!match) return null;
+      let kind = match[1].toLowerCase();
+      let parsed = {};
+      if (match[2]) {
+        try { parsed = JSON.parse(match[2]); } catch { parsed = {}; }
+      }
+      // Deterministic eventId so re-parsing the SAME marker on a still-running run is idempotent
+      // (coalesceReturnEvents drops the duplicate) — the inbox holds one entry per distinct marker.
+      let eventId = `ret-${crypto.createHash('sha256').update(`${run.id}:${match[0]}`).digest('hex').slice(0, 24)}`;
+      return normalizeWorkflowReturnEvent(
+        { kind, ...(parsed && typeof parsed === 'object' ? parsed : {}) },
+        { now: currentNow, correlationId: card.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, raisedBy: ESCALATION_ACTOR, eventId },
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  // Fold a minted return into the escalation state when it is a hard-interrupt (needs_decision | blocked
+  // | needs_permission). A hard-interrupt return must keep hasActiveEscalation(card) true so the existing
+  // re-engagement driver re-engages it — we write the SAME escalation-state shape buildDependencyEscalation
+  // produces, mapping the return's escalationKind onto the channel. A non-hard-interrupt return never
+  // touches metadata.escalation. Returns the next metadata, unchanged when not a hard interrupt.
+  function foldReturnEscalation(metadata, event, currentNow) {
+    if (!event || event.hardInterrupt !== true) return metadata;
+    let existing = metadata.escalation ? normalizeWorkflowEscalationState(metadata.escalation) : null;
+    let escalation = normalizeWorkflowEscalation(
+      { kind: event.escalationKind, detail: event.detail, raisedBy: ESCALATION_ACTOR },
+      { now: currentNow, runId: event.runId, taskId: event.taskId },
+    );
+    if (!escalation) return metadata;
+    let state = normalizeWorkflowEscalationState({
+      lastEscalation: escalation,
+      attemptCount: existing?.attemptCount ?? 0, // re-engagement owns accrual; never bump here
+      firstAt: existing?.firstAt ?? currentNow,
+      lastAt: currentNow,
+      nextAttemptAt: existing?.nextAttemptAt ?? currentNow, // first episode is re-engageable now
+      humanEscalated: existing?.humanEscalated ?? false,
+      lastRunId: event.runId,
+      history: [
+        ...(existing?.history ?? []),
+        { kind: escalation.kind, detail: escalation.detail, runId: event.runId, at: currentNow },
+      ],
+    });
+    return { ...metadata, escalation: state };
+  }
+
   function workflowRunStatusFromRuntime(run, runtimeTasks) {
     let taskIds = uniqueArray(run.taskIds);
     if (!taskIds.length) return null;
@@ -3503,6 +3566,40 @@ export function createWorkflowBoardService(opts = {}) {
           }
         }
 
+        // Intermediate-return mint (S6): a still-live run may emit a `WORKFLOW_RETURN: <kind>` marker
+        // before it terminalizes. Parse it BEFORE the no-status-change continue so a progress/discovered/
+        // needs_decision return on a card whose run status is unchanged still lands in the inbox. Most
+        // passes have no marker → computeIntermediateReturn returns null (zero cost).
+        let returnEvent = !TERMINAL_RUN_STATUSES.has(nextStatus)
+          ? computeIntermediateReturn(latestCard, run, runtimeTasks, currentNow)
+          : null;
+        if (returnEvent && nextStatus === run.status) {
+          // No run-status transition this pass, but a return was minted: fold it (and, for a
+          // hard-interrupt, its escalation) into the card and commit, then move to the next run.
+          let nextReturns = coalesceReturnEvents(latestCard.metadata?.returns, returnEvent);
+          let returnMetadata = foldReturnEscalation(
+            { ...(latestCard.metadata && typeof latestCard.metadata === 'object' ? latestCard.metadata : {}), returns: nextReturns },
+            returnEvent,
+            currentNow,
+          );
+          latestCard = normalizeWorkflowCardInput({
+            ...latestCard,
+            metadata: returnMetadata,
+            version: latestCard.version + 1,
+            updatedAt: currentNow,
+            updatedBy: principal.label,
+          }, {
+            id: latestCard.id,
+            actor: principal.label,
+            now: currentNow,
+            version: latestCard.version + 1,
+            createdAt: latestCard.createdAt,
+            updatedAt: currentNow,
+          });
+          cardChanged = true;
+          continue;
+        }
+
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
         // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution.
@@ -3531,12 +3628,30 @@ export function createWorkflowBoardService(opts = {}) {
           ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
+        // Terminal-return mint (S7): a run reaching a final status mints a completed|failed return. A
+        // non-terminal status change (e.g. requested→running) carries any intermediate return parsed
+        // above. Fold the minted return into the inbox (coalesce drops a late progress after a terminal,
+        // so no extra logic) so it lands in the SAME card update / commit as the rest of the reconcile.
+        let mintedReturn = terminal
+          ? normalizeWorkflowReturnEvent(
+            { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
+            { now: currentNow, correlationId: latestCard.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, seq: nextRun.version ?? null, raisedBy: ESCALATION_ACTOR },
+          )
+          : returnEvent;
+        if (mintedReturn) {
+          let baseMetadata = nextMetadata && typeof nextMetadata === 'object' ? nextMetadata : {};
+          let nextReturns = coalesceReturnEvents(latestCard.metadata?.returns, mintedReturn);
+          // S8: a hard-interrupt return ALSO folds onto metadata.escalation (same writer as the
+          // escalation reconcile) so hasActiveEscalation stays true and the driver re-engages it.
+          nextMetadata = foldReturnEscalation({ ...baseMetadata, returns: nextReturns }, mintedReturn, currentNow);
+        }
         // A terminated run leaves no live lifecycle; normalize stale `running` back to `idle`
         // (valid per WORKFLOW_CARD_LIFECYCLE_STATES) so bookkeeping reflects the ended run.
         let nextLifecycle = terminal ? 'idle' : latestCard.lifecycle;
         let needsCardUpdate = nextColumnId !== latestCard.columnId
           || nextFlags.join('|') !== normalizeRecoveryFlags(latestCard.recoveryFlags).join('|')
           || escalationDelta !== null
+          || mintedReturn !== null
           || (terminal && latestCard.lifecycle === 'running');
 
         if (needsCardUpdate) {
