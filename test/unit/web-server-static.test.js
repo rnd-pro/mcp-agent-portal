@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
   HTML_IN_CANVAS_ORIGIN_TRIAL_ENV,
   createStaticFileHeaders,
+  isImmutableAsset,
+  negotiatePrecompressedVariant,
   resolveStaticFileTarget,
   resolveWebRoot,
   resolveHtmlInCanvasOriginTrialToken,
@@ -80,6 +82,36 @@ test('web server prefers built web root when production dist exists', () => {
   try {
     let root = resolveWebRoot({ env: {}, webDir, distWebDir });
     assert.equal(root, distWebDir);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('content-hashed bundles are immutable; other assets stay uncached', () => {
+  assert.equal(isImmutableAsset('/dist/web/app-6R3FU6TT.js'), true);
+  assert.equal(isImmutableAsset('/dist/web/app.js'), false);
+  assert.equal(isImmutableAsset('/dist/web/index.html'), false);
+
+  let hashed = createStaticFileHeaders('/dist/web/app-6R3FU6TT.js', { env: {} });
+  assert.equal(hashed['Cache-Control'], 'public, max-age=31536000, immutable');
+  assert.equal(hashed.Vary, 'Accept-Encoding');
+
+  let html = createStaticFileHeaders('/dist/web/index.html', { env: {} });
+  assert.match(html['Cache-Control'], /no-store/);
+});
+
+test('precompressed variant negotiation honors Accept-Encoding and sibling presence', () => {
+  let tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-precompress-'));
+  try {
+    let js = path.join(tmp, 'app-ABCD1234.js');
+    fs.writeFileSync(js, 'x');
+    fs.writeFileSync(`${js}.gz`, 'gz');
+    fs.writeFileSync(`${js}.br`, 'br');
+
+    assert.deepEqual(negotiatePrecompressedVariant(js, 'br, gzip'), { encoding: 'br', path: `${js}.br` });
+    assert.deepEqual(negotiatePrecompressedVariant(js, 'gzip'), { encoding: 'gzip', path: `${js}.gz` });
+    assert.equal(negotiatePrecompressedVariant(js, ''), null);
+    assert.equal(negotiatePrecompressedVariant(path.join(tmp, 'plain.png'), 'br, gzip'), null);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

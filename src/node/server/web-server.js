@@ -89,14 +89,52 @@ export function resolveHtmlInCanvasOriginTrialToken(env = process.env) {
   return token || null;
 }
 
+// Text assets that the build precompresses to .br/.gz siblings.
+const PRECOMPRESSED_EXTENSIONS = new Set(['.js', '.css']);
+
+/**
+ * Content-hashed bundle assets (e.g. `app-WB6X7TQR.js`) are immutable: their URL
+ * changes whenever their bytes change, so they can be cached forever.
+ * @param {string} targetPath
+ * @returns {boolean}
+ */
+export function isImmutableAsset(targetPath) {
+  return /-[0-9A-Z]{8}\.(?:js|css)$/.test(path.basename(targetPath));
+}
+
+/**
+ * Pick the best precompressed variant the client accepts, if one was emitted at
+ * build time. Returns null when the asset is not precompressible or no sibling
+ * exists (e.g. vendor files served from node_modules).
+ * @param {string} targetPath
+ * @param {string} [acceptEncoding]
+ * @returns {{ encoding: string, path: string } | null}
+ */
+export function negotiatePrecompressedVariant(targetPath, acceptEncoding = '') {
+  if (!PRECOMPRESSED_EXTENSIONS.has(path.extname(targetPath))) return null;
+  let accept = String(acceptEncoding);
+  if (/\bbr\b/.test(accept) && fs.existsSync(`${targetPath}.br`)) {
+    return { encoding: 'br', path: `${targetPath}.br` };
+  }
+  if (/\bgzip\b/.test(accept) && fs.existsSync(`${targetPath}.gz`)) {
+    return { encoding: 'gzip', path: `${targetPath}.gz` };
+  }
+  return null;
+}
+
 export function createStaticFileHeaders(targetPath, options = {}) {
   let env = options.env || process.env;
   let ext = path.extname(targetPath);
   let mime = MIME_TYPES[ext] || 'application/octet-stream';
   let headers = {
     'Content-Type': mime,
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Cache-Control': isImmutableAsset(targetPath)
+      ? 'public, max-age=31536000, immutable'
+      : 'no-cache, no-store, must-revalidate',
   };
+  if (PRECOMPRESSED_EXTENSIONS.has(ext)) {
+    headers.Vary = 'Accept-Encoding';
+  }
   let htmlInCanvasToken = resolveHtmlInCanvasOriginTrialToken(env);
   if (ext === '.html' && htmlInCanvasToken) {
     headers['Origin-Trial'] = htmlInCanvasToken;
@@ -183,8 +221,18 @@ function serveStaticFile(reqPath, method, res, options = {}) {
     return;
   }
 
+  let headers = createStaticFileHeaders(targetPath);
+  let variant = negotiatePrecompressedVariant(targetPath, options.acceptEncoding);
+  if (variant) {
+    headers['Content-Encoding'] = variant.encoding;
+    let content = fs.readFileSync(variant.path);
+    res.writeHead(200, headers);
+    res.end(method === 'HEAD' ? undefined : content);
+    return;
+  }
+
   let content = fs.readFileSync(targetPath);
-  res.writeHead(200, createStaticFileHeaders(targetPath));
+  res.writeHead(200, headers);
   res.end(method === 'HEAD' ? undefined : content);
 }
 
@@ -347,7 +395,10 @@ export function startWebServer(projectRoot) {
     }
 
     // Static files
-    serveStaticFile(url.pathname, req.method, res, { webRoot });
+    serveStaticFile(url.pathname, req.method, res, {
+      webRoot,
+      acceptEncoding: req.headers['accept-encoding'],
+    });
   });
 
   server.on('upgrade', (req, socket, head) => {
