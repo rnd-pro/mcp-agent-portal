@@ -613,18 +613,25 @@ export class TaskRouter {
       let toolsMatch = text.match(/## Tools Used \((\d+)\)/i);
       if (toolsMatch) meta.tools = parseInt(toolsMatch[1], 10);
       let tokensMatch = text.match(/- Tokens:\s*(\d+)/i);
-      if (tokensMatch) {
-        meta.tokens = parseInt(tokensMatch[1], 10);
-        // Persist the run-level token total onto the task record so the workflow board can
-        // aggregate it onto the card's run at reconcile time (the chat meta alone is ephemeral).
-        try { sg.merge(`tasks/${taskId}`, { tokens: meta.tokens }); } catch { /* best effort */ }
-      }
+      if (tokensMatch) meta.tokens = parseInt(tokensMatch[1], 10);
       let costMatch = text.match(/- Cost:\s*\$?([\d.]+)/i);
       if (costMatch) meta.cost = parseFloat(costMatch[1]);
       let errorsMatch = text.match(/## Errors\n+([\s\S]*?)(?=\n+##|$)/i);
       if (errorsMatch) meta.errors = errorsMatch[1].trim();
       let failureBody = extractFinalAgentResponse(text);
       if (/^## (?:\[ERR\]|⚠️)?\s*Agent Failed/i.test(failureBody)) meta.errors = failureBody;
+    }
+
+    // Persist the run-level token total onto the task record so the workflow board can aggregate it
+    // onto the card's run (the chat meta is ephemeral). Prefer the structured runner stats the agent
+    // pool reports (result.stats.tokens.total / total_tokens); fall back to the parsed summary line.
+    let runTokens = parsedResult?.stats?.tokens?.total
+      ?? parsedResult?.stats?.total_tokens
+      ?? meta.tokens
+      ?? null;
+    if (Number.isFinite(Number(runTokens)) && Number(runTokens) >= 0) {
+      if (meta.tokens == null) meta.tokens = Math.floor(Number(runTokens));
+      try { sg.merge(`tasks/${taskId}`, { tokens: Math.floor(Number(runTokens)) }); } catch { /* best effort */ }
     }
 
     let elapsedSec = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
