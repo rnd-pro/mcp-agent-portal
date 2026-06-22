@@ -31,6 +31,27 @@ function statusKind(value = '') {
   return '';
 }
 
+function formatColumnId(id) {
+  let t = text(id);
+  if (!t) return '';
+  return t.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Describe a card event for the history list. A transition becomes "From → To"; everything else
+// falls back to its label/type so the row is never just a bare status like "accepted".
+function eventLabel(event = {}) {
+  let to = formatColumnId(event.toColumnId);
+  if (to) {
+    let from = formatColumnId(event.fromColumnId);
+    return from ? `${from} → ${to}` : `→ ${to}`;
+  }
+  return text(event.label || event.eventType, '—');
+}
+
+function eventTitle(event = {}) {
+  return [event.status, event.actor, event.note].map((p) => text(p)).filter(Boolean).join(' · ');
+}
+
 export class WorkflowCardInspector extends Symbiote {
   initCallback() {
     this.ref.lblStatus.textContent = tPortal('inspector.status');
@@ -129,8 +150,9 @@ export class WorkflowCardInspector extends Symbiote {
 
       let label = document.createElement('span');
       label.className = 'wci-history-label';
-      label.textContent = text(event.label || event.eventType, '—');
-      if (event.actor) label.title = event.actor;
+      label.textContent = eventLabel(event);
+      let title = eventTitle(event);
+      if (title) label.title = title;
 
       let time = document.createElement('span');
       time.className = 'wci-history-time';
