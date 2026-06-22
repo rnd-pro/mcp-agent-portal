@@ -87,13 +87,13 @@ describe('Agent Portal routed layout behavior metadata', () => {
     assert.equal(panelTypes['agent-process-graph'].attributes, undefined);
   });
 
-  it('renders workflow board as a board plus markdown layout window', () => {
+  it('renders workflow board as a board plus inspector layout window', () => {
     let root = getLayout('workflow-board');
     let nodes = walkLayout(root);
 
     assert.equal(nodes.filter((node) => node.panelType === 'workflow-board').length, 1);
-    assert.equal(nodes.filter((node) => node.panelType === 'workflow-card-markdown').length, 1);
-    assert.equal(panelTypes['workflow-card-markdown'].component, 'pg-workflow-card-markdown');
+    assert.equal(nodes.filter((node) => node.panelType === 'workflow-card-inspector').length, 1);
+    assert.equal(panelTypes['workflow-card-inspector'].component, 'pg-workflow-card-inspector');
     assert.equal(layoutMatchesSection('workflow-board', root), true);
     assert.equal(layoutMatchesSection('workflow-board', root.first.first), false);
   });

@@ -13,7 +13,7 @@ export const sectionLayoutMigrations = {
     requiredPanelTypes: new Set(['agent-portal-tree', 'agent-portal-library', 'skill-meta']),
   },
   'workflow-board': {
-    requiredPanelTypes: new Set(['workflow-card-markdown']),
+    requiredPanelTypes: new Set(['workflow-card-inspector']),
   },
   'agent-chat': {
     requiredPanelTypes: new Set(['agent-process-graph']),
