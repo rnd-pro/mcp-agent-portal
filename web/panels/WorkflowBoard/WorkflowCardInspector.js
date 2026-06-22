@@ -41,9 +41,13 @@ function formatColumnId(id) {
 // falls back to its label/type so the row is never just a bare status like "accepted".
 function eventLabel(event = {}) {
   let to = formatColumnId(event.toColumnId);
+  let from = formatColumnId(event.fromColumnId);
+  if (to && from && to !== from) return `${from} → ${to}`;
+  // Self-loop (e.g. an audit re-orchestrated within quality-audit): "X → X" is noise, so show the
+  // column plus what happened instead.
   if (to) {
-    let from = formatColumnId(event.fromColumnId);
-    return from ? `${from} → ${to}` : `→ ${to}`;
+    let kind = text(event.eventType);
+    return kind ? `${to} · ${kind}` : to;
   }
   return text(event.label || event.eventType, '—');
 }
@@ -57,6 +61,7 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.lblStatus.textContent = tPortal('inspector.status');
     this.ref.lblDuration.textContent = tPortal('inspector.duration');
     this.ref.lblTokens.textContent = tPortal('inspector.tokens');
+    this.ref.lblRuns.textContent = tPortal('inspector.runs');
     this.ref.lblHistory.textContent = tPortal('inspector.history');
     this.ref.lblBody.textContent = tPortal('inspector.details');
     this.ref.empty.textContent = tPortal('inspector.empty');
@@ -116,12 +121,54 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.mDuration.textContent = formatDuration(run) || '—';
     this.ref.mTokens.textContent = formatTokens(run?.tokens) || '—';
 
+    this.#renderRuns(card);
     this.#renderHistory(card);
 
     this.ref.viewer?.setContent?.(
       text(card.body || card.raw?.body || card.summary, tPortal('inspector.empty')),
       'markdown',
     );
+  }
+
+  #renderRuns(card) {
+    let runs = (Array.isArray(card.runs) ? card.runs : [])
+      .slice()
+      .sort((a, b) => (Date.parse(a.startedAt || '') || 0) - (Date.parse(b.startedAt || '') || 0));
+
+    let list = this.ref.runsList;
+    list.replaceChildren();
+    // Only worth a list when the card went through more than one pass; a single run is already
+    // summarized by the metrics row above.
+    if (runs.length < 2) {
+      this.ref.runsSection.hidden = true;
+      return;
+    }
+    this.ref.runsSection.hidden = false;
+
+    for (let run of runs) {
+      let item = document.createElement('li');
+      item.className = 'wci-run-item';
+      let kind = statusKind(run.status);
+      if (kind) item.dataset.kind = kind;
+
+      let dot = document.createElement('span');
+      dot.className = 'wci-run-dot';
+      dot.setAttribute('aria-hidden', 'true');
+
+      let agent = document.createElement('span');
+      agent.className = 'wci-run-agent';
+      agent.textContent = text(run.leaseOwner, tPortal('inspector.unassigned'));
+
+      let meta = document.createElement('span');
+      meta.className = 'wci-run-meta';
+      let tokens = formatTokens(run.tokens);
+      meta.textContent = [text(run.status), formatDuration(run), tokens ? `${tokens} tok` : '']
+        .filter(Boolean)
+        .join(' · ');
+
+      item.append(dot, agent, meta);
+      list.append(item);
+    }
   }
 
   #renderHistory(card) {
