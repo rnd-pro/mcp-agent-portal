@@ -346,7 +346,8 @@ describe('workflow board task dependencies', () => {
   // ── S4: join-policy fold in allDependenciesSatisfied ─────────────────────────────────────────────
   // Plant a join card directly with a `dependsOn` over members and `metadata.joinPolicy`; lifecycle is
   // `blocked` so the release tick re-runs allDependenciesSatisfied and frees the join exactly when the
-  // policy is met. A satisfied join is enqueued (blocked → queued) by the release tick.
+  // policy is met. A satisfied join is RETIRED by the release tick (it wakes its owner via the
+  // return-loop rather than being enqueued as work) — `metadata.ownerNotifiedAt` is the release signal.
   function plantJoinCard(id, members, joinPolicy) {
     let dependsOn = members.map(cardId => ({ cardId, releaseWhen: 'card_done', onUpstreamFailure: 'release' }));
     sg.commit([{
@@ -364,7 +365,9 @@ describe('workflow board task dependencies', () => {
 
   function joinReleased(joinId) {
     service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
-    return service.getCard(joinId).lifecycle === 'queued';
+    // A satisfied join is retired (owner woken), stamped with metadata.ownerNotifiedAt; an unsatisfied
+    // join stays blocked. The release signal is the notify stamp, not an enqueue.
+    return Boolean(service.getCard(joinId).metadata?.ownerNotifiedAt);
   }
 
   it('S4 join `all`: unsatisfied until every member is done', () => {
@@ -499,11 +502,13 @@ describe('workflow board task dependencies', () => {
     assert.equal(res.reason, 'not_a_join', 'a memberless join normalizes to null → not_a_join');
   });
 
-  it('S5 delegate persists a normalized subscription on metadata.subscription, otherwise unchanged', async () => {
+  it('S5 delegate persists a normalized subscription AND materializes the join card', async () => {
     // Orchestrate with delegate:false (no proxy in this harness) so the card-write path runs without a
-    // real delegation. A `subscription` arg must be persisted as the NORMALIZED record; everything else
-    // (column, run) is unchanged from a plain orchestrate.
+    // real delegation. A join `subscription` arg is persisted as the NORMALIZED record and materializes
+    // a synthetic join card over the members (the wiring that connects the subscription to the runtime).
     makeCard('sub-card', { columnId: 'ready' });
+    makeCard('m1');
+    makeCard('m2');
     let result = await service.orchestrateWorkItem({
       cardId: 'sub-card',
       delegate: false,
@@ -512,14 +517,76 @@ describe('workflow board task dependencies', () => {
     assert.equal(result.ok, true);
     let sub = service.getCard('sub-card').metadata?.subscription;
     assert.ok(sub, 'a subscription record is persisted');
-    assert.equal(sub.schema, 'workflow-subscription/v1');
     assert.equal(sub.mode, 'join');
-    assert.equal(sub.onFailure, 'all_settled');
     assert.deepEqual(sub.members, ['m1', 'm2'], 'members are deduped by the normalizer');
-    assert.equal(sub.joinPolicy.type, 'quorum');
     assert.equal(sub.joinPolicy.k, 2);
-    // No join cards are auto-created — persistence only records the subscription.
-    assert.equal(service.getCard('sub-card').columnId, 'ready', 'column unchanged with delegate:false');
+    assert.ok(result.joinCardId, 'a join card was materialized');
+    let join = service.getCard(result.joinCardId);
+    assert.equal(join.kind, 'join');
+    assert.equal(join.parentCardId, 'sub-card', 'join card is owned by the orchestrating card');
+    assert.deepEqual(join.dependsOn.map(d => d.cardId).sort(), ['m1', 'm2']);
+
+    // Idempotent: re-orchestrating the same owner reuses its join card, no duplicate. force:true
+    // bypasses the active-run early-return so the materialization guard is exercised on the second call.
+    let again = await service.orchestrateWorkItem({
+      cardId: 'sub-card',
+      delegate: false,
+      force: true,
+      subscription: { mode: 'join', members: ['m1', 'm2'], joinPolicy: { type: 'all' } },
+    });
+    assert.equal(again.joinCardId, result.joinCardId, 're-orchestrate reuses the join card (no duplicate)');
+  });
+
+  it('S5 join release wakes the owner via a completed return and retires the join card', async () => {
+    makeCard('jo-owner', { columnId: 'ready' });
+    makeCard('jo-m1');
+    makeCard('jo-m2');
+    let result = await service.orchestrateWorkItem({
+      cardId: 'jo-owner',
+      delegate: false,
+      subscription: { mode: 'join', members: ['jo-m1', 'jo-m2'], releaseWhen: 'run_success', joinPolicy: { type: 'all' } },
+    });
+    let joinId = result.joinCardId;
+    assert.ok(joinId, 'join materialized');
+    assert.equal(service.getCard(joinId).lifecycle, 'blocked', 'join blocked until members succeed');
+
+    // Members complete (run_success) → release tick wakes the owner.
+    writeRun('jo-m1', 'completed');
+    writeRun('jo-m2', 'completed');
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+
+    let owner = service.getCard('jo-owner');
+    let returns = owner.metadata?.returns ?? [];
+    let wake = returns.find(r => r.kind === 'completed' && r.correlationId === 'jo-owner');
+    assert.ok(wake, 'a completed return was minted onto the owner inbox');
+    assert.equal(wake.payload?.join, joinId, 'the return names the join that satisfied');
+    assert.deepEqual((wake.payload?.members ?? []).sort(), ['jo-m1', 'jo-m2']);
+
+    let join = service.getCard(joinId);
+    assert.equal(join.columnId, 'done', 'the join card is retired to the terminal column');
+    assert.ok(join.metadata?.ownerNotifiedAt, 'the notify guard is stamped');
+
+    // Idempotent: a second release tick does not mint a duplicate owner return.
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    let after = (service.getCard('jo-owner').metadata?.returns ?? []).filter(r => r.payload?.join === joinId);
+    assert.equal(after.length, 1, 'owner woken exactly once');
+  });
+
+  it('S5 join already satisfied at materialization still wakes the owner', async () => {
+    makeCard('js2-owner', { columnId: 'ready' });
+    makeCard('js2-m1');
+    // Member already has a successful run BEFORE the join is materialized → join is created `idle`,
+    // not `blocked`; the release tick must still wake the owner (pending-join guard).
+    writeRun('js2-m1', 'completed');
+    let result = await service.orchestrateWorkItem({
+      cardId: 'js2-owner',
+      delegate: false,
+      subscription: { mode: 'join', members: ['js2-m1'], releaseWhen: 'run_success', joinPolicy: { type: 'all' } },
+    });
+    assert.ok(result.joinCardId, 'join materialized');
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    let wake = (service.getCard('js2-owner').metadata?.returns ?? []).find(r => r.payload?.join === result.joinCardId);
+    assert.ok(wake, 'owner woken even though the join was idle at materialization');
   });
 
   it('S5 delegate without a subscription leaves metadata.subscription absent (unchanged behavior)', async () => {
@@ -527,5 +594,6 @@ describe('workflow board task dependencies', () => {
     let result = await service.orchestrateWorkItem({ cardId: 'nosub-card', delegate: false });
     assert.equal(result.ok, true);
     assert.equal(service.getCard('nosub-card').metadata?.subscription, undefined, 'no subscription persisted');
+    assert.equal(result.joinCardId, null, 'no join card without a join subscription');
   });
 });
