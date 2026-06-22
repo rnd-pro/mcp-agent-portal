@@ -597,4 +597,43 @@ describe('workflow board task dependencies', () => {
     assert.equal(service.getCard('nosub-card').metadata?.subscription, undefined, 'no subscription persisted');
     assert.equal(result.joinCardId, null, 'no join card without a join subscription');
   });
+
+  it('S5 a join subscription attached at CREATE materializes on a later subscription-less orchestrate (no auto-pickup race)', async () => {
+    // The race: the auto-pickup daemon orchestrates a fresh `ready` card BEFORE any explicit
+    // orchestrate({subscription}) call, so a join threaded only through that one call is silently dropped
+    // ("card not eligible for orchestration"). Fix: persist the subscription on the card at create time;
+    // whoever orchestrates first — the daemon or an explicit caller — reads it back from card.metadata.
+    makeCard('cm1');
+    makeCard('cm2');
+    service.createOrUpdateCard({
+      id: 'create-sub-owner', title: 'owner', columnId: 'ready', owner: 'orchestrator',
+      acceptanceCriteria: ['Done'], actor: 'test',
+      subscription: { mode: 'join', members: ['cm1', 'cm2'], releaseWhen: 'run_success', joinPolicy: { type: 'all' } },
+    });
+    let persisted = service.getCard('create-sub-owner').metadata?.subscription;
+    assert.ok(persisted, 'subscription persisted on the card at create time');
+    assert.equal(persisted.mode, 'join');
+    assert.deepEqual(persisted.members, ['cm1', 'cm2']);
+
+    // Orchestrate WITHOUT a subscription arg — exactly what the auto-pickup daemon does.
+    let result = await service.orchestrateWorkItem({ cardId: 'create-sub-owner', delegate: false });
+    assert.equal(result.ok, true);
+    assert.ok(result.joinCardId, 'join materialized from the persisted create-time subscription, no subscription arg');
+    let join = service.getCard(result.joinCardId);
+    assert.equal(join.parentCardId, 'create-sub-owner');
+    assert.deepEqual(join.dependsOn.map(d => d.cardId).sort(), ['cm1', 'cm2']);
+  });
+
+  it('S5 an explicit subscription arg still overrides a persisted one; a memberless join clears it', async () => {
+    makeCard('om1');
+    service.createOrUpdateCard({
+      id: 'override-owner', title: 'owner', columnId: 'ready', owner: 'orchestrator',
+      acceptanceCriteria: ['Done'], actor: 'test',
+      subscription: { mode: 'join', members: ['om1'], joinPolicy: { type: 'all' } },
+    });
+    assert.ok(service.getCard('override-owner').metadata?.subscription, 'persisted at create');
+    // Re-write with an explicit memberless join → normalizes to null → subscription cleared.
+    service.createOrUpdateCard({ id: 'override-owner', subscription: { mode: 'join', members: [] }, actor: 'test' });
+    assert.equal(service.getCard('override-owner').metadata?.subscription, undefined, 'memberless join clears the persisted subscription');
+  });
 });
