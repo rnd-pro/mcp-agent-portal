@@ -2176,12 +2176,15 @@ links:
     ticked.reconcileTick.stop();
   });
 
-  it('reconcileTick.tickOnce skips a concurrent re-entrant run', async () => {
+  it('reconcileTick.tickOnce coalesces a concurrent re-entrant call into a trailing pass', async () => {
     let results = await Promise.all([
       service.reconcileTick.tickOnce(),
       service.reconcileTick.tickOnce(),
     ]);
-    assert.equal(results.filter(r => r.skipped).length, 1, 'exactly one concurrent tick is skipped');
+    // Single-flight with a coalesced trailing edge: the re-entrant call is not dropped — it sets
+    // `pending` so the running cycle re-runs once more, and the call resolves `coalesced` (not skipped).
+    assert.equal(results.filter(r => r.coalesced).length, 1, 'exactly one concurrent tick is coalesced');
+    assert.equal(results.filter(r => r.ok).length, 2, 'both calls resolve ok (no drop, no error)');
   });
 
   // ── Unified escalation channel ──

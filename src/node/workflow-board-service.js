@@ -52,6 +52,8 @@ const COMPACT_ACTIVE_COLUMN_IDS = new Set([
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
 const DEFAULT_RECONCILE_TICK_MS = 60 * 1000;
+// Edge-trigger debounce: a burst of agent-pool task events collapses into one near-immediate reconcile.
+const DEFAULT_RECONCILE_TRIGGER_GAP_MS = 1000;
 // Escalation channel: the re-engagement loop owns attempt accrual + backoff. ESCALATION_ACTOR
 // labels channel-driven transitions/runs for board visibility. The cap bounds the loop — after
 // this many re-engagements without a completed run the card is handed to a human (blocked + a
@@ -5779,38 +5781,58 @@ export function createWorkflowBoardService(opts = {}) {
 
   // Periodic self-healing: run reconcile on a timer so a board that is never read still has its
   // leases/recovery flags reconciled. Heals via the shared StateGraph; not auto-started.
-  function createReconcileTick({ intervalMs = DEFAULT_RECONCILE_TICK_MS, onError = () => {} } = {}) {
+  function createReconcileTick({ intervalMs = DEFAULT_RECONCILE_TICK_MS, triggerGapMs = DEFAULT_RECONCILE_TRIGGER_GAP_MS, onError = () => {} } = {}) {
     let timer = null;
+    let triggerTimer = null;
     let running = false;
+    let pending = false;
+    async function runCycle() {
+      let { boards } = listWorkflowBoards({ includeArchived: false });
+      for (let board of boards) {
+        try {
+          await reconcileWorkflowRuntimeTasks({ boardId: board.id }, undefined, { drive: true });
+          await reconcileWorkflowAdmissions({ boardId: board.id });
+          await reconcileWorkflowRecovery({ boardId: board.id });
+          await reconcileWorkflowEscalations({ boardId: board.id });
+          // Dependency release tick (AD-5): enqueue blocked cards whose edges are satisfied and
+          // escalate any card blocked past max-blocked-age, before the admission pass. The drain
+          // also runs it, but the reconcile loop covers modes that drain skips.
+          if (!['stopped', 'maintenance'].includes(board.mode)) releaseDependencies(board.id);
+          // Scheduler loop: a bounded admission pass drains the queue under the board-admission
+          // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
+          await drainWorkflowQueue(board.id, {});
+        } catch (err) {
+          onError(err, board.id);
+        }
+      }
+      return boards.length;
+    }
+    // Single-flight with a coalesced trailing edge: a tickOnce requested while a cycle is running sets
+    // `pending` and the cycle re-runs ONCE more after it, so a burst of edge-triggers collapses into
+    // one extra pass and the last task event is never dropped between periodic ticks.
     async function tickOnce() {
-      if (running) return { ok: true, skipped: true };
+      if (running) { pending = true; return { ok: true, coalesced: true }; }
       running = true;
       try {
-        let { boards } = listWorkflowBoards({ includeArchived: false });
-        for (let board of boards) {
-          try {
-            await reconcileWorkflowRuntimeTasks({ boardId: board.id }, undefined, { drive: true });
-            await reconcileWorkflowAdmissions({ boardId: board.id });
-            await reconcileWorkflowRecovery({ boardId: board.id });
-            await reconcileWorkflowEscalations({ boardId: board.id });
-            // Dependency release tick (AD-5): enqueue blocked cards whose edges are satisfied and
-            // escalate any card blocked past max-blocked-age, before the admission pass. The drain
-            // also runs it, but the reconcile loop covers modes that drain skips.
-            if (!['stopped', 'maintenance'].includes(board.mode)) releaseDependencies(board.id);
-            // Scheduler loop: a bounded admission pass drains the queue under the board-admission
-            // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
-            await drainWorkflowQueue(board.id, {});
-          } catch (err) {
-            onError(err, board.id);
-          }
-        }
-        return { ok: true, boards: boards.length };
+        let boards = 0;
+        do { pending = false; boards = await runCycle(); } while (pending);
+        return { ok: true, boards };
       } finally {
         running = false;
       }
     }
+    // Edge-trigger entry: an agent-pool task event (status change / WORKFLOW_RETURN marker) requests a
+    // near-immediate reconcile so a return wakes the orchestrator without waiting for the periodic tick.
+    // Debounced by `triggerGapMs` so a stream of events collapses into one pass; the periodic
+    // setInterval remains the DURABLE backstop — a dropped/lost edge-trigger self-heals next interval.
+    function requestTick() {
+      if (triggerTimer) return;
+      triggerTimer = setTimeout(() => { triggerTimer = null; tickOnce().catch(onError); }, triggerGapMs);
+      if (typeof triggerTimer.unref === 'function') triggerTimer.unref();
+    }
     return {
       tickOnce,
+      requestTick,
       start() {
         if (timer) return;
         timer = setInterval(() => { tickOnce().catch(onError); }, intervalMs);
@@ -5818,6 +5840,7 @@ export function createWorkflowBoardService(opts = {}) {
       },
       stop() {
         if (timer) { clearInterval(timer); timer = null; }
+        if (triggerTimer) { clearTimeout(triggerTimer); triggerTimer = null; }
       },
       get active() { return timer !== null; },
     };
