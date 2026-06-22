@@ -114,4 +114,27 @@ describe('workflow runtime reconcile — token aggregation', () => {
 
     assert.equal(sg.get(`workflowRuns/${runId}`).tokens, null);
   });
+
+  it('backfills tokens onto an already-terminal run when they arrive late', async () => {
+    // The run terminalized before the worker token total landed on the task record (async results).
+    // Terminal runs are not reprocessed by the status loop, so the backfill must still pick it up.
+    let created = service.createOrUpdateCard({
+      id: 'late', title: 'Late tokens', body: 'x', columnId: 'quality-audit', projectId: 'agent-portal',
+      owner: 'orchestrator', assignedAgent: 'code-reviewer', acceptanceCriteria: ['Done'], actor: 'test',
+    });
+    sg.commit([
+      { op: 'set', path: 'workflowCards/late', value: { ...created.card, columnId: 'quality-audit' } },
+      { op: 'set', path: 'workflowRuns/run-late', value: {
+        schema: 'workflow-run/v1', id: 'run-late', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'late',
+        status: 'completed', taskIds: ['task-late'], startedAt: 900, updatedAt: 1000, completedAt: 1000, tokens: null,
+      } },
+    ], 'test:plant-terminal');
+    let runtimeTasks = new Map([
+      ['task-late', { id: 'task-late', status: 'completed', updatedAt: 1000, completedAt: 1000, tokens: 5000 }],
+    ]);
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    assert.equal(sg.get('workflowRuns/run-late').tokens, 5000);
+  });
 });
