@@ -56,6 +56,28 @@ function eventTitle(event = {}) {
   return [event.status, event.actor, event.note].map((p) => text(p)).filter(Boolean).join(' · ');
 }
 
+const RUNNING_STATUSES = new Set(['running', 'requested', 'recovering', 'started', 'active', 'streaming']);
+
+const HELD_FLAG_LABELS = {
+  needs_audit: 'Needs audit',
+  blocked: 'Blocked',
+  needs_resume: 'Needs resume',
+  stale: 'Stale',
+  recovering: 'Recovering',
+  lost: 'Lost',
+};
+
+// Why a card is sitting still: surface the recovery/blocking flags (and any blocker text) so a card
+// parked in e.g. quality-audit reads as "Needs audit" instead of looking frozen.
+function heldReason(card = {}) {
+  let labels = (Array.isArray(card.flags) ? card.flags : [])
+    .map((f) => HELD_FLAG_LABELS[f])
+    .filter(Boolean);
+  let blocker = text(card.blocker);
+  if (!labels.length && !blocker) return '';
+  return [[...new Set(labels)].join(', '), blocker].filter(Boolean).join(' — ');
+}
+
 export class WorkflowCardInspector extends Symbiote {
   initCallback() {
     this.ref.lblStatus.textContent = tPortal('inspector.status');
@@ -104,12 +126,22 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.title.textContent = text(card.title, tPortal('text.cardInspector'));
 
     let status = text(card.status || run?.status);
+    let active = RUNNING_STATUSES.has(text(run?.status).toLowerCase());
+    this.ref.spinner.hidden = !active;
     if (status) {
       this.ref.statusBadge.textContent = status;
-      this.ref.statusBadge.dataset.kind = statusKind(status);
+      this.ref.statusBadge.dataset.kind = active ? 'warning' : statusKind(status);
       this.ref.statusBadge.hidden = false;
     } else {
       this.ref.statusBadge.hidden = true;
+    }
+
+    let held = heldReason(card);
+    if (held && !active) {
+      this.ref.heldNotice.textContent = held;
+      this.ref.heldNotice.hidden = false;
+    } else {
+      this.ref.heldNotice.hidden = true;
     }
 
     this.ref.agentName.textContent = agentName(card, run) || tPortal('inspector.unassigned');
@@ -201,11 +233,15 @@ export class WorkflowCardInspector extends Symbiote {
       let title = eventTitle(event);
       if (title) label.title = title;
 
+      let actor = document.createElement('span');
+      actor.className = 'wci-history-actor';
+      actor.textContent = text(event.actor);
+
       let time = document.createElement('span');
       time.className = 'wci-history-time';
       time.textContent = relativeTime(event.timestamp);
 
-      item.append(dot, label, time);
+      item.append(dot, label, actor, time);
       list.append(item);
     }
   }

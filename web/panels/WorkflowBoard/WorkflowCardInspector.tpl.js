@@ -3,6 +3,7 @@ import { html } from '@symbiotejs/symbiote';
 export default html`
 <div class="wci-shell">
   <header class="wci-header">
+    <span class="wci-spinner" ref="spinner" hidden aria-hidden="true"></span>
     <span class="wci-title" ref="title"></span>
     <span class="wci-badge" ref="statusBadge" hidden></span>
   </header>
@@ -27,6 +28,7 @@ export default html`
         <span class="wci-metric-value" ref="mTokens">—</span>
       </div>
     </section>
+    <div class="wci-held" ref="heldNotice" hidden></div>
     <section class="wci-section" ref="runsSection" hidden>
       <div class="wci-section-label" ref="lblRuns"></div>
       <ul class="wci-runs-list" ref="runsList"></ul>
