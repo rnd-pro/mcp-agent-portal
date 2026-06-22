@@ -801,6 +801,64 @@ export class StateGraph extends EventEmitter {
     await this._chatFileQueue;
   }
 
+  /**
+   * Reset to a fresh-install baseline. Clears every runtime/cache collection
+   * (workflow boards/cards/transitions/checks/runs/leases + scheduler queue and
+   * admission state, chats, goals, tasks, projects, layouts, ui) and the on-disk
+   * chat files, then persists synchronously. User `settings` are preserved by
+   * default; the schema-migration marker and version counters are always kept.
+   * The default workflow board is NOT pre-seeded here — the board read path
+   * (workflow-board-service `ensureBoard`) re-creates the empty default on next
+   * access, so the board reappears clean.
+   * @param {{ keepSettings?: boolean }} [opts]
+   * @returns {{ clearedCollections: number, clearedChatFiles: number }}
+   */
+  resetToFreshInstall({ keepSettings = true } = {}) {
+    let def = defaultState();
+    let keep = new Set(['_v', '_ts', 'workflowSchema']);
+    if (keepSettings) keep.add('settings');
+
+    let ops = [];
+    // Reset every documented collection to its default shape.
+    for (let key of Object.keys(def)) {
+      if (keep.has(key)) continue;
+      ops.push({ op: 'set', path: key, value: def[key] });
+    }
+    // Drop any lazily-created top-level runtime keys absent from the default
+    // shape (e.g. workflow scheduler queue/admission state) so nothing survives.
+    for (let key of Object.keys(this._state)) {
+      if (key in def || keep.has(key)) continue;
+      ops.push({ op: 'delete', path: key });
+    }
+    this.commit(ops, 'reset-fresh-install', { durable: true });
+
+    // Wipe persisted chat files (whole dir, orphans included) + in-memory cache.
+    let clearedChatFiles = this._clearAllChatFiles();
+    this._chatCache.clear();
+    this._dirtyChats.clear();
+    this._deletedChats.clear();
+    this._chatWriteSeq.clear();
+
+    this.flush();
+    this.emit('reset', { version: this._version });
+    return { clearedCollections: ops.length, clearedChatFiles };
+  }
+
+  // Synchronously remove every persisted chat file. Best-effort per file.
+  _clearAllChatFiles() {
+    try {
+      if (!fs.existsSync(this._chatsDir)) return 0;
+      let files = fs.readdirSync(this._chatsDir).filter((f) => f.endsWith('.json'));
+      for (let f of files) {
+        try { fs.unlinkSync(path.join(this._chatsDir, f)); } catch { /* best effort */ }
+      }
+      return files.length;
+    } catch (err) {
+      console.warn('[StateGraph] Failed to clear chat files:', err.message);
+      return 0;
+    }
+  }
+
   // ── Migration ──────────────────────────────────────────
 
   // Migrate from old config-store format.

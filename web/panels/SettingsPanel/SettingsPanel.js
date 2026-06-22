@@ -81,6 +81,7 @@ export class SettingsPanel extends Symbiote {
     this.ref.restartBtn.onclick = () => this.restartServer();
     this.ref.stopBtn.onclick = () => this.stopServer();
     this.ref.saveSettingsBtn.onclick = () => this.saveSettings();
+    this.ref.resetDataBtn.onclick = () => this.resetData();
     this.ref.lanAccessInput.onchange = () => this.saveNetworkAccessSettings();
     this.ref.localeModeInput.onchange = () => this.saveLocalizationSettings();
     this._renderLocaleModeOptions();
@@ -129,6 +130,29 @@ export class SettingsPanel extends Symbiote {
       }, 4000);
     } catch (e) {
       console.error('Failed to save settings:', e);
+    }
+  }
+
+  async resetData() {
+    let keepSettings = this.ref.resetKeepSettingsInput?.checked !== false;
+    let confirmKey = keepSettings ? 'settings.reset.confirmKeep' : 'settings.reset.confirmAll';
+    if (!(await uiConfirm(tPortal(confirmKey)))) return;
+    let btn = this.ref.resetDataBtn;
+    btn.disabled = true;
+    setStatus(this.ref.resetStatus, tPortal('settings.reset.inProgress'), 'warning');
+    try {
+      let res = await fetch('/api/state/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keepSettings }),
+      });
+      let body = await res.json().catch(() => ({}));
+      if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+      setStatus(this.ref.resetStatus, tPortal('settings.reset.done'), 'success');
+      setTimeout(() => globalThis.location?.reload?.(), 600);
+    } catch (e) {
+      setStatus(this.ref.resetStatus, tPortal('settings.reset.failed', { message: e.message }), 'error');
+      btn.disabled = false;
     }
   }
 
