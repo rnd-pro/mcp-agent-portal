@@ -31,6 +31,10 @@ export const WORKFLOW_BOARD_MODES = [
 
 export const WORKFLOW_BOARD_PICKUP_MODES = ['auto', 'manual', 'disabled'];
 export const WORKFLOW_BOARD_RECOVERY_MODES = ['auto', 'manual', 'disabled'];
+// Auto re-engagement of a dormant orchestrator on a queued (soft) return — distinct from `recovery`,
+// which governs re-engaging stuck/escalated work. A return is new actionable work to pick up, so the
+// return loop is on by default; hard-interrupts bypass this regardless (a blocked child cannot wait).
+export const WORKFLOW_BOARD_RETURN_WAKE_MODES = ['auto', 'manual', 'disabled'];
 export const WORKFLOW_BOARD_STOP_POLICIES = ['pause_scheduling', 'drain', 'stop_active', 'cancel_active'];
 export const WORKFLOW_BOARD_PUBLISH_MODES = ['manual', 'after_audit', 'disabled'];
 export const WORKFLOW_BOARD_CONTROL_ACTIONS = [
@@ -492,6 +496,7 @@ const DEFAULT_WORKFLOW_COLUMNS = [
 const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   pickup: 'auto',
   recovery: 'manual',
+  returnWake: 'auto',
   stopPolicy: 'drain',
   publishMode: 'manual',
   defaultApprovalMode: 'plan',
@@ -698,6 +703,11 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
       automation.recovery ?? automation.recoveryMode ?? automation.recovery_mode,
       WORKFLOW_BOARD_RECOVERY_MODES,
       DEFAULT_WORKFLOW_BOARD_AUTOMATION.recovery,
+    ),
+    returnWake: normalizeKnownValue(
+      automation.returnWake ?? automation.return_wake,
+      WORKFLOW_BOARD_RETURN_WAKE_MODES,
+      DEFAULT_WORKFLOW_BOARD_AUTOMATION.returnWake,
     ),
     stopPolicy: normalizeKnownValue(
       automation.stopPolicy ?? automation.stop_policy,

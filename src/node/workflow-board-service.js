@@ -71,7 +71,7 @@ const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
 // object) in its final message/output, mirroring how escalation markers are emitted. The reconcile
 // folds the parsed return into the per-card inbox (card.metadata.returns) — see computeIntermediateReturn.
 const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
-const DEFAULT_WORKFLOW_POLICY_VERSION = 4;
+const DEFAULT_WORKFLOW_POLICY_VERSION = 5;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
 // no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
@@ -5348,6 +5348,7 @@ export function createWorkflowBoardService(opts = {}) {
     let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
     let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
     let recoveryAuto = boardAutomation.recovery === 'auto';
+    let returnWakeAuto = boardAutomation.returnWake === 'auto';
     let projectId = textOrNull(args.projectId ?? args.project_id);
     let currentNow = now();
     let maxAttempts = Number(args.maxAttempts ?? args.max_attempts);
@@ -5363,10 +5364,15 @@ export function createWorkflowBoardService(opts = {}) {
       .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card));
 
     for (let card of cards) {
-      // S9c (D4): the recovery gate is applied PER-CARD, not as a board-level early return. A card
-      // bearing an unconsumed hard-interrupt (a blocked child) wakes regardless of `recovery`; soft
-      // actionable returns and ordinary escalations stay gated on `recovery === 'auto'`.
-      if (!recoveryAuto && !args.force && !hasUnconsumedHardInterrupt(card)) continue;
+      // Per-card wake gate (D4 + returnWake), applied PER-CARD not as a board-level early return:
+      //   - an unconsumed hard-interrupt (a blocked child) wakes regardless — it cannot self-clear;
+      //   - otherwise a queued wake-driving (soft) return is NEW actionable work, gated on `returnWake`
+      //     (auto by default, so the return loop wakes a dormant orchestrator out of the box);
+      //   - a card driven only by an escalation (stuck/recovering work) stays gated on `recovery`.
+      if (!args.force && !hasUnconsumedHardInterrupt(card)) {
+        let gateOpen = hasQueuedActionableReturn(card) ? returnWakeAuto : recoveryAuto;
+        if (!gateOpen) continue;
+      }
       let state = normalizeWorkflowEscalationState(card.metadata.escalation);
       if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
@@ -5487,10 +5493,11 @@ export function createWorkflowBoardService(opts = {}) {
       reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued?.kind ?? null, ok: Boolean(outcome?.ok) });
     }
 
-    // A manual-recovery board still reports `skipped` when nothing escaped the per-card gate (no
-    // hard-interrupt passthrough, no escalation/return re-engaged), preserving the board-level contract.
-    if (!recoveryAuto && !args.force && reengaged.length === 0 && escalatedToHuman.length === 0) {
-      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}`, reengaged, escalatedToHuman };
+    // A fully-manual board (neither recovery nor returnWake auto) still reports `skipped` when nothing
+    // escaped the per-card gate (no hard-interrupt passthrough, no escalation/return re-engaged),
+    // preserving the board-level contract.
+    if (!recoveryAuto && !returnWakeAuto && !args.force && reengaged.length === 0 && escalatedToHuman.length === 0) {
+      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}, returnWake is ${boardAutomation.returnWake}`, reengaged, escalatedToHuman };
     }
     return { ok: true, reengaged, escalatedToHuman };
   }
