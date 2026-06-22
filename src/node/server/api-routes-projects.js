@@ -302,6 +302,27 @@ export function createProjectRoutes(deps = {}) {
       }
     },
 
+    // Fresh-install reset: wipe all runtime/cache state (boards, cards, chats,
+    // goals, tasks, runs, queue, layouts) plus on-disk chat files. The board
+    // read path re-creates the default board. Settings are preserved unless the
+    // caller passes keepSettings:false.
+    'POST /api/state/reset': async (req, res) => {
+      try {
+        let body = {};
+        try { body = await parseBody(req); } catch { body = {}; }
+        let keepSettings = body?.keepSettings !== false;
+        let result = getGraph().resetToFreshInstall({ keepSettings });
+        proxyManager?.broadcastMonitor?.({
+          jsonrpc: '2.0',
+          method: 'patch',
+          params: { path: 'state.reset', value: { keepSettings } },
+        });
+        json(res, { ok: true, ...result });
+      } catch (err) {
+        json(res, { error: err.message }, 400);
+      }
+    },
+
     'POST /api/goals/queue': async (req, res) => {
       try {
         let { goalId, id, text, delivery, status } = await parseBody(req);
