@@ -3674,7 +3674,23 @@ export function createWorkflowBoardService(opts = {}) {
       if (projectId && card.projectId !== projectId) continue;
       if (goalId && card.entityRefs?.goalId !== goalId) continue;
       if (chatId && card.entityRefs?.chatId !== chatId) continue;
-      let runs = getRunsForCard(card.id).filter(run => RUNNING_RUN_STATUSES.has(run.status));
+      let allRuns = getRunsForCard(card.id);
+      // Token backfill (timing-safe): a run's status can terminalize from its task before the
+      // worker's token total lands on the task record (results persist asynchronously). Terminal
+      // runs are not reprocessed below, so backfill their token total here while the runtime task is
+      // still readable. Idempotent — only runs still missing a token total are touched.
+      for (let run of allRuns) {
+        if (RUNNING_RUN_STATUSES.has(run.status)) continue;
+        if (run.tokens != null) continue;
+        let tokens = runtimeTaskTokenTotal(run, runtimeTasks);
+        if (tokens != null) {
+          ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: normalizeWorkflowRunInput(
+            { ...run, tokens },
+            { id: run.id, now: currentNow, updatedAt: run.updatedAt ?? currentNow },
+          ) });
+        }
+      }
+      let runs = allRuns.filter(run => RUNNING_RUN_STATUSES.has(run.status));
       if (!runs.length) continue;
       let latestCard = clone(card);
       let cardChanged = false;
