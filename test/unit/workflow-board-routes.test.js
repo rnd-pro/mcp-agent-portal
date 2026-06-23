@@ -175,6 +175,17 @@ seed_column: backlog
       assert.equal(updated.card.priority, 'high');
       assert.equal(updated.card.version, created.card.version + 1);
 
+      // This route plumbing test reuses the decomposed parent for a later transition, so opt out of
+      // the close-on-decompose default here (that semantic is covered by the board model test).
+      await routes['POST /api/workflow-board/automation'](
+        makeReq('POST', '/api/workflow-board/automation', {
+          boardId: 'agent-workflow-default',
+          automation: { decompositionClosesParent: false },
+          actor: 'route-test',
+        }),
+        makeRes(),
+      );
+
       let decomposeRes = makeRes();
       await routes['POST /api/workflow-board/decompose'](
         makeReq('POST', '/api/workflow-board/decompose', {

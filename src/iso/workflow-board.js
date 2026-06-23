@@ -502,6 +502,11 @@ const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   defaultApprovalMode: 'plan',
   globalParallelLimit: 8,
   fallbackAgents: ['orchestrator'],
+  // A decomposed parent's own work IS the decomposition: once it spawns children, the idea is
+  // processed, so it auto-closes to the terminal column instead of lingering in an active lane. The
+  // children carry the idea forward (inherited context + parentCardId), so nothing is lost. Opt out
+  // per board to keep the parent in place.
+  decompositionClosesParent: true,
 };
 
 const DEFAULT_WORKFLOW_TRANSITIONS = [
@@ -731,6 +736,9 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
     fallbackAgents: fallbackAgents.length
       ? fallbackAgents
       : [...DEFAULT_WORKFLOW_BOARD_AUTOMATION.fallbackAgents],
+    decompositionClosesParent: (automation.decompositionClosesParent ?? automation.decomposition_closes_parent) === undefined
+      ? DEFAULT_WORKFLOW_BOARD_AUTOMATION.decompositionClosesParent
+      : Boolean(automation.decompositionClosesParent ?? automation.decomposition_closes_parent),
     ...(leaseTtlMs ? { leaseTtlMs } : {}),
   };
 }
