@@ -1138,6 +1138,13 @@ export function createWorkflowBoardService(opts = {}) {
       .filter(candidate => candidate.boardId === board.id)
       .filter(candidate => !card.projectId || candidate.projectId === card.projectId)
       .filter(candidate => activeColumnIds.has(candidate.columnId))
+      // A card holds its file scope only once it has actually started — i.e. it has a run that is
+      // running or terminal. A card merely parked in an active column (e.g. freshly promoted into
+      // `ready` with no run) is not editing anything, so it must not block a peer with overlapping
+      // files; otherwise N cards promoted into ready at once would mutually deadlock and none start.
+      .filter(candidate => getRunsForCard(candidate.id).some(
+        run => RUNNING_RUN_STATUSES.has(run.status) || TERMINAL_RUN_STATUSES.has(run.status),
+      ))
       .map((candidate) => {
         let candidateFiles = cardFileScope(candidate);
         let overlappingFiles = files.filter(file => candidateFiles.some(candidateFile => fileScopesOverlap(file, candidateFile)));

@@ -1407,7 +1407,7 @@ links:
       proxyManager,
       defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
-    service.createOrUpdateCard({
+    let parent = service.createOrUpdateCard({
       title: 'Parent implementation',
       columnId: 'in-progress',
       projectId: 'agent-portal',
@@ -1417,6 +1417,12 @@ links:
       files: ['src/node/workflow-board-service.js'],
       actor: 'test',
     });
+    // The parent must actually be RUNNING to own its file scope — a card merely parked in an active
+    // column holds nothing (else freshly-promoted peers would deadlock each other).
+    sg.commit([{ op: 'set', path: `workflowRuns/run-parent-scope`, value: {
+      schema: 'workflow-run/v1', id: 'run-parent-scope', boardId: parent.card.boardId, cardId: parent.card.id,
+      status: 'running', taskIds: ['task-parent-scope'], startedAt: 900, updatedAt: 901,
+    } }], 'test:parent-running');
     let child = service.createOrUpdateCard({
       title: 'Child overlapping implementation',
       columnId: 'backlog',
@@ -1443,7 +1449,11 @@ links:
     assert.equal(moved.orchestration.skipped, true);
     assert.match(moved.orchestration.reason, /file scope overlaps active card/);
     assert.equal(calls.length, 0);
-    assert.deepEqual(Object.keys(sg.get('workflowRuns') ?? {}), []);
+    assert.equal(
+      Object.values(sg.get('workflowRuns') ?? {}).filter(run => run.cardId === child.card.id).length,
+      0,
+      'the blocked child started no run while the running parent owns the overlapping scope',
+    );
     await assert.rejects(
       service.orchestrateWorkItem({
         cardId: child.card.id,
