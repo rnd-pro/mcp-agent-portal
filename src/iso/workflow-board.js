@@ -693,10 +693,31 @@ export function normalizeWorkflowBoardMode(value, fallback = 'armed') {
   return normalizeKnownValue(value, WORKFLOW_BOARD_MODES, fallback);
 }
 
+// Daemon floor-sign waiver (separated-duty escape, inv 47; default OFF). In autonomous mode the
+// daemon both executes a card and reconciles its release tail, so signing that card's own
+// audit/hygiene floor would be an executor signing its own work. This opt-in, per-board waiver
+// authorizes that self-sign and records the human approver who accepted it, so the bypass stays
+// attributable. Absent or approver-less input → no waiver (separated duty stays enforced).
+function normalizeDaemonFloorSignWaiver(input) {
+  let waiver = objectOrNull(input);
+  if (!waiver) return undefined;
+  let approver = textOrNull(waiver.approver ?? waiver.approvedBy ?? waiver.approved_by);
+  if (!approver) return undefined;
+  let normalized = { approver };
+  let reason = textOrNull(waiver.reason);
+  if (reason) normalized.reason = reason;
+  let at = Number(waiver.at);
+  if (Number.isFinite(at) && at > 0) normalized.at = at;
+  return normalized;
+}
+
 export function normalizeWorkflowBoardAutomation(input = {}) {
   let automation = objectOrEmpty(input);
   let fallbackAgents = textArray(
     automation.fallbackAgents ?? automation.fallback_agents ?? automation.agents,
+  );
+  let daemonFloorSignWaiver = normalizeDaemonFloorSignWaiver(
+    automation.daemonFloorSignWaiver ?? automation.daemon_floor_sign_waiver,
   );
   let globalParallelLimit = positiveIntegerOrUndefined(
     automation.globalParallelLimit ?? automation.global_parallel_limit,
@@ -740,6 +761,7 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
       ? DEFAULT_WORKFLOW_BOARD_AUTOMATION.decompositionClosesParent
       : Boolean(automation.decompositionClosesParent ?? automation.decomposition_closes_parent),
     ...(leaseTtlMs ? { leaseTtlMs } : {}),
+    ...(daemonFloorSignWaiver ? { daemonFloorSignWaiver } : {}),
   };
 }
 

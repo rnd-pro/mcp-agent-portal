@@ -752,6 +752,27 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       'no second (audit) run was created');
   });
 
+  it('resume: a lost/orphaned run re-queues the card for resume (orchestrate stage + needs_resume), not audit', async () => {
+    let { cardId, runId, taskId } = plantRunningCard('resume-wip');
+    assert.equal(service.getCard(cardId).columnId, 'in-progress');
+
+    // The worker was orphaned by a backend restart: its task ends `lost` (heartbeat timeout). That is a
+    // RESUMABLE interruption — workflowRunStatusFromRuntime surfaces it as run status `error`, but it must
+    // NOT be treated as finished-but-failed.
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'lost', updatedAt: 1500 }]]);
+    let result = await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'ready', 'a resumable interruption returns the card to the orchestrate stage, not quality-audit');
+    assert.equal(card.recoveryFlags.includes('needs_resume'), true, 'it is flagged for resume');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), false, 'a resumable interruption is not finished-but-failed');
+    assert.equal(card.lifecycle, 'idle', 'the orphaned run lifecycle normalizes to idle');
+    assert.equal(Boolean(card.metadata?.escalation), false, 'no needs_decision/failed escalation is minted for a resumable interruption');
+    assert.equal(sg.get(`workflowRuns/${runId}`).status, 'error', 'the orphaned run is terminalized so a fresh attempt can spawn');
+    // The prior errored run + needs_resume make this card resume-eligible; the orchestrate re-pickup
+    // carries the resume preamble (buildWorkItemPrompt isResume), so the worker continues prior work.
+  });
+
   it('drive on: fires the quality-audit on_enter automation for the advanced card (a real audit delegation)', async () => {
     let { cardId, taskId } = plantRunningCard('wip-drive');
     let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
@@ -838,7 +859,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
 
   // Plant a card parked in quality-audit whose audit run has already terminated with `runStatus`,
   // mirroring a card the core reconcile advanced and whose on_enter audit then finished.
-  function plantAuditedCard(id, runStatus = 'completed', { cwd = null } = {}) {
+  function plantAuditedCard(id, runStatus = 'completed', { cwd = null, executedBy = [] } = {}) {
     let created = service.createOrUpdateCard({
       id,
       title: `Card ${id}`,
@@ -853,8 +874,12 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       actor: 'test',
     });
     let card = created.card;
+    // executedBy records who ran the card (the run path stamps principal.id). A card the daemon
+    // executed in autonomous mode carries 'daemon' here — the separated-duty constraint the release
+    // tail must honour when deciding whether the daemon may sign its own audit floor.
+    let metadata = executedBy.length ? { ...card.metadata, executedBy } : card.metadata;
     sg.commit([
-      { op: 'set', path: `workflowCards/${id}`, value: { ...card, columnId: 'quality-audit', lifecycle: 'idle' } },
+      { op: 'set', path: `workflowCards/${id}`, value: { ...card, metadata, columnId: 'quality-audit', lifecycle: 'idle' } },
       { op: 'set', path: `workflowRuns/run-${id}`, value: {
         schema: 'workflow-run/v1', id: `run-${id}`, boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: id,
         status: runStatus, taskIds: [`task-${id}`], startedAt: 900, updatedAt: 1500, completedAt: 1500,
@@ -884,6 +909,59 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(checks.audit.signedBy, 'daemon', 'the signature records the daemon as the signer');
     assert.ok(result.releaseTail.advanced.some(item => item.cardId === cardId && item.toColumnId === 'commit-publish'));
     assert.equal(result.releaseTail.closed.includes(cardId), false, 'manual publishMode does not auto-close');
+  });
+
+  it('separated-duty: the daemon may NOT self-sign+advance a card it executed without a waiver', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    // The daemon both ran AND reconciles this card (autonomous mode): 'daemon' is in executedBy.
+    let cardId = plantAuditedCard('aud-selfsign', 'completed', { executedBy: ['daemon'] });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'an executor-daemon cannot auto-pass its own card');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'it is held for an independent sign-off');
+    assert.equal(checkPassed(sg.get(`workflowChecks/${cardId}`)?.checks?.audit), false, 'no self-signed audit pass is written');
+    assert.equal(result.releaseTail.advanced.some(i => i.cardId === cardId), false);
+  });
+
+  it('separated-duty: an INDEPENDENT audit sign-off lets the daemon advance the card it executed', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-indep', 'completed', { executedBy: ['daemon'] });
+    // A reviewer who did NOT execute the card signs the audit floor (the update_item AUDIT path).
+    let reviewer = humanPrincipal({ id: 'code-reviewer', label: 'code-reviewer' });
+    let signed = service.createOrUpdateCard({ cardId, checks: { audit: 'passed' } }, reviewer);
+    assert.equal(signed.ok, true, 'an independent principal can sign the floor');
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'an independent sign-off advances the card');
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+  });
+
+  it('separated-duty: an explicit per-board waiver lets the daemon self-sign, recording the approver', async () => {
+    service.updateWorkflowBoard(
+      { mode: 'autonomous', automation: { daemonFloorSignWaiver: { approver: 'local-human', reason: 'small board, accepted risk' } } },
+      { gatedBy: 'board.control' },
+    );
+    let cardId = plantAuditedCard('aud-waived', 'completed', { executedBy: ['daemon'] });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'the waiver authorizes the daemon self-sign+advance');
+    let audit = sg.get(`workflowChecks/${cardId}`)?.checks?.audit;
+    assert.equal(checkPassed(audit), true, 'the audit floor is signed under the waiver');
+    assert.equal(audit.signedBy, 'daemon', 'the daemon is recorded as the signer');
+    assert.equal(audit.waiver.approver, 'local-human', 'the waiver approver is recorded for attribution');
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
   });
 
   it('proof-contract: a completed audit run with NO verdict is held as needs_audit, never auto-passed', async () => {

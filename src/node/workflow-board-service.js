@@ -895,17 +895,23 @@ export function createWorkflowBoardService(opts = {}) {
     let checks = getChecks(card.id);
 
     if (input.checks !== undefined) {
-      // Separated-duty gated check-writing (inv 33, 47). Classify the write: a floor-gate check
-      // (audit/hygiene) needs AUDIT; a basic check needs only WRITE_CARD. An executor (its id in
-      // card.executedBy) can never sign a floor check for its own card, even with AUDIT.
+      // Separated-duty gated check-writing (inv 33, 47). Capability classification: a daemon write
+      // authorizes via daemon.bookkeeping (DAEMON), a human/agent floor-gate check (audit/hygiene)
+      // via checks.write.floor (AUDIT), a basic check via checks.write.basic (WRITE_CARD). Whether a
+      // write IS a floor signature is decided from its keys alone — independent of the daemon mapping
+      // — so the executedBy separated-duty constraint applies to daemon floor-writes too, not just
+      // human/agent ones (the daemon both runs and reconciles a card in autonomous mode).
+      let isFloorWrite = checkWriteIntent(input.checks) === 'checks.write.floor';
       let intentType = daemonWrite ? 'daemon.bookkeeping' : checkWriteIntent(input.checks);
       let checksGate = gate(intentType, principal, { boardId: board.id, cardId: id });
       if (!checksGate.ok) {
         return { ...checksGate, board, card: current ? clone(current) : null, checks };
       }
-      if (intentType === 'checks.write.floor') {
+      if (isFloorWrite) {
+        // An executor (its id in card.executedBy) can never sign a floor check for its own card, even
+        // with AUDIT or DAEMON. The only escape is a daemon self-sign explicitly waived per board.
         let executedBy = textArray(current?.metadata?.executedBy);
-        if (executedBy.includes(principal.id)) {
+        if (!floorSignSeparation(board, executedBy, principal).ok) {
           return {
             ok: false,
             status: 'blocked',
@@ -3764,6 +3770,18 @@ export function createWorkflowBoardService(opts = {}) {
     return card.columnId;
   }
 
+  // A run whose underlying task(s) ended `lost` or `stale` is a RESUMABLE interruption — a heartbeat
+  // timeout or a worker orphaned by a backend restart — NOT a genuine failure. `workflowRunStatusFromRuntime`
+  // collapses lost/stale into the run status `error` (they share TASK_ERROR_STATUSES), so the reconcile
+  // would otherwise route the card to quality-audit as finished-but-failed. This recovers the distinction
+  // from the raw task statuses so the reconcile can re-queue the card for resume instead of zombifying it.
+  function runInterruptionResumable(run, runtimeTasks) {
+    return uniqueArray(run.taskIds).some(taskId => {
+      let status = runtimeStatusForTaskId(runtimeTasks, taskId);
+      return status === 'lost' || status === 'stale';
+    });
+  }
+
   // Resolve the release-tail columns by automation action (never by hardcoded id) so a board that
   // renames or reorders columns still drives correctly.
   function releaseTailColumns(board) {
@@ -3787,6 +3805,42 @@ export function createWorkflowBoardService(opts = {}) {
   // auditable: the pass is backed by observed repository state, not a rubber stamp.
   function probeSignedCheck(reason, at, evidence) {
     return { status: 'passed', signedBy: 'daemon-probe', reason, at, evidence };
+  }
+
+  // The per-board waiver (if any) that authorizes the daemon to sign a floor check for a card it
+  // executed (separated-duty escape, inv 47). Default-off: an absent or approver-less waiver returns
+  // null, leaving separated duty fully enforced. A valid waiver carries the human approver who
+  // accepted the daemon self-sign, so the bypass is attributable in the audit trail.
+  function boardDaemonFloorSignWaiver(board) {
+    return normalizeWorkflowBoardAutomation(board?.automation).daemonFloorSignWaiver ?? null;
+  }
+
+  // Separated-duty verdict for a floor-gate (audit/hygiene) signature (inv 33, 47). A principal whose
+  // id is recorded in the card's executedBy executed the card and may not sign its floor gate — this
+  // now includes the daemon, which both runs AND reconciles a card in autonomous mode. The only escape
+  // is a daemon self-sign explicitly waived per board by a recorded approver; a non-daemon executor is
+  // never waived. Returns the waiver when the escape is taken so the signature can record the approver.
+  function floorSignSeparation(board, executedBy, principal) {
+    if (!textArray(executedBy).includes(principal.id)) return { ok: true, waiver: null };
+    if (isDaemonPrincipal(principal)) {
+      let waiver = boardDaemonFloorSignWaiver(board);
+      if (waiver) return { ok: true, waiver };
+    }
+    return { ok: false, waiver: null };
+  }
+
+  // Whether the audit floor is already signed by an INDEPENDENT principal — a signer not among the
+  // card's executors. A persisted floor check with no recorded signer was written through the
+  // AUDIT-gated, separated-duty-checked update_item path, so by construction its writer was not an
+  // executor; it is independent. A signer recorded in executedBy (e.g. a waived daemon self-sign) is
+  // NOT independent and does not, on its own, authorize the autonomous advance.
+  function auditSignedIndependently(checks, executedBy) {
+    let entry = checkPassed(checks.audit) ? checks.audit
+      : (checkPassed(checks.auditWaiver) ? checks.auditWaiver : null);
+    if (!entry) return false;
+    let signer = textOrNull(typeof entry === 'object' ? entry.signedBy : null);
+    if (!signer) return true;
+    return !textArray(executedBy).includes(signer);
   }
 
   function checksSetOp(cardId, checks, at, principal) {
@@ -3929,21 +3983,42 @@ export function createWorkflowBoardService(opts = {}) {
       let latestCard = clone(card);
       let checks = getChecks(card.id);
 
-      // Stage 1 — quality-audit → commit-publish. Proof-contract: completed != approved. Advance ONLY
-      // on a real verdict — an audit floor check already signed (preferred; an independent principal via
-      // update_item), or an explicit PASS in the audit run's output. A clean process exit with no
-      // verdict does NOT pass; it is surfaced as needs_audit for a human/re-audit instead of shipping.
+      // Stage 1 — quality-audit → commit-publish. Proof-contract: completed != approved, AND separated
+      // duty (inv 47). Advance ONLY when the audit floor is signed by a principal who did NOT execute
+      // the card: either it is already signed independently (preferred — a human or qa/code-reviewer
+      // via update_item, a signer not in executedBy), or the run reports an explicit PASS and the
+      // daemon is itself independent (no recorded executor) OR explicitly waived per board to self-sign.
+      // A daemon that ran the card may not auto-pass its own work on its own authority; absent an
+      // independent sign-off or a waiver it is held as needs_audit for a human/re-audit, never shipped.
       if (latestCard.columnId === auditColumnId && publishColumnId) {
         let finished = cardRuns.filter(run => TERMINAL_RUN_STATUSES.has(run.status));
         let latestFinished = finished.sort(
           (a, b) => (Number(a.completedAt ?? a.updatedAt ?? 0) - Number(b.completedAt ?? b.updatedAt ?? 0)),
         ).at(-1);
         if (latestFinished?.status === 'completed') {
-          let alreadySigned = checkPassed(checks.audit) || checkPassed(checks.auditWaiver);
-          let verdict = alreadySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
-          if (verdict === 'pass') {
-            if (!alreadySigned) {
-              checks = { ...checks, audit: daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow) };
+          let executedBy = textArray(latestCard.metadata?.executedBy);
+          let independentlySigned = auditSignedIndependently(checks, executedBy);
+          let verdict = independentlySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
+          // When the floor is not yet independently signed, the daemon would have to sign it itself —
+          // allowed only when the daemon is not an executor of this card, or under an explicit waiver.
+          let separation = independentlySigned
+            ? { ok: true, waiver: null }
+            : floorSignSeparation(board, executedBy, principal);
+          if (verdict === 'pass' && separation.ok) {
+            if (!independentlySigned) {
+              // Daemon self-sign. Under a waiver, record the approver who accepted the separated-duty
+              // bypass so it stays attributable; without one (no recorded executor) it is an ordinary
+              // daemon signature.
+              let signed = separation.waiver
+                ? {
+                  ...daemonSignedCheck(
+                    `autonomous mode: audit run reported PASS (daemon self-sign waived by ${separation.waiver.approver})`,
+                    runtimeNow,
+                  ),
+                  waiver: { approver: separation.waiver.approver },
+                }
+                : daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow);
+              checks = { ...checks, audit: signed };
               ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
             }
             let advance = runtimeAdvanceCardOps(
@@ -3955,7 +4030,8 @@ export function createWorkflowBoardService(opts = {}) {
             latestCard = advance.card;
             advanced.push({ cardId: card.id, toColumnId: publishColumnId });
           } else if (!flags.has('needs_audit')) {
-            // No PASS verdict (FAIL or none emitted): hold in audit and flag it instead of auto-passing.
+            // No PASS verdict (FAIL or none emitted), or a daemon self-sign barred by separated duty:
+            // hold in audit and flag it instead of auto-passing.
             let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
             let held = normalizeWorkflowCardInput({
               ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
@@ -4124,8 +4200,13 @@ export function createWorkflowBoardService(opts = {}) {
 
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
-        // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution.
-        if (['error', 'failed', 'cancelled'].includes(nextStatus)) failedUpstreamIds.add(card.id);
+        // A run whose task(s) ended lost/stale (heartbeat timeout, or a worker orphaned by a backend
+        // restart) is a RESUMABLE interruption surfacing as `error`, not a genuine failure: re-queue it
+        // for the orchestrator to resume from prior work rather than push it to audit as failed.
+        let resumableInterruption = nextStatus === 'error' && runInterruptionResumable(run, runtimeTasks);
+        // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution — but a
+        // resumable interruption has not failed, so it must NOT fan out failure to its dependents.
+        if (['error', 'failed', 'cancelled'].includes(nextStatus) && !resumableInterruption) failedUpstreamIds.add(card.id);
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
         let nextRun = normalizeWorkflowRunInput({
           ...run,
@@ -4140,27 +4221,40 @@ export function createWorkflowBoardService(opts = {}) {
         });
         ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: nextRun });
 
-        let nextColumnId = runtimeColumnForCard(latestCard, nextStatus);
+        // A resumable interruption returns to the orchestrate stage so the autonomous orchestrate drive
+        // re-picks it under pickup=auto; the re-pickup carries the resume preamble (buildWorkItemPrompt
+        // isResume) so the worker continues from prior on-disk work. A genuine terminal status advances
+        // per runtimeColumnForCard.
+        let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
+        let nextColumnId = resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(latestCard, nextStatus);
         let flags = new Set(normalizeRecoveryFlags(latestCard.recoveryFlags));
         if (terminal) {
-          flags.delete('recovering');
-          flags.delete('needs_resume');
-          if (nextStatus !== 'completed') flags.add('needs_audit');
-          // Execute-stage proof-contract: a `completed` exit is not proof of work. Cross-check the
-          // run's working tree — a clean process exit that produced NO diff is a no-op masquerading as
-          // done, so it advances to audit flagged needs_audit rather than presented as finished work.
-          // Fail-safe: only a real probe that DEFINITIVELY shows an empty diff flags it (a non-git or
-          // unreadable cwd cannot prove a no-op, so behavior is unchanged there).
-          let columnAction = textOrNull(
-            (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
-          );
-          if (nextStatus === 'completed' && columnAction === 'execute') {
-            let probe = probeReleaseGate(textOrNull(latestCard.cwd) || projectRoot);
-            if (probe.available && !probe.hasDiff) flags.add('needs_audit');
+          if (resumableInterruption) {
+            // Mark for resume rather than audit; the orchestrate re-pickup owns the next attempt.
+            flags.delete('needs_audit');
+            flags.add('needs_resume');
+          } else {
+            flags.delete('recovering');
+            flags.delete('needs_resume');
+            if (nextStatus !== 'completed') flags.add('needs_audit');
+            // Execute-stage proof-contract: a `completed` exit is not proof of work. Cross-check the
+            // run's working tree — a clean process exit that produced NO diff is a no-op masquerading as
+            // done, so it advances to audit flagged needs_audit rather than presented as finished work.
+            // Fail-safe: only a real probe that DEFINITIVELY shows an empty diff flags it (a non-git or
+            // unreadable cwd cannot prove a no-op, so behavior is unchanged there).
+            let columnAction = textOrNull(
+              (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
+            );
+            if (nextStatus === 'completed' && columnAction === 'execute') {
+              let probe = probeReleaseGate(textOrNull(latestCard.cwd) || projectRoot);
+              if (probe.available && !probe.hasDiff) flags.add('needs_audit');
+            }
           }
         }
         let nextFlags = [...flags].filter(flag => normalizeRecoveryFlags([flag]).length > 0);
-        let escalationDelta = terminal
+        // A resumable interruption is not an escalation episode (no human decision / rework needed) and
+        // does not mint a `failed` return — it is simply re-queued for resume.
+        let escalationDelta = terminal && !resumableInterruption
           ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
@@ -4168,7 +4262,7 @@ export function createWorkflowBoardService(opts = {}) {
         // non-terminal status change (e.g. requested→running) carries any intermediate return parsed
         // above. Fold the minted return into the inbox (coalesce drops a late progress after a terminal,
         // so no extra logic) so it lands in the SAME card update / commit as the rest of the reconcile.
-        let mintedReturn = terminal
+        let mintedReturn = terminal && !resumableInterruption
           ? normalizeWorkflowReturnEvent(
             { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
             { now: currentNow, correlationId: latestCard.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, seq: nextRun.version ?? null, raisedBy: ESCALATION_ACTOR },
