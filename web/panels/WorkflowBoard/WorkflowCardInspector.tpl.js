@@ -29,6 +29,17 @@ export default html`
       </div>
     </section>
     <div class="wci-held" ref="heldNotice" hidden></div>
+    <section class="wci-section wci-audit-section" ref="auditSection" hidden>
+      <div class="wci-section-label" ref="lblAudit"></div>
+      <div class="wci-audit-verdict">
+        <span class="wci-badge" ref="auditBadge"></span>
+        <span class="wci-audit-by" ref="auditBy" hidden></span>
+      </div>
+      <div class="wci-audit-reason" ref="auditReason" hidden></div>
+      <div class="wci-audit-returned" ref="auditReturned" hidden></div>
+      <div class="wci-audit-detail" ref="auditDetail" hidden></div>
+      <div class="wci-audit-next" ref="auditNext" hidden></div>
+    </section>
     <section class="wci-section" ref="runsSection" hidden>
       <div class="wci-section-label" ref="lblRuns"></div>
       <ul class="wci-runs-list" ref="runsList"></ul>

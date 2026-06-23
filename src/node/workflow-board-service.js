@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -278,6 +279,67 @@ function cardFileScope(card = {}, args = {}) {
     ...textArray(card.entityRefs?.files),
     ...textArray(card.metadata?.files),
   ]);
+}
+
+// Scratch/junk/secret-bearing path patterns that must never reach a published changeset. A release
+// probe that finds any of these in the worktree fails the hygiene floor rather than shipping it.
+const HYGIENE_OFFENDER_PATTERNS = [
+  /(^|\/)\.env(\.|$)/i,
+  /\.(pem|key|p12|pfx)$/i,
+  /(^|\/)id_(rsa|ed25519|ecdsa|dsa)(\.|$)/,
+  /(^|\/)(tmp|scratch|sandbox|\.scratch)(\/|$)/i,
+  /\.(log|tmp|bak|orig|swp|swo)$/i,
+  /(^|\/)[^/]+\.(tar|tar\.gz|tgz|zip)$/i,
+  /(^|\/)\.DS_Store$/,
+];
+
+// Parse one `git status --porcelain` v1 line into its path. The format is two status chars + a
+// space (3-char prefix) then the path; a rename is `orig -> dest`, so the destination is the path
+// that actually lands in the tree.
+function porcelainPath(line) {
+  let body = line.slice(3);
+  let arrow = body.lastIndexOf(' -> ');
+  return (arrow === -1 ? body : body.slice(arrow + 4)).trim();
+}
+
+// A real working-tree probe for the autonomous release tail — the daemon's substitute for an
+// independent human's clean-diff/hygiene sign-off. Runs read-only git in the card's working
+// directory and reports whether there is a non-empty, junk-free changeset to ship. Fail-safe: a
+// missing / non-git / unreadable cwd yields `{ available: false }` so the caller fails CLOSED (holds
+// the card) instead of fabricating a pass. Never mutates the repo (status only).
+function probeReleaseGate(cwd) {
+  let dir = textOrNull(cwd);
+  if (!dir) return { available: false, reason: 'card has no working directory to probe' };
+  let runGit = (args) => execFileSync('git', args, {
+    cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
+  });
+  try {
+    runGit(['rev-parse', '--is-inside-work-tree']);
+  } catch {
+    return { available: false, reason: `not a git work tree: ${dir}` };
+  }
+  let porcelain;
+  try {
+    porcelain = runGit(['status', '--porcelain']);
+  } catch (err) {
+    return { available: false, reason: `git status failed: ${err.message}` };
+  }
+  let changedPaths = porcelain.split('\n').filter(Boolean).map(porcelainPath).filter(Boolean);
+  let offenders = changedPaths.filter(p => HYGIENE_OFFENDER_PATTERNS.some(re => re.test(p)));
+  let changedFiles = changedPaths.length;
+  return {
+    available: true,
+    changedFiles,
+    changedPaths,
+    offenders,
+    hasDiff: changedFiles > 0,
+    hygiene: offenders.length === 0,
+    reason: changedFiles === 0
+      ? 'working tree has no diff to ship'
+      : offenders.length
+        ? `hygiene offenders in worktree: ${offenders.join(', ')}`
+        : `${changedFiles} changed path(s), no hygiene offenders`,
+  };
 }
 
 function normalizeScopePath(value) {
@@ -3720,6 +3782,13 @@ export function createWorkflowBoardService(opts = {}) {
     return { status: 'passed', signedBy: 'daemon', reason, at };
   }
 
+  // A check signed off the result of a real probe rather than a bare daemon assertion. `signedBy`
+  // is `daemon-probe` (not `daemon`) and the probe `evidence` rides along so the floor write is
+  // auditable: the pass is backed by observed repository state, not a rubber stamp.
+  function probeSignedCheck(reason, at, evidence) {
+    return { status: 'passed', signedBy: 'daemon-probe', reason, at, evidence };
+  }
+
   function checksSetOp(cardId, checks, at, principal) {
     return {
       op: 'set',
@@ -3902,14 +3971,35 @@ export function createWorkflowBoardService(opts = {}) {
       }
 
       // Stage 2 — commit-publish → done when publishMode delegates the publish to the board.
-      if (latestCard.columnId === publishColumnId && closeColumnId && publishMode === 'after_audit') {
+      if (latestCard.columnId === publishColumnId && closeColumnId && publishMode === 'after_audit'
+        && !flags.has('needs_audit')) {
         let needCleanDiff = !checkPassed(checks.cleanDiff);
         let needHygiene = !(checkPassed(checks.hygiene) || checkPassed(checks.publicHygiene) || checkPassed(checks.packageHygiene));
+        // The clean-diff/hygiene floor is signed off a REAL probe of the card's working tree, never a
+        // bare daemon signature: there must be a non-empty, junk-free changeset to ship. If the probe
+        // is unavailable (no git repo) or shows an empty diff / hygiene offenders, the card is HELD as
+        // needs_audit rather than auto-closed — fail-closed, so unverifiable work never ships.
         if (needCleanDiff || needHygiene) {
+          let probe = probeReleaseGate(textOrNull(card.cwd) || projectRoot);
+          if (!probe.available || !probe.hasDiff || !probe.hygiene) {
+            let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
+            let held = normalizeWorkflowCardInput({
+              ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
+              updatedAt: runtimeNow, updatedBy: principal.label,
+            }, {
+              id: latestCard.id, actor: principal.label, now: runtimeNow,
+              version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
+            });
+            ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+            latestCard = held;
+            continue;
+          }
+          let evidence = { changedFiles: probe.changedFiles, offenders: probe.offenders };
+          let reason = `autonomous release tail: ${probe.reason}`;
           checks = {
             ...checks,
-            ...(needCleanDiff ? { cleanDiff: daemonSignedCheck('autonomous mode: release tail', runtimeNow) } : {}),
-            ...(needHygiene ? { hygiene: daemonSignedCheck('autonomous mode: release tail', runtimeNow) } : {}),
+            ...(needCleanDiff ? { cleanDiff: probeSignedCheck(reason, runtimeNow, evidence) } : {}),
+            ...(needHygiene ? { hygiene: probeSignedCheck(reason, runtimeNow, evidence) } : {}),
           };
           ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
         }
@@ -4056,6 +4146,18 @@ export function createWorkflowBoardService(opts = {}) {
           flags.delete('recovering');
           flags.delete('needs_resume');
           if (nextStatus !== 'completed') flags.add('needs_audit');
+          // Execute-stage proof-contract: a `completed` exit is not proof of work. Cross-check the
+          // run's working tree — a clean process exit that produced NO diff is a no-op masquerading as
+          // done, so it advances to audit flagged needs_audit rather than presented as finished work.
+          // Fail-safe: only a real probe that DEFINITIVELY shows an empty diff flags it (a non-git or
+          // unreadable cwd cannot prove a no-op, so behavior is unchanged there).
+          let columnAction = textOrNull(
+            (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
+          );
+          if (nextStatus === 'completed' && columnAction === 'execute') {
+            let probe = probeReleaseGate(textOrNull(latestCard.cwd) || projectRoot);
+            if (probe.available && !probe.hasDiff) flags.add('needs_audit');
+          }
         }
         let nextFlags = [...flags].filter(flag => normalizeRecoveryFlags([flag]).length > 0);
         let escalationDelta = terminal
@@ -5026,9 +5128,28 @@ export function createWorkflowBoardService(opts = {}) {
       '  - `ESCALATION_SUGGESTION:` optional — the capability, context, or decision that would unblock it',
       '  - Never self-grant rights or approval; permission and approval stay board/human-owned.',
     ].filter(Boolean).join('\n');
+    // Resume preamble: if a prior attempt that actually ran (had a task) was cut off — error/lost/stale
+    // /cancelled, or the card is flagged for resume/recovery — this delegation is a CONTINUATION, not a
+    // fresh start. Re-engagement may land in a new chat (no prior transcript), so the agent is told to
+    // reconcile partial state from the working tree itself and continue, rather than redo everything.
+    let priorWorkRuns = getRunsForCard(card.id).filter(run => (run.taskIds?.length));
+    let recoveryFlags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+    let isResume = priorWorkRuns.some(run => ['error', 'failed', 'lost', 'stale', 'cancelled'].includes(run.status))
+      || recoveryFlags.has('needs_resume') || recoveryFlags.has('recovering');
+    let resumeBlock = isResume
+      ? [
+        '',
+        '',
+        '⟳ RESUMING after interruption — a previous attempt on this card ran but was cut off before finishing (e.g. a backend restart or a lost run). You are CONTINUING that work, not starting over.',
+        '- First inspect the current state: run read-only `git status` / `git diff` in the working directory and review any partial changes already made for this card; check each acceptance criterion against what is already in place.',
+        '- Continue from where the prior attempt stopped. Do NOT redo or duplicate work that is already present, and do not revert valid partial progress.',
+        '- If the partial state is broken or half-applied, reconcile it (finish or cleanly redo only the affected part), then proceed.',
+      ].join('\n')
+      : '';
     return [
       `Run the Agent Portal workflow work item "${card.title}".`,
       card.body ? `\n\n${card.body}` : '',
+      resumeBlock,
       `\n\nWorkflow card id: ${card.id}`,
       card.projectId ? `\nProject: ${card.projectId}` : '',
       card.domain ? `\nDomain: ${card.domain}` : '',

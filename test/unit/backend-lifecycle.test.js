@@ -181,7 +181,7 @@ describe('backend lifecycle', () => {
     }
   });
 
-  it('serializes backend startup with a per-project lock', async () => {
+  it('serializes backend startup with the shared state lock', async () => {
     let tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-lock-home-'));
     let tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-lock-project-'));
     let originalHome = process.env.HOME;
@@ -225,8 +225,10 @@ describe('backend lifecycle', () => {
     process.env.HOME = tmpHome;
 
     try {
-      let hash = createHash('md5').update(path.resolve(tmpProject)).digest('hex').slice(0, 8);
-      let lockDir = path.join(tmpHome, '.local-gateway', 'backends', `portal-${hash}.lock`);
+      // The lock is keyed on the shared state path, not the project root.
+      let statePath = path.join(tmpHome, '.agent-portal', 'agent-portal-state.json');
+      let hash = createHash('md5').update(path.resolve(statePath)).digest('hex').slice(0, 8);
+      let lockDir = path.join(tmpHome, '.local-gateway', 'backends', `portal-state-${hash}.lock`);
       fs.mkdirSync(lockDir, { recursive: true });
       let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-fresh-lock`);
       let secondResolved = false;

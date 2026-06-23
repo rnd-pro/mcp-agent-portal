@@ -33,6 +33,7 @@ import {
   formatDuration,
   formatTokens,
 } from './workflow-card-telemetry.js';
+import { checkPassed } from '../../../src/iso/workflow-board.js';
 
 const DEFAULT_SCOPE = 'home';
 const BOARD_VIEWS = new Set(['kanban', 'graph']);
@@ -153,6 +154,51 @@ function statusKind(status = '') {
   if (key === 'blocked' || key === 'error' || key === 'lost') return 'error';
   if (key === 'stale' || key === 'recovering' || key === 'needs_resume') return 'warning';
   return 'status';
+}
+
+// Audit kickback escalation kinds (auditor rejected → routed back to the orchestrator for rework).
+const AUDIT_ESCALATION_KINDS = new Set(['insufficient_permission', 'insufficient_context', 'needs_decision', 'rework']);
+
+// The original check object form lives on `card.raw.checks` (the projection); the normalized card keeps
+// only a display array under `card.checks`, so read verdicts from the raw side.
+function rawCardCheck(card, key) {
+  let checks = card?.raw?.checks;
+  if (!checks || typeof checks !== 'object') return undefined;
+  return checks[key];
+}
+
+function auditRejected(value) {
+  if (value === false) return true;
+  if (value === null || value === undefined || value === true) return false;
+  if (typeof value === 'object') return auditRejected(value.status);
+  return ['failed', 'fail', 'rejected', 'reject'].includes(String(value).trim().toLowerCase());
+}
+
+function cardHasAuditEscalation(card = {}) {
+  let state = card?.metadata?.escalation;
+  let kind = state?.kind || state?.lastEscalation?.kind;
+  return Boolean(kind && AUDIT_ESCALATION_KINDS.has(String(kind)));
+}
+
+// The kanban footer verdict chip for a card that has reached the quality audit: a success chip when the
+// audit passed (or was waived), a danger "rework" chip when the auditor rejected it (an explicit failed
+// audit check, or a needs_audit flag paired with an audit-related escalation). Returns null otherwise.
+function auditVerdictChip(card = {}) {
+  let audit = rawCardCheck(card, 'audit');
+  let waiver = rawCardCheck(card, 'auditWaiver');
+  if (checkPassed(audit) || checkPassed(waiver)) {
+    let signedBy = audit && typeof audit === 'object' ? normalizeText(audit.signedBy) : '';
+    return { label: '✓ audit', kind: 'audit-pass', title: signedBy ? `Audit passed · ${signedBy}` : 'Audit passed' };
+  }
+  let needsAudit = asArray(card.flags).includes('needs_audit');
+  if (auditRejected(audit) || (needsAudit && cardHasAuditEscalation(card))) {
+    let state = card?.metadata?.escalation;
+    let reason = (audit && typeof audit === 'object' ? normalizeText(audit.reason) : '')
+      || normalizeText(state?.detail || state?.lastEscalation?.detail)
+      || normalizeText(state?.kind || state?.lastEscalation?.kind);
+    return { label: '✗ rework', kind: 'audit-reject', title: reason ? `Audit rejected · ${reason}` : 'Audit rejected' };
+  }
+  return null;
 }
 
 function isRuntimeOnlyCard(card = {}) {
@@ -996,6 +1042,13 @@ export class WorkflowBoard extends Symbiote {
     let group = normalizeText(card.resourceGroup ?? card.raw?.resourceGroup) || '';
     let blockedBy = asArray(card.raw?.dependsOn ?? card.dependsOn).length;
     let unlocks = downstream.get(card.id) ?? 0;
+    // Prefer the explicit audit verdict chip over the raw `needs_audit` flag chip when a verdict exists,
+    // so the card reads "✓ audit" / "✗ rework" instead of a bare "Needs audit".
+    let auditChip = auditVerdictChip(card);
+    let flagChips = asArray(card.flags)
+      .filter(flag => !(auditChip && flag === 'needs_audit'))
+      .slice(0, 2)
+      .map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) }));
     return {
       id: card.id,
       columnId: card.columnId,
@@ -1015,7 +1068,8 @@ export class WorkflowBoard extends Symbiote {
         agent ? { label: agent, kind: 'status' } : null,
         duration ? { label: duration, kind: 'status' } : null,
         tokens ? { label: `${tokens} tok`, kind: 'status' } : null,
-        ...card.flags.slice(0, 2).map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) })),
+        auditChip,
+        ...flagChips,
       ].filter(Boolean),
       actions: this.#cardActions(card, nextColumn, runtimeOnly),
       draggable: !runtimeOnly,

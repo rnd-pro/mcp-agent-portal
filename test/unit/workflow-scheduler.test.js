@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -657,8 +658,10 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
   let idSeq;
   let ledger;
   let service;
+  let gitRepos;
 
   beforeEach(() => {
+    gitRepos = [];
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-runtime-reconcile-'));
     sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
@@ -682,11 +685,12 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     await sg.flushChatWrites();
     sg.flush();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    for (let repo of gitRepos) fs.rmSync(repo, { recursive: true, force: true });
   });
 
   // Plant a card in `in-progress` (lifecycle running) with a live run linked to a runtime task and a
   // lease, mirroring a card the scheduler already admitted. Returns { cardId, runId, taskId }.
-  function plantRunningCard(id = 'wip') {
+  function plantRunningCard(id = 'wip', { cwd = null } = {}) {
     let created = service.createOrUpdateCard({
       id,
       title: `Card ${id}`,
@@ -698,6 +702,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       assignedAgent: 'backend-engineer',
       resourceGroup: 'impl',
       acceptanceCriteria: ['Done when audited'],
+      cwd,
       actor: 'test',
     });
     let card = created.card;
@@ -785,9 +790,55 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(ledger.slotCount(), 0, 'the read reconcile never starts an audit run');
   });
 
+  it('execute proof-contract: a `completed` run that produced NO diff is flagged needs_audit on advance', async () => {
+    // A clean repo: the execute run exited cleanly but changed nothing — a no-op masquerading as done.
+    let { cardId, taskId } = plantRunningCard('wip-nodiff', { cwd: makeGitRepo('nodiff', { dirtyPaths: [] }) });
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'the card still advances to audit (audit is the safety net)');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true,
+      'a no-diff completion is surfaced for scrutiny, not presented as finished work');
+  });
+
+  it('execute proof-contract: a `completed` run WITH a real diff advances clean (no needs_audit)', async () => {
+    let { cardId, taskId } = plantRunningCard('wip-realdiff', { cwd: makeGitRepo('realdiff') });
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), false,
+      'a real, non-trivial diff is not flagged as a no-op');
+  });
+
+  // A real git work tree the release-tail probe can read. `dirtyPaths` are written and left
+  // uncommitted so the probe sees a non-empty working-tree diff; pass junk paths to exercise the
+  // hygiene-offender branch. Returns the repo path for use as a card cwd.
+  function makeGitRepo(name, { dirtyPaths = ['src/feature.js'] } = {}) {
+    let repo = fs.mkdtempSync(path.join(os.tmpdir(), `wf-repo-${name}-`));
+    let git = (args) => execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'ignore', 'ignore'] });
+    git(['init']);
+    git(['config', 'user.email', 'test@example.com']);
+    git(['config', 'user.name', 'test']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# base\n');
+    git(['add', '.']);
+    git(['commit', '-m', 'base']);
+    for (let rel of dirtyPaths) {
+      let abs = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, `// work for ${rel}\n`);
+    }
+    gitRepos.push(repo);
+    return repo;
+  }
+
   // Plant a card parked in quality-audit whose audit run has already terminated with `runStatus`,
   // mirroring a card the core reconcile advanced and whose on_enter audit then finished.
-  function plantAuditedCard(id, runStatus = 'completed') {
+  function plantAuditedCard(id, runStatus = 'completed', { cwd = null } = {}) {
     let created = service.createOrUpdateCard({
       id,
       title: `Card ${id}`,
@@ -798,6 +849,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       owner: 'orchestrator',
       assignedAgent: 'backend-engineer',
       acceptanceCriteria: ['Done when audited'],
+      cwd,
       actor: 'test',
     });
     let card = created.card;
@@ -856,7 +908,9 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     service.updateWorkflowBoard(
       { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
     );
-    let cardId = plantAuditedCard('aud-close');
+    // A real working tree with a non-empty, junk-free diff so the release-tail probe (not a daemon
+    // rubber-stamp) signs the clean-diff/hygiene floor.
+    let cardId = plantAuditedCard('aud-close', 'completed', { cwd: makeGitRepo('close') });
 
     let result = await service.reconcileWorkflowRuntimeTasks(
       { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'WORKFLOW_RESULT: pass'), { drive: true },
@@ -868,11 +922,54 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(checkPassed(checks.audit), true, 'audit floor check signed');
     assert.equal(checkPassed(checks.cleanDiff), true, 'clean-diff floor check signed');
     assert.equal(checkPassed(checks.hygiene), true, 'hygiene floor check signed');
+    // The clean-diff/hygiene pass is backed by a real probe, not a bare daemon signature.
+    assert.equal(checks.cleanDiff.signedBy, 'daemon-probe', 'clean-diff signed off a real probe');
+    assert.equal(checks.hygiene.signedBy, 'daemon-probe', 'hygiene signed off a real probe');
+    assert.ok(checks.cleanDiff.evidence.changedFiles >= 1, 'probe evidence records the real changeset');
     assert.ok(result.releaseTail.closed.includes(cardId), 'the card is reported closed');
     // A runtime transition event captures each leg of the autonomous walk.
     let events = service.listEvents({ cardId });
     assert.ok(events.some(e => e.toColumnId === 'commit-publish'), 'quality-audit → commit-publish recorded');
     assert.ok(events.some(e => e.toColumnId === 'done'), 'commit-publish → done recorded');
+  });
+
+  it('proof-contract: an empty working tree at publish is HELD as needs_audit, never auto-closed', async () => {
+    service.updateWorkflowBoard(
+      { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
+    );
+    // A clean repo (no uncommitted diff): the publish probe finds nothing to ship.
+    let cardId = plantAuditedCard('aud-empty', 'completed', { cwd: makeGitRepo('empty', { dirtyPaths: [] }) });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'WORKFLOW_RESULT: pass'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'no diff to ship: the card never auto-closes');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'held for re-audit, not silently closed');
+    let checks = sg.get(`workflowChecks/${cardId}`)?.checks ?? {};
+    assert.equal(checkPassed(checks.cleanDiff), false, 'no clean-diff pass is fabricated without a diff');
+    assert.equal(result.releaseTail.closed.includes(cardId), false, 'the card is not reported closed');
+  });
+
+  it('proof-contract: a hygiene offender in the worktree at publish HOLDS the card, never auto-closes', async () => {
+    service.updateWorkflowBoard(
+      { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
+    );
+    // A real diff that includes a scratch/secret-bearing path the hygiene probe must reject.
+    let cardId = plantAuditedCard('aud-junk', 'completed', {
+      cwd: makeGitRepo('junk', { dirtyPaths: ['src/feature.js', '.env.local'] }),
+    });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'WORKFLOW_RESULT: pass'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'a hygiene offender blocks the auto-close');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'held for re-audit on a hygiene violation');
+    assert.equal(checkPassed(sg.get(`workflowChecks/${cardId}`)?.checks?.hygiene), false, 'no hygiene pass fabricated');
+    assert.equal(result.releaseTail.closed.includes(cardId), false);
   });
 
   it('autonomous tail: a failed audit run is NOT auto-passed — it is left in quality-audit for recovery', async () => {

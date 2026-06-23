@@ -488,4 +488,14 @@ sn-kanban-board .sn-kanban-chip[data-kind="dep-unlocks"] {
   color: var(--sn-success-color);
   border-color: color-mix(in srgb, var(--sn-success-color) 40%, var(--sn-node-border));
 }
+
+/* Quality-audit verdict: a passed audit (success) vs. a rejected audit routed back as rework (danger). */
+sn-kanban-board .sn-kanban-chip[data-kind="audit-pass"] {
+  color: var(--sn-success-color);
+  border-color: color-mix(in srgb, var(--sn-success-color) 46%, var(--sn-node-border));
+}
+sn-kanban-board .sn-kanban-chip[data-kind="audit-reject"] {
+  color: var(--sn-danger-color);
+  border-color: color-mix(in srgb, var(--sn-danger-color) 50%, var(--sn-node-border));
+}
 `;
