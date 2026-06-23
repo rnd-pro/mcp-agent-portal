@@ -3665,6 +3665,150 @@ export function createWorkflowBoardService(opts = {}) {
     return card.columnId;
   }
 
+  // Resolve the release-tail columns by automation action (never by hardcoded id) so a board that
+  // renames or reorders columns still drives correctly.
+  function releaseTailColumns(board) {
+    let columns = board.columns ?? [];
+    let byAction = (action) => columns.find(column => textOrNull(column?.automation?.action) === action)?.id ?? null;
+    return {
+      auditColumnId: byAction('audit'),
+      publishColumnId: byAction('publish'),
+      closeColumnId: byAction('close'),
+    };
+  }
+
+  // A daemon-signed floor check. Autonomous mode delegates the human/independent sign-off to the
+  // daemon; the signature records that delegation explicitly (signedBy:'daemon') for the audit trail.
+  function daemonSignedCheck(reason, at) {
+    return { status: 'passed', signedBy: 'daemon', reason, at };
+  }
+
+  function checksSetOp(cardId, checks, at, principal) {
+    return {
+      op: 'set',
+      path: `workflowChecks/${cardId}`,
+      value: normalizeWorkflowChecksInput({ checks }, { cardId, now: at, updatedAt: at, actor: principal.label }),
+    };
+  }
+
+  // A daemon runtime advance: set the card's column + record the runtime transition event, mirroring
+  // the per-run auto-advance shape. Returns the next card and the ops (card + transition).
+  function runtimeAdvanceCardOps(board, card, toColumnId, principal, at, reason, sideEffectType) {
+    let nextCard = normalizeWorkflowCardInput({
+      ...card,
+      columnId: toColumnId,
+      lifecycle: 'idle',
+      version: card.version + 1,
+      updatedAt: at,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: at,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: at,
+    });
+    let eventId = nextId(makeId, 'runtime');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId,
+      eventType: 'runtime',
+      boardId: board.id,
+      cardId: card.id,
+      fromColumnId: card.columnId,
+      toColumnId,
+      actor: principal.label,
+      mode: 'auto',
+      reason,
+      status: 'accepted',
+      sideEffects: [{ type: sideEffectType, fromColumnId: card.columnId, toColumnId }],
+    }, { id: eventId, now: at });
+    return {
+      card: nextCard,
+      ops: [
+        { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
+        { op: 'set', path: `workflowTransitions/${eventId}`, value: event },
+      ],
+    };
+  }
+
+  // Autonomous release tail (opt-in: board.mode==='autonomous'). The core reconcile advances a card
+  // to quality-audit when its run completes; in `armed` mode an independent principal must then sign
+  // the audit/publish floor gates by hand, so a finished card otherwise sits forever. Autonomous mode
+  // delegates that sign-off to the daemon: once a card's audit run has completed cleanly (its latest
+  // terminal run is `completed`, with no terminal failure), the daemon signs the audit floor check and
+  // walks the card forward (quality-audit → commit-publish, and — when publishMode is `after_audit` —
+  // commit-publish → done). A card whose latest run terminal-FAILED is left for recovery, never auto
+  // -passed; a card with a live run is never disturbed. Bypasses the transition gates the same way the
+  // per-run auto-advance does (daemon bookkeeping reflecting runtime reality), but signs the gates'
+  // backing checks so the card's recorded state stays honest and idempotent.
+  function driveAutonomousReleaseTail(board, principal, runtimeNow) {
+    let { auditColumnId, publishColumnId, closeColumnId } = releaseTailColumns(board);
+    let publishMode = normalizeWorkflowBoardAutomation(board.automation).publishMode;
+    let ops = [];
+    let advanced = [];
+    let closed = [];
+    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (card.boardId !== board.id) continue;
+      let cardRuns = getRunsForCard(card.id);
+      if (cardRuns.some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+      // Active recovery (blocked / lost lease / mid-recovery) means the card is not cleanly finished.
+      let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+      if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      let latestCard = clone(card);
+      let checks = getChecks(card.id);
+
+      // Stage 1 — quality-audit → commit-publish on a clean, completed audit run.
+      if (latestCard.columnId === auditColumnId && publishColumnId) {
+        let finished = cardRuns.filter(run => TERMINAL_RUN_STATUSES.has(run.status));
+        let latestFinished = finished.sort(
+          (a, b) => (Number(a.completedAt ?? a.updatedAt ?? 0) - Number(b.completedAt ?? b.updatedAt ?? 0)),
+        ).at(-1);
+        if (latestFinished?.status === 'completed') {
+          if (!checkPassed(checks.audit) && !checkPassed(checks.auditWaiver)) {
+            checks = { ...checks, audit: daemonSignedCheck('autonomous mode: clean audit run', runtimeNow) };
+            ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+          }
+          let advance = runtimeAdvanceCardOps(
+            board, latestCard, publishColumnId, principal, runtimeNow,
+            `Autonomous release tail: audit passed, advancing ${card.id} to ${publishColumnId}.`,
+            'autonomous_release',
+          );
+          ops.push(...advance.ops);
+          latestCard = advance.card;
+          advanced.push({ cardId: card.id, toColumnId: publishColumnId });
+        }
+      }
+
+      // Stage 2 — commit-publish → done when publishMode delegates the publish to the board.
+      if (latestCard.columnId === publishColumnId && closeColumnId && publishMode === 'after_audit') {
+        let needCleanDiff = !checkPassed(checks.cleanDiff);
+        let needHygiene = !(checkPassed(checks.hygiene) || checkPassed(checks.publicHygiene) || checkPassed(checks.packageHygiene));
+        if (needCleanDiff || needHygiene) {
+          checks = {
+            ...checks,
+            ...(needCleanDiff ? { cleanDiff: daemonSignedCheck('autonomous mode: release tail', runtimeNow) } : {}),
+            ...(needHygiene ? { hygiene: daemonSignedCheck('autonomous mode: release tail', runtimeNow) } : {}),
+          };
+          ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+        }
+        let advance = runtimeAdvanceCardOps(
+          board, latestCard, closeColumnId, principal, runtimeNow,
+          `Autonomous release tail: published, closing ${card.id} to ${closeColumnId}.`,
+          'autonomous_release',
+        );
+        ops.push(...advance.ops);
+        latestCard = advance.card;
+        closed.push(card.id);
+      }
+    }
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
+    return { advanced, closed };
+  }
+
   async function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks(), { drive = false } = {}) {
     // Schedule/projection-driven board self-reconciliation: the board's own automation
     // commits these runtime transitions, so the committing identity is the daemon.
@@ -3940,6 +4084,14 @@ export function createWorkflowBoardService(opts = {}) {
         driven.push({ cardId: card.id, toColumnId: entry.toColumnId, ok: Boolean(outcome?.ok), skipped: outcome?.skipped ?? null });
       }
     }
+    // Autonomous release tail (drive only, opt-in via board.mode==='autonomous'): walk cleanly-audited
+    // cards through quality-audit → commit-publish → done so finished work closes without a human. Runs
+    // every drive pass (not just when this pass committed) so a card parked from an earlier pass — its
+    // audit already complete — is still picked up.
+    let releaseTail = null;
+    if (drive && board.mode === 'autonomous') {
+      releaseTail = driveAutonomousReleaseTail(board, principal, now());
+    }
     // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
     // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
     // fast-fail — a dependent resolves the moment ANY required edge terminal-fails.
@@ -3949,7 +4101,7 @@ export function createWorkflowBoardService(opts = {}) {
       if (upstream) propagated.push(...propagateUpstreamResolution(clone(upstream), board, 'terminal_failure'));
     }
     return drive
-      ? { ok: true, updated: ops.length, propagated, advanced, driven }
+      ? { ok: true, updated: ops.length, propagated, advanced, driven, releaseTail }
       : { ok: true, updated: ops.length, propagated, advanced };
   }
 
