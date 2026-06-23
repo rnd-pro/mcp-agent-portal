@@ -1,5 +1,6 @@
 // @ctx .context/web/app.ctx
 import "./common/base-path.js";
+import "./shell/AppShell.js";
 import { tPortal } from "./common/localization.js";
 import { applyTheme as n, DEFAULT_PROVIDER_THEME as o, registerGlobalParam, updateParams, getRoute, parseQuery, buildHash, navigate } from "symbiote-ui/ui";
 import { applyPortalProjectTransaction, getPortalProjectRuntime } from "./services/portal-runtime.js";
