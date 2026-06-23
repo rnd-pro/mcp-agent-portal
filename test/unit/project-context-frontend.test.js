@@ -113,7 +113,7 @@ describe('project scoped frontend data loading', () => {
   });
 
   it('mounts isolated workspace layouts for project tabs instead of one global shell layout', () => {
-    let indexSource = readSource('web/index.html');
+    let indexSource = readSource('web/index.html') + readSource('web/shell/app-shell.tpl.js');
     let demoIndexSource = readSource('demo/index.html');
     let demoBuildSource = readSource('demo/build.js');
     let appSource = readSource('web/app.js');
