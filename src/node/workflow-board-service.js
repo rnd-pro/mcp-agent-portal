@@ -4212,7 +4212,19 @@ export function createWorkflowBoardService(opts = {}) {
     let backlog = null;
     if (drive && board.mode === 'autonomous') {
       backlog = driveAutonomousBacklog(board, principal, now());
-      for (let entry of [...backlog.promoted.map(p => p.cardId), ...backlog.scopeNeeded]) {
+      // Level-triggered orchestration: drive freshly promoted/scoped cards AND any card parked idle in
+      // the orchestrate column. The edge-triggered drive (the `advanced` loop) only fires on the tick a
+      // card changes column and is gated on a running-run commit, so a card promoted on an earlier pass
+      // — or before a restart — would otherwise sit in ready forever. maybeAutoOrchestrateCard is the
+      // authority (candidate gate, capacity, file-scope) and dedups, so re-driving is a safe no-op.
+      let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id;
+      let driveSet = new Set([...backlog.promoted.map(p => p.cardId), ...backlog.scopeNeeded]);
+      if (orchestrateColumnId) {
+        for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+          if (card.boardId === board.id && card.columnId === orchestrateColumnId) driveSet.add(card.id);
+        }
+      }
+      for (let entry of driveSet) {
         let card = stateGraph.get(`workflowCards/${entry}`);
         if (!card) continue;
         if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
