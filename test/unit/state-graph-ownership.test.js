@@ -108,6 +108,51 @@ describe('state-graph single-writer ownership guard', () => {
     assert.ok(!walAfter.includes('should-not-persist'), 'its abandoned commit is not on disk');
   });
 
+  it('re-reads ownership from disk before a WAL append, even when the heartbeat has not fired yet', async () => {
+    // Closes the heartbeat-sized window: A loses ownership on disk but its cached flag is still clear.
+    // The fresh _ownsSnapshot() re-check inside _flushWal must catch it before the async append lands.
+    let a = makeSG('A', { pid: 1001 });
+    a.load();
+    a.commit([{ op: 'set', path: 'ui/a', value: 1 }], 'test');
+    await a._flushWal();
+    let walAfterOwner = fs.readFileSync(path.join(dir, 'state.wal'), 'utf8');
+
+    // A different live writer takes the owner record on disk; A's cached flag is intentionally NOT set.
+    alive.add(1002);
+    fs.writeFileSync(ownerPath(), JSON.stringify({ pid: 1002, token: 'B', startedAt: Date.now() }));
+    assert.equal(a._ownershipLost, false, 'cached flag still clear (heartbeat has not run)');
+
+    a.commit([{ op: 'set', path: 'ui/a', value: 999 }], 'test');
+    await a._flushWal();
+
+    assert.equal(a._ownershipLost, true, 'the fresh on-disk re-check detected the takeover');
+    assert.equal(
+      fs.readFileSync(path.join(dir, 'state.wal'), 'utf8'),
+      walAfterOwner,
+      'A appended nothing after losing ownership on disk',
+    );
+  });
+
+  it('stamps every WAL record with the writer token and a per-writer monotonic fence', async () => {
+    let a = makeSG('A', { pid: 1001 });
+    a.load();
+    a.commit([{ op: 'set', path: 'ui/a', value: 1 }], 'test');
+    a.commit([{ op: 'set', path: 'ui/b', value: 2 }], 'test');
+    await a._flushWal();
+
+    let entries = fs.readFileSync(path.join(dir, 'state.wal'), 'utf8')
+      .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(entries.length >= 2);
+    for (let entry of entries) {
+      assert.equal(entry.writer, 'A', 'record carries the writer token');
+      assert.equal(typeof entry.fence, 'number', 'record carries a numeric fence');
+    }
+    let fences = entries.map((e) => e.fence);
+    for (let i = 1; i < fences.length; i++) {
+      assert.ok(fences[i] > fences[i - 1], 'the per-writer fence is strictly monotonic');
+    }
+  });
+
   it('with the guard OFF (default) writes always proceed and no owner file is created', () => {
     let a = makeSG('A', { guard: false });
     a.load();

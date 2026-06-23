@@ -1,6 +1,7 @@
 // @ctx backend-lifecycle.ctx
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
@@ -26,10 +27,21 @@ function getPortFilePath(rootPath) {
   return join(LOCAL_GATEWAY_DIR, `portal-${hash}.json`);
 }
 
-function getLockDirPath(rootPath) {
-  const absPath = resolve(rootPath);
+// Resolve the global state file the same way state-graph.js does. The backend lock is keyed on this
+// path — not on the project root — so a single PORTAL_BACKEND owns the shared snapshot.
+function getStatePath() {
+  const stateDir = process.env.PORTAL_STATE_DIR || join(homedir(), '.agent-portal');
+  return process.env.PORTAL_STATE_PATH || join(stateDir, 'agent-portal-state.json');
+}
+
+// State lives in one shared location (~/.agent-portal) but a backend can be spawned from any project
+// root. A per-root lock therefore lets several backends become legitimate concurrent writers of the
+// same snapshot — the multi-writer race that clobbers persistent state. Keying the lock on the
+// resolved state path makes every backend contend on one lock, so only one owns the global state.
+function getLockDirPath() {
+  const absPath = resolve(getStatePath());
   const hash = createHash('md5').update(absPath).digest('hex').slice(0, 8);
-  return join(LOCAL_GATEWAY_DIR, `portal-${hash}.lock`);
+  return join(LOCAL_GATEWAY_DIR, `portal-state-${hash}.lock`);
 }
 
 function processExists(pid) {
@@ -54,7 +66,7 @@ function lockAgeMs(lockDir) {
 
 export async function acquireBackendLock(rootPath, options = {}) {
   mkdirSync(LOCAL_GATEWAY_DIR, { recursive: true });
-  const lockDir = getLockDirPath(rootPath);
+  const lockDir = getLockDirPath();
   const timeoutMs = options.timeoutMs ?? 10000;
   const staleMs = options.staleMs ?? 30000;
   const retryMs = options.retryMs ?? 100;

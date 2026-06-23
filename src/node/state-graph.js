@@ -229,6 +229,10 @@ export class StateGraph extends EventEmitter {
     this._ownershipLostEmitted = false;
     this._ownershipLost = false;   // in-memory short-circuit for the write hot path (set on detection)
     this._ownerHeartbeat = null;
+    // Per-writer monotonic fence: every WAL record this instance emits is stamped with the owner token
+    // and a strictly increasing fence. The global version can collide across concurrent writers; the
+    // (token, fence) pair identifies the producing writer and gives replay a deterministic tie-break.
+    this._writerFence = 0;
   }
 
   // ── Single-writer ownership ────────────────────────────
@@ -372,8 +376,10 @@ export class StateGraph extends EventEmitter {
     this._state._v = this._version;
     this._state._ts = ts;
 
-    // 3. Create WAL entry
-    let entry = { v: this._version, ts, source, ops };
+    // 3. Create WAL entry, stamped with the writer identity (owner token) and a per-writer
+    //    monotonic fence so a record's producing writer is recoverable even when two concurrent
+    //    writers collide on the global version.
+    let entry = { v: this._version, ts, source, ops, writer: this._ownerToken, fence: ++this._writerFence };
 
     // 4. Push to ring buffer (delta sync cache)
     this._ring.push(entry);
@@ -512,8 +518,20 @@ export class StateGraph extends EventEmitter {
           try { entries.push(JSON.parse(line)); }
           catch { /* skip corrupt line */ }
         }
-        entries.sort((a, b) => (a.v || 0) - (b.v || 0));
+        // Sort by global version, then by the per-writer fence so colliding same-version records from
+        // concurrent writers replay in a deterministic order (lowest fence wins, the rest are dropped
+        // by the `entry.v > this._version` guard below).
+        entries.sort((a, b) => (a.v || 0) - (b.v || 0) || (a.fence || 0) - (b.fence || 0));
+        let prevEntry = null;
+        let writerCollisions = 0;
         for (let entry of entries) {
+          // Same-version records are adjacent after the sort; differing writer stamps on the same
+          // version are the multi-writer signature the stamp exists to surface.
+          if (prevEntry && prevEntry.v === entry.v && entry.writer && prevEntry.writer
+              && entry.writer !== prevEntry.writer) {
+            writerCollisions++;
+          }
+          prevEntry = entry;
           if (entry.v > this._version) {
             for (let op of entry.ops) _applyOp(this._state, op);
             this._version = entry.v;
@@ -522,6 +540,9 @@ export class StateGraph extends EventEmitter {
             // Also populate ring buffer for immediate delta sync
             this._ring.push(entry);
           }
+        }
+        if (writerCollisions > 0) {
+          console.warn(`[StateGraph] WAL replay: dropped ${writerCollisions} version-colliding record(s) from a superseded concurrent writer.`);
         }
       } catch (err) {
         console.error('[StateGraph] WAL replay failed:', err.message);
@@ -591,6 +612,10 @@ export class StateGraph extends EventEmitter {
     // on version with the live owner's and drop one on replay. Drop the queue; this instance is exiting.
     if (this._ownershipLost) { this._walQueue = []; return; }
     if (this._walQueue.length === 0 || this._walFlushing) return;
+    // Re-read ownership from disk immediately before the append. The cached _ownershipLost flag only
+    // refreshes on the ~2s heartbeat; a freshly superseded instance must not slip a version-colliding
+    // append onto the shared WAL inside that window.
+    if (!this._ownsSnapshot()) { this._signalOwnershipLost(); this._walQueue = []; return; }
 
     this._walFlushing = true;
     let batch = this._walQueue.splice(0);
@@ -624,6 +649,9 @@ export class StateGraph extends EventEmitter {
     // durable-before-side-effect guarantee is moot — a superseded writer must not perform the side effect.
     if (this._ownershipLost) { this._walQueue = []; return; }
     if (this._walQueue.length === 0) return;
+    // Fresh on-disk ownership re-check before a durable append, closing the same heartbeat-sized window
+    // as _flushWal: a writer that just lost ownership must not fsync a version-colliding record.
+    if (!this._ownsSnapshot()) { this._signalOwnershipLost(); this._walQueue = []; return; }
     let batch = this._walQueue.splice(0);
     let dir = path.dirname(this._walPath);
     try {
