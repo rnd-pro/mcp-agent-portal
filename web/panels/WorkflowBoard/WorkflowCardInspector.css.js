@@ -80,6 +80,52 @@ pg-workflow-card-inspector .wci-held {
   border: 1px solid rgba(239, 159, 39, 0.3);
 }
 
+pg-workflow-card-inspector .wci-audit-verdict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+pg-workflow-card-inspector .wci-audit-by {
+  min-width: 0;
+  color: var(--sn-text-dim);
+  font-size: 11px;
+  font-family: var(--sn-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pg-workflow-card-inspector .wci-audit-reason {
+  margin-block-start: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--sn-text);
+}
+
+pg-workflow-card-inspector .wci-audit-returned {
+  margin-block-start: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sn-danger-color, #e24b4a);
+}
+
+pg-workflow-card-inspector .wci-audit-detail {
+  margin-block-start: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--sn-text-dim);
+}
+
+pg-workflow-card-inspector .wci-audit-next {
+  margin-block-start: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--sn-text-dim);
+}
+
 pg-workflow-card-inspector .wci-history-actor {
   flex: 0 0 auto;
   color: var(--sn-text-dim);
