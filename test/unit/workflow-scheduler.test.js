@@ -811,32 +811,55 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     return id;
   }
 
-  it('autonomous tail: a clean audit run auto-signs the audit floor check and advances to commit-publish', async () => {
+  // Proof-contract: a finished audit run must carry an explicit PASS verdict to advance. This map mirrors
+  // the auditor's final output (read via workerFinalAnswerText) carrying a COMPLETION_PROOF marker.
+  function verdictTasks(cardId, text) {
+    return new Map([[`task-${cardId}`, { id: `task-${cardId}`, status: 'completed', completedAt: 1500, events: [{ text }] }]]);
+  }
+
+  it('autonomous tail: a PASS verdict signs the audit floor check and advances to commit-publish', async () => {
     service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
     let cardId = plantAuditedCard('aud-pass');
 
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'a PASS verdict advances the card past quality-audit');
+    let checks = sg.get(`workflowChecks/${cardId}`)?.checks ?? {};
+    assert.equal(checkPassed(checks.audit), true, 'the daemon signed the audit floor check on a real verdict');
+    assert.equal(checks.audit.signedBy, 'daemon', 'the signature records the daemon as the signer');
+    assert.ok(result.releaseTail.advanced.some(item => item.cardId === cardId && item.toColumnId === 'commit-publish'));
+    assert.equal(result.releaseTail.closed.includes(cardId), false, 'manual publishMode does not auto-close');
+  });
+
+  it('proof-contract: a completed audit run with NO verdict is held as needs_audit, never auto-passed', async () => {
+    service.updateWorkflowBoard(
+      { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
+    );
+    let cardId = plantAuditedCard('aud-noverdict');
+
+    // Empty runtimeTasks → the run completed cleanly but emitted no PASS/FAIL verdict.
     let result = await service.reconcileWorkflowRuntimeTasks(
       { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
     );
 
     let card = service.getCard(cardId);
-    assert.equal(card.columnId, 'commit-publish', 'the clean audit advances the card past quality-audit');
-    let checks = service.getCard ? sg.get(`workflowChecks/${cardId}`)?.checks ?? {} : {};
-    assert.equal(checkPassed(checks.audit), true, 'the daemon signed the audit floor check');
-    assert.equal(checks.audit.signedBy, 'daemon', 'the signature records the daemon as the signer');
-    assert.ok(result.releaseTail.advanced.some(item => item.cardId === cardId && item.toColumnId === 'commit-publish'));
-    // Default publishMode is `manual`, so the card stops at commit-publish for a human publish.
-    assert.equal(result.releaseTail.closed.includes(cardId), false, 'manual publishMode does not auto-close');
+    assert.equal(card.columnId, 'quality-audit', 'completed != approved: no verdict means no advance');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'the card is surfaced as needs_audit, not silently parked');
+    assert.equal(checkPassed(sg.get(`workflowChecks/${cardId}`)?.checks?.audit), false, 'no pass is fabricated');
+    assert.equal(result.releaseTail.advanced.some(i => i.cardId === cardId), false);
   });
 
-  it('autonomous tail + publishMode after_audit: walks a clean card all the way to done', async () => {
+  it('autonomous tail + publishMode after_audit: walks a verdict-passed card all the way to done', async () => {
     service.updateWorkflowBoard(
       { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
     );
     let cardId = plantAuditedCard('aud-close');
 
     let result = await service.reconcileWorkflowRuntimeTasks(
-      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'WORKFLOW_RESULT: pass'), { drive: true },
     );
 
     let card = service.getCard(cardId);
@@ -876,5 +899,45 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     let card = service.getCard(cardId);
     assert.equal(card.columnId, 'quality-audit', 'armed mode keeps the independent human/agent sign-off');
     assert.equal(result.releaseTail, null, 'no release tail runs outside autonomous mode');
+    assert.equal(result.backlog, null, 'no backlog self-start runs outside autonomous mode');
+  });
+
+  // Plant a card parked in backlog with or without an execution contract, without firing creation-time
+  // automation (created in in-progress, which is lease-gated, then moved to backlog).
+  function plantBacklogCard(id, { contract = true } = {}) {
+    let created = service.createOrUpdateCard({
+      id, title: `Card ${id}`, body: 'Backlog item.', columnId: 'in-progress',
+      projectId: 'agent-portal', domain: 'backend',
+      owner: contract ? 'orchestrator' : null,
+      acceptanceCriteria: contract ? ['Done when shipped'] : [],
+      actor: 'test',
+    });
+    sg.commit([{ op: 'set', path: `workflowCards/${id}`, value: { ...created.card, columnId: 'backlog', lifecycle: 'idle' } }], 'test:plant-backlog');
+    return id;
+  }
+
+  it('autonomous backlog: a scoped card auto-promotes to the orchestrate column (then orchestration fires)', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantBacklogCard('bl-scoped', { contract: true });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    assert.ok(result.backlog.promoted.some(p => p.cardId === cardId && p.toColumnId === 'ready'),
+      'a scoped backlog card is promoted to the orchestrate column');
+    assert.notEqual(service.getCard(cardId).columnId, 'backlog', 'the card has left the backlog');
+  });
+
+  it('autonomous backlog: a raw card with no contract is surfaced for one-shot scope, not promoted', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantBacklogCard('bl-raw', { contract: false });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    assert.ok(result.backlog.scopeNeeded.includes(cardId), 'a raw backlog card is surfaced for scope');
+    assert.equal(result.backlog.promoted.some(p => p.cardId === cardId), false, 'a card with no contract is not promoted');
   });
 });
