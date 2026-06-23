@@ -4274,6 +4274,10 @@ export function createWorkflowBoardService(opts = {}) {
     let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
     let board = ensureBoard(parent.boardId);
     let ts = now();
+    // The idea travels with each child as context, so an executor (human or agent) sees the original
+    // intent at the point of work even when the parent card is no longer on the active board.
+    let parentBody = textOrNull(parent.body);
+    let ideaContext = [`Origin idea "${parent.title}"${parentBody ? `: ${parentBody}` : ''}`];
     let children = childItemsFromArgs(args).map((item) => {
       let childContext = textArray(item.context);
       let childRoutingHints = textArray(item.routingHints ?? item.routing_hints);
@@ -4300,7 +4304,7 @@ export function createWorkflowBoardService(opts = {}) {
         owner: textOrNull(item.owner) ?? parent.owner,
         resourceGroup: textOrNull(item.resourceGroup ?? item.resource_group) ?? parent.resourceGroup,
         approvalMode: textOrNull(item.approvalMode ?? item.approval_mode) ?? parent.approvalMode,
-        context: [...textArray(parent.context), ...childContext],
+        context: [...ideaContext, ...textArray(parent.context), ...childContext],
         routingHints: [...textArray(parent.routingHints), ...childRoutingHints],
       }, {
         id,
@@ -4311,6 +4315,37 @@ export function createWorkflowBoardService(opts = {}) {
         updatedAt: ts,
       });
     });
+    // Processed-idea close: the parent's own work is the decomposition. Once it has spawned children,
+    // auto-close it to the terminal column (resolved by automation.action, never a hardcoded id) so it
+    // leaves the active lanes instead of lingering. Opt-out via board automation; only when children
+    // were actually created and a terminal column exists and the parent is not already there.
+    let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
+    let closeColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'close')?.id ?? null;
+    let parentCloses = boardAutomation.decompositionClosesParent
+      && children.length > 0
+      && Boolean(closeColumnId)
+      && parent.columnId !== closeColumnId;
+    let parentNextColumnId = parentCloses ? closeColumnId : parent.columnId;
+    let resultParent = parent;
+    let parentOps = [];
+    if (parentCloses) {
+      resultParent = normalizeWorkflowCardInput({
+        ...parent,
+        columnId: parentNextColumnId,
+        lifecycle: 'idle',
+        version: parent.version + 1,
+        updatedAt: ts,
+        updatedBy: actor,
+      }, {
+        id: parent.id,
+        actor,
+        now: ts,
+        version: parent.version + 1,
+        createdAt: parent.createdAt,
+        updatedAt: ts,
+      });
+      parentOps.push({ op: 'set', path: `workflowCards/${parent.id}`, value: resultParent });
+    }
     let eventId = textOrNull(args.eventId ?? args.event_id) ?? nextId(makeId, 'decomposition');
     let event = normalizeWorkflowTransitionEvent({
       id: eventId,
@@ -4318,32 +4353,38 @@ export function createWorkflowBoardService(opts = {}) {
       boardId: board.id,
       cardId: parent.id,
       fromColumnId: parent.columnId,
-      toColumnId: parent.columnId,
+      toColumnId: parentNextColumnId,
       actor,
       mode: 'manual',
-      reason: textOrNull(args.reason) ?? `Decomposed workflow card ${parent.id} into ${children.length} child card(s).`,
+      reason: textOrNull(args.reason)
+        ?? `Decomposed workflow card ${parent.id} into ${children.length} child card(s)${parentCloses ? `; idea processed, closing to ${parentNextColumnId}.` : '.'}`,
       status: 'accepted',
-      cardVersion: parent.version,
+      cardVersion: resultParent.version,
       gateResult: { ok: true, checks: [], failures: [] },
-      sideEffects: children.map(child => ({
-        type: 'child_card_created',
-        cardId: child.id,
-        parentCardId: parent.id,
-        columnId: child.columnId,
-        assignedAgent: child.assignedAgent,
-      })),
+      sideEffects: [
+        ...children.map(child => ({
+          type: 'child_card_created',
+          cardId: child.id,
+          parentCardId: parent.id,
+          columnId: child.columnId,
+          assignedAgent: child.assignedAgent,
+        })),
+        ...(parentCloses ? [{ type: 'parent_closed', cardId: parent.id, toColumnId: parentNextColumnId }] : []),
+      ],
     }, { id: eventId, now: ts });
     stateGraph.commit([
       ...children.map(child => ({ op: 'set', path: `workflowCards/${child.id}`, value: child })),
+      ...parentOps,
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
     ], sourceForPrincipal(principal));
     return {
       ok: true,
       board,
-      parent,
+      parent: resultParent,
       children,
       event,
       childCardIds: children.map(child => child.id),
+      parentClosed: parentCloses,
     };
   }
 

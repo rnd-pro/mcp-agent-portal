@@ -554,8 +554,35 @@ describe('workflow board model and service', () => {
     assert.equal(result.event.eventType, 'decomposition');
     assert.deepEqual(
       result.event.sideEffects.map(item => item.type),
-      ['child_card_created', 'child_card_created'],
+      ['child_card_created', 'child_card_created', 'parent_closed'],
     );
+
+    // Processed-idea close: the parent's work IS the decomposition, so it auto-closes to the terminal
+    // column and leaves the active lanes; the children carry the idea forward as context.
+    assert.equal(result.parentClosed, true);
+    assert.equal(projectedParent.columnId, 'done', 'the decomposed parent is closed to the terminal column');
+    assert.equal(result.event.toColumnId, 'done');
+    assert.ok(
+      result.children.every(child => child.context.some(line => line.includes('Implement broad workflow board work'))),
+      'each child inherits the origin idea as context',
+    );
+    assert.ok(result.children[1].context.includes('Child-specific context'), 'child-specific context is preserved');
+  });
+
+  it('keeps the decomposed parent in place when decompositionClosesParent is disabled', () => {
+    service.updateWorkflowBoard(
+      { automation: { decompositionClosesParent: false } }, { gatedBy: 'board.control' },
+    );
+    let parent = service.createOrUpdateCard({
+      title: 'Stay put after decompose', projectId: 'agent-portal', domain: 'orchestration',
+      columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
+    });
+    let result = service.decomposeWorkItem({
+      cardId: parent.card.id, actor: 'test',
+      childItems: [{ title: 'Child A', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
+    });
+    assert.equal(result.parentClosed, false);
+    assert.equal(service.getCard(parent.card.id).columnId, 'backlog', 'parent stays when the policy is off');
   });
 
   it('does not partially persist decomposition children when one child is invalid', () => {
