@@ -70,6 +70,32 @@ describe('workflow board model and service', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('self-heals a default column automation gap (a lost action) on a stale policy version', () => {
+    let board = service.ensureBoard();
+    // Simulate a clobbered/older-normalizer snapshot: the quality-audit column lost its action, and the
+    // board still carries an older policy version so the fill-only refresh is allowed to run again.
+    let columns = board.columns.map(column => column.id === 'quality-audit'
+      ? { ...column, automation: { ...column.automation, action: undefined } }
+      : column);
+    sg.commit([{ op: 'set', path: `workflowBoards/${board.id}`, value: {
+      ...board,
+      columns,
+      metadata: { ...board.metadata, defaultPolicyVersion: 1 },
+    } }], 'test:corrupt-column');
+    assert.equal(
+      sg.get(`workflowBoards/${board.id}`).columns.find(c => c.id === 'quality-audit')?.automation?.action,
+      undefined,
+      'precondition: the stored column has no action',
+    );
+
+    let healed = service.ensureBoard();
+    assert.equal(
+      healed.columns.find(c => c.id === 'quality-audit')?.automation?.action,
+      'audit',
+      'the fill-only refresh restores the default action without clobbering customizations',
+    );
+  });
+
   it('defines the default board columns, gates, card shape, and recovery flags', () => {
     let board = createDefaultWorkflowBoard({ now: 123 });
     let card = normalizeWorkflowCardInput({

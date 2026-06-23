@@ -71,7 +71,11 @@ const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
 // object) in its final message/output, mirroring how escalation markers are emitted. The reconcile
 // folds the parsed return into the per-card inbox (card.metadata.returns) — see computeIntermediateReturn.
 const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
-const DEFAULT_WORKFLOW_POLICY_VERSION = 5;
+// Bump to force refreshDefaultBoardPolicy to re-run its fill-only merge on every existing default
+// board once — v6 self-heals a column automation gap (e.g. a `quality-audit` that lost its `action`
+// to an older normalizer or a clobbered snapshot) so the on-enter audit and the autonomous release
+// tail resolve their columns by action again.
+const DEFAULT_WORKFLOW_POLICY_VERSION = 6;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
 // no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
@@ -245,6 +249,17 @@ function mergeDefined(current, updates) {
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+// Drop nullish (undefined/null) own-values so a fill-only merge cannot have a default clobbered by a
+// stored gap. `false`/`0`/`''` are real configured values and are preserved.
+function definedOnly(value) {
+  let source = asObject(value);
+  let out = {};
+  for (let key of Object.keys(source)) {
+    if (source[key] !== undefined && source[key] !== null) out[key] = source[key];
+  }
+  return out;
 }
 
 function textArray(value) {
@@ -599,7 +614,10 @@ export function createWorkflowBoardService(opts = {}) {
         ...current,
         id: defaultColumn.id,
         title: textOrNull(current.title) ?? defaultColumn.title,
-        automation: { ...defaultColumn.automation, ...asObject(current.automation) },
+        // Fill-only: a stored automation gap (a missing/nullish field — e.g. an `action` lost to an
+        // older normalizer or a clobbered snapshot) falls back to the default instead of overwriting
+        // it, so the column's action/trigger/mode self-heal on every reconcile.
+        automation: { ...defaultColumn.automation, ...definedOnly(current.automation) },
       };
     });
     for (let column of currentColumns) {
