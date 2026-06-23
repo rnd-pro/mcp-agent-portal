@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { DEFAULT_WORKFLOW_BOARD_ID } from '../../src/iso/workflow-board.js';
+import { DEFAULT_WORKFLOW_BOARD_ID, checkPassed } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
 import { humanPrincipal } from '../../src/node/server/principal.js';
@@ -783,5 +783,98 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.notEqual(card.lifecycle, 'running', 'lifecycle must not stay running after the run terminated');
     assert.equal(card.lifecycle, 'idle');
     assert.equal(ledger.slotCount(), 0, 'the read reconcile never starts an audit run');
+  });
+
+  // Plant a card parked in quality-audit whose audit run has already terminated with `runStatus`,
+  // mirroring a card the core reconcile advanced and whose on_enter audit then finished.
+  function plantAuditedCard(id, runStatus = 'completed') {
+    let created = service.createOrUpdateCard({
+      id,
+      title: `Card ${id}`,
+      body: 'Audited work item.',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      assignedAgent: 'backend-engineer',
+      acceptanceCriteria: ['Done when audited'],
+      actor: 'test',
+    });
+    let card = created.card;
+    sg.commit([
+      { op: 'set', path: `workflowCards/${id}`, value: { ...card, columnId: 'quality-audit', lifecycle: 'idle' } },
+      { op: 'set', path: `workflowRuns/run-${id}`, value: {
+        schema: 'workflow-run/v1', id: `run-${id}`, boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: id,
+        status: runStatus, taskIds: [`task-${id}`], startedAt: 900, updatedAt: 1500, completedAt: 1500,
+      } },
+    ], 'test:plant-audited');
+    return id;
+  }
+
+  it('autonomous tail: a clean audit run auto-signs the audit floor check and advances to commit-publish', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-pass');
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'the clean audit advances the card past quality-audit');
+    let checks = service.getCard ? sg.get(`workflowChecks/${cardId}`)?.checks ?? {} : {};
+    assert.equal(checkPassed(checks.audit), true, 'the daemon signed the audit floor check');
+    assert.equal(checks.audit.signedBy, 'daemon', 'the signature records the daemon as the signer');
+    assert.ok(result.releaseTail.advanced.some(item => item.cardId === cardId && item.toColumnId === 'commit-publish'));
+    // Default publishMode is `manual`, so the card stops at commit-publish for a human publish.
+    assert.equal(result.releaseTail.closed.includes(cardId), false, 'manual publishMode does not auto-close');
+  });
+
+  it('autonomous tail + publishMode after_audit: walks a clean card all the way to done', async () => {
+    service.updateWorkflowBoard(
+      { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
+    );
+    let cardId = plantAuditedCard('aud-close');
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'done', 'after_audit publishMode closes the card autonomously');
+    let checks = sg.get(`workflowChecks/${cardId}`)?.checks ?? {};
+    assert.equal(checkPassed(checks.audit), true, 'audit floor check signed');
+    assert.equal(checkPassed(checks.cleanDiff), true, 'clean-diff floor check signed');
+    assert.equal(checkPassed(checks.hygiene), true, 'hygiene floor check signed');
+    assert.ok(result.releaseTail.closed.includes(cardId), 'the card is reported closed');
+    // A runtime transition event captures each leg of the autonomous walk.
+    let events = service.listEvents({ cardId });
+    assert.ok(events.some(e => e.toColumnId === 'commit-publish'), 'quality-audit → commit-publish recorded');
+    assert.ok(events.some(e => e.toColumnId === 'done'), 'commit-publish → done recorded');
+  });
+
+  it('autonomous tail: a failed audit run is NOT auto-passed — it is left in quality-audit for recovery', async () => {
+    service.updateWorkflowBoard(
+      { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
+    );
+    let cardId = plantAuditedCard('aud-fail', 'error');
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true });
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'a terminal-failed audit run never auto-advances');
+    let checks = sg.get(`workflowChecks/${cardId}`)?.checks ?? {};
+    assert.equal(checkPassed(checks.audit), false, 'no audit pass is fabricated for a failed run');
+  });
+
+  it('armed mode (default): the autonomous tail stays off — a finished audit card waits for a human', async () => {
+    let cardId = plantAuditedCard('aud-armed');
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'armed mode keeps the independent human/agent sign-off');
+    assert.equal(result.releaseTail, null, 'no release tail runs outside autonomous mode');
   });
 });
