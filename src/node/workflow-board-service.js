@@ -1206,13 +1206,25 @@ export function createWorkflowBoardService(opts = {}) {
     if (automation.enabled === false) {
       return { ok: false, reason: 'column automation is disabled', automation };
     }
-    if (automation.trigger !== 'on_enter' || !['orchestrate', 'audit'].includes(automation.action)) {
-      return { ok: false, reason: 'column is not configured for on-enter orchestration or audit', automation };
+    // Autonomous mode also auto-fires the `scope` action so the backlog self-starts (the orchestrator
+    // scopes a raw card); armed/other modes keep scope manual — only on-enter orchestrate/audit auto-run.
+    let autoActions = board.mode === 'autonomous'
+      ? ['orchestrate', 'audit', 'scope']
+      : ['orchestrate', 'audit'];
+    let triggerEligible = automation.trigger === 'on_enter'
+      || (board.mode === 'autonomous' && automation.action === 'scope');
+    if (!triggerEligible || !autoActions.includes(automation.action)) {
+      return { ok: false, reason: 'column is not configured for on-enter orchestration or autonomous scope', automation };
     }
     // Idempotency: do not re-run the audit action on a card that already has a passing audit
     // (re-entry, reconcile, or duplicate transition must not loop the auditor).
     if (automation.action === 'audit' && checkPassed(getChecks(card.id).audit)) {
       return { ok: false, reason: 'audit already passed for this card', automation };
+    }
+    // A `scope` is for raw cards: one that already carries an execution contract (owner + acceptance)
+    // is promoted to the orchestrate column by the autonomous backlog driver, never re-scoped.
+    if (automation.action === 'scope' && readyCardHasExecutionContract(card)) {
+      return { ok: false, reason: 'card already has an execution contract; promote instead of scope', automation };
     }
     if (board.mode !== 'armed' && board.mode !== 'autonomous') {
       return { ok: false, reason: `board mode ${board.mode} does not allow automatic orchestration`, automation };
@@ -3760,7 +3772,72 @@ export function createWorkflowBoardService(opts = {}) {
   // -passed; a card with a live run is never disturbed. Bypasses the transition gates the same way the
   // per-run auto-advance does (daemon bookkeeping reflecting runtime reality), but signs the gates'
   // backing checks so the card's recorded state stays honest and idempotent.
-  function driveAutonomousReleaseTail(board, principal, runtimeNow) {
+  // The audit verdict for a finished audit run: an EXPLICIT pass/fail from the worker's final output
+  // (WORKFLOW_RESULT, or a COMPLETION_PROOF / RELEASE_AUTH_PACKET marker) — never the bare process exit.
+  // Returns 'pass' | 'fail' | null. A clean exit with no verdict is NOT a pass (completed != approved).
+  function auditRunVerdict(run, runtimeTasks) {
+    let text = workerFinalAnswerText(run, runtimeTasks) || '';
+    if (!text) return null;
+    let resultMatch = text.match(ESCALATION_RESULT_PATTERN);
+    let result = resultMatch ? resultMatch[1].toLowerCase() : null;
+    let passMarker = /\b(?:COMPLETION_PROOF|RELEASE_AUTH_PACKET)\s*:\s*PASS\b/i.test(text);
+    let failMarker = /\b(?:COMPLETION_PROOF|RELEASE_AUTH_PACKET)\s*:\s*FAIL\b/i.test(text);
+    if (['pass', 'passed', 'ok', 'success'].includes(result) || passMarker) return 'pass';
+    if (['fail', 'failed', 'blocked', 'rejected'].includes(result) || failMarker) return 'fail';
+    return null;
+  }
+
+  // Autonomous backlog self-start (opt-in: board.mode==='autonomous'). The orchestrate column already
+  // auto-fires on entry; this is the missing step before it. A backlog card (the `scope`-action column)
+  // that already carries an execution contract (owner + acceptance) is promoted to the orchestrate
+  // column — its on_enter orchestration then fires. A raw card with no contract and no prior run is
+  // surfaced for the orchestrator to `scope` once (the caller drives it); a card that was already scoped
+  // but still lacks a contract is left for a human rather than re-scoped in a loop. Columns resolved by
+  // automation.action, never by hardcoded id. armed/manual keep the human scope step.
+  function driveAutonomousBacklog(board, principal, runtimeNow) {
+    let columns = board.columns ?? [];
+    let byAction = (action) => columns.find(column => textOrNull(column?.automation?.action) === action)?.id ?? null;
+    let scopeColumnId = byAction('scope');
+    let orchestrateColumnId = byAction('orchestrate');
+    let promoted = [];
+    let scopeNeeded = [];
+    let blockedByDependency = [];
+    if (!scopeColumnId || !orchestrateColumnId) return { promoted, scopeNeeded, blockedByDependency };
+    let classifier = classifyWorkflowGraph(board);
+    let ops = [];
+    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (card.boardId !== board.id || card.columnId !== scopeColumnId) continue;
+      let cardRuns = getRunsForCard(card.id);
+      if (cardRuns.some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+      let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+      if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      // Dependency ordering: hold a card until its dependsOn upstreams are satisfied, so a dependent
+      // never jumps ahead of its prerequisites (the deps gate admission only once `blocked`, which the
+      // direct promote would otherwise bypass). It promotes on a later tick once the upstream is done.
+      if (!allDependenciesSatisfied(card, board, classifier, releasedEdgesFor(card))) {
+        blockedByDependency.push(card.id);
+        continue;
+      }
+      if (readyCardHasExecutionContract(card)) {
+        let advance = runtimeAdvanceCardOps(
+          board, clone(card), orchestrateColumnId, principal, runtimeNow,
+          `Autonomous backlog: scoped card ${card.id} promoted to ${orchestrateColumnId}.`,
+          'autonomous_promote',
+        );
+        ops.push(...advance.ops);
+        promoted.push({ cardId: card.id, toColumnId: orchestrateColumnId });
+      } else if (!cardRuns.some(run => TERMINAL_RUN_STATUSES.has(run.status))) {
+        scopeNeeded.push(card.id);
+      }
+    }
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
+    return { promoted, scopeNeeded, blockedByDependency };
+  }
+
+  function driveAutonomousReleaseTail(board, principal, runtimeNow, runtimeTasks) {
     let { auditColumnId, publishColumnId, closeColumnId } = releaseTailColumns(board);
     let publishMode = normalizeWorkflowBoardAutomation(board.automation).publishMode;
     let ops = [];
@@ -3776,25 +3853,44 @@ export function createWorkflowBoardService(opts = {}) {
       let latestCard = clone(card);
       let checks = getChecks(card.id);
 
-      // Stage 1 — quality-audit → commit-publish on a clean, completed audit run.
+      // Stage 1 — quality-audit → commit-publish. Proof-contract: completed != approved. Advance ONLY
+      // on a real verdict — an audit floor check already signed (preferred; an independent principal via
+      // update_item), or an explicit PASS in the audit run's output. A clean process exit with no
+      // verdict does NOT pass; it is surfaced as needs_audit for a human/re-audit instead of shipping.
       if (latestCard.columnId === auditColumnId && publishColumnId) {
         let finished = cardRuns.filter(run => TERMINAL_RUN_STATUSES.has(run.status));
         let latestFinished = finished.sort(
           (a, b) => (Number(a.completedAt ?? a.updatedAt ?? 0) - Number(b.completedAt ?? b.updatedAt ?? 0)),
         ).at(-1);
         if (latestFinished?.status === 'completed') {
-          if (!checkPassed(checks.audit) && !checkPassed(checks.auditWaiver)) {
-            checks = { ...checks, audit: daemonSignedCheck('autonomous mode: clean audit run', runtimeNow) };
-            ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+          let alreadySigned = checkPassed(checks.audit) || checkPassed(checks.auditWaiver);
+          let verdict = alreadySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
+          if (verdict === 'pass') {
+            if (!alreadySigned) {
+              checks = { ...checks, audit: daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow) };
+              ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+            }
+            let advance = runtimeAdvanceCardOps(
+              board, latestCard, publishColumnId, principal, runtimeNow,
+              `Autonomous release tail: audit verdict PASS, advancing ${card.id} to ${publishColumnId}.`,
+              'autonomous_release',
+            );
+            ops.push(...advance.ops);
+            latestCard = advance.card;
+            advanced.push({ cardId: card.id, toColumnId: publishColumnId });
+          } else if (!flags.has('needs_audit')) {
+            // No PASS verdict (FAIL or none emitted): hold in audit and flag it instead of auto-passing.
+            let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
+            let held = normalizeWorkflowCardInput({
+              ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
+              updatedAt: runtimeNow, updatedBy: principal.label,
+            }, {
+              id: latestCard.id, actor: principal.label, now: runtimeNow,
+              version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
+            });
+            ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+            latestCard = held;
           }
-          let advance = runtimeAdvanceCardOps(
-            board, latestCard, publishColumnId, principal, runtimeNow,
-            `Autonomous release tail: audit passed, advancing ${card.id} to ${publishColumnId}.`,
-            'autonomous_release',
-          );
-          ops.push(...advance.ops);
-          latestCard = advance.card;
-          advanced.push({ cardId: card.id, toColumnId: publishColumnId });
         }
       }
 
@@ -4102,13 +4198,31 @@ export function createWorkflowBoardService(opts = {}) {
         driven.push({ cardId: card.id, toColumnId: entry.toColumnId, ok: Boolean(outcome?.ok), skipped: outcome?.skipped ?? null });
       }
     }
-    // Autonomous release tail (drive only, opt-in via board.mode==='autonomous'): walk cleanly-audited
-    // cards through quality-audit → commit-publish → done so finished work closes without a human. Runs
-    // every drive pass (not just when this pass committed) so a card parked from an earlier pass — its
-    // audit already complete — is still picked up.
+    // Autonomous backlog self-start (drive only, opt-in via board.mode==='autonomous'): promote scoped
+    // backlog cards into the orchestrate column (then fire its on_enter orchestration), and drive a
+    // one-shot `scope` for raw, never-run cards. This is the missing front of the pipeline — with it the
+    // board runs idea(human) → done without a human from backlog onward.
+    let backlog = null;
+    if (drive && board.mode === 'autonomous') {
+      backlog = driveAutonomousBacklog(board, principal, now());
+      for (let entry of [...backlog.promoted.map(p => p.cardId), ...backlog.scopeNeeded]) {
+        let card = stateGraph.get(`workflowCards/${entry}`);
+        if (!card) continue;
+        if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+        try {
+          await maybeAutoOrchestrateCard(board, clone(card), {}, { principal });
+        } catch {
+          // best-effort — a failed backlog drive must not abort the reconcile pass.
+        }
+      }
+    }
+    // Autonomous release tail (drive only, opt-in via board.mode==='autonomous'): walk audited cards
+    // through quality-audit → commit-publish → done so verified work closes without a human. Runs every
+    // drive pass (not just when this pass committed) so a card parked from an earlier pass — its audit
+    // already complete — is still picked up. Requires a real audit verdict (proof-contract).
     let releaseTail = null;
     if (drive && board.mode === 'autonomous') {
-      releaseTail = driveAutonomousReleaseTail(board, principal, now());
+      releaseTail = driveAutonomousReleaseTail(board, principal, now(), runtimeTasks);
     }
     // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
     // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
@@ -4119,7 +4233,7 @@ export function createWorkflowBoardService(opts = {}) {
       if (upstream) propagated.push(...propagateUpstreamResolution(clone(upstream), board, 'terminal_failure'));
     }
     return drive
-      ? { ok: true, updated: ops.length, propagated, advanced, driven, releaseTail }
+      ? { ok: true, updated: ops.length, propagated, advanced, driven, releaseTail, backlog }
       : { ok: true, updated: ops.length, propagated, advanced };
   }
 
