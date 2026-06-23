@@ -39,7 +39,8 @@ describe('portal shell theme contract', () => {
   });
 
   it('mounts the provider cascade theme widget and opens the provider editor panel', () => {
-    let index = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
+    let index = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8')
+      + fs.readFileSync(path.join(ROOT, 'web/shell/app-shell.tpl.js'), 'utf8');
     let app = fs.readFileSync(path.join(ROOT, 'web/app.js'), 'utf8');
     let router = fs.readFileSync(path.join(ROOT, 'web/router-registry.js'), 'utf8');
     let panelTemplate = fs.readFileSync(path.join(ROOT, 'web/components/ThemeEditorPanel/ThemeEditorPanel.tpl.js'), 'utf8');
