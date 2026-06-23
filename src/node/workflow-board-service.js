@@ -895,17 +895,23 @@ export function createWorkflowBoardService(opts = {}) {
     let checks = getChecks(card.id);
 
     if (input.checks !== undefined) {
-      // Separated-duty gated check-writing (inv 33, 47). Classify the write: a floor-gate check
-      // (audit/hygiene) needs AUDIT; a basic check needs only WRITE_CARD. An executor (its id in
-      // card.executedBy) can never sign a floor check for its own card, even with AUDIT.
+      // Separated-duty gated check-writing (inv 33, 47). Capability classification: a daemon write
+      // authorizes via daemon.bookkeeping (DAEMON), a human/agent floor-gate check (audit/hygiene)
+      // via checks.write.floor (AUDIT), a basic check via checks.write.basic (WRITE_CARD). Whether a
+      // write IS a floor signature is decided from its keys alone — independent of the daemon mapping
+      // — so the executedBy separated-duty constraint applies to daemon floor-writes too, not just
+      // human/agent ones (the daemon both runs and reconciles a card in autonomous mode).
+      let isFloorWrite = checkWriteIntent(input.checks) === 'checks.write.floor';
       let intentType = daemonWrite ? 'daemon.bookkeeping' : checkWriteIntent(input.checks);
       let checksGate = gate(intentType, principal, { boardId: board.id, cardId: id });
       if (!checksGate.ok) {
         return { ...checksGate, board, card: current ? clone(current) : null, checks };
       }
-      if (intentType === 'checks.write.floor') {
+      if (isFloorWrite) {
+        // An executor (its id in card.executedBy) can never sign a floor check for its own card, even
+        // with AUDIT or DAEMON. The only escape is a daemon self-sign explicitly waived per board.
         let executedBy = textArray(current?.metadata?.executedBy);
-        if (executedBy.includes(principal.id)) {
+        if (!floorSignSeparation(board, executedBy, principal).ok) {
           return {
             ok: false,
             status: 'blocked',
@@ -3789,6 +3795,42 @@ export function createWorkflowBoardService(opts = {}) {
     return { status: 'passed', signedBy: 'daemon-probe', reason, at, evidence };
   }
 
+  // The per-board waiver (if any) that authorizes the daemon to sign a floor check for a card it
+  // executed (separated-duty escape, inv 47). Default-off: an absent or approver-less waiver returns
+  // null, leaving separated duty fully enforced. A valid waiver carries the human approver who
+  // accepted the daemon self-sign, so the bypass is attributable in the audit trail.
+  function boardDaemonFloorSignWaiver(board) {
+    return normalizeWorkflowBoardAutomation(board?.automation).daemonFloorSignWaiver ?? null;
+  }
+
+  // Separated-duty verdict for a floor-gate (audit/hygiene) signature (inv 33, 47). A principal whose
+  // id is recorded in the card's executedBy executed the card and may not sign its floor gate — this
+  // now includes the daemon, which both runs AND reconciles a card in autonomous mode. The only escape
+  // is a daemon self-sign explicitly waived per board by a recorded approver; a non-daemon executor is
+  // never waived. Returns the waiver when the escape is taken so the signature can record the approver.
+  function floorSignSeparation(board, executedBy, principal) {
+    if (!textArray(executedBy).includes(principal.id)) return { ok: true, waiver: null };
+    if (isDaemonPrincipal(principal)) {
+      let waiver = boardDaemonFloorSignWaiver(board);
+      if (waiver) return { ok: true, waiver };
+    }
+    return { ok: false, waiver: null };
+  }
+
+  // Whether the audit floor is already signed by an INDEPENDENT principal — a signer not among the
+  // card's executors. A persisted floor check with no recorded signer was written through the
+  // AUDIT-gated, separated-duty-checked update_item path, so by construction its writer was not an
+  // executor; it is independent. A signer recorded in executedBy (e.g. a waived daemon self-sign) is
+  // NOT independent and does not, on its own, authorize the autonomous advance.
+  function auditSignedIndependently(checks, executedBy) {
+    let entry = checkPassed(checks.audit) ? checks.audit
+      : (checkPassed(checks.auditWaiver) ? checks.auditWaiver : null);
+    if (!entry) return false;
+    let signer = textOrNull(typeof entry === 'object' ? entry.signedBy : null);
+    if (!signer) return true;
+    return !textArray(executedBy).includes(signer);
+  }
+
   function checksSetOp(cardId, checks, at, principal) {
     return {
       op: 'set',
@@ -3929,21 +3971,42 @@ export function createWorkflowBoardService(opts = {}) {
       let latestCard = clone(card);
       let checks = getChecks(card.id);
 
-      // Stage 1 — quality-audit → commit-publish. Proof-contract: completed != approved. Advance ONLY
-      // on a real verdict — an audit floor check already signed (preferred; an independent principal via
-      // update_item), or an explicit PASS in the audit run's output. A clean process exit with no
-      // verdict does NOT pass; it is surfaced as needs_audit for a human/re-audit instead of shipping.
+      // Stage 1 — quality-audit → commit-publish. Proof-contract: completed != approved, AND separated
+      // duty (inv 47). Advance ONLY when the audit floor is signed by a principal who did NOT execute
+      // the card: either it is already signed independently (preferred — a human or qa/code-reviewer
+      // via update_item, a signer not in executedBy), or the run reports an explicit PASS and the
+      // daemon is itself independent (no recorded executor) OR explicitly waived per board to self-sign.
+      // A daemon that ran the card may not auto-pass its own work on its own authority; absent an
+      // independent sign-off or a waiver it is held as needs_audit for a human/re-audit, never shipped.
       if (latestCard.columnId === auditColumnId && publishColumnId) {
         let finished = cardRuns.filter(run => TERMINAL_RUN_STATUSES.has(run.status));
         let latestFinished = finished.sort(
           (a, b) => (Number(a.completedAt ?? a.updatedAt ?? 0) - Number(b.completedAt ?? b.updatedAt ?? 0)),
         ).at(-1);
         if (latestFinished?.status === 'completed') {
-          let alreadySigned = checkPassed(checks.audit) || checkPassed(checks.auditWaiver);
-          let verdict = alreadySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
-          if (verdict === 'pass') {
-            if (!alreadySigned) {
-              checks = { ...checks, audit: daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow) };
+          let executedBy = textArray(latestCard.metadata?.executedBy);
+          let independentlySigned = auditSignedIndependently(checks, executedBy);
+          let verdict = independentlySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
+          // When the floor is not yet independently signed, the daemon would have to sign it itself —
+          // allowed only when the daemon is not an executor of this card, or under an explicit waiver.
+          let separation = independentlySigned
+            ? { ok: true, waiver: null }
+            : floorSignSeparation(board, executedBy, principal);
+          if (verdict === 'pass' && separation.ok) {
+            if (!independentlySigned) {
+              // Daemon self-sign. Under a waiver, record the approver who accepted the separated-duty
+              // bypass so it stays attributable; without one (no recorded executor) it is an ordinary
+              // daemon signature.
+              let signed = separation.waiver
+                ? {
+                  ...daemonSignedCheck(
+                    `autonomous mode: audit run reported PASS (daemon self-sign waived by ${separation.waiver.approver})`,
+                    runtimeNow,
+                  ),
+                  waiver: { approver: separation.waiver.approver },
+                }
+                : daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow);
+              checks = { ...checks, audit: signed };
               ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
             }
             let advance = runtimeAdvanceCardOps(
@@ -3955,7 +4018,8 @@ export function createWorkflowBoardService(opts = {}) {
             latestCard = advance.card;
             advanced.push({ cardId: card.id, toColumnId: publishColumnId });
           } else if (!flags.has('needs_audit')) {
-            // No PASS verdict (FAIL or none emitted): hold in audit and flag it instead of auto-passing.
+            // No PASS verdict (FAIL or none emitted), or a daemon self-sign barred by separated duty:
+            // hold in audit and flag it instead of auto-passing.
             let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
             let held = normalizeWorkflowCardInput({
               ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,

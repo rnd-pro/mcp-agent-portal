@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { checkPassed } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
-import { agentPrincipal, derivePrincipal } from '../../src/node/server/principal.js';
+import { agentPrincipal, daemonPrincipal, derivePrincipal } from '../../src/node/server/principal.js';
 
 // Regression tests for the separated-duty check-writing closure (inv 33/47). These lock down two
 // bypasses found by adversarial review: a floor-check classification gap (a non-object `checks`
@@ -90,5 +91,29 @@ describe('check-writing separated-duty (security regression)', () => {
     let sign = svc.createOrUpdateCard({ cardId, checks: { audit: 'passed' } }, human);
     assert.equal(sign.ok, false);
     assert.equal(sign.failures?.[0]?.gate, 'separated_duty');
+  });
+
+  it('the daemon cannot floor-sign a card it executed — daemon.bookkeeping does not bypass separated duty', () => {
+    let svc = makeService();
+    let cardId = auditCard(svc);
+    let daemon = daemonPrincipal();
+    // The daemon ran the card (its id stamped on executedBy by the run path).
+    let card = sg.get(`workflowCards/${cardId}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${cardId}`, value: { ...card, metadata: { ...card.metadata, executedBy: [daemon.id] } } }], 'seed');
+
+    // A daemon floor write maps to daemon.bookkeeping (DAEMON) for the capability gate, but it is still
+    // a floor signature: the executedBy separated-duty constraint applies to it too.
+    let sign = svc.createOrUpdateCard({ cardId, checks: { audit: 'passed' } }, daemon);
+    assert.equal(sign.ok, false, 'the daemon may not sign the audit floor of a card it executed');
+    assert.equal(sign.failures?.[0]?.gate, 'separated_duty');
+    assert.equal(checkPassed(sg.get(`workflowChecks/${cardId}`)?.checks?.audit), false, 'no floor pass is persisted');
+
+    // An explicit per-board waiver with a recorded approver authorizes the daemon self-sign.
+    svc.updateWorkflowBoard(
+      { automation: { daemonFloorSignWaiver: { approver: 'local-human' } } }, { gatedBy: 'board.control' },
+    );
+    let waived = svc.createOrUpdateCard({ cardId, checks: { audit: 'passed' } }, daemon);
+    assert.equal(waived.ok, true, 'the waiver authorizes the daemon self-sign');
+    assert.equal(checkPassed(sg.get(`workflowChecks/${cardId}`)?.checks?.audit), true, 'the waived floor pass is persisted');
   });
 });
