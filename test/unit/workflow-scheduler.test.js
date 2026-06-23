@@ -752,6 +752,27 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       'no second (audit) run was created');
   });
 
+  it('resume: a lost/orphaned run re-queues the card for resume (orchestrate stage + needs_resume), not audit', async () => {
+    let { cardId, runId, taskId } = plantRunningCard('resume-wip');
+    assert.equal(service.getCard(cardId).columnId, 'in-progress');
+
+    // The worker was orphaned by a backend restart: its task ends `lost` (heartbeat timeout). That is a
+    // RESUMABLE interruption — workflowRunStatusFromRuntime surfaces it as run status `error`, but it must
+    // NOT be treated as finished-but-failed.
+    let runtimeTasks = new Map([[taskId, { id: taskId, status: 'lost', updatedAt: 1500 }]]);
+    let result = await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, runtimeTasks);
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'ready', 'a resumable interruption returns the card to the orchestrate stage, not quality-audit');
+    assert.equal(card.recoveryFlags.includes('needs_resume'), true, 'it is flagged for resume');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), false, 'a resumable interruption is not finished-but-failed');
+    assert.equal(card.lifecycle, 'idle', 'the orphaned run lifecycle normalizes to idle');
+    assert.equal(Boolean(card.metadata?.escalation), false, 'no needs_decision/failed escalation is minted for a resumable interruption');
+    assert.equal(sg.get(`workflowRuns/${runId}`).status, 'error', 'the orphaned run is terminalized so a fresh attempt can spawn');
+    // The prior errored run + needs_resume make this card resume-eligible; the orchestrate re-pickup
+    // carries the resume preamble (buildWorkItemPrompt isResume), so the worker continues prior work.
+  });
+
   it('drive on: fires the quality-audit on_enter automation for the advanced card (a real audit delegation)', async () => {
     let { cardId, taskId } = plantRunningCard('wip-drive');
     let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);

@@ -3770,6 +3770,18 @@ export function createWorkflowBoardService(opts = {}) {
     return card.columnId;
   }
 
+  // A run whose underlying task(s) ended `lost` or `stale` is a RESUMABLE interruption — a heartbeat
+  // timeout or a worker orphaned by a backend restart — NOT a genuine failure. `workflowRunStatusFromRuntime`
+  // collapses lost/stale into the run status `error` (they share TASK_ERROR_STATUSES), so the reconcile
+  // would otherwise route the card to quality-audit as finished-but-failed. This recovers the distinction
+  // from the raw task statuses so the reconcile can re-queue the card for resume instead of zombifying it.
+  function runInterruptionResumable(run, runtimeTasks) {
+    return uniqueArray(run.taskIds).some(taskId => {
+      let status = runtimeStatusForTaskId(runtimeTasks, taskId);
+      return status === 'lost' || status === 'stale';
+    });
+  }
+
   // Resolve the release-tail columns by automation action (never by hardcoded id) so a board that
   // renames or reorders columns still drives correctly.
   function releaseTailColumns(board) {
@@ -4188,8 +4200,13 @@ export function createWorkflowBoardService(opts = {}) {
 
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
-        // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution.
-        if (['error', 'failed', 'cancelled'].includes(nextStatus)) failedUpstreamIds.add(card.id);
+        // A run whose task(s) ended lost/stale (heartbeat timeout, or a worker orphaned by a backend
+        // restart) is a RESUMABLE interruption surfacing as `error`, not a genuine failure: re-queue it
+        // for the orchestrator to resume from prior work rather than push it to audit as failed.
+        let resumableInterruption = nextStatus === 'error' && runInterruptionResumable(run, runtimeTasks);
+        // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution — but a
+        // resumable interruption has not failed, so it must NOT fan out failure to its dependents.
+        if (['error', 'failed', 'cancelled'].includes(nextStatus) && !resumableInterruption) failedUpstreamIds.add(card.id);
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
         let nextRun = normalizeWorkflowRunInput({
           ...run,
@@ -4204,27 +4221,40 @@ export function createWorkflowBoardService(opts = {}) {
         });
         ops.push({ op: 'set', path: `workflowRuns/${run.id}`, value: nextRun });
 
-        let nextColumnId = runtimeColumnForCard(latestCard, nextStatus);
+        // A resumable interruption returns to the orchestrate stage so the autonomous orchestrate drive
+        // re-picks it under pickup=auto; the re-pickup carries the resume preamble (buildWorkItemPrompt
+        // isResume) so the worker continues from prior on-disk work. A genuine terminal status advances
+        // per runtimeColumnForCard.
+        let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
+        let nextColumnId = resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(latestCard, nextStatus);
         let flags = new Set(normalizeRecoveryFlags(latestCard.recoveryFlags));
         if (terminal) {
-          flags.delete('recovering');
-          flags.delete('needs_resume');
-          if (nextStatus !== 'completed') flags.add('needs_audit');
-          // Execute-stage proof-contract: a `completed` exit is not proof of work. Cross-check the
-          // run's working tree — a clean process exit that produced NO diff is a no-op masquerading as
-          // done, so it advances to audit flagged needs_audit rather than presented as finished work.
-          // Fail-safe: only a real probe that DEFINITIVELY shows an empty diff flags it (a non-git or
-          // unreadable cwd cannot prove a no-op, so behavior is unchanged there).
-          let columnAction = textOrNull(
-            (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
-          );
-          if (nextStatus === 'completed' && columnAction === 'execute') {
-            let probe = probeReleaseGate(textOrNull(latestCard.cwd) || projectRoot);
-            if (probe.available && !probe.hasDiff) flags.add('needs_audit');
+          if (resumableInterruption) {
+            // Mark for resume rather than audit; the orchestrate re-pickup owns the next attempt.
+            flags.delete('needs_audit');
+            flags.add('needs_resume');
+          } else {
+            flags.delete('recovering');
+            flags.delete('needs_resume');
+            if (nextStatus !== 'completed') flags.add('needs_audit');
+            // Execute-stage proof-contract: a `completed` exit is not proof of work. Cross-check the
+            // run's working tree — a clean process exit that produced NO diff is a no-op masquerading as
+            // done, so it advances to audit flagged needs_audit rather than presented as finished work.
+            // Fail-safe: only a real probe that DEFINITIVELY shows an empty diff flags it (a non-git or
+            // unreadable cwd cannot prove a no-op, so behavior is unchanged there).
+            let columnAction = textOrNull(
+              (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
+            );
+            if (nextStatus === 'completed' && columnAction === 'execute') {
+              let probe = probeReleaseGate(textOrNull(latestCard.cwd) || projectRoot);
+              if (probe.available && !probe.hasDiff) flags.add('needs_audit');
+            }
           }
         }
         let nextFlags = [...flags].filter(flag => normalizeRecoveryFlags([flag]).length > 0);
-        let escalationDelta = terminal
+        // A resumable interruption is not an escalation episode (no human decision / rework needed) and
+        // does not mint a `failed` return — it is simply re-queued for resume.
+        let escalationDelta = terminal && !resumableInterruption
           ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
@@ -4232,7 +4262,7 @@ export function createWorkflowBoardService(opts = {}) {
         // non-terminal status change (e.g. requested→running) carries any intermediate return parsed
         // above. Fold the minted return into the inbox (coalesce drops a late progress after a terminal,
         // so no extra logic) so it lands in the SAME card update / commit as the rest of the reconcile.
-        let mintedReturn = terminal
+        let mintedReturn = terminal && !resumableInterruption
           ? normalizeWorkflowReturnEvent(
             { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
             { now: currentNow, correlationId: latestCard.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, seq: nextRun.version ?? null, raisedBy: ESCALATION_ACTOR },
