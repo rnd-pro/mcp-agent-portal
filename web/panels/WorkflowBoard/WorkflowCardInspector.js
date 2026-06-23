@@ -208,9 +208,12 @@ export class WorkflowCardInspector extends Symbiote {
     let audit = rawCheck(card, 'audit');
     let waiver = rawCheck(card, 'auditWaiver');
     let passed = checkPassed(audit) || checkPassed(waiver);
-    let rejected = !passed && checkRejected(audit);
     let inAuditColumn = (card.columnId || card.raw?.columnId) === AUDIT_COLUMN_ID;
     let escalated = hasAuditEscalation(card);
+    // An audit-related escalation means the auditor bounced the card back to the orchestrator — that
+    // reads as a rejection in the badge, matching the card's ✗ rework chip, even when the audit check
+    // object itself is still empty (the proof-contract held it before any pass verdict was signed).
+    let rejected = !passed && (checkRejected(audit) || escalated);
 
     let relevant = passed || rejected || inAuditColumn || escalated;
     if (!relevant) {
