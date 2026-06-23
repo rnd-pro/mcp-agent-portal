@@ -466,4 +466,26 @@ pg-workflow-board [hidden] {
     --sn-kanban-column-width: minmax(218px, 82vw);
   }
 }
+
+/* Resource-group accents: a categorical color per group (the glyph carries the distinction where the
+   color does not apply); the border tints from the group color so it reads without shouting. */
+sn-kanban-board .sn-kanban-chip[data-kind^="group-"] {
+  font-weight: 600;
+  border-color: color-mix(in srgb, currentColor 38%, var(--sn-node-border));
+}
+sn-kanban-board .sn-kanban-chip[data-kind="group-integrity"] { color: hsl(355 75% 62%); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-resilience"] { color: hsl(28 85% 58%); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-model"] { color: hsl(210 82% 64%); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-governance"] { color: hsl(265 70% 70%); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-collab-observability"] { color: hsl(175 62% 52%); }
+
+/* Dependency degree: blocked-by (caution) vs unlocks (positive). */
+sn-kanban-board .sn-kanban-chip[data-kind="dep-blocked"] {
+  color: var(--sn-warning-color);
+  border-color: color-mix(in srgb, var(--sn-warning-color) 46%, var(--sn-node-border));
+}
+sn-kanban-board .sn-kanban-chip[data-kind="dep-unlocks"] {
+  color: var(--sn-success-color);
+  border-color: color-mix(in srgb, var(--sn-success-color) 40%, var(--sn-node-border));
+}
 `;

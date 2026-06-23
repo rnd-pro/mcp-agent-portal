@@ -37,6 +37,15 @@ import {
 const DEFAULT_SCOPE = 'home';
 const BOARD_VIEWS = new Set(['kanban', 'graph']);
 const FALLBACK_REFRESH_INTERVAL_MS = 60_000;
+// A distinct glyph per resource group so a card's group reads at a glance even where the chip color
+// (data-kind) does not apply; unknown groups fall back to a neutral marker.
+const GROUP_GLYPH = {
+  integrity: '◆',
+  resilience: '▲',
+  model: '●',
+  governance: '■',
+  'collab-observability': '◇',
+};
 const REALTIME_DEBOUNCE_MS = 200;
 const REALTIME_STATE_KEYS = ['workflowCards', 'workflowRuns', 'workflowLeases', 'workflowTransitions', 'tasks'];
 const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
@@ -944,6 +953,7 @@ export class WorkflowBoard extends Symbiote {
         'No workflow cards in this scope.',
         'Import markdown work items or reconcile recovery from the board controls.',
       ].join(' ');
+    let downstream = this.#downstreamDependencyCounts(columns);
     this.ref.boardView.setBoard({
       id: this.#board?.boardId || this.#board?.id || '',
       title: this.#board?.title || 'Workflow Board',
@@ -952,14 +962,29 @@ export class WorkflowBoard extends Symbiote {
         title: column.title,
         description: column.description || column.gate || '',
         automation: column.automation,
-        cards: column.cards.map(card => this.#toKanbanCard(card)),
+        cards: column.cards.map(card => this.#toKanbanCard(card, downstream)),
       })),
     }, {
       renderColumnHeader: (column) => this.#renderColumnHeader(column),
     });
   }
 
-  #toKanbanCard(card) {
+  // Count, per card id, how many other cards declare it as an upstream dependency (downstream fan-out).
+  // Upstream count lives on each card (its own dependsOn); this is the reverse edge for "unlocks N".
+  #downstreamDependencyCounts(columns) {
+    let counts = new Map();
+    for (let column of columns) {
+      for (let card of column.cards) {
+        for (let dep of asArray(card.raw?.dependsOn ?? card.dependsOn)) {
+          let upstreamId = typeof dep === 'string' ? dep : (dep?.cardId ?? dep?.card_id);
+          if (upstreamId) counts.set(upstreamId, (counts.get(upstreamId) ?? 0) + 1);
+        }
+      }
+    }
+    return counts;
+  }
+
+  #toKanbanCard(card, downstream = new Map()) {
     let nextColumn = getAdjacentColumn(this.#board, card.columnId, 1);
     let runtimeOnly = isRuntimeOnlyCard(card);
     let run = latestRun(card);
@@ -968,6 +993,9 @@ export class WorkflowBoard extends Symbiote {
     let tokens = formatTokens(run?.tokens);
     let busy = ['running', 'requested', 'recovering', 'active', 'started', 'streaming']
       .includes(normalizeText(run?.status).toLowerCase());
+    let group = normalizeText(card.resourceGroup ?? card.raw?.resourceGroup) || '';
+    let blockedBy = asArray(card.raw?.dependsOn ?? card.dependsOn).length;
+    let unlocks = downstream.get(card.id) ?? 0;
     return {
       id: card.id,
       columnId: card.columnId,
@@ -975,11 +1003,14 @@ export class WorkflowBoard extends Symbiote {
       summary: card.summary || 'No summary provided.',
       busy,
       meta: [
+        group ? { label: `${GROUP_GLYPH[group] ?? '⊟'} ${group}`, kind: `group-${group}`, title: `Resource group: ${group}` } : null,
         card.projectId ? { label: card.projectId } : null,
         card.kind ? { label: card.kind } : null,
         card.priority ? { label: card.priority, kind: 'status' } : null,
       ].filter(Boolean),
       footer: [
+        blockedBy ? { label: `⟸ ${blockedBy}`, kind: 'dep-blocked', title: `Blocked by ${blockedBy} upstream card(s)` } : null,
+        unlocks ? { label: `⟹ ${unlocks}`, kind: 'dep-unlocks', title: `Unlocks ${unlocks} downstream card(s)` } : null,
         card.status ? { label: card.status, kind: statusKind(card.status) } : null,
         agent ? { label: agent, kind: 'status' } : null,
         duration ? { label: duration, kind: 'status' } : null,
