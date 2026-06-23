@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as esbuild from 'esbuild';
 
 let repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,6 +73,32 @@ async function rewriteIndexHtml(hashedAppName) {
     throw new Error('Failed to rewrite app.js script reference in dist index.html');
   }
   await writeFile(indexPath, next);
+}
+
+// Server-render the app shell at build time (SSG). Symbiote's SSR.init patches
+// Node process globals (document/window/customElements), so it must never run in
+// the live web-server request path — build-time is the isolated, one-shot place
+// for it. The rendered <app-shell> markup is hydrated on the client via isoMode,
+// so first paint shows the shell chrome before app.js finishes booting and the
+// client reuses the server DOM instead of re-rendering it. Data-driven widgets
+// (cascade-theme-widget, project-tabs) are left as empty mounts and rendered on
+// the client; SSR-ing them would double-render since they do not opt into isoMode.
+const SHELL_PLACEHOLDER = '<app-shell class="app-shell"></app-shell>';
+
+async function injectSsrShell() {
+  let { SSR } = await import('@symbiotejs/symbiote/node/SSR.js');
+  let shellModuleUrl = pathToFileURL(path.join(webRoot, 'shell', 'AppShell.js')).href;
+  await SSR.init();
+  await import(shellModuleUrl);
+  let shellHtml = await SSR.processHtml(SHELL_PLACEHOLDER);
+  SSR.destroy();
+
+  let indexPath = path.join(distRoot, 'index.html');
+  let html = await readFile(indexPath, 'utf8');
+  if (!html.includes(SHELL_PLACEHOLDER)) {
+    throw new Error('Failed to locate <app-shell> placeholder in dist index.html');
+  }
+  await writeFile(indexPath, html.replace(SHELL_PLACEHOLDER, shellHtml));
 }
 
 // Precompress text assets at build time so the server can serve brotli/gzip with
@@ -151,5 +177,6 @@ await esbuild.build({
 });
 
 await rewriteIndexHtml(hashedApp);
+await injectSsrShell();
 await precompressAssets();
 await writeBuildManifest({ hashedApp });

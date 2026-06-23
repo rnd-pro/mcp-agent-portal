@@ -50,6 +50,7 @@
   "devDependencies": {
     "esbuild": "^0.28.0",
     "eslint": "^9.39.4",
-    "globals": "^17.5.0"
+    "globals": "^17.5.0",
+    "linkedom": "^0.18.12"
   }
 }
