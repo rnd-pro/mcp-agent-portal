@@ -292,6 +292,56 @@ export function coalesceReturnEvents(events, incoming, limit = 12) {
   return kept.slice(-limit);
 }
 
+// ── Per-card comment / note stream (Axis C: human-agent collaboration surface) ───────────────────
+// An auditable, attributed, append-only stream of human/agent notes on a card. Distinct from the
+// return inbox (machine control events) and the escalation episode (loop-safety state): comments are
+// free-form collaboration the board never reasons about, only records and surfaces. Each entry is
+// frozen with its author identity + role and the instant it was posted, so the stream is a durable
+// audit trail. `reply` marks a comment that also fed the return inbox (a human answer routed to the
+// orchestrator) so the two surfaces cross-reference without duplicating the text.
+export const WORKFLOW_COMMENT_SCHEMA = 'workflow-comment/v1';
+export const WORKFLOW_COMMENT_KINDS = ['comment', 'note', 'reply', 'system'];
+
+/**
+ * Normalize a single card comment. Returns null when there is no body AND no chosen option — an empty
+ * note is not an auditable event. Carries NO control fields; a comment never moves a card or grants a
+ * right. Attribution (`author`, `authorRole`) and `at` are frozen by the caller's principal + clock.
+ * @param {object} input
+ * @param {{ now?: number, id?: string, author?: string, authorRole?: string }} [opts]
+ */
+export function normalizeWorkflowComment(input = {}, opts = {}) {
+  let source = objectOrEmpty(input);
+  let body = textOrNull(source.body ?? source.text ?? source.message ?? source.comment);
+  let optionId = textOrNull(source.optionId ?? source.option_id);
+  if (!body && !optionId) return null;
+  let kind = normalizeKnownValue(source.kind, WORKFLOW_COMMENT_KINDS, 'comment');
+  let now = Number(opts.now);
+  let at = Number.isFinite(now) ? now : Number(source.at ?? source.createdAt ?? source.created_at);
+  return {
+    schema: WORKFLOW_COMMENT_SCHEMA,
+    id: textOrNull(opts.id ?? source.id),
+    cardId: textOrNull(source.cardId ?? source.card_id),
+    kind,
+    body,
+    optionId,
+    replyTo: textOrNull(source.replyTo ?? source.reply_to),
+    author: textOrNull(opts.author ?? source.author ?? source.raisedBy ?? source.raised_by),
+    authorRole: textOrNull(opts.authorRole ?? source.authorRole ?? source.author_role),
+    at: Number.isFinite(at) ? at : null,
+  };
+}
+
+/**
+ * Append a normalized comment to the bounded per-card display cache (`card.metadata.comments`). The
+ * cache is a tail window (default 50) for cheap rendering; the unbounded audit trail lives in the
+ * board event log (one `comment` transition event per post). Returns a new array (pure), oldest first.
+ */
+export function appendCardComment(comments, comment, limit = 50) {
+  let list = Array.isArray(comments) ? comments : [];
+  if (!comment) return list.slice(-limit);
+  return [...list, comment].slice(-limit);
+}
+
 // ── Orchestrator subscription (when a child's return wakes the orchestrator) ─────────────────────
 export const WORKFLOW_SUBSCRIPTION_SCHEMA = 'workflow-subscription/v1';
 export const WORKFLOW_SUBSCRIPTION_MODES = ['final', 'stage', 'join'];

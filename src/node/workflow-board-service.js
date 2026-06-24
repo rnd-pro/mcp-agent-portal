@@ -28,6 +28,8 @@ import {
   migrateWorkflowBoardToV2,
   migrateWorkflowCardToV2,
   normalizeWorkflowReturnEvent,
+  normalizeWorkflowComment,
+  appendCardComment,
   coalesceReturnEvents,
   isWakeDrivingReturn,
   normalizeWorkflowTransitionEvent,
@@ -4603,10 +4605,11 @@ export function createWorkflowBoardService(opts = {}) {
   // in the lane, already terminal, with a live run, or with no decision lane configured is left untouched.
   function driveNeedsDecisionParking(board, principal, runtimeNow) {
     let laneId = decisionColumnId(board);
-    if (!laneId) return { parked: [] };
+    if (!laneId) return { parked: [], notified: [] };
     let classifier = classifyWorkflowGraph(board);
     let ops = [];
     let parked = [];
+    let notified = [];
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id || card.columnId === laneId) continue;
       if (classifier.isTerminal(card.columnId)) continue;
@@ -4619,13 +4622,41 @@ export function createWorkflowBoardService(opts = {}) {
         'needs_decision_park',
       );
       ops.push(...advance.ops);
+      // Axis C: an explicit, watchable signal that a human is needed. Parking is the single chokepoint
+      // every `needs_human` episode (backstop or orchestrator ask) flows through exactly once, so the
+      // notification fires once per escalation without spamming.
+      ops.push(humanEscalationNotificationOp(board, card, state, principal, runtimeNow));
       parked.push({ cardId: card.id, toColumnId: laneId });
+      notified.push({ cardId: card.id, channel: 'human_escalated', escalationKind: state.kind });
     }
     if (ops.length) {
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
-    return { parked };
+    return { parked, notified };
+  }
+
+  // Build a durable notification event for a card escalated to a human (Axis C). Previously reaching the
+  // human-decision lane only moved the card; the collaboration surface needs an explicit, watchable
+  // signal. One `notification` board event per parking, channel `human_escalated`, addressed to the
+  // card's watchers (its owner plus any `metadata.watchers`) so a badge / watcher view can surface it.
+  function humanEscalationNotificationOp(board, card, state, principal, ts) {
+    let watchers = uniqueArray([
+      textOrNull(card.owner),
+      ...(Array.isArray(card.metadata?.watchers) ? card.metadata.watchers.map(textOrNull) : []),
+    ].filter(Boolean));
+    let detail = textOrNull(state?.detail ?? state?.lastEscalation?.detail) ?? 'A card needs a human decision.';
+    let eventId = nextId(makeId, 'notification');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId, eventType: 'notification', boardId: board.id, cardId: card.id,
+      fromColumnId: card.columnId, toColumnId: card.columnId, actor: principal.label, mode: 'auto',
+      reason: detail, status: 'accepted',
+      sideEffects: [{
+        type: 'notification', channel: 'human_escalated', cardId: card.id,
+        escalationKind: state?.kind ?? 'needs_human', detail, watchers,
+      }],
+    }, { id: eventId, now: ts });
+    return { op: 'set', path: `workflowTransitions/${event.id}`, value: event };
   }
 
   // A human resolves a card parked in the decision lane (the inspector buttons + free-text answer). Two
@@ -4709,6 +4740,130 @@ export function createWorkflowBoardService(opts = {}) {
       boardId: board.id, cardId: card.id, toColumnId: orchestrateColumnId, reason: detail, reworkAuthorized: true,
     }, context);
     return { ok: Boolean(outcome?.ok), decision, cardId: card.id, toColumnId: orchestrateColumnId, transition: outcome };
+  }
+
+  // ── Per-card collaboration surface (Axis C: human-agent collaboration) ───────────────────────────
+  // An auditable comment/note stream plus a human reply path into the return inbox. Comments are
+  // recorded two ways: a bounded display cache on `card.metadata.comments` (cheap render) and one
+  // durable `comment` event per post in the board log (the unbounded audit trail). Neither moves the
+  // card nor grants a right — attribution + timestamp are frozen from the caller's principal and clock.
+
+  // Durable ops for one posted comment: the bumped card (cache appended) plus a `comment` board event.
+  // The caller may pass already-merged metadata (e.g. a reply that also folded a return into the inbox)
+  // so a single card write carries both the comment and its side effects.
+  function buildCommentOps(board, card, comment, principal, ts, baseMetadata, extraSideEffects = []) {
+    let metadata = baseMetadata ?? (card.metadata && typeof card.metadata === 'object' ? { ...card.metadata } : {});
+    metadata = { ...metadata, comments: appendCardComment(metadata.comments, comment) };
+    let nextCard = normalizeWorkflowCardInput({
+      ...card, metadata, version: card.version + 1, updatedAt: ts, updatedBy: principal.label,
+    }, {
+      id: card.id, actor: principal.label, now: ts,
+      version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
+    });
+    let eventId = nextId(makeId, 'comment');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId, eventType: 'comment', boardId: board.id, cardId: card.id,
+      fromColumnId: card.columnId, toColumnId: card.columnId, actor: principal.label, mode: 'manual',
+      reason: comment.body ?? comment.optionId ?? comment.kind, status: 'accepted',
+      sideEffects: [
+        { type: 'comment', kind: comment.kind, commentId: comment.id, author: comment.author, body: comment.body, optionId: comment.optionId },
+        ...extraSideEffects,
+      ],
+    }, { id: eventId, now: ts });
+    return {
+      card: nextCard,
+      ops: [
+        { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
+        { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+      ],
+    };
+  }
+
+  // Post an auditable note/comment to a card (board:write-card). Free-form collaboration the board
+  // records but never reasons about. Returns the frozen comment record.
+  function addCardComment(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    let raw = cardId ? stateGraph.get(`workflowCards/${cardId}`) : null;
+    if (!raw) return { ok: false, error: 'card_not_found' };
+    let card = clone(raw);
+    let verdict = gate('card.write', principal, { boardId: board.id, cardId: card.id });
+    if (!verdict.ok) return verdict;
+    let ts = now();
+    let comment = normalizeWorkflowComment(
+      { ...args, cardId: card.id, kind: args.kind ?? 'comment' },
+      { now: ts, id: nextId(makeId, 'comment'), author: principal.label, authorRole: principal.kind },
+    );
+    if (!comment) return { ok: false, error: 'empty_comment' };
+    let built = buildCommentOps(board, card, comment, principal, ts);
+    stateGraph.commit(built.ops, sourceForPrincipal(principal));
+    return { ok: true, cardId: card.id, comment };
+  }
+
+  // Read the bounded per-card comment cache (oldest first). The unbounded audit trail is the board
+  // event log (`listWorkflowEvents` / eventType 'comment'); this is the cheap render surface.
+  function listCardComments(args = {}) {
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    let raw = cardId ? stateGraph.get(`workflowCards/${cardId}`) : null;
+    if (!raw) return { ok: false, error: 'card_not_found' };
+    let card = clone(raw);
+    let comments = Array.isArray(card.metadata?.comments) ? card.metadata.comments : [];
+    return { ok: true, cardId: card.id, comments };
+  }
+
+  // A human reply on a card — the missing human→orchestrator return path (Axis C). Until now the return
+  // inbox carried only agent→orchestrator events, so a `needs_decision` could be closed only by another
+  // agent run. A reply records an auditable comment AND mints a return into the card's inbox attributed
+  // to the human, so the SAME re-engagement driver wakes the orchestrator carrying the person's answer.
+  // Governed by board:control (the decision-closing capability resolveDecisionCard uses). `resolve`
+  // (default true when a decision is live) also clears the live escalation so the person closes the
+  // episode directly; the routed return still wakes the orchestrator to act on the answer.
+  function replyToCard(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    let raw = cardId ? stateGraph.get(`workflowCards/${cardId}`) : null;
+    if (!raw) return { ok: false, error: 'card_not_found' };
+    let card = clone(raw);
+    let verdict = gate('card.control', principal, { boardId: board.id, cardId: card.id });
+    if (!verdict.ok) return verdict;
+    let ts = now();
+    let state = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : null;
+    let liveDecision = Boolean(state && !state.humanEscalated && (state.kind === 'needs_decision' || state.kind === 'needs_human'));
+    let resolve = args.resolve === undefined ? liveDecision : Boolean(args.resolve);
+
+    let comment = normalizeWorkflowComment(
+      { ...args, cardId: card.id, kind: 'reply' },
+      { now: ts, id: nextId(makeId, 'comment'), author: principal.label, authorRole: principal.kind },
+    );
+    if (!comment) return { ok: false, error: 'empty_reply' };
+
+    // Mint the reply as a routed actionable return into the inbox. `resolve` answers the open decision
+    // (a routed `completed` — wake-driving, non-re-raising, mirroring a join answer routed to its owner);
+    // a non-resolving reply is a routed `discovered` contribution that still wakes the loop once. raisedBy
+    // is the HUMAN, so the inbox is no longer an agent-only channel.
+    let returnDetail = [comment.optionId ? `Human chose: ${comment.optionId}` : null, comment.body]
+      .filter(Boolean).join(' — ') || 'Human reply.';
+    let eventId = `reply-${crypto.createHash('sha256').update(`${card.id}:${comment.id}`).digest('hex').slice(0, 24)}`;
+    let returnEvent = normalizeWorkflowReturnEvent(
+      { kind: resolve ? 'completed' : 'discovered', detail: returnDetail, payload: { optionId: comment.optionId, answer: comment.body, commentId: comment.id } },
+      { now: ts, correlationId: card.id, raisedBy: principal.label, eventId, routed: true },
+    );
+    let metadata = card.metadata && typeof card.metadata === 'object' ? { ...card.metadata } : {};
+    metadata.returns = coalesceReturnEvents(metadata.returns, returnEvent);
+    metadata.humanAnswer = { optionId: comment.optionId, answer: comment.body, at: ts, by: principal.label };
+    // The person closes the decision: clear the live escalation episode (the routed return remains in the
+    // inbox as the durable answer + wakes the orchestrator). The auto-rework budget resets with it.
+    if (resolve && state) {
+      delete metadata.escalation;
+      delete metadata.reworkCycles;
+    }
+    let built = buildCommentOps(board, card, comment, principal, ts, metadata, [
+      { type: 'return', status: 'queued', kind: returnEvent.kind, source: 'human', resolved: resolve },
+    ]);
+    stateGraph.commit(built.ops, sourceForPrincipal(principal));
+    return { ok: true, cardId: card.id, comment, resolved: resolve, returnEventId: returnEvent.eventId };
   }
 
   async function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks(), { drive = false } = {}) {
@@ -7357,6 +7512,9 @@ export function createWorkflowBoardService(opts = {}) {
     reconcileWorkflowRecovery,
     reconcileWorkflowEscalations,
     resolveDecisionCard,
+    addCardComment,
+    listCardComments,
+    replyToCard,
     parseRunEscalation,
     importWorkflowWorkItems,
     exportWorkflowWorkItem,
