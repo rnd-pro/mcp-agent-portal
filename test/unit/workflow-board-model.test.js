@@ -1463,6 +1463,87 @@ links:
     );
   });
 
+  it('a card returned to ready with only a TERMINAL run does not hold file scope (no mutual deadlock)', async () => {
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
+        return { content: [{ type: 'text', text: 'Started task 44444444-4444-4444-8444-444444444444' }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    // A card RETURNED to `ready` (orchestrate / pre-execution) carrying only a now-TERMINAL run from a
+    // prior cycle. It is not editing anything, so it must NOT reserve its file scope.
+    let returned = service.createOrUpdateCard({
+      title: 'Returned for rework', columnId: 'ready', projectId: 'agent-portal', domain: 'backend',
+      owner: 'orchestrator', acceptanceCriteria: ['Rework'], files: ['src/node/workflow-board-service.js'], actor: 'test',
+    });
+    sg.commit([{ op: 'set', path: 'workflowRuns/run-returned', value: {
+      schema: 'workflow-run/v1', id: 'run-returned', boardId: returned.card.boardId, cardId: returned.card.id,
+      status: 'completed', taskIds: ['task-returned'], startedAt: 900, updatedAt: 901,
+    } }], 'test:returned-terminal');
+    // A same-file peer, also parked in `ready`, with no run of its own.
+    let peer = service.createOrUpdateCard({
+      title: 'Same-file peer', columnId: 'ready', projectId: 'agent-portal', domain: 'backend',
+      owner: 'orchestrator', acceptanceCriteria: ['Run'], files: ['src/node/workflow-board-service.js'], actor: 'test',
+    });
+
+    let result = await service.orchestrateWorkItem({ cardId: peer.card.id, actor: 'orchestrator' });
+    assert.notEqual(result.ok, false, 'a stale terminal run in pre-execution `ready` must not block a same-file peer');
+    // The peer starts a run (the deadlock is gone); the returned card, now also unblocked, may orchestrate
+    // too — both eligible same-file `ready` cards being pickable is the point, so assert at least one ran.
+    assert.ok(calls.length >= 1, 'the peer actually started a run — no false file-scope deadlock');
+  });
+
+  it('a TERMINAL run still holds file scope while the card sits in an execution column (in-progress)', async () => {
+    let calls = [];
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
+        return { content: [{ type: 'text', text: 'Started task 55555555-5555-4555-8555-555555555555' }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    // A card mid-execution whose run just COMPLETED (terminal) but is still in `in-progress` — its
+    // produced, uncommitted changes are pending advance/audit, so it MUST keep holding its file scope.
+    let pending = service.createOrUpdateCard({
+      title: 'Completed, pending advance', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'l1', acceptanceCriteria: ['Own the file until audited'], files: ['src/node/workflow-board-service.js'], actor: 'test',
+    });
+    sg.commit([{ op: 'set', path: 'workflowRuns/run-pending', value: {
+      schema: 'workflow-run/v1', id: 'run-pending', boardId: pending.card.boardId, cardId: pending.card.id,
+      status: 'completed', taskIds: ['task-pending'], startedAt: 900, updatedAt: 901,
+    } }], 'test:pending-terminal');
+    let peer = service.createOrUpdateCard({
+      title: 'Same-file peer', columnId: 'ready', projectId: 'agent-portal', domain: 'backend',
+      owner: 'orchestrator', acceptanceCriteria: ['Run'], files: ['src/node/workflow-board-service.js'], actor: 'test',
+    });
+
+    await assert.rejects(
+      service.orchestrateWorkItem({ cardId: peer.card.id, actor: 'orchestrator' }),
+      /file scope overlaps active card/,
+    );
+    assert.equal(calls.length, 0, 'the peer must not start while the in-progress card holds the scope');
+  });
+
   it('adds required proof marker instructions when a workflow card names one', async () => {
     let taskId = '66666666-6666-4666-8666-666666666666';
     let calls = [];

@@ -104,6 +104,12 @@ const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 // in-flight run that needs recovery (orchestrate/execute/audit/publish each spawn or require a
 // run). The passive intake/close actions (classify/scope/close) never strand a run.
 const EXECUTION_COLUMN_ACTIONS = new Set(['orchestrate', 'execute', 'audit', 'publish']);
+// Columns whose action implies a card may hold UNCOMMITTED working-tree changes still pending
+// advance/audit/commit — there a TERMINAL run legitimately reserves file scope so a peer cannot clobber
+// the produced changes. `orchestrate` (pre-execution / `ready`) is intentionally absent: a card sitting
+// there has not started its current cycle, so a stale terminal run from a prior cycle must NOT reserve
+// files (else same-file rework returns piled into `ready` mutually deadlock).
+const PENDING_CHANGE_COLUMN_ACTIONS = new Set(['execute', 'audit', 'publish']);
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
 const RUNTIME_DONE_STATUSES = new Set(['done', 'finished', 'complete', 'completed', 'success']);
 const RUNTIME_READY_STATUSES = new Set(['queued', 'pending', 'requested', 'created']);
@@ -1485,13 +1491,22 @@ export function createWorkflowBoardService(opts = {}) {
       .filter(candidate => candidate.boardId === board.id)
       .filter(candidate => !card.projectId || candidate.projectId === card.projectId)
       .filter(candidate => activeColumnIds.has(candidate.columnId))
-      // A card holds its file scope only once it has actually started — i.e. it has a run that is
-      // running or terminal. A card merely parked in an active column (e.g. freshly promoted into
-      // `ready` with no run) is not editing anything, so it must not block a peer with overlapping
-      // files; otherwise N cards promoted into ready at once would mutually deadlock and none start.
-      .filter(candidate => getRunsForCard(candidate.id).some(
-        run => RUNNING_RUN_STATUSES.has(run.status) || TERMINAL_RUN_STATUSES.has(run.status),
-      ))
+      // Scope-hold semantics. A RUNNING run is actively editing and always holds its file scope. A merely
+      // TERMINAL run holds scope ONLY while the card is still in an execution/audit/publish column — there
+      // its produced (uncommitted) changes are pending advance/audit/commit and a peer must not clobber
+      // them. A card with no run, or one RETURNED to a pre-execution column (`orchestrate`/`ready`,
+      // backlog) carrying only a STALE terminal run from a prior cycle, is not editing anything and must
+      // NOT hold scope; otherwise N same-file cards piled into `ready` (e.g. several rework/return cards)
+      // mutually deadlock and none can ever start.
+      .filter((candidate) => {
+        let runs = getRunsForCard(candidate.id);
+        if (runs.some(run => RUNNING_RUN_STATUSES.has(run.status))) return true;
+        let action = textOrNull(
+          (Array.isArray(board?.columns) ? board.columns : []).find(col => col.id === candidate.columnId)?.automation?.action,
+        );
+        return PENDING_CHANGE_COLUMN_ACTIONS.has(action)
+          && runs.some(run => TERMINAL_RUN_STATUSES.has(run.status));
+      })
       .map((candidate) => {
         let candidateFiles = cardFileScope(candidate);
         let overlappingFiles = files.filter(file => candidateFiles.some(candidateFile => fileScopesOverlap(file, candidateFile)));
