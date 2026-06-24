@@ -379,6 +379,12 @@ export class MCPProxyManager {
     });
 
     let env = { ...process.env, ...settings.env };
+    // PORTAL_BACKEND=1 is the single-writer ownership trigger: ONLY the long-lived backend process may
+    // enforce ownership of the shared ~/.agent-portal state (see getStateGraph). It must NOT leak into
+    // child MCP servers (e.g. the agent-pool) or their descendants (worker `claude -p` agents) — a
+    // descendant that touches getStateGraph() would otherwise claim the token and make the real backend
+    // hit `ownership-lost` and exit(0), causing a restart-churn storm that flaps portal.local.
+    delete env.PORTAL_BACKEND;
     let child = spawn(settings.command, settings.args, {
       cwd: settings.cwd || this.projectRoot,
       env,
