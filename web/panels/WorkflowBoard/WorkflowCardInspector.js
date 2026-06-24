@@ -15,7 +15,7 @@ import {
   formatTokens,
   relativeTime,
 } from './workflow-card-telemetry.js';
-import { decideWorkflowCard } from '../../services/workflow-board.js';
+import { replyToCard } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
 
 const HISTORY_LIMIT = 8;
@@ -151,13 +151,11 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.empty.textContent = tPortal('inspector.empty');
     this.ref.chatBtn.textContent = tPortal('inspector.openChat');
     this.ref.lblDecision.textContent = tPortal('inspector.decision');
-    this.ref.decisionReturnBtn.textContent = tPortal('inspector.decisionReturn');
-    this.ref.decisionRejectBtn.textContent = tPortal('inspector.decisionReject');
+    this.ref.decisionSendBtn.textContent = tPortal('inspector.decisionSend');
     this.ref.decisionText.placeholder = tPortal('inspector.decisionPlaceholder');
 
     this.ref.chatBtn.addEventListener('click', () => this.#openChat());
-    this.ref.decisionReturnBtn.addEventListener('click', () => this.#submitDecision({ decision: 'return' }));
-    this.ref.decisionRejectBtn.addEventListener('click', () => this.#submitDecision({ decision: 'reject' }));
+    this.ref.decisionSendBtn.addEventListener('click', () => this.#submitReply());
 
     this._selectionHandler = (event) => this.renderSelection(event.detail);
     selectionEvents.addEventListener('workflow-board-selection-change', this._selectionHandler);
@@ -342,8 +340,9 @@ export class WorkflowCardInspector extends Symbiote {
   }
 
   // The human-decision panel: shown for a card parked in the decision lane (or carrying a needs_human
-  // escalation). Renders the orchestrator's question, its button options, and a free-text answer. A
-  // button (or "Send to orchestrator") routes the answer back; "Reject" retires the card.
+  // escalation). The human only ANSWERS the orchestrator's question — picks one of the orchestrator's
+  // options or types a free-text reply. The answer is minted as a routed return into the orchestrator's
+  // inbox; the orchestrator decides how to route the card. The human never routes or rejects directly.
   #renderDecision(card) {
     let state = needsHumanEscalation(card);
     let inLane = (card.columnId || card.raw?.columnId) === DECISION_COLUMN_ID;
@@ -367,11 +366,7 @@ export class WorkflowCardInspector extends Symbiote {
       btn.type = 'button';
       btn.className = 'wci-decision-option';
       btn.textContent = text(opt?.label, id);
-      let isReject = id === 'reject';
-      if (isReject) btn.classList.add('wci-decision-option-reject');
-      btn.addEventListener('click', () => this.#submitDecision(
-        isReject ? { decision: 'reject', optionId: id } : { decision: 'return', optionId: id },
-      ));
+      btn.addEventListener('click', () => this.#submitReply({ optionId: id }));
       host.append(btn);
     }
     this.#setDecisionStatus('', '');
@@ -379,7 +374,7 @@ export class WorkflowCardInspector extends Symbiote {
   }
 
   #decisionDisabled(disabled) {
-    for (let ref of [this.ref.decisionReturnBtn, this.ref.decisionRejectBtn, this.ref.decisionText]) {
+    for (let ref of [this.ref.decisionSendBtn, this.ref.decisionText]) {
       if (ref) ref.disabled = disabled;
     }
     for (let btn of this.ref.decisionOptions?.children ?? []) btn.disabled = disabled;
@@ -391,17 +386,20 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.decisionStatus.hidden = !message;
   }
 
-  async #submitDecision({ decision, optionId } = {}) {
+  // Submit the human's answer to the orchestrator: a chosen optionId and/or free-text reply. The reply
+  // becomes a routed return in the orchestrator's inbox; the orchestrator owns the routing decision.
+  async #submitReply({ optionId } = {}) {
     let card = this._decisionCard;
     let board = this._decisionBoard;
     let boardId = text(board?.boardId || board?.id);
     let cardId = text(card?.id || card?.raw?.id);
     if (!boardId || !cardId) return;
-    let answer = text(this.ref.decisionText?.value);
+    let body = text(this.ref.decisionText?.value);
+    if (!optionId && !body) return; // nothing to send
     this.#decisionDisabled(true);
     this.#setDecisionStatus(tPortal('inspector.decisionSubmitting'), 'warning');
     try {
-      await decideWorkflowCard({ boardId, cardId, decision, optionId, answer, actor: 'human' });
+      await replyToCard({ boardId, cardId, optionId, body, actor: 'human' });
       this.#setDecisionStatus(tPortal('inspector.decisionDone'), 'ok');
       if (this.ref.decisionText) this.ref.decisionText.value = '';
     } catch (error) {

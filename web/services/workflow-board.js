@@ -3,7 +3,7 @@ const WORKFLOW_TRANSITIONS_ENDPOINT = '/api/workflow-board/transitions';
 const WORKFLOW_DECOMPOSE_ENDPOINT = '/api/workflow-board/decompose';
 const WORKFLOW_ORCHESTRATE_ENDPOINT = '/api/workflow-board/orchestrate';
 const WORKFLOW_CONTROL_ENDPOINT = '/api/workflow-board/control';
-const WORKFLOW_DECIDE_ENDPOINT = '/api/workflow-board/decide';
+const WORKFLOW_REPLY_ENDPOINT = '/api/workflow-board/cards/reply';
 const WORKFLOW_DELETE_ENDPOINT = '/api/workflow-board/delete';
 const WORKFLOW_BOARD_AUTOMATION_ENDPOINT = '/api/workflow-board/automation';
 const WORKFLOW_COLUMN_UPDATE_ENDPOINT = '/api/workflow-board/columns/update';
@@ -627,11 +627,12 @@ export function controlWorkflowCard(input = {}, options = {}) {
   return postWorkflowAction(WORKFLOW_CONTROL_ENDPOINT, input, options);
 }
 
-// Resolve a card parked in the human-decision lane: `decision: 'return'` (default) routes the answer
-// back to the orchestrator; `decision: 'reject'` retires it to the reject terminal. `optionId`/`answer`
-// carry the human's choice and free text.
-export function decideWorkflowCard(input = {}, options = {}) {
-  return postWorkflowAction(WORKFLOW_DECIDE_ENDPOINT, input, options);
+// Answer the orchestrator's question on a card parked in the human-decision lane. The human does NOT
+// route the card — they ANSWER (a chosen `optionId` and/or free-text `body`); the reply is minted as a
+// routed return into the orchestrator's inbox and the orchestrator decides what to do next. `resolve`
+// (default: the card has a live needs_human/needs_decision episode) closes the open question.
+export function replyToCard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_REPLY_ENDPOINT, input, options);
 }
 
 export function updateWorkflowBoardAutomation(input = {}, options = {}) {

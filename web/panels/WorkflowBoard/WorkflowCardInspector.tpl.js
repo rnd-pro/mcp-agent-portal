@@ -47,8 +47,7 @@ export default html`
       <div class="wci-decision-options" ref="decisionOptions"></div>
       <textarea class="wci-decision-text" ref="decisionText" rows="2"></textarea>
       <div class="wci-decision-actions">
-        <button type="button" class="wci-decision-btn wci-decision-return" ref="decisionReturnBtn"></button>
-        <button type="button" class="wci-decision-btn wci-decision-reject" ref="decisionRejectBtn"></button>
+        <button type="button" class="wci-decision-btn wci-decision-send" ref="decisionSendBtn"></button>
       </div>
       <div class="wci-decision-status" ref="decisionStatus" hidden></div>
     </section>

@@ -427,13 +427,9 @@ pg-workflow-card-inspector .wci-decision-btn {
   font-size: 11px;
   cursor: pointer;
 }
-pg-workflow-card-inspector .wci-decision-return {
+pg-workflow-card-inspector .wci-decision-send {
   border-color: var(--sn-accent, #7f77dd);
   color: var(--sn-accent, #7f77dd);
-}
-pg-workflow-card-inspector .wci-decision-reject {
-  border-color: rgba(226, 75, 74, 0.4);
-  color: #e24b4a;
 }
 pg-workflow-card-inspector .wci-decision-btn:hover:not(:disabled) {
   background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
