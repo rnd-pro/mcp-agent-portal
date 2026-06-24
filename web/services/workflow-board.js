@@ -3,6 +3,7 @@ const WORKFLOW_TRANSITIONS_ENDPOINT = '/api/workflow-board/transitions';
 const WORKFLOW_DECOMPOSE_ENDPOINT = '/api/workflow-board/decompose';
 const WORKFLOW_ORCHESTRATE_ENDPOINT = '/api/workflow-board/orchestrate';
 const WORKFLOW_CONTROL_ENDPOINT = '/api/workflow-board/control';
+const WORKFLOW_DECIDE_ENDPOINT = '/api/workflow-board/decide';
 const WORKFLOW_DELETE_ENDPOINT = '/api/workflow-board/delete';
 const WORKFLOW_BOARD_AUTOMATION_ENDPOINT = '/api/workflow-board/automation';
 const WORKFLOW_COLUMN_UPDATE_ENDPOINT = '/api/workflow-board/columns/update';
@@ -624,6 +625,13 @@ export function decomposeWorkflowCard(input = {}, options = {}) {
 
 export function controlWorkflowCard(input = {}, options = {}) {
   return postWorkflowAction(WORKFLOW_CONTROL_ENDPOINT, input, options);
+}
+
+// Resolve a card parked in the human-decision lane: `decision: 'return'` (default) routes the answer
+// back to the orchestrator; `decision: 'reject'` retires it to the reject terminal. `optionId`/`answer`
+// carry the human's choice and free text.
+export function decideWorkflowCard(input = {}, options = {}) {
+  return postWorkflowAction(WORKFLOW_DECIDE_ENDPOINT, input, options);
 }
 
 export function updateWorkflowBoardAutomation(input = {}, options = {}) {

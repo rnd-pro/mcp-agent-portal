@@ -111,6 +111,16 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    'POST /api/workflow-board/decide': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = await resolveService().resolveDecisionCard(body, mutationContext(req));
+        json(res, { ok: result.ok !== false, ...result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'POST /api/workflow-board/decompose': async (req, res) => {
       try {
         let body = await parseBody(req);

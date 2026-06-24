@@ -202,9 +202,12 @@ describe('workflow board task dependencies', () => {
     service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
     assert.equal(service.getCard('down-release').lifecycle, 'queued', 'release lets the dependent proceed');
 
-    // cancel_self: the dependent is driven to the terminal column and unblocked.
-    assert.equal(service.getCard('down-cancel').columnId, 'done', 'cancel_self moves the dependent to terminal');
-    assert.notEqual(service.getCard('down-cancel').lifecycle, 'blocked');
+    // cancel_self: the dependent is driven to the REJECT terminal (a cancellation is a discard, not a
+    // success) with a `cancelled` resolution, and unblocked.
+    let cancelled = service.getCard('down-cancel');
+    assert.equal(cancelled.columnId, 'rejected', 'cancel_self retires the dependent to the reject terminal');
+    assert.equal(cancelled.metadata.resolution.status, 'cancelled', 'the cancellation resolution is recorded');
+    assert.notEqual(cancelled.lifecycle, 'blocked');
   });
 
   it('fan-in: a dependent on two upstreams fails fast when one terminal-fails', () => {
@@ -322,7 +325,7 @@ describe('workflow board task dependencies', () => {
     service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
 
     assert.equal(service.getCard('down-rel').lifecycle, 'queued', 'release lets the dependent proceed');
-    assert.equal(service.getCard('down-can').columnId, 'done', 'cancel_self moves the dependent to terminal');
+    assert.equal(service.getCard('down-can').columnId, 'rejected', 'cancel_self retires the dependent to the reject terminal');
     assert.notEqual(service.getCard('down-can').lifecycle, 'blocked', 'cancel_self unblocks the dependent');
     let esc = service.getCard('down-esc');
     assert.equal(esc.metadata?.escalation?.kind, 'needs_decision', 'block_and_escalate raises a typed needs_decision');
