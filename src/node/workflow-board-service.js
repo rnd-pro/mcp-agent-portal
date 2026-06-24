@@ -4504,31 +4504,29 @@ export function createWorkflowBoardService(opts = {}) {
             advanced.push({ cardId: card.id, toColumnId: publishColumnId });
           } else if (!hasActiveEscalation(latestCard)) {
             // The audit did NOT approve the work (FAIL, no verdict, or a daemon self-sign barred by
-            // separated duty) AND no escalation episode is open yet — so the problem returns to the
-            // orchestrator instead of sticking here silently: raise a `rework` escalation and the
-            // re-engagement driver routes the card back to the orchestrate column (re-audit, re-execute,
-            // or reject). Gating on `!hasActiveEscalation` (not the needs_audit flag) means a card ALREADY
-            // flagged needs_audit — including one wedged before this code shipped — is still rescued; the
-            // open escalation then prevents re-raising every tick. A bounded consecutive-rework counter
-            // (persisted on metadata, so it survives the re-execution run that clears the escalation)
-            // backstops the loop — past the limit the card parks for a human (`needs_human`).
+            // separated duty) AND no escalation episode is open yet — so the problem RETURNS TO THE
+            // ORCHESTRATOR instead of sticking here silently or being parked for a human by the board:
+            // raise a `rework` escalation and the re-engagement driver routes the card back to the
+            // orchestrate column. The orchestrator owns the routing decision (re-audit, re-execute,
+            // reject, or — the extreme case — ask a human with its OWN question). Gating on
+            // `!hasActiveEscalation` (not the needs_audit flag) means a card ALREADY flagged needs_audit
+            // — including one wedged before this code shipped — is still rescued; the open escalation then
+            // prevents re-raising every tick. A bounded consecutive-rework counter (persisted on metadata,
+            // so it survives the re-execution run that clears the escalation) flips the detail to an
+            // explicit "automatic rework is exhausted — terminate now" directive so the orchestrator stops
+            // looping and decides; the board never fabricates a human prompt or a terminal of its own here.
             let reworkCycles = Number(latestCard.metadata?.reworkCycles ?? 0) + 1;
             let exhausted = reworkCycles > DEFAULT_AUDIT_REWORK_LIMIT;
             let verdictText = verdict === 'fail' ? 'reported FAIL'
               : verdict === 'pass' ? 'passed but could not be independently signed (separated duty)'
                 : 'produced no PASS/FAIL verdict';
             let detail = exhausted
-              ? `Quality audit ${verdictText} for ${card.id} after ${reworkCycles - 1} orchestrator re-routes; parking for a human decision.`
+              ? `Quality audit ${verdictText} for ${card.id} after ${reworkCycles - 1} orchestrator re-routes; automatic rework is exhausted. Decide now: reject (WORKFLOW_RESULT: rejected) or — only if a person genuinely must choose — ask a human (WORKFLOW_RESULT: needs_human with your own question and options). Do not request another plain rework.`
               : `Quality audit ${verdictText} for ${card.id}; returning to the orchestrator to re-route (re-audit, re-execute, or reject).`;
             let escalationMetadata = raiseEscalationMetadata(latestCard, {
-              kind: exhausted ? 'needs_human' : 'rework',
+              kind: 'rework',
               detail,
-              options: exhausted
-                ? [
-                  { id: 'retry', label: 'Send back to the orchestrator to retry' },
-                  { id: 'reject', label: 'Reject this card' },
-                ]
-                : [],
+              options: [],
               runId: latestFinished?.id ?? null,
               at: runtimeNow,
             });
@@ -4600,9 +4598,10 @@ export function createWorkflowBoardService(opts = {}) {
 
   // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
   // move — no transition gate). This surfaces the "waiting on a human" state as a visible column instead
-  // of a buried flag. The orchestrator raises `needs_human` when it explicitly wants a human, and the
-  // audit/escalation backstops raise it after exhausting automatic re-routing. Idempotent: a card already
-  // in the lane, already terminal, with a live run, or with no decision lane configured is left untouched.
+  // of a buried flag. `needs_human` is raised ONLY by the orchestrator's explicit `WORKFLOW_RESULT:
+  // needs_human` decision (with its own question + options) — the board's loop-safety backstops never
+  // fabricate one. Idempotent: a card already in the lane, already terminal, with a live run, or with no
+  // decision lane configured is left untouched.
   function driveNeedsDecisionParking(board, principal, runtimeNow) {
     let laneId = decisionColumnId(board);
     if (!laneId) return { parked: [], notified: [] };
@@ -4657,89 +4656,6 @@ export function createWorkflowBoardService(opts = {}) {
       }],
     }, { id: eventId, now: ts });
     return { op: 'set', path: `workflowTransitions/${event.id}`, value: event };
-  }
-
-  // A human resolves a card parked in the decision lane (the inspector buttons + free-text answer). Two
-  // outcomes, both governed by the operator's board:control capability at the call site:
-  //   - `return` (default): the answer (a chosen option id and/or free text) is folded into a fresh
-  //     re-engageable `rework` escalation and the card routes back to the orchestrate column — the
-  //     orchestrator wakes carrying the human's answer and re-routes. The auto-rework budget resets.
-  //   - `reject`: the card retires to the reject terminal with a `rejected` resolution, escalation cleared.
-  // Returning to the orchestrator is the default — the human-decision lane is the orchestrator's
-  // last-resort question, and its answer always flows back to the orchestrator unless explicitly rejected.
-  async function resolveDecisionCard(args = {}, context = {}) {
-    let principal = resolvePrincipal(context);
-    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
-    let cardId = textOrNull(args.cardId ?? args.card_id);
-    let card = cardId ? getCard(cardId) : null;
-    if (!card) return { ok: false, error: 'card_not_found' };
-    let state = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : null;
-    let optionId = textOrNull(args.optionId ?? args.option_id);
-    let answer = textOrNull(args.answer ?? args.text);
-    // `reject` is requested explicitly, or via the reserved `reject` option id from a backstop question.
-    let decision = (textOrNull(args.decision) === 'reject' || optionId === 'reject') ? 'reject' : 'return';
-    let ts = now();
-
-    if (decision === 'reject') {
-      let rejectColumnId = rejectTerminalColumnId(board);
-      if (!rejectColumnId) return { ok: false, error: 'no_reject_terminal' };
-      let metadata = { ...(card.metadata ?? {}) };
-      delete metadata.escalation;
-      delete metadata.reworkCycles;
-      metadata.resolution = {
-        status: 'rejected',
-        reason: answer ?? state?.detail ?? 'Rejected by a human decision.',
-        at: ts,
-        by: principal.label,
-      };
-      let flags = normalizeRecoveryFlags((card.recoveryFlags ?? []).filter(flag => flag !== 'needs_audit' && flag !== 'blocked'));
-      let rejected = normalizeWorkflowCardInput({
-        ...card, columnId: rejectColumnId, lifecycle: 'idle', recoveryFlags: flags,
-        metadata, version: card.version + 1, updatedAt: ts, updatedBy: principal.label,
-      }, {
-        id: card.id, actor: principal.label, now: ts,
-        version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
-      });
-      let eventId = nextId(makeId, 'decision');
-      let event = normalizeWorkflowTransitionEvent({
-        id: eventId, eventType: 'transition', boardId: board.id, cardId: card.id,
-        fromColumnId: card.columnId, toColumnId: rejectColumnId, actor: principal.label, mode: 'manual',
-        reason: metadata.resolution.reason, status: 'accepted',
-        sideEffects: [{ type: 'decision', resolution: 'rejected', detail: metadata.resolution.reason }],
-      }, { id: eventId, now: ts });
-      stateGraph.commit([
-        { op: 'set', path: `workflowCards/${card.id}`, value: rejected },
-        { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-      ], sourceForPrincipal(principal));
-      return { ok: true, decision, cardId: card.id, toColumnId: rejectColumnId };
-    }
-
-    // Return to the orchestrator carrying the human's answer. Stage a fresh re-engageable rework episode
-    // (attemptCount 0, humanEscalated false, due now), then route to the orchestrate column. The card has
-    // an active escalation at gate-eval time, so the rework_authorized edge passes for a human too.
-    let detailParts = [];
-    if (optionId) detailParts.push(`Human chose: ${optionId}`);
-    if (answer) detailParts.push(answer);
-    let detail = detailParts.join(' — ') || 'Human returned the card to the orchestrator for re-routing.';
-    let escalation = normalizeWorkflowEscalation({ kind: 'rework', detail, raisedBy: principal.label }, { now: ts });
-    let escalationState = normalizeWorkflowEscalationState({
-      lastEscalation: escalation, attemptCount: 0, firstAt: ts, lastAt: ts, nextAttemptAt: ts, humanEscalated: false,
-      history: [...(state?.history ?? []), { kind: 'rework', detail, runId: null, at: ts }],
-    });
-    let metadata = { ...(card.metadata ?? {}), escalation: escalationState, humanAnswer: { optionId, answer, at: ts, by: principal.label } };
-    delete metadata.reworkCycles;
-    let staged = normalizeWorkflowCardInput({
-      ...card, metadata, version: card.version + 1, updatedAt: ts, updatedBy: principal.label,
-    }, {
-      id: card.id, actor: principal.label, now: ts,
-      version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
-    });
-    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: staged }], sourceForPrincipal(principal));
-    let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
-    let outcome = await requestWorkflowTransition({
-      boardId: board.id, cardId: card.id, toColumnId: orchestrateColumnId, reason: detail, reworkAuthorized: true,
-    }, context);
-    return { ok: Boolean(outcome?.ok), decision, cardId: card.id, toColumnId: orchestrateColumnId, transition: outcome };
   }
 
   // ── Per-card collaboration surface (Axis C: human-agent collaboration) ───────────────────────────
@@ -4816,7 +4732,7 @@ export function createWorkflowBoardService(opts = {}) {
   // inbox carried only agent→orchestrator events, so a `needs_decision` could be closed only by another
   // agent run. A reply records an auditable comment AND mints a return into the card's inbox attributed
   // to the human, so the SAME re-engagement driver wakes the orchestrator carrying the person's answer.
-  // Governed by board:control (the decision-closing capability resolveDecisionCard uses). `resolve`
+  // Governed by board:control (card.control — the decision-closing capability). `resolve`
   // (default true when a decision is live) also clears the live escalation so the person closes the
   // episode directly; the routed return still wakes the orchestrator to act on the answer.
   function replyToCard(args = {}, context = {}) {
@@ -6004,7 +5920,8 @@ export function createWorkflowBoardService(opts = {}) {
         '  - insufficient_permission: PROPOSE a capable lane (resource group / agent) and let the board gate or a human approve it. Never self-grant rights or approval.',
         '  - insufficient_context: gather and attach the missing context, or decompose an investigation child card, then re-delegate.',
         '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
-        '  - rework: re-delegate the fix with the audit findings as acceptance criteria.',
+        '  - rework (the common case): re-delegate the fix with the audit findings as acceptance criteria. But if the Detail above says automatic rework is exhausted, do NOT re-route again — decide a terminal: reject the card or, only in the extreme case, ask a human.',
+        '- You own the routing decision when a card returns: rework with corrections (most often), reject (`WORKFLOW_RESULT: rejected`), or — the rare extreme — ask a human (`WORKFLOW_RESULT: needs_human`). The board never decides this for you.',
         '- Permission and approval policy stay board/human-owned; this channel only proposes.',
       ].filter(Boolean).join('\n')
       : '';
@@ -6038,7 +5955,7 @@ export function createWorkflowBoardService(opts = {}) {
       '- End with `WORKFLOW_RESULT: completed`, `WORKFLOW_RESULT: blocked`, or `WORKFLOW_RESULT: needs_follow_up`.',
       '- Orchestrator terminal DECISIONS — use only when routing a card you own, on a clean finish:',
       '  - `WORKFLOW_RESULT: rejected` — the card is not worth completing; it retires to the reject terminal. Put the reason on an `ESCALATION_DETAIL:` line.',
-      '  - `WORKFLOW_RESULT: needs_human` — the extreme case: you genuinely cannot decide and must ask a human. Put the question on `ESCALATION_DETAIL:`, optional button choices on `ESCALATION_OPTIONS: choice a | choice b | choice c`. The card parks in the decision lane until a human answers, then the answer returns to you.',
+      '  - `WORKFLOW_RESULT: needs_human` — the extreme case: you genuinely cannot decide and must ask a human. Put the question on `ESCALATION_DETAIL:`, optional button choices on `ESCALATION_OPTIONS: choice a | choice b | choice c`. Write the question and every option label in the user\'s language (match the locale the user communicates in) — a person reads them. The card parks in the decision lane until a human answers, then the answer returns to you.',
       '- If you end with `WORKFLOW_RESULT: blocked`, emit a typed escalation on the lines just above it so the orchestrator can route it:',
       '  - `ESCALATION_KIND:` one of insufficient_permission, insufficient_context, needs_decision, needs_human, rework',
       '  - `ESCALATION_DETAIL:` one line — exactly what is missing and why you cannot self-resolve it',
@@ -6823,7 +6740,10 @@ export function createWorkflowBoardService(opts = {}) {
     let maxAttempts = Number(args.maxAttempts ?? args.max_attempts);
     if (!Number.isFinite(maxAttempts) || maxAttempts < 1) maxAttempts = DEFAULT_ESCALATION_MAX_ATTEMPTS;
     let reengaged = [];
+    // No board-fabricated human escalations survive here (asking a person is the orchestrator's decision);
+    // the loop-safety backstop now retires a terminally-stuck card to the reject terminal instead.
     let escalatedToHuman = [];
+    let terminated = [];
 
     // S9a: a queued actionable return is a driver candidate alongside an active escalation, so a
     // return drives the orchestrator through this SAME re-engagement driver.
@@ -6851,61 +6771,43 @@ export function createWorkflowBoardService(opts = {}) {
       // window plus this guard mean each round drives exactly one orchestration.
       if (activeRunForCard(card.id) && !args.force) continue;
 
-      if (state.attemptCount >= maxAttempts) {
-        // Loop-safety backstop: automatic re-engagement is exhausted. Rather than block the card in place
-        // (a buried flag), convert the episode to a `needs_human` decision so the parking driver surfaces
-        // it in the decision lane with a question + retry/reject buttons. The episode stays actionable
-        // (NOT humanEscalated) until a human answers — nothing silently sticks.
-        let question = escalationHumanBlocker(state, maxAttempts);
-        let decisionEscalation = normalizeWorkflowEscalation({
-          kind: 'needs_human',
-          detail: question,
-          options: [
-            { id: 'retry', label: 'Send back to the orchestrator to retry' },
-            { id: 'reject', label: 'Reject this card' },
-          ],
-          raisedBy: principal.label,
-        }, { now: currentNow });
-        let decisionState = normalizeWorkflowEscalationState({
-          ...state,
-          lastEscalation: decisionEscalation,
-          lastAt: currentNow,
-          history: [...(state.history ?? []), { kind: 'needs_human', detail: question, runId: null, at: currentNow }],
-        });
-        let nextCard = normalizeWorkflowCardInput({
-          ...card,
-          metadata: { ...card.metadata, escalation: decisionState },
-          version: card.version + 1,
-          updatedAt: currentNow,
-          updatedBy: principal.label,
-        }, {
-          id: card.id,
-          actor: principal.label,
-          now: currentNow,
-          version: card.version + 1,
-          createdAt: card.createdAt,
-          updatedAt: currentNow,
-        });
-        let eventId = nextId(makeId, 'escalation');
-        let event = normalizeWorkflowTransitionEvent({
-          id: eventId,
-          eventType: 'escalation',
-          boardId: board.id,
-          cardId: card.id,
-          fromColumnId: card.columnId,
-          toColumnId: card.columnId,
-          actor: principal.label,
-          mode: 'auto',
-          reason: question,
-          status: 'accepted',
-          sideEffects: [{ type: 'escalation', status: 'needs_human', kind: 'needs_human', detail: question, attempts: state.attemptCount }],
-        }, { id: eventId, now: currentNow });
-        stateGraph.commit([
-          { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
-          { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
-        ], sourceForPrincipal(principal));
-        escalatedToHuman.push({ cardId: card.id, kind: 'needs_human', attempts: state.attemptCount, blocker: question });
-        continue;
+      // Loop-safety backstop. The board does NOT fabricate a human question here — asking a person is the
+      // orchestrator's decision (WORKFLOW_RESULT: needs_human), not the board's. Below a hard ceiling an
+      // exhausted card simply keeps RETURNING TO THE ORCHESTRATOR through the normal re-engage path below,
+      // carrying the exhaustion directive its escalation detail already states, so the orchestrator stops
+      // looping and decides (reject / ask a human / one targeted fix). Past the hard ceiling the card must
+      // still reach a terminal (every card resolves), so the board retires it to the reject terminal as a
+      // last-resort discard — a legitimate board terminal, never a fabricated human prompt or park.
+      if (state.attemptCount >= maxAttempts * 2) {
+        let rejectColumnId = rejectTerminalColumnId(board);
+        if (rejectColumnId) {
+          let reason = `Automatic re-engagement exhausted after ${state.attemptCount} attempts without an orchestrator terminal decision; retiring ${card.id} to the reject terminal.`;
+          let metadata = { ...card.metadata };
+          delete metadata.escalation;
+          delete metadata.reworkCycles;
+          metadata.resolution = { status: 'rejected', reason, at: currentNow, by: principal.label };
+          let flags = normalizeRecoveryFlags((card.recoveryFlags ?? []).filter(flag => flag !== 'needs_audit' && flag !== 'blocked'));
+          let rejected = normalizeWorkflowCardInput({
+            ...card, columnId: rejectColumnId, lifecycle: 'idle', recoveryFlags: flags,
+            metadata, version: card.version + 1, updatedAt: currentNow, updatedBy: principal.label,
+          }, {
+            id: card.id, actor: principal.label, now: currentNow,
+            version: card.version + 1, createdAt: card.createdAt, updatedAt: currentNow,
+          });
+          let eventId = nextId(makeId, 'escalation');
+          let event = normalizeWorkflowTransitionEvent({
+            id: eventId, eventType: 'transition', boardId: board.id, cardId: card.id,
+            fromColumnId: card.columnId, toColumnId: rejectColumnId, actor: principal.label, mode: 'auto',
+            reason, status: 'accepted',
+            sideEffects: [{ type: 'decision', resolution: 'rejected', detail: reason, attempts: state.attemptCount }],
+          }, { id: eventId, now: currentNow });
+          stateGraph.commit([
+            { op: 'set', path: `workflowCards/${card.id}`, value: rejected },
+            { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+          ], sourceForPrincipal(principal));
+          terminated.push({ cardId: card.id, kind: 'rejected', attempts: state.attemptCount, reason });
+          continue;
+        }
       }
 
       // Accrue FIRST, durably, before re-engaging — the central loop-safety invariant. An escalation
@@ -6982,10 +6884,10 @@ export function createWorkflowBoardService(opts = {}) {
     // A fully-manual board (neither recovery nor returnWake auto) still reports `skipped` when nothing
     // escaped the per-card gate (no hard-interrupt passthrough, no escalation/return re-engaged),
     // preserving the board-level contract.
-    if (!recoveryAuto && !returnWakeAuto && !args.force && reengaged.length === 0 && escalatedToHuman.length === 0) {
-      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}, returnWake is ${boardAutomation.returnWake}`, reengaged, escalatedToHuman };
+    if (!recoveryAuto && !returnWakeAuto && !args.force && reengaged.length === 0 && escalatedToHuman.length === 0 && terminated.length === 0) {
+      return { ok: true, skipped: true, reason: `board recovery is ${boardAutomation.recovery}, returnWake is ${boardAutomation.returnWake}`, reengaged, escalatedToHuman, terminated };
     }
-    return { ok: true, reengaged, escalatedToHuman };
+    return { ok: true, reengaged, escalatedToHuman, terminated };
   }
 
   // ── Admission recovery / D1.4 resolution-from-phase (inv 25, 43; AD-11) ───────────────────────
@@ -7148,15 +7050,6 @@ export function createWorkflowBoardService(opts = {}) {
     }
 
     return { ok: true, resolved, kept };
-  }
-
-  function escalationHumanBlocker(state, maxAttempts) {
-    let parts = [`Escalation unresolved after ${maxAttempts} re-engagements (${state.kind}).`];
-    if (state.detail) parts.push(state.detail);
-    let suggestion = textOrNull(state.lastEscalation?.suggestedResolution);
-    if (suggestion) parts.push(`Suggested: ${suggestion}`);
-    parts.push('Human decision required.');
-    return parts.join(' ');
   }
 
   function workspaceRoot() {
@@ -7511,7 +7404,6 @@ export function createWorkflowBoardService(opts = {}) {
     reconcileWorkflowAdmissions,
     reconcileWorkflowRecovery,
     reconcileWorkflowEscalations,
-    resolveDecisionCard,
     addCardComment,
     listCardComments,
     replyToCard,

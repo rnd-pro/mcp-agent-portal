@@ -1068,7 +1068,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(card.metadata.escalation?.kind, 'rework', 'a pre-flagged needs_audit card still gets a rework escalation raised');
   });
 
-  it('return-loop backstop: past the rework limit a verdict-less audit parks the card for a human', async () => {
+  it('return-loop backstop: past the rework limit a verdict-less audit still returns to the orchestrator (the board never fabricates a human ask)', async () => {
     service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
     let cardId = plantAuditedCard('aud-backstop');
     let seeded = service.getCard(cardId);
@@ -1077,9 +1077,10 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true });
 
     let card = service.getCard(cardId);
-    assert.equal(card.metadata.escalation.kind, 'needs_human', 'past the limit it asks for a human decision');
-    assert.equal(card.columnId, 'needs-decision', 'the parking driver relocates it to the decision lane');
-    assert.ok(card.metadata.escalation.lastEscalation.options.some(o => o.id === 'retry'), 'retry/reject options offered');
+    assert.equal(card.metadata.escalation.kind, 'rework', 'past the limit it still returns to the orchestrator as rework — asking a human is the orchestrator\'s decision, not the board\'s');
+    assert.notEqual(card.columnId, 'needs-decision', 'the board never parks it for a human itself');
+    assert.deepEqual(card.metadata.escalation.lastEscalation.options, [], 'no board-fabricated retry/reject options');
+    assert.match(card.metadata.escalation.lastEscalation.detail, /exhausted/i, 'the detail directs the orchestrator to terminate (reject or ask a human)');
   });
 
   it('reject decision: a run that ends WORKFLOW_RESULT: rejected retires the card to the reject terminal', async () => {
@@ -1105,12 +1106,13 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(card.metadata.resolution.reason, 'not worth it');
   });
 
-  it('resolveDecisionCard: a human return routes a parked card back to the orchestrator with the answer', async () => {
+  it('replyToCard: a human answer on a parked needs_human card clears the decision and returns it to the orchestrator', async () => {
     service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
     let created = service.createOrUpdateCard({
       id: 'dec-1', title: 'Decide', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
       owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
     });
+    // An orchestrator-raised needs_human ask, parked in the decision lane (the only way a card gets here now).
     let escalation = {
       schema: 'workflow-escalation-state/v1', kind: 'needs_human',
       lastEscalation: { schema: 'workflow-escalation/v1', kind: 'needs_human', detail: 'pick one', options: [{ id: 'a', label: 'A' }] },
@@ -1118,34 +1120,19 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     };
     sg.commit([{ op: 'set', path: 'workflowCards/dec-1', value: { ...created.card, columnId: 'needs-decision', metadata: { ...created.card.metadata, escalation } } }], 'test:park');
 
-    let result = await service.resolveDecisionCard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'dec-1', decision: 'return', optionId: 'a', answer: 'do X' });
+    // The human only ANSWERS the orchestrator's question (Axis C reply) — they do not route or reject.
+    let result = service.replyToCard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'dec-1', optionId: 'a', body: 'do X' });
     assert.equal(result.ok, true);
-    assert.equal(result.toColumnId, 'ready', 'resolveDecisionCard routes back to the orchestrate column');
+    assert.equal(result.resolved, true, 'the reply resolves the live decision');
+    let answered = service.getCard('dec-1');
+    assert.equal(answered.metadata.escalation, undefined, 'the human answer clears the live escalation episode');
+    assert.equal(answered.metadata.humanAnswer.optionId, 'a', 'the human answer is recorded for the orchestrator');
+    assert.ok(Array.isArray(answered.metadata.returns) && answered.metadata.returns.length >= 1, 'a routed return is queued into the orchestrator inbox');
+
+    // The re-engagement driver wakes the orchestrator carrying the answer and routes the card out of the lane.
+    await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, {});
     let card = service.getCard('dec-1');
-    assert.notEqual(card.columnId, 'needs-decision', 'the card leaves the decision lane');
-    // On an autonomous board the orchestrate column auto-picks it up, so it may already be in-progress.
-    assert.ok(['ready', 'in-progress'].includes(card.columnId), 'it returns to the orchestrator pipeline');
-    assert.equal(card.metadata.humanAnswer.optionId, 'a', 'the human answer is recorded for the orchestrator');
-  });
-
-  it('resolveDecisionCard: a human reject retires the card to the reject terminal', async () => {
-    let created = service.createOrUpdateCard({
-      id: 'dec-2', title: 'Reject', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
-      owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
-    });
-    let escalation = {
-      schema: 'workflow-escalation-state/v1', kind: 'needs_human',
-      lastEscalation: { schema: 'workflow-escalation/v1', kind: 'needs_human', detail: 'pick' },
-      attemptCount: 3, humanEscalated: false,
-    };
-    sg.commit([{ op: 'set', path: 'workflowCards/dec-2', value: { ...created.card, columnId: 'needs-decision', metadata: { ...created.card.metadata, escalation } } }], 'test:park2');
-
-    let result = await service.resolveDecisionCard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'dec-2', decision: 'reject', answer: 'wont fix' });
-    assert.equal(result.ok, true);
-    let card = service.getCard('dec-2');
-    assert.equal(card.columnId, 'rejected', 'a human reject retires the card to the reject terminal');
-    assert.equal(card.metadata.resolution.status, 'rejected');
-    assert.equal(card.metadata.resolution.reason, 'wont fix');
+    assert.notEqual(card.columnId, 'needs-decision', 'the answered card leaves the decision lane back toward the orchestrator');
   });
 
   it('autonomous tail + publishMode after_audit: walks a verdict-passed card all the way to done', async () => {

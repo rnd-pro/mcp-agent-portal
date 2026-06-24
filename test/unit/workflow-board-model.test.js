@@ -2381,7 +2381,7 @@ links:
     assert.equal(after.columnId, 'ready', 'card routed back to the orchestrate column');
   });
 
-  it('parks for a human decision after the attempt cap without ever exceeding it (natural N rounds)', async () => {
+  it('past the attempt cap keeps returning to the orchestrator; only a hard ceiling retires it to the reject terminal (never a board-fabricated human park)', async () => {
     service.updateWorkflowBoard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, automation: { recovery: 'auto' } });
     let { card } = service.createOrUpdateCard({
       title: 'Unresolvable escalation', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
@@ -2390,38 +2390,41 @@ links:
     seedTerminalRun({ card, runId: 'run-cap', taskId: 'task-cap', text: 'Blocked.\nESCALATION_KIND: needs_context\nESCALATION_DETAIL: missing API spec\nWORKFLOW_RESULT: blocked' });
     service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
 
+    // Below the hard ceiling every round just RETURNS THE CARD TO THE ORCHESTRATOR — the board never
+    // fabricates a needs_human ask, never parks it in the decision lane, never auto-rejects it. Deciding
+    // to ask a human or reject is the orchestrator's job (WORKFLOW_RESULT), not the board's.
     let counts = [];
-    for (let round = 0; round < 3; round++) {
+    for (let round = 0; round < 5; round++) {
       now += 60 * 60 * 1000; // jump past the exponential backoff window
-      await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
-      counts.push(service.getCard(card.id).metadata.escalation.attemptCount);
+      let res = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+      let c = service.getCard(card.id);
+      counts.push(c.metadata.escalation.attemptCount);
+      assert.equal(res.escalatedToHuman.length, 0, `round ${round}: the board never fabricates a human park`);
+      assert.equal(res.terminated.length, 0, `round ${round}: below the hard ceiling nothing is terminated`);
+      assert.notEqual(c.metadata.escalation.kind, 'needs_human', `round ${round}: kind never flips to a board-fabricated needs_human`);
+      assert.notEqual(c.columnId, 'needs-decision', `round ${round}: never parked in the decision lane by the board`);
+      assert.notEqual(c.columnId, 'rejected', `round ${round}: not retired below the ceiling`);
     }
+    assert.deepEqual(counts, [1, 2, 3, 4, 5], 'attempt counter is monotonic, one bump per round — no cap-conversion at the old limit');
 
-    assert.deepEqual(counts, [1, 2, 3], 'attempt counter is monotonic, one bump per round');
-
+    // Force the hard ceiling (maxAttempts * 2 = 6 for the default) — the orchestrator demonstrably never
+    // issued a terminal decision, so the board retires the stuck card to the reject terminal as a
+    // last-resort discard (every card must reach a terminal). This is a board terminal, NOT a fake human ask.
+    let stuck = service.getCard(card.id);
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+      ...stuck, metadata: { ...stuck.metadata, escalation: { ...stuck.metadata.escalation, attemptCount: 6, nextAttemptAt: 0 } },
+    } }], 'test:seed-ceiling');
     now += 60 * 60 * 1000;
     let capped = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
     let final = service.getCard(card.id);
 
-    assert.equal(capped.escalatedToHuman.length, 1, 'card parked for a human at the cap');
-    assert.equal(capped.reengaged.length, 0, 'no further re-engagement after the cap');
-    // The episode converts to a needs_human decision — surfaced in the decision lane, NOT humanEscalated
-    // (it stays actionable until a human answers), and NOT blocked-in-place behind a buried flag.
-    assert.equal(final.metadata.escalation.kind, 'needs_human');
-    assert.equal(final.metadata.escalation.humanEscalated, false);
-    assert.equal(final.metadata.escalation.attemptCount, 3, 'counter never exceeds the cap');
+    assert.equal(capped.terminated.length, 1, 'at the hard ceiling the board retires the stuck card to a terminal');
+    assert.equal(capped.escalatedToHuman.length, 0, 'still no board-fabricated human handoff');
+    assert.equal(capped.reengaged.length, 0, 'no further re-engagement after the terminal');
+    assert.equal(final.columnId, 'rejected', 'the card reaches the reject terminal (every card resolves)');
+    assert.equal(final.metadata.resolution.status, 'rejected');
+    assert.equal(final.metadata.escalation, undefined, 'the escalation episode is cleared on the terminal');
     assert.equal(final.recoveryFlags.includes('blocked'), false, 'no silent blocked-in-place flag');
-    assert.ok(/Human decision required/.test(final.metadata.escalation.detail), 'human-decision question recorded');
-    assert.deepEqual(
-      final.metadata.escalation.lastEscalation.options.map(o => o.id),
-      ['retry', 'reject'],
-      'retry/reject buttons offered to the human',
-    );
-
-    now += 60 * 60 * 1000;
-    let afterCap = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
-    assert.equal(afterCap.reengaged.length, 0, 'parked needs_human card stays put');
-    assert.equal(afterCap.escalatedToHuman.length, 0, 'no repeated human handoff');
   });
 
   // S5 (WS-B3): the service derives the closed column set, destructive moves, the active/recovery
