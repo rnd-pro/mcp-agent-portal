@@ -32,6 +32,9 @@ import {
   agentName,
   formatDuration,
   formatTokens,
+  effectiveStatus,
+  isCardActive,
+  formatStatusLabel,
 } from './workflow-card-telemetry.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
 
@@ -51,7 +54,6 @@ const REALTIME_DEBOUNCE_MS = 200;
 const REALTIME_STATE_KEYS = ['workflowCards', 'workflowRuns', 'workflowLeases', 'workflowTransitions', 'tasks'];
 const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
 const ACTIVE_CONTROL_COLUMNS = new Set(['ready', 'in-progress', 'quality-audit', 'commit-publish']);
-const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 const COLUMN_TRIGGERS = ['manual', 'on_enter', 'lease_required'];
 const COLUMN_ACTIONS = ['classify', 'scope', 'orchestrate', 'execute', 'audit', 'publish', 'close'];
 const COLUMN_MODES = ['manual', 'gated', 'auto'];
@@ -252,22 +254,8 @@ function createTextInput(value, dataset = {}, options = {}) {
   return input;
 }
 
-function hasRunData(run = {}) {
-  return Boolean(
-    normalizeText(run.id)
-    || normalizeText(run.status)
-    || normalizeText(run.leaseOwner)
-    || asArray(run.taskIds).length
-    || normalizeText(run.startedAt)
-    || normalizeText(run.updatedAt)
-    || normalizeText(run.completedAt)
-  );
-}
-
 function cardHasActiveRun(card = {}) {
-  let run = hasRunData(card.run) ? card.run : null;
-  let runs = [...asArray(card.runs), run].filter(Boolean);
-  return runs.some(item => RUNNING_RUN_STATUSES.has(normalizeText(item.status).toLowerCase()));
+  return isCardActive(card);
 }
 
 function eventDetail(board, card, extra = {}) {
@@ -1037,8 +1025,8 @@ export class WorkflowBoard extends Symbiote {
     let agent = agentName(card, run);
     let duration = formatDuration(run);
     let tokens = formatTokens(run?.tokens);
-    let busy = ['running', 'requested', 'recovering', 'active', 'started', 'streaming']
-      .includes(normalizeText(run?.status).toLowerCase());
+    let busy = isCardActive(card);
+    let liveStatus = effectiveStatus(card);
     let group = normalizeText(card.resourceGroup ?? card.raw?.resourceGroup) || '';
     let blockedBy = asArray(card.raw?.dependsOn ?? card.dependsOn).length;
     let unlocks = downstream.get(card.id) ?? 0;
@@ -1064,7 +1052,7 @@ export class WorkflowBoard extends Symbiote {
       footer: [
         blockedBy ? { label: `⟸ ${blockedBy}`, kind: 'dep-blocked', title: `Blocked by ${blockedBy} upstream card(s)` } : null,
         unlocks ? { label: `⟹ ${unlocks}`, kind: 'dep-unlocks', title: `Unlocks ${unlocks} downstream card(s)` } : null,
-        card.status ? { label: card.status, kind: statusKind(card.status) } : null,
+        liveStatus ? { label: formatStatusLabel(liveStatus), kind: busy ? 'warning' : statusKind(liveStatus) } : null,
         agent ? { label: agent, kind: 'status' } : null,
         duration ? { label: duration, kind: 'status' } : null,
         tokens ? { label: `${tokens} tok`, kind: 'status' } : null,

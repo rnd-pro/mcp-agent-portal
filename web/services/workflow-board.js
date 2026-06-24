@@ -309,6 +309,7 @@ function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID
     kind: normalizeText(card.kind || card.type, 'work-item'),
     priority,
     status: normalizeText(card.status || card.runtimeStatus || card.runtime_status),
+    lifecycle: normalizeText(card.lifecycle || card.workflowLifecycle || card.workflow_lifecycle),
     owner: normalizeText(card.owner || card.assignee || card.agent || card.agentSlug),
     assignedAgent: normalizeText(card.assignedAgent || card.assigned_agent || card.agent || card.agentSlug),
     resourceGroup: normalizeText(card.resourceGroup || card.resource_group),

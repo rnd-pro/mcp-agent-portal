@@ -14,6 +14,9 @@ import {
   formatDuration,
   formatTokens,
   relativeTime,
+  effectiveStatus,
+  isCardActive,
+  formatStatusLabel,
 } from './workflow-card-telemetry.js';
 import { replyToCard } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
@@ -117,8 +120,6 @@ function eventTitle(event = {}) {
   return [event.status, event.actor, event.note].map((p) => text(p)).filter(Boolean).join(' · ');
 }
 
-const RUNNING_STATUSES = new Set(['running', 'requested', 'recovering', 'started', 'active', 'streaming']);
-
 const HELD_FLAG_LABELS = {
   needs_audit: 'Needs audit',
   blocked: 'Blocked',
@@ -198,11 +199,11 @@ export class WorkflowCardInspector extends Symbiote {
     let run = latestRun(card);
     this.ref.title.textContent = text(card.title, tPortal('text.cardInspector'));
 
-    let status = text(card.status || run?.status);
-    let active = RUNNING_STATUSES.has(text(run?.status).toLowerCase());
+    let status = effectiveStatus(card);
+    let active = isCardActive(card);
     this.ref.spinner.hidden = !active;
     if (status) {
-      this.ref.statusBadge.textContent = status;
+      this.ref.statusBadge.textContent = formatStatusLabel(status);
       this.ref.statusBadge.dataset.kind = active ? 'warning' : statusKind(status);
       this.ref.statusBadge.hidden = false;
     } else {
@@ -221,7 +222,7 @@ export class WorkflowCardInspector extends Symbiote {
     this._chatId = text(card.entityRefs?.chatId) || null;
     this.ref.chatBtn.hidden = !this._chatId;
 
-    this.ref.mStatus.textContent = status || '—';
+    this.ref.mStatus.textContent = formatStatusLabel(status) || '—';
     this.ref.mStatus.dataset.kind = statusKind(status);
     this.ref.mDuration.textContent = formatDuration(run) || '—';
     this.ref.mTokens.textContent = formatTokens(run?.tokens) || '—';
