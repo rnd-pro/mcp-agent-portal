@@ -1,10 +1,12 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startWebServer } from './web-server.js';
 import { writePortFile, removePortFile } from './backend-lifecycle.js';
-import { ensureGatewayAlive } from './local-gateway.js';
+import { ensureGatewayAlive, getGatewayPort } from './local-gateway.js';
+import { registerLocal } from './mdns.js';
 
 const projectRoot = resolve(process.argv[2] || '.');
 
@@ -55,5 +57,39 @@ const checkInterval = setInterval(() => {
 // that happened to host the gateway dies, the next surviving backend re-hosts it within one heartbeat — and
 // routes stay fresh across backend restarts (portal.local no longer drops with the backend).
 ensureGatewayAlive();
-const gatewayHeartbeat = setInterval(ensureGatewayAlive, 10000);
+
+// Keep portal.local advertised whenever THIS backend hosts the gateway. The gateway-host setup only
+// advertised the name on the no-projectName registerService path; a backend that TAKES OVER :80 via
+// ensureGatewayAlive never re-advertised, so portal.local stopped resolving on every backend restart
+// while :80 kept serving (the observed "up but unreachable by name" split-brain). Close that gap: own
+// the advert while we own the gateway pid, drop it when we don't, and re-assert if the advertiser was
+// reaped while we still host. Best-effort — advert maintenance must never crash the backend.
+let _portalAdvert = null;
+function _gatewayHostPid() {
+  try {
+    const gwRoot = process.env.PORTAL_LOCAL_GATEWAY_DIR
+      || join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway');
+    return JSON.parse(readFileSync(join(gwRoot, 'gateway.pid'), 'utf8'))?.pid ?? null;
+  } catch { return null; }
+}
+function _portalAdvertAlive() {
+  // macOS advertises via a detached `dns-sd` child that can be reaped independently; other platforms use
+  // an in-process responder (Node UDP) / avahi child whose handle we hold, so the handle is the signal.
+  if (process.platform !== 'darwin') return Boolean(_portalAdvert);
+  try { return execSync('pgrep -f "dns-sd.*portal\\.local" 2>/dev/null || true', { encoding: 'utf8' }).trim().length > 0; }
+  catch { return Boolean(_portalAdvert); }
+}
+function maintainPortalAdvert() {
+  try {
+    if (_gatewayHostPid() === process.pid) {
+      if (!_portalAdvert || !_portalAdvertAlive()) _portalAdvert = registerLocal('portal.local', getGatewayPort());
+    } else if (_portalAdvert) {
+      try { _portalAdvert.cleanup?.(); } catch { /* best effort */ }
+      _portalAdvert = null;
+    }
+  } catch { /* best effort */ }
+}
+maintainPortalAdvert();
+
+const gatewayHeartbeat = setInterval(() => { ensureGatewayAlive(); maintainPortalAdvert(); }, 10000);
 gatewayHeartbeat.unref();
