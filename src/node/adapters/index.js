@@ -249,7 +249,7 @@ export function invalidateAgentList() {
 
 // Adapter metadata — describes providers and their parameters.
 // The UI uses this to build dynamic cascading selects:
-//   pool → Agent (from .agent-portal/agents/) → Provider → Model → ChatType
+//   pool → Agent (from team-memory agents/) → Provider → Model → ChatType
 
 /**
  * Read resource-groups.json and extract preferred models per provider + full group list.

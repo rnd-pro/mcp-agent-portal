@@ -107,7 +107,7 @@ function assertWritableAgentPortalPath(relativePath = '') {
   let parts = String(relativePath || '').split(/[\\/]+/).filter(Boolean);
   let [first] = parts;
   if (!first || !WRITABLE_AGENT_PORTAL_DIRS.has(first)) {
-    throw new Error('Path is not editable public .agent-portal content');
+    throw new Error('Path is not editable public team-memory content');
   }
   if (parts.some(part => part.startsWith('.'))) {
     throw new Error('Hidden paths are not editable');
@@ -123,7 +123,7 @@ function assertPublicAgentPortalContent(content = '') {
   }
   for (let { label, pattern } of PUBLIC_CONTENT_PATTERNS) {
     if (pattern.test(content)) {
-      throw new Error(`Content contains ${label}; public .agent-portal files must not store secrets or local paths`);
+      throw new Error(`Content contains ${label}; public team-memory files must not store secrets or local paths`);
     }
   }
 }
@@ -132,7 +132,7 @@ async function listAgentPortalTree(root, dir = '', state = { nodes: 0 }, depth =
   if (depth > TREE_MAX_DEPTH) return [];
   let targetPath = path.resolve(root, dir);
   if (targetPath !== root && !targetPath.startsWith(root + path.sep)) {
-    throw new Error('Path must stay inside .agent-portal');
+    throw new Error('Path must stay inside team memory');
   }
   let entries = await fs.readdir(targetPath, { withFileTypes: true });
   let nodes = [];
