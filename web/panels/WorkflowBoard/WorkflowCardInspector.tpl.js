@@ -6,6 +6,7 @@ export default html`
     <span class="wci-spinner" ref="spinner" hidden aria-hidden="true"></span>
     <span class="wci-title" ref="title"></span>
     <span class="wci-badge" ref="statusBadge" hidden></span>
+    <span class="wci-badge" ref="resolutionBadge" hidden></span>
   </header>
   <div class="wci-empty" ref="empty"></div>
   <div class="wci-content" ref="content" hidden>
@@ -39,6 +40,17 @@ export default html`
       <div class="wci-audit-returned" ref="auditReturned" hidden></div>
       <div class="wci-audit-detail" ref="auditDetail" hidden></div>
       <div class="wci-audit-next" ref="auditNext" hidden></div>
+    </section>
+    <section class="wci-section wci-decision-section" ref="decisionSection" hidden>
+      <div class="wci-section-label" ref="lblDecision"></div>
+      <div class="wci-decision-question" ref="decisionQuestion"></div>
+      <div class="wci-decision-options" ref="decisionOptions"></div>
+      <textarea class="wci-decision-text" ref="decisionText" rows="2"></textarea>
+      <div class="wci-decision-actions">
+        <button type="button" class="wci-decision-btn wci-decision-return" ref="decisionReturnBtn"></button>
+        <button type="button" class="wci-decision-btn wci-decision-reject" ref="decisionRejectBtn"></button>
+      </div>
+      <div class="wci-decision-status" ref="decisionStatus" hidden></div>
     </section>
     <section class="wci-section" ref="runsSection" hidden>
       <div class="wci-section-label" ref="lblRuns"></div>

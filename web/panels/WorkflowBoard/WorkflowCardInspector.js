@@ -15,13 +15,24 @@ import {
   formatTokens,
   relativeTime,
 } from './workflow-card-telemetry.js';
+import { decideWorkflowCard } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
 
 const HISTORY_LIMIT = 8;
 
 const AUDIT_COLUMN_ID = 'quality-audit';
+// The human-decision lane: a card parked here (or carrying a needs_human escalation) shows the decision
+// panel — the orchestrator's question, its button options, and a free-text answer that routes back.
+const DECISION_COLUMN_ID = 'needs-decision';
 // The escalation kinds the auditor uses to bounce a card back to the orchestrator.
 const AUDIT_ESCALATION_KINDS = new Set(['insufficient_permission', 'insufficient_context', 'needs_decision', 'rework']);
+
+// A terminal card's resolution status (cancelled / rejected / discarded) → a short badge label.
+const RESOLUTION_LABELS = {
+  rejected: '✗ Rejected',
+  cancelled: '⊘ Cancelled',
+  discarded: '🗑 Discarded',
+};
 
 // Read a check value off the raw projection card. The web normalizer flattens `card.checks` into a
 // display array, but keeps the original object form on `card.raw.checks`, which is what the gate
@@ -42,8 +53,23 @@ function checkRejected(value) {
 }
 
 function escalationState(card) {
-  let state = card?.metadata?.escalation;
+  let state = card?.metadata?.escalation ?? card?.raw?.metadata?.escalation;
   return state && typeof state === 'object' ? state : null;
+}
+
+// The card's resolution record, set when it reached a terminal via cancel / reject / debris reap.
+function resolutionState(card) {
+  let res = card?.metadata?.resolution ?? card?.raw?.metadata?.resolution;
+  return res && typeof res === 'object' ? res : null;
+}
+
+// The active needs_human escalation (the orchestrator's parked question), or null.
+function needsHumanEscalation(card) {
+  let state = escalationState(card);
+  if (!state) return null;
+  let kind = state.kind || state.lastEscalation?.kind;
+  if (String(kind) !== 'needs_human' || state.humanEscalated) return null;
+  return state;
 }
 
 // Does this card's escalation belong to the audit kickback flow (auditor rejected → re-orchestrate)?
@@ -124,8 +150,14 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.lblBody.textContent = tPortal('inspector.details');
     this.ref.empty.textContent = tPortal('inspector.empty');
     this.ref.chatBtn.textContent = tPortal('inspector.openChat');
+    this.ref.lblDecision.textContent = tPortal('inspector.decision');
+    this.ref.decisionReturnBtn.textContent = tPortal('inspector.decisionReturn');
+    this.ref.decisionRejectBtn.textContent = tPortal('inspector.decisionReject');
+    this.ref.decisionText.placeholder = tPortal('inspector.decisionPlaceholder');
 
     this.ref.chatBtn.addEventListener('click', () => this.#openChat());
+    this.ref.decisionReturnBtn.addEventListener('click', () => this.#submitDecision({ decision: 'return' }));
+    this.ref.decisionRejectBtn.addEventListener('click', () => this.#submitDecision({ decision: 'reject' }));
 
     this._selectionHandler = (event) => this.renderSelection(event.detail);
     selectionEvents.addEventListener('workflow-board-selection-change', this._selectionHandler);
@@ -149,12 +181,18 @@ export class WorkflowCardInspector extends Symbiote {
     let board = selection?.board || null;
     if (!card) {
       this._chatId = null;
+      this._decisionCard = null;
+      this._decisionBoard = null;
       this.ref.title.textContent = tPortal('text.cardInspector');
       this.ref.statusBadge.hidden = true;
+      this.ref.resolutionBadge.hidden = true;
+      this.ref.decisionSection.hidden = true;
       this.ref.empty.hidden = false;
       this.ref.content.hidden = true;
       return;
     }
+    this._decisionCard = card;
+    this._decisionBoard = board;
 
     this.ref.empty.hidden = true;
     this.ref.content.hidden = false;
@@ -190,7 +228,9 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.mDuration.textContent = formatDuration(run) || '—';
     this.ref.mTokens.textContent = formatTokens(run?.tokens) || '—';
 
+    this.#renderResolution(card);
     this.#renderAudit(card, board);
+    this.#renderDecision(card);
     this.#renderRuns(card);
     this.#renderHistory(card);
 
@@ -281,6 +321,92 @@ export class WorkflowCardInspector extends Symbiote {
       this.ref.auditNext.hidden = false;
     } else {
       this.ref.auditNext.hidden = true;
+    }
+  }
+
+  // The terminal resolution badge (Rejected / Cancelled / Discarded) for a card that reached a terminal
+  // via a reject decision, cancellation, or a reaped runtime-debris orphan. The reason rides on the title.
+  #renderResolution(card) {
+    let res = resolutionState(card);
+    let badge = this.ref.resolutionBadge;
+    if (!res || !res.status) {
+      badge.hidden = true;
+      return;
+    }
+    let key = text(res.status).toLowerCase();
+    badge.textContent = RESOLUTION_LABELS[key] || formatColumnId(key);
+    badge.dataset.kind = key === 'discarded' ? 'warning' : 'error';
+    let reason = text(res.reason);
+    if (reason) badge.title = reason;
+    badge.hidden = false;
+  }
+
+  // The human-decision panel: shown for a card parked in the decision lane (or carrying a needs_human
+  // escalation). Renders the orchestrator's question, its button options, and a free-text answer. A
+  // button (or "Send to orchestrator") routes the answer back; "Reject" retires the card.
+  #renderDecision(card) {
+    let state = needsHumanEscalation(card);
+    let inLane = (card.columnId || card.raw?.columnId) === DECISION_COLUMN_ID;
+    if (!state && !inLane) {
+      this.ref.decisionSection.hidden = true;
+      return;
+    }
+    this.ref.decisionSection.hidden = false;
+    this.ref.decisionQuestion.textContent = text(
+      state?.detail || state?.lastEscalation?.detail,
+      tPortal('inspector.decisionQuestion'),
+    );
+
+    let options = Array.isArray(state?.lastEscalation?.options) ? state.lastEscalation.options : [];
+    let host = this.ref.decisionOptions;
+    host.replaceChildren();
+    for (let opt of options) {
+      let id = text(opt?.id);
+      if (!id) continue;
+      let btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wci-decision-option';
+      btn.textContent = text(opt?.label, id);
+      let isReject = id === 'reject';
+      if (isReject) btn.classList.add('wci-decision-option-reject');
+      btn.addEventListener('click', () => this.#submitDecision(
+        isReject ? { decision: 'reject', optionId: id } : { decision: 'return', optionId: id },
+      ));
+      host.append(btn);
+    }
+    this.#setDecisionStatus('', '');
+    this.#decisionDisabled(false);
+  }
+
+  #decisionDisabled(disabled) {
+    for (let ref of [this.ref.decisionReturnBtn, this.ref.decisionRejectBtn, this.ref.decisionText]) {
+      if (ref) ref.disabled = disabled;
+    }
+    for (let btn of this.ref.decisionOptions?.children ?? []) btn.disabled = disabled;
+  }
+
+  #setDecisionStatus(message, kind) {
+    this.ref.decisionStatus.textContent = message;
+    this.ref.decisionStatus.dataset.kind = kind || '';
+    this.ref.decisionStatus.hidden = !message;
+  }
+
+  async #submitDecision({ decision, optionId } = {}) {
+    let card = this._decisionCard;
+    let board = this._decisionBoard;
+    let boardId = text(board?.boardId || board?.id);
+    let cardId = text(card?.id || card?.raw?.id);
+    if (!boardId || !cardId) return;
+    let answer = text(this.ref.decisionText?.value);
+    this.#decisionDisabled(true);
+    this.#setDecisionStatus(tPortal('inspector.decisionSubmitting'), 'warning');
+    try {
+      await decideWorkflowCard({ boardId, cardId, decision, optionId, answer, actor: 'human' });
+      this.#setDecisionStatus(tPortal('inspector.decisionDone'), 'ok');
+      if (this.ref.decisionText) this.ref.decisionText.value = '';
+    } catch (error) {
+      this.#setDecisionStatus(error?.message || String(error), 'error');
+      this.#decisionDisabled(false);
     }
   }
 

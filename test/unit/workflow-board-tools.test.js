@@ -150,6 +150,8 @@ describe('workflow board MCP tool', () => {
       'quality-audit',
       'commit-publish',
       'done',
+      'needs-decision',
+      'rejected',
     ]);
     assert.equal(payload.actions.transition.required.includes('toColumnId'), true);
     assert.deepEqual(payload.actions.control_board.required, ['control']);

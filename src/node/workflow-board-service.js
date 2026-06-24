@@ -69,10 +69,20 @@ const DEFAULT_RECONCILE_TRIGGER_GAP_MS = 1000;
 const ESCALATION_ACTOR = 'escalation-channel';
 const DEFAULT_ESCALATION_MAX_ATTEMPTS = 3;
 const DEFAULT_ESCALATION_BACKOFF_MS = 5 * 60 * 1000;
+// Audit return-loop backstop: after this many CONSECUTIVE verdict-less / failed audits — each one
+// returning the card to the orchestrator to re-route — the card is parked for an explicit human
+// decision (a `needs_human` escalation → the needs-decision column) instead of being re-routed again.
+// The counter lives on `card.metadata.reworkCycles` so it survives the re-execution run that would
+// otherwise clear `metadata.escalation`; it resets the moment an audit actually passes. Without it a
+// card could cycle audit → orchestrator → audit forever, never reaching the human/reject backstop.
+const DEFAULT_AUDIT_REWORK_LIMIT = 3;
 const ESCALATION_RESULT_PATTERN = /WORKFLOW_RESULT:\s*([a-z_]+)/i;
 const ESCALATION_KIND_PATTERN = /ESCALATION_KIND:\s*([a-z_]+)/i;
 const ESCALATION_DETAIL_PATTERN = /ESCALATION_DETAIL:\s*(.+)/i;
 const ESCALATION_SUGGESTION_PATTERN = /ESCALATION_SUGGESTION:\s*(.+)/i;
+// Human-decision button choices for a `needs_human` ask, pipe-separated (e.g. `a | b | c`). The
+// orchestrator emits these so the inspector renders the question as buttons; free text is always allowed.
+const ESCALATION_OPTIONS_PATTERN = /ESCALATION_OPTIONS:\s*(.+)/i;
 const ESCALATION_LANE_PATTERN = /ESCALATION_LANE:\s*(.+)/i;
 // Intermediate-return marker: a worker emits `WORKFLOW_RETURN: <kind>` (optionally trailed by a JSON
 // object) in its final message/output, mirroring how escalation markers are emitted. The reconcile
@@ -82,7 +92,7 @@ const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
 // board once — v6 self-heals a column automation gap (e.g. a `quality-audit` that lost its `action`
 // to an older normalizer or a clobbered snapshot) so the on-enter audit and the autonomous release
 // tail resolve their columns by action again.
-const DEFAULT_WORKFLOW_POLICY_VERSION = 6;
+const DEFAULT_WORKFLOW_POLICY_VERSION = 7;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
 // no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
@@ -138,6 +148,13 @@ const WORKFLOW_PRIORITY_ORDER = { critical: 3, high: 2, normal: 1, low: 0 };
 // escalates it to a typed `needs_decision` (inv 24: never a silent permanent block). The blocked-age
 // clock is `card.metadata.dependencyBlock.blockedAt`, stamped when the dependency path blocks it.
 const MAX_BLOCKED_AGE_MS = 24 * 60 * 60 * 1000;
+// Default stale/aging budget (Axis C): max wall-clock a worked card may OCCUPY a non-terminal column
+// after its run ends before the reconcile/drain tick escalates it to a typed `needs_decision`. This is
+// the occupancy-aging counterpart of MAX_BLOCKED_AGE_MS — independent of the dependency-block clock —
+// covering the gap where a card finished its run but was never advanced and ages silently. The clock
+// is `card.metadata.enteredColumnAt` (stamped by the card normalizer on every column change). A
+// per-column `automation.staleAgeMs` overrides this; an explicit 0 disables aging for that column.
+const DEFAULT_COLUMN_STALE_AGE_MS = 24 * 60 * 60 * 1000;
 
 function priorityOrdinal(priority) {
   let key = textOrNull(priority);
@@ -493,7 +510,10 @@ function runtimeTaskStatus(task = {}) {
 function runtimeTaskColumnId(status) {
   if (RUNTIME_DONE_STATUSES.has(status)) return 'done';
   if (RUNTIME_READY_STATUSES.has(status)) return 'ready';
-  if (TASK_ERROR_STATUSES.has(status)) return 'quality-audit';
+  // A terminal-failed / lost ORPHAN runtime task (no linked workflow card) is runtime debris — a dead
+  // task left over from a crashed or externally-killed worker. Project it into the reject terminal
+  // (discarded) so it is visibly resolved instead of piling up forever in the active quality-audit lane.
+  if (TASK_ERROR_STATUSES.has(status)) return 'rejected';
   if (RUNTIME_RUNNING_STATUSES.has(status)) return 'in-progress';
   return 'in-progress';
 }
@@ -1234,6 +1254,39 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
+  function stageOccupancyLimit(automation = {}) {
+    let limit = Number(automation.occupancyLimit ?? automation.occupancy_limit);
+    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
+  }
+
+  // Count the cards currently OCCUPYING a column — every card in it, not just the ones with a live
+  // run. This is the WIP figure the occupancy cap gates on: a card that finished its run but was not
+  // advanced still occupies the column, so it must be counted (the whole point of Axis C).
+  function columnOccupancyCount(boardId, columnId) {
+    return Object.values(getCollection(stateGraph, 'workflowCards'))
+      .filter(card => card.boardId === boardId && card.columnId === columnId)
+      .length;
+  }
+
+  // Occupancy WIP cap (Axis C). Unlike stageCapacityAvailable — which bounds concurrently RUNNING
+  // agents — this bounds how many cards may sit in the column at once. The candidate is already in its
+  // column at admission time, so it is counted in the population and the cap is breached at `>`: a
+  // column may hold up to `limit` cards, and admitting more work while the column is already at/over
+  // the cap is refused. Absent limit → uncapped (prior behaviour).
+  function columnOccupancyAvailable(board, card, automation = {}) {
+    let limit = stageOccupancyLimit(automation);
+    if (!limit) return { ok: true, limit: null, occupancy: 0 };
+    let occupancy = columnOccupancyCount(board.id, card.columnId);
+    return {
+      ok: occupancy <= limit,
+      limit,
+      occupancy,
+      reason: occupancy <= limit
+        ? ''
+        : `Column ${card.columnId} holds ${occupancy} card${occupancy === 1 ? '' : 's'} at occupancy cap ${limit}.`,
+    };
+  }
+
   function boardCapacityAvailable(board, card) {
     let automation = normalizeWorkflowBoardAutomation(board.automation);
     let limit = Number(automation.globalParallelLimit);
@@ -1548,9 +1601,13 @@ export function createWorkflowBoardService(opts = {}) {
     if (!boardCapacity.ok && !args.force) {
       return { ok: false, reason: boardCapacity.reason, automation, capacity, boardCapacity };
     }
+    let occupancy = columnOccupancyAvailable(board, card, automation);
+    if (!occupancy.ok && !args.force) {
+      return { ok: false, reason: occupancy.reason, automation, capacity, boardCapacity, occupancy };
+    }
     let boardBudget = boardBudgetAvailable(board);
     if (!boardBudget.ok && !args.force) {
-      return { ok: false, reason: boardBudget.reason, automation, capacity, boardCapacity, boardBudget };
+      return { ok: false, reason: boardBudget.reason, automation, capacity, boardCapacity, occupancy, boardBudget };
     }
     let fileConflicts = activeFileScopeConflicts(board, card, args);
     if (fileConflicts.length && !args.force) {
@@ -2039,13 +2096,20 @@ export function createWorkflowBoardService(opts = {}) {
   function cancelDependentCard(board, card, principal, reason) {
     let ts = now();
     let classifier = classifyWorkflowGraph(board);
-    let terminalColumn = board.columns.find(column => classifier.isTerminal(column.id));
+    // A cancelled dependent is a discard, not a success: retire it to the reject terminal (resolution
+    // `cancelled`), falling back to any terminal column, then to staying put so the lifecycle still clears.
+    let targetColumnId = rejectTerminalColumnId(board)
+      ?? board.columns.find(column => classifier.isTerminal(column.id))?.id
+      ?? card.columnId;
     let metadata = { ...(card.metadata ?? {}) };
     delete metadata.dependencyBlock;
+    if (classifier.isTerminal(targetColumnId)) {
+      metadata.resolution = { status: 'cancelled', reason, at: ts, by: principal.label };
+    }
     let cancelled = normalizeWorkflowCardInput({
       ...card,
       lifecycle: 'idle',
-      columnId: terminalColumn ? terminalColumn.id : card.columnId,
+      columnId: targetColumnId,
       metadata,
       version: card.version + 1,
       updatedAt: ts,
@@ -2217,6 +2281,56 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     return { ok: true, boardId: board.id, released, escalated };
+  }
+
+  // Resolve the stale/aging budget for a card's current column: an explicit per-column/card
+  // `automation.staleAgeMs` wins (0 disables), otherwise the module default. Returned in ms.
+  function resolveColumnStaleAgeMs(automation = {}) {
+    let override = Number(automation.staleAgeMs ?? automation.stale_age_ms);
+    if (Number.isFinite(override)) return Math.max(0, override);
+    return DEFAULT_COLUMN_STALE_AGE_MS;
+  }
+
+  // Stale/aging escalation (Axis C). Independent of the dependency-block clock (releaseDependencies):
+  // a card that ran and stopped but was never advanced occupies its column and ages silently — no
+  // dependency block, no concurrency pressure (its run is done), so nothing else flags it. For each
+  // non-terminal card that has been worked (>=1 run), is not currently running, is not dependency-
+  // blocked (that path owns its own clock), and carries no active escalation, escalate to a typed
+  // `needs_decision` once its time-in-column exceeds the budget. Idempotent: the raised escalation
+  // sets hasActiveEscalation, so a re-tick skips the card (no escalation spam). Runs in the reconcile
+  // loop and at the top of the drain pass, mirroring releaseDependencies.
+  function escalateStaleCards(boardId) {
+    let board = ensureBoard(boardId);
+    let classifier = classifyWorkflowGraph(board);
+    let principal = daemonPrincipal();
+    let currentNow = now();
+    let escalated = [];
+    for (let card of boardCardsFor(board.id)) {
+      if (classifier.isTerminal(card.columnId)) continue;
+      // A dependency-blocked card is the MAX_BLOCKED_AGE clock's domain — keep the two independent.
+      if (normalizeWorkflowLifecycle(card.lifecycle) === 'blocked') continue;
+      if (hasActiveEscalation(card)) continue;
+      // A live run is progress, not staleness; and a card never worked is intake, not a stalled run.
+      if (activeRunForCard(card.id)) continue;
+      if (!getRunsForCard(card.id).length) continue;
+      let budget = resolveColumnStaleAgeMs(cardAutomation(board, card));
+      if (!(budget > 0)) continue;
+      let enteredAt = Number(card.metadata?.enteredColumnAt);
+      if (!Number.isFinite(enteredAt)) continue;
+      let age = currentNow - enteredAt;
+      if (age < budget) continue;
+      let hours = budget / 3600000;
+      let label = hours >= 1 ? `${Math.floor(hours)}h` : `${Math.max(1, Math.round(budget / 60000))}m`;
+      raiseDependencyEscalation(
+        board,
+        card,
+        principal,
+        `Card ${card.id} has occupied column "${card.columnId}" for over ${label} after its run ended without being advanced.`,
+        'Advance, re-run, or cancel the stalled card.',
+      );
+      escalated.push({ cardId: card.id, columnId: card.columnId, ageMs: age });
+    }
+    return { ok: true, boardId: board.id, escalated };
   }
 
   // Materialize a `join` subscription as a synthetic dependent card (S5). The join `dependsOn` every
@@ -2798,6 +2912,9 @@ export function createWorkflowBoardService(opts = {}) {
     // card blocked past max-blocked-age escalates. Skipped only when the board mode forbids release.
     if (!['stopped', 'maintenance'].includes(board.mode)) {
       releaseDependencies(board.id);
+      // Occupancy-aging tick (Axis C): escalate any worked card that has lingered in its column past
+      // the stale budget. Independent of the dependency clock above; idempotent across passes.
+      escalateStaleCards(board.id);
     }
     let owner = textOrNull(opts.owner) ?? `drain-${slugSegment(board.id)}-${nextId(makeId, 'pass')}`;
     let budget = Number.isFinite(Number(opts.budget)) && Number(opts.budget) > 0
@@ -3742,6 +3859,11 @@ export function createWorkflowBoardService(opts = {}) {
           workflowRunId: workflowRefs.runId,
           eventCount: task.eventCount ?? (Array.isArray(task.events) ? task.events.length : 0),
           pid: task.pid ?? null,
+          // A terminal-failed orphan task is reaped to the reject terminal as runtime debris; stamp the
+          // resolution so the UI explains why it sits in `rejected` rather than as a real result.
+          ...(TASK_ERROR_STATUSES.has(status)
+            ? { resolution: { status: 'discarded', reason: 'Orphaned runtime task (no linked card); reaped as debris.', at: timestamp, by: 'runtime' } }
+            : {}),
         },
         createdAt: task.startedAt ?? task.createdAt ?? timestamp,
         updatedAt: timestamp,
@@ -3875,6 +3997,32 @@ export function createWorkflowBoardService(opts = {}) {
       history,
     });
     return { metadata: { ...metadata, escalation: nextState }, status: 'raised', kind: escalation.kind, detail: escalation.detail };
+  }
+
+  // Mint a card-metadata patch that raises (or continues) a typed escalation episode the SAME way
+  // computeTerminalEscalation does, but driven by the BOARD (not a worker run) — the audit return loop
+  // and the human-decision backstop both use it. `options` carries the human-decision button choices
+  // (only meaningful for a `needs_human` episode). Attempt accrual stays owned by the re-engagement
+  // driver (never bumped here); a `needs_human` episode is skipped by that driver, so it simply waits.
+  function raiseEscalationMetadata(card, { kind, detail, options = [], runId = null, at }) {
+    let metadata = card.metadata && typeof card.metadata === 'object' ? { ...card.metadata } : {};
+    let existing = metadata.escalation ? normalizeWorkflowEscalationState(metadata.escalation) : null;
+    let escalation = normalizeWorkflowEscalation(
+      { kind, detail, options, raisedBy: daemonPrincipal().label },
+      { now: at, runId },
+    );
+    if (!escalation) return metadata;
+    let nextState = normalizeWorkflowEscalationState({
+      lastEscalation: escalation,
+      attemptCount: existing?.attemptCount ?? 0,
+      firstAt: existing?.firstAt ?? at,
+      lastAt: at,
+      nextAttemptAt: existing?.nextAttemptAt ?? at,
+      humanEscalated: existing?.humanEscalated ?? false,
+      lastRunId: runId ?? existing?.lastRunId ?? null,
+      history: [...(existing?.history ?? []), { kind, detail, runId, at }],
+    });
+    return { ...metadata, escalation: nextState };
   }
 
   // Parse a typed intermediate return from the latest task output of a still-live run. A worker emits
@@ -4029,8 +4177,33 @@ export function createWorkflowBoardService(opts = {}) {
     return {
       auditColumnId: byAction('audit'),
       publishColumnId: byAction('publish'),
-      closeColumnId: byAction('close'),
+      // The SUCCESS terminal: the first `close` column that is not flavored `rejected`. `done` precedes
+      // `rejected` in the default order, so this stays `done` while ignoring the discard terminal.
+      closeColumnId: columns.find(column =>
+        textOrNull(column?.automation?.action) === 'close'
+        && textOrNull(column?.automation?.closeKind) !== 'rejected')?.id ?? byAction('close'),
     };
+  }
+
+  // The reject terminal: a `close` column flavored `closeKind: 'rejected'` — cancelled, rejected, and
+  // reaped runtime-debris cards land here. Resolved by action+flavor so the board stays data-driven;
+  // falls back to a close column distinct from the success terminal, then null when the board has none.
+  function rejectTerminalColumnId(board) {
+    let columns = board.columns ?? [];
+    let rejected = columns.find(column =>
+      textOrNull(column?.automation?.action) === 'close'
+      && textOrNull(column?.automation?.closeKind) === 'rejected');
+    if (rejected) return rejected.id;
+    let successId = columns.find(column => textOrNull(column?.automation?.action) === 'close')?.id ?? null;
+    return columns.find(column =>
+      textOrNull(column?.automation?.action) === 'close' && column.id !== successId)?.id ?? null;
+  }
+
+  // The human-decision lane: the (non-terminal) column whose action parks a card for an explicit human
+  // answer. Resolved by action so the board stays data-driven; null when the board defines no such lane.
+  function decisionColumnId(board) {
+    return (board.columns ?? []).find(column =>
+      textOrNull(column?.automation?.action) === 'await_human')?.id ?? null;
   }
 
   // A daemon-signed floor check. Autonomous mode delegates the human/independent sign-off to the
@@ -4156,6 +4329,33 @@ export function createWorkflowBoardService(opts = {}) {
     return null;
   }
 
+  // A worker — typically the orchestrator — may decide a card is not worth completing and emit
+  // `WORKFLOW_RESULT: rejected` (optionally with `ESCALATION_DETAIL:` as the reason). This is a terminal
+  // DECISION: the card retires to the reject terminal, distinct from `blocked` (which escalates back) and
+  // `completed` (which advances). Returns the reason string when a reject is requested, else null.
+  function runRequestsReject(run, runtimeTasks) {
+    let text = workerFinalAnswerText(run, runtimeTasks) || '';
+    if (!text) return null;
+    let result = text.match(ESCALATION_RESULT_PATTERN)?.[1]?.toLowerCase() ?? null;
+    if (result !== 'rejected') return null;
+    return textOrNull(text.match(ESCALATION_DETAIL_PATTERN)?.[1]) ?? 'Rejected by the orchestrator.';
+  }
+
+  // The orchestrator deliberately escalates to a human by ending with `WORKFLOW_RESULT: needs_human`
+  // (the extreme case it cannot self-resolve). Unlike `blocked` — which rides an error exit and the board
+  // auto re-engages — this is a clean DECISION: park the card in the decision lane with the question and
+  // optional button choices. Returns `{ detail, options }` when requested, else null.
+  function runRequestsHumanDecision(run, runtimeTasks) {
+    let text = workerFinalAnswerText(run, runtimeTasks) || '';
+    if (!text) return null;
+    let result = text.match(ESCALATION_RESULT_PATTERN)?.[1]?.toLowerCase() ?? null;
+    if (result !== 'needs_human') return null;
+    let detail = textOrNull(text.match(ESCALATION_DETAIL_PATTERN)?.[1]) ?? 'The orchestrator requested a human decision.';
+    let optionsRaw = textOrNull(text.match(ESCALATION_OPTIONS_PATTERN)?.[1]);
+    let options = optionsRaw ? optionsRaw.split('|').map(part => part.trim()).filter(Boolean) : [];
+    return { detail, options };
+  }
+
   // Autonomous backlog self-start (opt-in: board.mode==='autonomous'). The orchestrate column already
   // auto-fires on entry; this is the missing step before it. A backlog card (the `scope`-action column)
   // that already carries an execution contract (owner + acceptance) is promoted to the orchestrate
@@ -4243,7 +4443,10 @@ export function createWorkflowBoardService(opts = {}) {
           let separation = independentlySigned
             ? { ok: true, waiver: null }
             : floorSignSeparation(board, executedBy, principal);
-          if (verdict === 'pass' && separation.ok && !flags.has('needs_audit')) {
+          // An INDEPENDENT audit pass (a signer not in executedBy) supersedes a lingering needs_audit
+          // flag — the fresh pass is authoritative, so it advances and the stale flag is cleared. A bare
+          // daemon self-sign still respects needs_audit (it may not self-pass a card flagged for rework).
+          if (verdict === 'pass' && separation.ok && (independentlySigned || !flags.has('needs_audit'))) {
             // Release proof-contract: a self-reported PASS marker is not enough to ship. Actually run
             // the unit suite against the (still uncommitted) work before it advances to the commit
             // stage. Fail-closed — a failing or timed-out run holds the card for rework (re-execution
@@ -4278,6 +4481,17 @@ export function createWorkflowBoardService(opts = {}) {
               checks = { ...checks, audit: signed };
               ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
             }
+            // The audit passed: clear the consecutive-rework counter (so a later, unrelated stall starts
+            // its own count) and drop a lingering needs_audit flag (the pass is authoritative) so the
+            // advanced card lands clean.
+            if (latestCard.metadata && 'reworkCycles' in latestCard.metadata) {
+              let cleaned = { ...latestCard.metadata };
+              delete cleaned.reworkCycles;
+              latestCard = { ...latestCard, metadata: cleaned };
+            }
+            if (flags.has('needs_audit')) {
+              latestCard = { ...latestCard, recoveryFlags: normalizeRecoveryFlags([...flags].filter(f => f !== 'needs_audit')) };
+            }
             let advance = runtimeAdvanceCardOps(
               board, latestCard, publishColumnId, principal, runtimeNow,
               `Autonomous release tail: audit verdict PASS, advancing ${card.id} to ${publishColumnId}.`,
@@ -4286,12 +4500,41 @@ export function createWorkflowBoardService(opts = {}) {
             ops.push(...advance.ops);
             latestCard = advance.card;
             advanced.push({ cardId: card.id, toColumnId: publishColumnId });
-          } else if (!flags.has('needs_audit')) {
-            // No PASS verdict (FAIL or none emitted), or a daemon self-sign barred by separated duty:
-            // hold in audit and flag it instead of auto-passing.
+          } else if (!hasActiveEscalation(latestCard)) {
+            // The audit did NOT approve the work (FAIL, no verdict, or a daemon self-sign barred by
+            // separated duty) AND no escalation episode is open yet — so the problem returns to the
+            // orchestrator instead of sticking here silently: raise a `rework` escalation and the
+            // re-engagement driver routes the card back to the orchestrate column (re-audit, re-execute,
+            // or reject). Gating on `!hasActiveEscalation` (not the needs_audit flag) means a card ALREADY
+            // flagged needs_audit — including one wedged before this code shipped — is still rescued; the
+            // open escalation then prevents re-raising every tick. A bounded consecutive-rework counter
+            // (persisted on metadata, so it survives the re-execution run that clears the escalation)
+            // backstops the loop — past the limit the card parks for a human (`needs_human`).
+            let reworkCycles = Number(latestCard.metadata?.reworkCycles ?? 0) + 1;
+            let exhausted = reworkCycles > DEFAULT_AUDIT_REWORK_LIMIT;
+            let verdictText = verdict === 'fail' ? 'reported FAIL'
+              : verdict === 'pass' ? 'passed but could not be independently signed (separated duty)'
+                : 'produced no PASS/FAIL verdict';
+            let detail = exhausted
+              ? `Quality audit ${verdictText} for ${card.id} after ${reworkCycles - 1} orchestrator re-routes; parking for a human decision.`
+              : `Quality audit ${verdictText} for ${card.id}; returning to the orchestrator to re-route (re-audit, re-execute, or reject).`;
+            let escalationMetadata = raiseEscalationMetadata(latestCard, {
+              kind: exhausted ? 'needs_human' : 'rework',
+              detail,
+              options: exhausted
+                ? [
+                  { id: 'retry', label: 'Send back to the orchestrator to retry' },
+                  { id: 'reject', label: 'Reject this card' },
+                ]
+                : [],
+              runId: latestFinished?.id ?? null,
+              at: runtimeNow,
+            });
             let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
             let held = normalizeWorkflowCardInput({
-              ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
+              ...latestCard, recoveryFlags: nextFlags,
+              metadata: { ...escalationMetadata, reworkCycles },
+              version: latestCard.version + 1,
               updatedAt: runtimeNow, updatedBy: principal.label,
             }, {
               id: latestCard.id, actor: principal.label, now: runtimeNow,
@@ -4351,6 +4594,121 @@ export function createWorkflowBoardService(opts = {}) {
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
     return { advanced, closed };
+  }
+
+  // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
+  // move — no transition gate). This surfaces the "waiting on a human" state as a visible column instead
+  // of a buried flag. The orchestrator raises `needs_human` when it explicitly wants a human, and the
+  // audit/escalation backstops raise it after exhausting automatic re-routing. Idempotent: a card already
+  // in the lane, already terminal, with a live run, or with no decision lane configured is left untouched.
+  function driveNeedsDecisionParking(board, principal, runtimeNow) {
+    let laneId = decisionColumnId(board);
+    if (!laneId) return { parked: [] };
+    let classifier = classifyWorkflowGraph(board);
+    let ops = [];
+    let parked = [];
+    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (card.boardId !== board.id || card.columnId === laneId) continue;
+      if (classifier.isTerminal(card.columnId)) continue;
+      if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+      let state = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : null;
+      if (!state || state.kind !== 'needs_human' || state.humanEscalated) continue;
+      let advance = runtimeAdvanceCardOps(
+        board, clone(card), laneId, principal, runtimeNow,
+        `Parked for a human decision: ${state.detail ?? state.kind}.`,
+        'needs_decision_park',
+      );
+      ops.push(...advance.ops);
+      parked.push({ cardId: card.id, toColumnId: laneId });
+    }
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
+    return { parked };
+  }
+
+  // A human resolves a card parked in the decision lane (the inspector buttons + free-text answer). Two
+  // outcomes, both governed by the operator's board:control capability at the call site:
+  //   - `return` (default): the answer (a chosen option id and/or free text) is folded into a fresh
+  //     re-engageable `rework` escalation and the card routes back to the orchestrate column — the
+  //     orchestrator wakes carrying the human's answer and re-routes. The auto-rework budget resets.
+  //   - `reject`: the card retires to the reject terminal with a `rejected` resolution, escalation cleared.
+  // Returning to the orchestrator is the default — the human-decision lane is the orchestrator's
+  // last-resort question, and its answer always flows back to the orchestrator unless explicitly rejected.
+  async function resolveDecisionCard(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let cardId = textOrNull(args.cardId ?? args.card_id);
+    let card = cardId ? getCard(cardId) : null;
+    if (!card) return { ok: false, error: 'card_not_found' };
+    let state = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : null;
+    let optionId = textOrNull(args.optionId ?? args.option_id);
+    let answer = textOrNull(args.answer ?? args.text);
+    // `reject` is requested explicitly, or via the reserved `reject` option id from a backstop question.
+    let decision = (textOrNull(args.decision) === 'reject' || optionId === 'reject') ? 'reject' : 'return';
+    let ts = now();
+
+    if (decision === 'reject') {
+      let rejectColumnId = rejectTerminalColumnId(board);
+      if (!rejectColumnId) return { ok: false, error: 'no_reject_terminal' };
+      let metadata = { ...(card.metadata ?? {}) };
+      delete metadata.escalation;
+      delete metadata.reworkCycles;
+      metadata.resolution = {
+        status: 'rejected',
+        reason: answer ?? state?.detail ?? 'Rejected by a human decision.',
+        at: ts,
+        by: principal.label,
+      };
+      let flags = normalizeRecoveryFlags((card.recoveryFlags ?? []).filter(flag => flag !== 'needs_audit' && flag !== 'blocked'));
+      let rejected = normalizeWorkflowCardInput({
+        ...card, columnId: rejectColumnId, lifecycle: 'idle', recoveryFlags: flags,
+        metadata, version: card.version + 1, updatedAt: ts, updatedBy: principal.label,
+      }, {
+        id: card.id, actor: principal.label, now: ts,
+        version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
+      });
+      let eventId = nextId(makeId, 'decision');
+      let event = normalizeWorkflowTransitionEvent({
+        id: eventId, eventType: 'transition', boardId: board.id, cardId: card.id,
+        fromColumnId: card.columnId, toColumnId: rejectColumnId, actor: principal.label, mode: 'manual',
+        reason: metadata.resolution.reason, status: 'accepted',
+        sideEffects: [{ type: 'decision', resolution: 'rejected', detail: metadata.resolution.reason }],
+      }, { id: eventId, now: ts });
+      stateGraph.commit([
+        { op: 'set', path: `workflowCards/${card.id}`, value: rejected },
+        { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+      ], sourceForPrincipal(principal));
+      return { ok: true, decision, cardId: card.id, toColumnId: rejectColumnId };
+    }
+
+    // Return to the orchestrator carrying the human's answer. Stage a fresh re-engageable rework episode
+    // (attemptCount 0, humanEscalated false, due now), then route to the orchestrate column. The card has
+    // an active escalation at gate-eval time, so the rework_authorized edge passes for a human too.
+    let detailParts = [];
+    if (optionId) detailParts.push(`Human chose: ${optionId}`);
+    if (answer) detailParts.push(answer);
+    let detail = detailParts.join(' — ') || 'Human returned the card to the orchestrator for re-routing.';
+    let escalation = normalizeWorkflowEscalation({ kind: 'rework', detail, raisedBy: principal.label }, { now: ts });
+    let escalationState = normalizeWorkflowEscalationState({
+      lastEscalation: escalation, attemptCount: 0, firstAt: ts, lastAt: ts, nextAttemptAt: ts, humanEscalated: false,
+      history: [...(state?.history ?? []), { kind: 'rework', detail, runId: null, at: ts }],
+    });
+    let metadata = { ...(card.metadata ?? {}), escalation: escalationState, humanAnswer: { optionId, answer, at: ts, by: principal.label } };
+    delete metadata.reworkCycles;
+    let staged = normalizeWorkflowCardInput({
+      ...card, metadata, version: card.version + 1, updatedAt: ts, updatedBy: principal.label,
+    }, {
+      id: card.id, actor: principal.label, now: ts,
+      version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
+    });
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: staged }], sourceForPrincipal(principal));
+    let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
+    let outcome = await requestWorkflowTransition({
+      boardId: board.id, cardId: card.id, toColumnId: orchestrateColumnId, reason: detail, reworkAuthorized: true,
+    }, context);
+    return { ok: Boolean(outcome?.ok), decision, cardId: card.id, toColumnId: orchestrateColumnId, transition: outcome };
   }
 
   async function reconcileWorkflowRuntimeTasks(filter = {}, runtimeTasks = readStateGraphRuntimeTasks(), { drive = false } = {}) {
@@ -4548,6 +4906,35 @@ export function createWorkflowBoardService(opts = {}) {
           // escalation reconcile) so hasActiveEscalation stays true and the driver re-engages it.
           nextMetadata = foldReturnEscalation({ ...baseMetadata, returns: nextReturns }, mintedReturn, currentNow);
         }
+        // Orchestrator reject DECISION: a completed run that emitted `WORKFLOW_RESULT: rejected` retires
+        // the card to the reject terminal with a resolution status instead of advancing it. The decision
+        // is final — clear any escalation episode and the needs_audit flag (nothing left to re-route).
+        let rejectReason = terminal && nextStatus === 'completed' ? runRequestsReject(run, runtimeTasks) : null;
+        if (rejectReason) {
+          let rejectColumnId = rejectTerminalColumnId(board);
+          if (rejectColumnId) {
+            nextColumnId = rejectColumnId;
+            let base = nextMetadata && typeof nextMetadata === 'object' ? { ...nextMetadata } : {};
+            delete base.escalation;
+            base.resolution = { status: 'rejected', reason: rejectReason, at: completedAt ?? currentNow, by: principal.label };
+            nextMetadata = base;
+            nextFlags = nextFlags.filter(flag => flag !== 'needs_audit');
+          }
+        }
+        // Orchestrator human-decision ASK: a completed run that emitted `WORKFLOW_RESULT: needs_human`
+        // raises a `needs_human` escalation (with its question + button options) and stays put — the
+        // parking driver relocates it to the decision lane next pass. Mutually exclusive with reject.
+        let humanAsk = !rejectReason && terminal && nextStatus === 'completed'
+          ? runRequestsHumanDecision(run, runtimeTasks)
+          : null;
+        if (humanAsk) {
+          nextColumnId = latestCard.columnId;
+          nextMetadata = raiseEscalationMetadata(
+            { ...latestCard, metadata: nextMetadata },
+            { kind: 'needs_human', detail: humanAsk.detail, options: humanAsk.options, runId: run.id, at: completedAt ?? currentNow },
+          );
+          nextFlags = nextFlags.filter(flag => flag !== 'needs_audit');
+        }
         // A terminated run leaves no live lifecycle; normalize stale `running` back to `idle`
         // (valid per WORKFLOW_CARD_LIFECYCLE_STATES) so bookkeeping reflects the ended run.
         let nextLifecycle = terminal ? 'idle' : latestCard.lifecycle;
@@ -4711,6 +5098,11 @@ export function createWorkflowBoardService(opts = {}) {
     let releaseTail = null;
     if (drive && board.mode === 'autonomous') {
       releaseTail = await driveAutonomousReleaseTail(board, principal, now(), runtimeTasks);
+    }
+    // Human-decision parking runs in every mode (the orchestrator can ask for a human regardless of
+    // autonomous self-drive): make any `needs_human` card visible in the decision lane.
+    if (drive) {
+      driveNeedsDecisionParking(board, principal, now());
     }
     // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
     // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
@@ -5489,8 +5881,11 @@ export function createWorkflowBoardService(opts = {}) {
       '- Do not end with an introduction to a report; include the report itself.',
       proofMarkerContract,
       '- End with `WORKFLOW_RESULT: completed`, `WORKFLOW_RESULT: blocked`, or `WORKFLOW_RESULT: needs_follow_up`.',
+      '- Orchestrator terminal DECISIONS — use only when routing a card you own, on a clean finish:',
+      '  - `WORKFLOW_RESULT: rejected` — the card is not worth completing; it retires to the reject terminal. Put the reason on an `ESCALATION_DETAIL:` line.',
+      '  - `WORKFLOW_RESULT: needs_human` — the extreme case: you genuinely cannot decide and must ask a human. Put the question on `ESCALATION_DETAIL:`, optional button choices on `ESCALATION_OPTIONS: choice a | choice b | choice c`. The card parks in the decision lane until a human answers, then the answer returns to you.',
       '- If you end with `WORKFLOW_RESULT: blocked`, emit a typed escalation on the lines just above it so the orchestrator can route it:',
-      '  - `ESCALATION_KIND:` one of insufficient_permission, insufficient_context, needs_decision, rework',
+      '  - `ESCALATION_KIND:` one of insufficient_permission, insufficient_context, needs_decision, needs_human, rework',
       '  - `ESCALATION_DETAIL:` one line — exactly what is missing and why you cannot self-resolve it',
       '  - `ESCALATION_SUGGESTION:` optional — the capability, context, or decision that would unblock it',
       '  - Never self-grant rights or approval; permission and approval stay board/human-owned.',
@@ -5715,6 +6110,10 @@ export function createWorkflowBoardService(opts = {}) {
     let boardCapacity = boardCapacityAvailable(board, card);
     if (!boardCapacity.ok && !args.force) {
       throw new Error(boardCapacity.reason);
+    }
+    let occupancy = columnOccupancyAvailable(board, card, automation);
+    if (!occupancy.ok && !args.force) {
+      throw new Error(occupancy.reason);
     }
     let boardBudget = boardBudgetAvailable(board);
     if (!boardBudget.ok && !args.force) {
@@ -6289,21 +6688,38 @@ export function createWorkflowBoardService(opts = {}) {
         if (!gateOpen) continue;
       }
       let state = normalizeWorkflowEscalationState(card.metadata.escalation);
+      // A `needs_human` episode is parked for an explicit human decision in the decision lane — the
+      // board never auto re-engages it. The parking driver surfaces it; a human answer reactivates it.
+      if (state.kind === 'needs_human') continue;
       if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
       // window plus this guard mean each round drives exactly one orchestration.
       if (activeRunForCard(card.id) && !args.force) continue;
 
       if (state.attemptCount >= maxAttempts) {
-        let humanState = normalizeWorkflowEscalationState({ ...state, humanEscalated: true });
-        let blocker = escalationHumanBlocker(state, maxAttempts);
-        let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
-        flags.add('blocked');
+        // Loop-safety backstop: automatic re-engagement is exhausted. Rather than block the card in place
+        // (a buried flag), convert the episode to a `needs_human` decision so the parking driver surfaces
+        // it in the decision lane with a question + retry/reject buttons. The episode stays actionable
+        // (NOT humanEscalated) until a human answers — nothing silently sticks.
+        let question = escalationHumanBlocker(state, maxAttempts);
+        let decisionEscalation = normalizeWorkflowEscalation({
+          kind: 'needs_human',
+          detail: question,
+          options: [
+            { id: 'retry', label: 'Send back to the orchestrator to retry' },
+            { id: 'reject', label: 'Reject this card' },
+          ],
+          raisedBy: principal.label,
+        }, { now: currentNow });
+        let decisionState = normalizeWorkflowEscalationState({
+          ...state,
+          lastEscalation: decisionEscalation,
+          lastAt: currentNow,
+          history: [...(state.history ?? []), { kind: 'needs_human', detail: question, runId: null, at: currentNow }],
+        });
         let nextCard = normalizeWorkflowCardInput({
           ...card,
-          blockers: uniqueArray([...card.blockers, blocker]),
-          recoveryFlags: [...flags],
-          metadata: { ...card.metadata, escalation: humanState },
+          metadata: { ...card.metadata, escalation: decisionState },
           version: card.version + 1,
           updatedAt: currentNow,
           updatedBy: principal.label,
@@ -6325,15 +6741,15 @@ export function createWorkflowBoardService(opts = {}) {
           toColumnId: card.columnId,
           actor: principal.label,
           mode: 'auto',
-          reason: blocker,
+          reason: question,
           status: 'accepted',
-          sideEffects: [{ type: 'escalation', status: 'human_handoff', kind: state.kind, detail: state.detail, attempts: state.attemptCount }],
+          sideEffects: [{ type: 'escalation', status: 'needs_human', kind: 'needs_human', detail: question, attempts: state.attemptCount }],
         }, { id: eventId, now: currentNow });
         stateGraph.commit([
           { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
           { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
         ], sourceForPrincipal(principal));
-        escalatedToHuman.push({ cardId: card.id, kind: state.kind, attempts: state.attemptCount, blocker });
+        escalatedToHuman.push({ cardId: card.id, kind: 'needs_human', attempts: state.attemptCount, blocker: question });
         continue;
       }
 
@@ -6843,7 +7259,11 @@ export function createWorkflowBoardService(opts = {}) {
           // Dependency release tick (AD-5): enqueue blocked cards whose edges are satisfied and
           // escalate any card blocked past max-blocked-age, before the admission pass. The drain
           // also runs it, but the reconcile loop covers modes that drain skips.
-          if (!['stopped', 'maintenance'].includes(board.mode)) releaseDependencies(board.id);
+          if (!['stopped', 'maintenance'].includes(board.mode)) {
+            releaseDependencies(board.id);
+            // Occupancy-aging tick (Axis C): escalate cards stalled in a column past the stale budget.
+            escalateStaleCards(board.id);
+          }
           // Scheduler loop: a bounded admission pass drains the queue under the board-admission
           // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
           await drainWorkflowQueue(board.id, {});
@@ -6928,12 +7348,15 @@ export function createWorkflowBoardService(opts = {}) {
     defineWorkflowTransition,
     defineWorkflowGate,
     releaseDependencies,
+    escalateStaleCards,
+    columnOccupancyAvailable,
     resumeWorkItem,
     controlWorkItem,
     reconcileWorkflowRuntimeTasks,
     reconcileWorkflowAdmissions,
     reconcileWorkflowRecovery,
     reconcileWorkflowEscalations,
+    resolveDecisionCard,
     parseRunEscalation,
     importWorkflowWorkItems,
     exportWorkflowWorkItem,

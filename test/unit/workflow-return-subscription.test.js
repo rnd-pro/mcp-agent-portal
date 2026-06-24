@@ -22,6 +22,7 @@ describe('return-event normalizer (S1)', () => {
     assert.deepEqual(WORKFLOW_RETURN_KINDS, [
       'completed', 'failed',
       'needs_decision', 'needs_context', 'needs_permission',
+      'needs_human',
       'blocked',
       'partial', 'discovered', 'progress',
     ]);
@@ -39,6 +40,7 @@ describe('return-event normalizer (S1)', () => {
       needs_decision: { terminal: false, actionable: true, hardInterrupt: true },
       needs_context: { terminal: false, actionable: true, hardInterrupt: false },
       needs_permission: { terminal: false, actionable: true, hardInterrupt: true },
+      needs_human: { terminal: false, actionable: true, hardInterrupt: true },
       blocked: { terminal: false, actionable: true, hardInterrupt: true },
       partial: { terminal: false, actionable: false, hardInterrupt: false },
       discovered: { terminal: false, actionable: true, hardInterrupt: false },

@@ -2381,7 +2381,7 @@ links:
     assert.equal(after.columnId, 'ready', 'card routed back to the orchestrate column');
   });
 
-  it('escalates to a human after the attempt cap without ever exceeding it (natural N rounds)', async () => {
+  it('parks for a human decision after the attempt cap without ever exceeding it (natural N rounds)', async () => {
     service.updateWorkflowBoard({ boardId: DEFAULT_WORKFLOW_BOARD_ID, automation: { recovery: 'auto' } });
     let { card } = service.createOrUpdateCard({
       title: 'Unresolvable escalation', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
@@ -2403,16 +2403,24 @@ links:
     let capped = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
     let final = service.getCard(card.id);
 
-    assert.equal(capped.escalatedToHuman.length, 1, 'card handed to a human at the cap');
+    assert.equal(capped.escalatedToHuman.length, 1, 'card parked for a human at the cap');
     assert.equal(capped.reengaged.length, 0, 'no further re-engagement after the cap');
-    assert.equal(final.metadata.escalation.humanEscalated, true);
+    // The episode converts to a needs_human decision — surfaced in the decision lane, NOT humanEscalated
+    // (it stays actionable until a human answers), and NOT blocked-in-place behind a buried flag.
+    assert.equal(final.metadata.escalation.kind, 'needs_human');
+    assert.equal(final.metadata.escalation.humanEscalated, false);
     assert.equal(final.metadata.escalation.attemptCount, 3, 'counter never exceeds the cap');
-    assert.equal(final.recoveryFlags.includes('blocked'), true);
-    assert.ok(final.blockers.some(b => /Human decision required/.test(b)), 'precise human-handoff blocker recorded');
+    assert.equal(final.recoveryFlags.includes('blocked'), false, 'no silent blocked-in-place flag');
+    assert.ok(/Human decision required/.test(final.metadata.escalation.detail), 'human-decision question recorded');
+    assert.deepEqual(
+      final.metadata.escalation.lastEscalation.options.map(o => o.id),
+      ['retry', 'reject'],
+      'retry/reject buttons offered to the human',
+    );
 
     now += 60 * 60 * 1000;
     let afterCap = await service.reconcileWorkflowEscalations({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
-    assert.equal(afterCap.reengaged.length, 0, 'human-escalated card stays put');
+    assert.equal(afterCap.reengaged.length, 0, 'parked needs_human card stays put');
     assert.equal(afterCap.escalatedToHuman.length, 0, 'no repeated human handoff');
   });
 
@@ -2527,9 +2535,9 @@ links:
 });
 
 describe('normalizeWorkflowEscalation', () => {
-  it('exposes exactly the four escalation kinds', () => {
+  it('exposes exactly the five escalation kinds', () => {
     assert.deepEqual(WORKFLOW_ESCALATION_KINDS, [
-      'insufficient_permission', 'insufficient_context', 'needs_decision', 'rework',
+      'insufficient_permission', 'insufficient_context', 'needs_decision', 'needs_human', 'rework',
     ]);
   });
 
@@ -2658,7 +2666,7 @@ describe('workflow graph classifier (AD-6)', () => {
     assert.equal(classifier.rankOf('does-not-exist'), -1);
   });
 
-  it('classes the two rework edges as recovery + backward, and only done as terminal', () => {
+  it('classes the two rework edges as recovery + backward, and done + rejected as terminal', () => {
     let classifier = classifyWorkflowGraph(createDefaultWorkflowBoard());
     let reworkEdges = classifier.edges.filter(edge => edge.to === 'ready' && edge.edgeClass === 'recovery');
     assert.deepEqual(
@@ -2666,8 +2674,9 @@ describe('workflow graph classifier (AD-6)', () => {
       ['in-progress', 'quality-audit'],
     );
     assert.ok(reworkEdges.every(edge => edge.backward === true));
-    assert.deepEqual([...classifier.terminals], ['done']);
+    assert.deepEqual([...classifier.terminals].sort(), ['done', 'rejected']);
     assert.equal(classifier.isTerminal('done'), true);
+    assert.equal(classifier.isTerminal('rejected'), true);
     assert.equal(classifier.isTerminal('ready'), false);
     assert.equal(classifier.edgeClass('ideas', 'backlog'), 'forward');
     assert.equal(classifier.edgeClass('in-progress', 'ready'), 'recovery');

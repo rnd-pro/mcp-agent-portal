@@ -15,6 +15,8 @@ export const DEFAULT_WORKFLOW_COLUMN_IDS = [
   'quality-audit',
   'commit-publish',
   'done',
+  'needs-decision',
+  'rejected',
 ];
 
 export const WORKFLOW_BOARD_MODES = [
@@ -68,8 +70,31 @@ export const WORKFLOW_ESCALATION_KINDS = [
   'insufficient_permission',
   'insufficient_context',
   'needs_decision',
+  // The orchestrator (and, as a loop-safety backstop, the board) parks a card for an explicit human
+  // decision in the `await_human` column. Distinct from `needs_decision`/`rework`, which the board
+  // re-engages the orchestrator on: a `needs_human` episode waits for a human answer, never auto-retries.
+  'needs_human',
   'rework',
 ];
+
+// A bounded, deduped set of button choices an escalation may carry for the human-decision UI. Each
+// option is `{ id, label }`; a bare string becomes `{ id: <text>, label: <text> }`. The orchestrator
+// emits these (its WORKFLOW_RETURN payload) so the inspector can render the question as buttons.
+function normalizeEscalationOptions(input) {
+  if (!Array.isArray(input)) return [];
+  let seen = new Set();
+  let out = [];
+  for (let opt of input) {
+    let label = typeof opt === 'string' ? textOrNull(opt) : textOrNull(opt?.label ?? opt?.title ?? opt?.text);
+    if (!label) continue;
+    let id = (opt && typeof opt === 'object' ? textOrNull(opt.id ?? opt.value) : null) ?? label;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, label });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
 
 /**
  * Normalize a typed worker escalation. Returns null for an absent/unknown kind so an untyped
@@ -87,6 +112,7 @@ export function normalizeWorkflowEscalation(input = {}, opts = {}) {
     kind,
     detail: textOrNull(input.detail),
     suggestedResolution: textOrNull(input.suggestedResolution ?? input.suggested_resolution),
+    options: normalizeEscalationOptions(input.options),
     proposedLane: textOrNull(input.proposedLane ?? input.proposed_lane),
     raisedBy: textOrNull(input.raisedBy ?? input.raised_by ?? opts.raisedBy),
     raisedAt: Number.isFinite(raisedAt) ? raisedAt : null,
@@ -151,11 +177,12 @@ export const WORKFLOW_RETURN_SCHEMA = 'workflow-return/v1';
 export const WORKFLOW_RETURN_KINDS = [
   'completed', 'failed',                                  // terminal — run reached a final status
   'needs_decision', 'needs_context', 'needs_permission',  // intermediate — two-way
+  'needs_human',                                          // intermediate — hard-interrupt, parks for a human
   'blocked',                                              // intermediate — hard-interrupt
   'partial', 'discovered', 'progress',                    // intermediate — soft
 ];
 export const WORKFLOW_RETURN_TERMINAL_KINDS = ['completed', 'failed'];
-export const WORKFLOW_RETURN_HARD_INTERRUPT_KINDS = ['needs_decision', 'blocked', 'needs_permission'];
+export const WORKFLOW_RETURN_HARD_INTERRUPT_KINDS = ['needs_decision', 'needs_human', 'blocked', 'needs_permission'];
 export const WORKFLOW_RETURN_COALESCE_ONLY_KINDS = ['progress', 'partial'];
 export const WORKFLOW_RETURN_ACTIONABLE_KINDS =
   WORKFLOW_RETURN_KINDS.filter(kind => !WORKFLOW_RETURN_COALESCE_ONLY_KINDS.includes(kind));
@@ -165,6 +192,7 @@ const RETURN_KIND_TO_ESCALATION = {
   needs_decision: 'needs_decision',
   needs_context: 'insufficient_context',
   needs_permission: 'insufficient_permission',
+  needs_human: 'needs_human',
   blocked: 'needs_decision',
 };
 
@@ -392,6 +420,7 @@ export const WORKFLOW_GATE_VOCABULARY = [
   'audit_pass_or_explicit_waiver',
   'clean_diff_and_hygiene',
   'rework_authorized',
+  'decision_resolution',
 ];
 
 /** Floor-gate classification (inv 9, 10). */
@@ -489,7 +518,23 @@ const DEFAULT_WORKFLOW_COLUMNS = [
   {
     id: 'done',
     title: 'Done',
-    automation: { trigger: 'manual', action: 'close', mode: 'manual' },
+    automation: { trigger: 'manual', action: 'close', mode: 'manual', closeKind: 'success' },
+  },
+  {
+    // Human-decision lane (non-terminal). A card lands here only when the orchestrator explicitly asks a
+    // human (a `needs_human` escalation), or — as a loop-safety backstop — when board re-engagement is
+    // exhausted. It is NOT an execution column (no run is spawned); the card waits for a human answer,
+    // which routes it back to the orchestrator (→ ready) or to a terminal.
+    id: 'needs-decision',
+    title: 'Needs Decision',
+    automation: { trigger: 'manual', action: 'await_human', mode: 'manual' },
+  },
+  {
+    // Discard terminal: cancelled, human/orchestrator-rejected, and reaped runtime-debris cards. Distinct
+    // from `done` via closeKind so success throughput and the audit history stay clean.
+    id: 'rejected',
+    title: 'Rejected',
+    automation: { trigger: 'manual', action: 'close', mode: 'manual', closeKind: 'rejected' },
   },
 ];
 
@@ -555,6 +600,21 @@ const DEFAULT_WORKFLOW_TRANSITIONS = [
     to: 'ready',
     gate: 'rework_authorized',
   },
+  // Human-decision lane. The board/orchestrator parks a card in `needs-decision` (a daemon-bypass move,
+  // so no inbound transition is declared); the human's answer routes it back to the orchestrator
+  // (→ ready, carrying the answer) or retires it to the reject terminal. Both exits stay governed.
+  // Cancelled / runtime-debris / orchestrator-reject cards reach `rejected` via daemon bypass too, so
+  // the only declared inbound edge to the reject terminal is this governed human one.
+  {
+    from: 'needs-decision',
+    to: 'ready',
+    gate: 'rework_authorized',
+  },
+  {
+    from: 'needs-decision',
+    to: 'rejected',
+    gate: 'decision_resolution',
+  },
 ];
 
 const GATE_CHECKS = {
@@ -589,6 +649,13 @@ const GATE_CHECKS = {
   rework_authorized: (card, checks, request) => ({
     ok: hasActiveEscalation(card) || checkFailed(checks.audit) || request?.reworkAuthorized === true,
     reason: 'Rework to ready requires a recorded escalation, a failed audit, or a board re-engagement.',
+  }),
+  // A governed retirement to the reject terminal: like rework_authorized it requires a real reason —
+  // an open escalation episode (the card sits in the human-decision lane), a failed audit, or an
+  // authorized board/operator decision — never an arbitrary discard.
+  decision_resolution: (card, checks, request) => ({
+    ok: hasActiveEscalation(card) || checkFailed(checks.audit) || request?.reworkAuthorized === true,
+    reason: 'Resolution to rejected requires an open escalation, a failed audit, or an authorized decision.',
   }),
 };
 
@@ -672,6 +739,10 @@ export function normalizeWorkflowAutomation(input = {}) {
   let normalized = {
     trigger: textOrNull(automation.trigger),
     action: textOrNull(automation.action),
+    // Terminal flavor for an `action: 'close'` column. `success` (or absent) is the happy-path Done
+    // terminal; `rejected` is the discard terminal (cancelled / rejected / runtime-debris). Lets the
+    // service resolve the two terminals apart without hardcoding a column id (the board stays data-driven).
+    closeKind: textOrNull(automation.closeKind ?? automation.close_kind),
     mode: textOrNull(automation.mode),
     agent: textOrNull(automation.agent ?? automation.agentSlug ?? automation.agent_slug),
     agents: textArray(automation.agents ?? automation.agentPool ?? automation.agent_pool),
@@ -679,6 +750,18 @@ export function normalizeWorkflowAutomation(input = {}) {
     resourceGroup: textOrNull(automation.resourceGroup ?? automation.resource_group),
     parallelLimit: Number.isFinite(Number(automation.parallelLimit ?? automation.parallel_limit))
       ? Math.max(1, Math.floor(Number(automation.parallelLimit ?? automation.parallel_limit)))
+      : undefined,
+    // Occupancy WIP cap (Axis C): bounds how many cards may OCCUPY the column at once — including a
+    // card that finished its run but was not advanced — whereas parallelLimit bounds only the
+    // concurrently RUNNING agents. Opt-in per column; absent → uncapped.
+    occupancyLimit: Number.isFinite(Number(automation.occupancyLimit ?? automation.occupancy_limit))
+      ? Math.max(1, Math.floor(Number(automation.occupancyLimit ?? automation.occupancy_limit)))
+      : undefined,
+    // Stale/aging budget (Axis C): max wall-clock a worked card may occupy this column after its run
+    // ends before it escalates. Opt-in per column; absent → the service module default; an explicit 0
+    // disables aging for the column.
+    staleAgeMs: Number.isFinite(Number(automation.staleAgeMs ?? automation.stale_age_ms))
+      ? Math.max(0, Math.floor(Number(automation.staleAgeMs ?? automation.stale_age_ms)))
       : undefined,
     enabled: automation.enabled === undefined ? undefined : Boolean(automation.enabled),
   };
@@ -869,6 +952,17 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
   // validates `columnId ∈ board.columns` at the card-creation chokepoint (createOrUpdateCard / the
   // decompose child path), which is where the board is in scope.
   let columnId = textOrNull(input.columnId ?? input.column_id) ?? 'ideas';
+  // Occupancy aging clock (Axis C): stamp the instant a card ENTERS a column so the stale/aging
+  // escalation has a per-card start time, independent of the dependency-block clock. The stamp is
+  // keyed to the column it refers to (`enteredColumn`): a column change — or a card that has no prior
+  // stamp — restamps to `now`; a same-column edit preserves it, so a metadata-only write never resets
+  // the clock. Every card write funnels through this normalizer spreading the prior card, so this is
+  // the single source of truth for the stamp.
+  let metadata = objectOrEmpty(input.metadata);
+  let priorEnteredAt = Number(metadata.enteredColumnAt ?? metadata.entered_column_at);
+  if (metadata.enteredColumn !== columnId || !Number.isFinite(priorEnteredAt)) {
+    metadata = { ...metadata, enteredColumn: columnId, enteredColumnAt: now };
+  }
   return {
     schema: WORKFLOW_CARD_SCHEMA,
     id,
@@ -900,7 +994,7 @@ export function normalizeWorkflowCardInput(input = {}, opts = {}) {
     ),
     automation: normalizeWorkflowAutomation(input.automation),
     entityRefs: normalizeWorkflowEntityRefs(input.entityRefs ?? input.entity_refs ?? {}),
-    metadata: objectOrEmpty(input.metadata),
+    metadata,
     lifecycle: normalizeWorkflowLifecycle(input.lifecycle),
     dependsOn: normalizeWorkflowDependsOn(input.dependsOn ?? input.depends_on),
     recoveryFlags: normalizeRecoveryFlags(input.recoveryFlags ?? input.recovery_flags),
@@ -1228,8 +1322,15 @@ export function validateWorkflowTransitionGraph(board) {
     }
   }
 
-  // (2) Per-terminal floor-gate properties.
+  // (2) Per-terminal floor-gate properties. The hygiene/audit floor invariants guarantee that nothing
+  // SHIPS without crossing audit + hygiene — they guard the success terminal only. A reject terminal
+  // (`closeKind: 'rejected'`) is the opposite of shipping: a governed discard reached by daemon bypass
+  // (cancelled / debris / orchestrator-reject) or the human-decision exit, so P1/P2 do not apply to it.
+  let columnById = new Map(columns.map(column => [column.id, column]));
+  let isRejectTerminal = (columnId) =>
+    textOrNull(columnById.get(columnId)?.automation?.closeKind) === 'rejected';
   for (let terminal of terminals) {
+    if (isRejectTerminal(terminal)) continue;
     let inboundEdges = inbound.get(terminal) ?? [];
     // P1 — hygiene inbound edge-cut: every inbound forward edge must be hygiene-gated.
     if (inboundEdges.length > 0 && !inboundEdges.every(edge => edgeIsHygieneGated(edge.gates))) {

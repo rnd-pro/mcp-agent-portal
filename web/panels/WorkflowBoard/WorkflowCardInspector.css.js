@@ -361,4 +361,94 @@ pg-workflow-card-inspector .wci-view {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+/* Human-decision panel: the orchestrator's parked question, its button options, and a free-text answer
+   that routes back to the orchestrator (or rejects the card). */
+pg-workflow-card-inspector .wci-decision-section {
+  background: rgba(127, 119, 221, 0.06);
+}
+pg-workflow-card-inspector .wci-decision-question {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--sn-text);
+  margin-block-end: 8px;
+}
+pg-workflow-card-inspector .wci-decision-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-end: 8px;
+}
+pg-workflow-card-inspector .wci-decision-options:empty {
+  display: none;
+}
+pg-workflow-card-inspector .wci-decision-option {
+  padding: 5px 10px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 6px;
+  background: var(--sn-panel-bg);
+  color: var(--sn-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+pg-workflow-card-inspector .wci-decision-option:hover:not(:disabled) {
+  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+}
+pg-workflow-card-inspector .wci-decision-option-reject {
+  border-color: rgba(226, 75, 74, 0.4);
+  color: #e24b4a;
+}
+pg-workflow-card-inspector .wci-decision-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 6px;
+  background: var(--sn-panel-bg);
+  color: var(--sn-text);
+  font: inherit;
+  font-size: 11px;
+  margin-block-end: 8px;
+}
+pg-workflow-card-inspector .wci-decision-actions {
+  display: flex;
+  gap: 8px;
+}
+pg-workflow-card-inspector .wci-decision-btn {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--sn-node-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sn-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+pg-workflow-card-inspector .wci-decision-return {
+  border-color: var(--sn-accent, #7f77dd);
+  color: var(--sn-accent, #7f77dd);
+}
+pg-workflow-card-inspector .wci-decision-reject {
+  border-color: rgba(226, 75, 74, 0.4);
+  color: #e24b4a;
+}
+pg-workflow-card-inspector .wci-decision-btn:hover:not(:disabled) {
+  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+}
+pg-workflow-card-inspector .wci-decision-btn:disabled,
+pg-workflow-card-inspector .wci-decision-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+pg-workflow-card-inspector .wci-decision-status {
+  margin-block-start: 8px;
+  font-size: 11px;
+  color: var(--sn-text-dim);
+}
+pg-workflow-card-inspector .wci-decision-status[data-kind="error"] { color: #e24b4a; }
+pg-workflow-card-inspector .wci-decision-status[data-kind="ok"] { color: #1d9e75; }
+pg-workflow-card-inspector .wci-decision-status[data-kind="warning"] { color: #ef9f27; }
 `;
