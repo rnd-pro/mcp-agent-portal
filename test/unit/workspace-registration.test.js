@@ -23,7 +23,10 @@ function runIsolated(code) {
   let result = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
     cwd: path.resolve(import.meta.dirname, '../..'),
     encoding: 'utf8',
-    timeout: 5000,
+    // Success-path helper: every caller asserts an outcome, not a timeout. A generous budget so
+    // cold subprocess startup + module import under concurrent full-suite load can't trip a false
+    // ETIMEDOUT kill (the spawned script normally exits in tens of ms).
+    timeout: 15000,
     env: { ...process.env, PORTAL_CONFIG_PATH: configPath },
   });
   fs.rmSync(dir, { recursive: true, force: true });
