@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -342,6 +342,49 @@ function probeReleaseGate(cwd) {
   };
 }
 
+// Real test verification for the release gate (proof-contract: ship only what passes). The audit run's
+// self-reported PASS marker is NOT trusted on its own — the project's unit suite is actually run against
+// the (still uncommitted) work before it advances to the commit stage. Fail-closed: a failing or
+// timed-out run blocks the advance. A project with no unit-test script is "nothing to verify"
+// (available:false), so it is not blocked. Async + non-blocking (execFile, never execFileSync) so the
+// reconcile awaits the child without freezing the event loop or the ownership heartbeat.
+async function probeReleaseTests(cwd) {
+  let dir = textOrNull(cwd);
+  if (!dir) return { available: false, reason: 'no working directory to verify' };
+  let script;
+  try {
+    let pkg = JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf-8'));
+    script = pkg?.scripts?.['test:unit'] ? 'test:unit' : (pkg?.scripts?.test ? 'test' : null);
+  } catch {
+    return { available: false, reason: 'no readable package.json to verify' };
+  }
+  if (!script) return { available: false, reason: 'no test script to verify' };
+  return await new Promise((resolve) => {
+    execFile('npm', ['run', '--silent', script], {
+      cwd: dir, timeout: 300_000, maxBuffer: 64 * 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err && err.code === 'ENOENT') return resolve({ available: false, reason: 'npm unavailable' });
+      let out = `${stdout || ''}\n${stderr || ''}`;
+      let failMatch = out.match(/^# fail (\d+)/m);
+      let passMatch = out.match(/^# pass (\d+)/m);
+      let failing = failMatch ? Number(failMatch[1]) : null;
+      let timedOut = Boolean(err && err.killed);
+      // Fail-closed: a non-zero exit (incl. timeout) OR a parsed failing-count > 0 fails the gate.
+      let passed = !err && (failing === null || failing === 0);
+      resolve({
+        available: true,
+        passed,
+        failing,
+        passing: passMatch ? Number(passMatch[1]) : null,
+        reason: passed
+          ? `unit tests passed${passMatch ? ` (${passMatch[1]})` : ''}`
+          : timedOut ? 'unit tests timed out'
+            : `unit tests failed${failing != null ? ` (${failing} failing)` : ''}`,
+      });
+    });
+  });
+}
+
 function normalizeScopePath(value) {
   let text = textOrNull(value);
   if (!text) return null;
@@ -571,6 +614,9 @@ export function createWorkflowBoardService(opts = {}) {
     proxyManager = null,
     reconcileTickMs = DEFAULT_RECONCILE_TICK_MS,
     onReconcileTickError = () => {},
+    // Release-gate test verification (proof-contract). Injectable so the unit harness can stub it
+    // instead of spawning a real `npm` subprocess; defaults to the module-level probe.
+    probeReleaseTests: runReleaseTests = probeReleaseTests,
     // Trusted-embedder seam. `defaultPrincipal` is the committing identity for direct,
     // in-process callers (and the unit-test harness) that do not flow through the HTTP/MCP
     // seams. PRODUCTION wiring (web-server routes, MCP tool handler) never sets it, so the
@@ -3967,7 +4013,7 @@ export function createWorkflowBoardService(opts = {}) {
     return { promoted, scopeNeeded, blockedByDependency };
   }
 
-  function driveAutonomousReleaseTail(board, principal, runtimeNow, runtimeTasks) {
+  async function driveAutonomousReleaseTail(board, principal, runtimeNow, runtimeTasks) {
     let { auditColumnId, publishColumnId, closeColumnId } = releaseTailColumns(board);
     let publishMode = normalizeWorkflowBoardAutomation(board.automation).publishMode;
     let ops = [];
@@ -4004,7 +4050,25 @@ export function createWorkflowBoardService(opts = {}) {
           let separation = independentlySigned
             ? { ok: true, waiver: null }
             : floorSignSeparation(board, executedBy, principal);
-          if (verdict === 'pass' && separation.ok) {
+          if (verdict === 'pass' && separation.ok && !flags.has('needs_audit')) {
+            // Release proof-contract: a self-reported PASS marker is not enough to ship. Actually run
+            // the unit suite against the (still uncommitted) work before it advances to the commit
+            // stage. Fail-closed — a failing or timed-out run holds the card for rework (re-execution
+            // resets its checks and re-verifies); a verified absence of a test setup does not block.
+            let testProbe = await runReleaseTests(textOrNull(latestCard.cwd) || projectRoot);
+            if (testProbe.available && !testProbe.passed) {
+              let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
+              let held = normalizeWorkflowCardInput({
+                ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
+                updatedAt: runtimeNow, updatedBy: principal.label,
+              }, {
+                id: latestCard.id, actor: principal.label, now: runtimeNow,
+                version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
+              });
+              ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+              latestCard = held;
+              continue;
+            }
             if (!independentlySigned) {
               // Daemon self-sign. Under a waiver, record the approver who accepted the separated-duty
               // bypass so it stays attributable; without one (no recorded executor) it is an ordinary
@@ -4437,7 +4501,7 @@ export function createWorkflowBoardService(opts = {}) {
     // already complete — is still picked up. Requires a real audit verdict (proof-contract).
     let releaseTail = null;
     if (drive && board.mode === 'autonomous') {
-      releaseTail = driveAutonomousReleaseTail(board, principal, now(), runtimeTasks);
+      releaseTail = await driveAutonomousReleaseTail(board, principal, now(), runtimeTasks);
     }
     // Failure propagation (inv 22): now that each failed upstream's status is durable, resolve every
     // downstream dependency edge that points at it per the dependent's onUpstreamFailure. Fan-in
