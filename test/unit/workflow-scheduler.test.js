@@ -864,13 +864,21 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
   // hygiene-offender branch. Returns the repo path for use as a card cwd.
   function makeGitRepo(name, { dirtyPaths = ['src/feature.js'] } = {}) {
     let repo = fs.mkdtempSync(path.join(os.tmpdir(), `wf-repo-${name}-`));
-    let git = (args) => execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'ignore', 'ignore'] });
-    git(['init']);
-    git(['config', 'user.email', 'test@example.com']);
-    git(['config', 'user.name', 'test']);
+    // Commit identity via env instead of two `git config` subprocesses: each repo setup drops from
+    // five synchronous spawns to three (init/add/commit). Real git spawns dominate this file's runtime,
+    // and under concurrent suite load their startup latency dilates ~2.5x — trimming the spawn count
+    // keeps the slowest case clear of the per-test timeout (same fix shape as the ops-process and
+    // workspace-registration stabilizations).
+    let env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.com',
+      GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@example.com',
+    };
+    let git = (args) => execFileSync('git', args, { cwd: repo, env, stdio: ['ignore', 'ignore', 'ignore'] });
+    git(['init', '-q']);
     fs.writeFileSync(path.join(repo, 'README.md'), '# base\n');
     git(['add', '.']);
-    git(['commit', '-m', 'base']);
+    git(['commit', '-q', '-m', 'base']);
     for (let rel of dirtyPaths) {
       let abs = path.join(repo, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
