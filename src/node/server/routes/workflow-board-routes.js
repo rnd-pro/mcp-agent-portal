@@ -121,6 +121,43 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    // Axis C human-agent collaboration surface. Same server-derived-principal seam as /decide: a
+    // loopback or verified-LAN request is the human, attribution is frozen from that principal, and
+    // the request body never supplies identity. These are the human's only reachable entry into the
+    // comment stream and the human→orchestrator reply path; without them the service methods are
+    // unreachable from outside an agent run.
+    'POST /api/workflow-board/cards/comment': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().addCardComment(body, mutationContext(req));
+        json(res, { ok: result.ok !== false, ...result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'GET /api/workflow-board/cards/comments': (req, res) => {
+      try {
+        let result = resolveService().listCardComments({
+          boardId: queryValue(req, 'boardId'),
+          cardId: queryValue(req, 'cardId') ?? queryValue(req, 'card_id'),
+        });
+        json(res, { ok: result.ok !== false, ...result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
+    'POST /api/workflow-board/cards/reply': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().replyToCard(body, mutationContext(req));
+        json(res, { ok: result.ok !== false, ...result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'POST /api/workflow-board/decompose': async (req, res) => {
       try {
         let body = await parseBody(req);

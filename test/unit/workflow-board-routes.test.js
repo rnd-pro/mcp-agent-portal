@@ -107,6 +107,9 @@ seed_column: backlog
         'GET /api/workflow-board/boards',
         'POST /api/workflow-board/cards',
         'POST /api/workflow-board/cards/update',
+        'POST /api/workflow-board/cards/comment',
+        'GET /api/workflow-board/cards/comments',
+        'POST /api/workflow-board/cards/reply',
         'POST /api/workflow-board/decompose',
         'POST /api/workflow-board/transition',
         'POST /api/workflow-board/enqueue',
@@ -558,6 +561,82 @@ seed_column: backlog
       assert.equal(badColRes.status, 200);
       assert.equal(badColRes.json().result.ok, false);
       assert.equal(badColRes.json().result.failures[0].gate, 'invalid_board_graph');
+    } finally {
+      await sg.flushChatWrites();
+      sg.flush();
+      if (oldMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+      else process.env.AGENT_PORTAL_MEMORY_ROOT = oldMemoryRoot;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('serves the Axis C collaboration routes (comment, list, reply) as the loopback human', async () => {
+    let oldMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-board-routes-axisc-'));
+    process.env.AGENT_PORTAL_MEMORY_ROOT = path.join(tmpDir, '.agent-portal');
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+    let seq = 0;
+    let routes = createWorkflowBoardRoutes({
+      stateGraph: sg,
+      now: () => 4000 + (seq += 1),
+      makeId: (prefix) => `${prefix}-axisc-${seq}`,
+      projectRoot: tmpDir,
+    });
+
+    let call = async (key, method, url, body) => {
+      let res = makeRes();
+      await routes[key](makeReq(method, url, body), res);
+      return res;
+    };
+
+    try {
+      let cardRes = await call('POST /api/workflow-board/cards', 'POST', '/api/workflow-board/cards', {
+        id: 'route-collab', title: 'Collab card', projectId: 'project-alpha', domain: 'backend',
+        columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['Done'],
+      });
+      assert.equal(cardRes.json().ok, true);
+
+      // Post an auditable comment. Attribution is server-derived from the loopback human; the body
+      // never supplies identity.
+      let commentRes = await call('POST /api/workflow-board/cards/comment', 'POST', '/api/workflow-board/cards/comment', {
+        cardId: 'route-collab', body: 'Looks good, one question on scope.', author: 'spoofed-should-be-ignored',
+      });
+      assert.equal(commentRes.status, 200);
+      assert.equal(commentRes.json().ok, true);
+      assert.equal(commentRes.json().comment.kind, 'comment');
+      assert.equal(commentRes.json().comment.body, 'Looks good, one question on scope.');
+      assert.ok(commentRes.json().comment.author, 'comment carries a server-derived author');
+      assert.notEqual(commentRes.json().comment.author, 'spoofed-should-be-ignored');
+
+      // The bounded display cache reflects the post (oldest first).
+      let listRes = await call('GET /api/workflow-board/cards/comments', 'GET', '/api/workflow-board/cards/comments?cardId=route-collab');
+      assert.equal(listRes.status, 200);
+      assert.equal(listRes.json().ok, true);
+      assert.equal(listRes.json().comments.length, 1);
+      assert.equal(listRes.json().comments[0].body, 'Looks good, one question on scope.');
+
+      // Each comment is one durable audit event in the board log.
+      let eventsRes = await call('GET /api/workflow-board/events', 'GET', '/api/workflow-board/events?cardId=route-collab');
+      assert.equal(eventsRes.json().events.some(event => event.eventType === 'comment'), true);
+
+      // A human reply mints a routed return into the inbox (human→orchestrator path).
+      let replyRes = await call('POST /api/workflow-board/cards/reply', 'POST', '/api/workflow-board/cards/reply', {
+        cardId: 'route-collab', body: 'Proceed with the narrower scope.',
+      });
+      assert.equal(replyRes.status, 200);
+      assert.equal(replyRes.json().ok, true);
+      assert.equal(replyRes.json().comment.kind, 'reply');
+      assert.ok(replyRes.json().returnEventId, 'reply produces a routed return into the inbox');
+
+      // Unknown card is a clean 200 with ok:false, not a thrown 400.
+      let missingRes = await call('GET /api/workflow-board/cards/comments', 'GET', '/api/workflow-board/cards/comments?cardId=nope');
+      assert.equal(missingRes.status, 200);
+      assert.equal(missingRes.json().ok, false);
+      assert.equal(missingRes.json().error, 'card_not_found');
     } finally {
       await sg.flushChatWrites();
       sg.flush();
