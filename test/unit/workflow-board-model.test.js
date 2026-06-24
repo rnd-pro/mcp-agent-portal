@@ -2044,8 +2044,10 @@ links:
         path: `workflowLeases/${cardId}`,
         value: { cardId, runId: 'run-stale-wc', leaseOwner: 'tooling-engineer', leaseExpiresAt: 2000 },
       },
-      // Activity timestamp far in the past relative to the wall-clock now -> outside the window.
-      { op: 'set', path: `tasks/${taskId}`, value: { id: taskId, status: 'running', updatedAt: 1500 } },
+      // Activity ~12 min stale: past the 10-min freshness window (so the lease must NOT extend) but
+      // within the 15-min liveness-watchdog window (so the run is not reaped — this isolates the
+      // lease-freshness gate, not the watchdog).
+      { op: 'set', path: `tasks/${taskId}`, value: { id: taskId, status: 'running', updatedAt: bigNow - 12 * 60 * 1000 } },
     ], 'test');
 
     await localService.getBoardProjectionWithRuntime({ reconcileRuntime: true });

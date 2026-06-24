@@ -779,6 +779,23 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     // carries the resume preamble (buildWorkItemPrompt isResume), so the worker continues prior work.
   });
 
+  it('liveness watchdog: an active run whose runtime task is gone + stale self-heals (resumable re-queue)', async () => {
+    let { cardId, runId } = plantRunningCard('phantom-wip');
+    assert.equal(service.getCard(cardId).columnId, 'in-progress');
+
+    // The worker died (e.g. killed externally) and its runtime task is gone (empty map); advance the
+    // clock past the staleness window. The run is still marked "running" — a phantom that would
+    // otherwise wedge the card forever.
+    now = 901 + 16 * 60 * 1000;
+    let result = await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map());
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'ready', 'the dead/phantom run re-queues the card to the orchestrate stage');
+    assert.equal(card.recoveryFlags.includes('needs_resume'), true, 'it is flagged for resume');
+    assert.equal(sg.get(`workflowRuns/${runId}`).status, 'error', 'the phantom run is terminalized so re-engagement can proceed');
+    assert.equal(result.propagated?.some?.(p => p.cardId === cardId) ?? false, false, 'a resumable interruption is not a terminal failure to dependents');
+  });
+
   it('drive on: fires the quality-audit on_enter automation for the advanced card (a real audit delegation)', async () => {
     let { cardId, taskId } = plantRunningCard('wip-drive');
     let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
