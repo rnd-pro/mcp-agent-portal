@@ -53,8 +53,10 @@ describe('ops process utilities', () => {
     ], {
       collect: true,
       silent: true,
-      timeoutMs: 1000,
-      inactivityMs: 1000,
+      // Success-path test: a generous budget so subprocess startup latency under concurrent
+      // suite load can't trip the watchdog (the process normally exits in tens of ms).
+      timeoutMs: 15000,
+      inactivityMs: 15000,
       label: 'collect-test',
     });
 
@@ -69,8 +71,10 @@ describe('ops process utilities', () => {
     let result = await runShellWithWatchdog(`${JSON.stringify(process.execPath)} -e "process.stdout.write('shell-ok')"`, {
       collect: true,
       silent: true,
-      timeoutMs: 1000,
-      inactivityMs: 1000,
+      // Success-path test: a generous budget so subprocess startup latency under concurrent
+      // suite load can't trip the watchdog (the process normally exits in tens of ms).
+      timeoutMs: 15000,
+      inactivityMs: 15000,
       label: 'shell-test',
     });
 
@@ -82,8 +86,10 @@ describe('ops process utilities', () => {
       runProcessWithWatchdog(process.execPath, ['-e', 'process.stderr.write("bad"); process.exit(7);'], {
         collect: true,
         silent: true,
-        timeoutMs: 1000,
-        inactivityMs: 1000,
+        // Success-path test (asserts the collected non-zero exit, not a watchdog trip): a generous
+        // budget so subprocess startup latency under concurrent suite load can't trip the watchdog.
+        timeoutMs: 15000,
+        inactivityMs: 15000,
         label: 'exit-test',
       }),
       (error) => {
@@ -100,8 +106,10 @@ describe('ops process utilities', () => {
         collect: true,
         silent: true,
         maxBuffer: 3,
-        timeoutMs: 1000,
-        inactivityMs: 1000,
+        // Asserts the buffer-limit outcome, not a watchdog trip: a generous time budget so subprocess
+        // startup latency under concurrent suite load can't pre-empt it with a PROCESS_TIMEOUT.
+        timeoutMs: 15000,
+        inactivityMs: 15000,
         label: 'buffer-test',
       }),
       (error) => {
