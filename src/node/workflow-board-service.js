@@ -54,6 +54,11 @@ const COMPACT_ACTIVE_COLUMN_IDS = new Set([
 ]);
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
+// Liveness watchdog: an active run with no runtime-task activity within this window is treated as a
+// dead/phantom run (worker crashed, was killed externally, or agent-pool lost it) and reconciled to a
+// resumable terminal status. Generous vs. the 10-min freshness window so a slow-but-live worker (which
+// still streams events periodically) is never falsely reaped; tighter than the 30-min lease TTL.
+const DEFAULT_RUNTIME_STALE_RUN_MS = 15 * 60 * 1000;
 const DEFAULT_RECONCILE_TICK_MS = 60 * 1000;
 // Edge-trigger debounce: a burst of agent-pool task events collapses into one near-immediate reconcile.
 const DEFAULT_RECONCILE_TRIGGER_GAP_MS = 1000;
@@ -4416,6 +4421,22 @@ export function createWorkflowBoardService(opts = {}) {
           }
         }
 
+        // Liveness watchdog: an active run (running/requested/recovering) whose linked runtime task has
+        // gone missing (nextStatus null) or shown no activity within the staleness window is a DEAD /
+        // phantom run — the worker crashed, was killed externally, or agent-pool lost it. Reconcile it to
+        // a resumable terminal status (`error` + watchdogLost) so the card self-heals (re-queued for
+        // resume) instead of wedging "running" forever: a phantom-active run otherwise blocks its own
+        // re-engagement (self-feed guard), holds its file scope, and cannot be deleted.
+        let watchdogLost = false;
+        if (RUNNING_RUN_STATUSES.has(run.status) && (nextStatus === null || nextStatus === 'running')) {
+          let lastActivityAt = latestRuntimeTaskTimestamp(run, runtimeTasks);
+          let referenceAt = lastActivityAt ?? Number(run.updatedAt ?? run.startedAt ?? 0);
+          if (referenceAt > 0 && (currentNow - referenceAt) > DEFAULT_RUNTIME_STALE_RUN_MS) {
+            nextStatus = 'error';
+            watchdogLost = true;
+          }
+        }
+
         // Intermediate-return mint (S6): a still-live run may emit a `WORKFLOW_RETURN: <kind>` marker
         // before it terminalizes. Parse it BEFORE the no-status-change continue so a progress/discovered/
         // needs_decision return on a card whose run status is unchanged still lands in the inbox. Most
@@ -4455,7 +4476,7 @@ export function createWorkflowBoardService(opts = {}) {
         // A run whose task(s) ended lost/stale (heartbeat timeout, or a worker orphaned by a backend
         // restart) is a RESUMABLE interruption surfacing as `error`, not a genuine failure: re-queue it
         // for the orchestrator to resume from prior work rather than push it to audit as failed.
-        let resumableInterruption = nextStatus === 'error' && runInterruptionResumable(run, runtimeTasks);
+        let resumableInterruption = nextStatus === 'error' && (watchdogLost || runInterruptionResumable(run, runtimeTasks));
         // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution — but a
         // resumable interruption has not failed, so it must NOT fan out failure to its dependents.
         if (['error', 'failed', 'cancelled'].includes(nextStatus) && !resumableInterruption) failedUpstreamIds.add(card.id);
