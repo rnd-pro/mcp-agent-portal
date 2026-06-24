@@ -62,7 +62,10 @@ describe('CLI context resolve', () => {
       '--json',
     ], {
       encoding: 'utf8',
-      timeout: 3000,
+      // Success-path test: a generous budget so cold CLI subprocess startup under concurrent
+      // suite load can't trip the spawn timeout (the resolve normally finishes in well under a
+      // second), matching the ops-process and workspace-registration stabilizations.
+      timeout: 15000,
       env: { ...process.env, AGENT_PORTAL_MEMORY_ROOT: path.join(cwd, '.agent-portal') },
     });
 
