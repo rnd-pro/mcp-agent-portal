@@ -14,6 +14,7 @@ import {
   normalizeWorkflowEscalationState,
   normalizeWorkflowBoardAutomation,
   normalizeWorkflowBoardMode,
+  evaluateWorkflowBoardBudget,
   normalizeWorkflowCardInput,
   normalizeWorkflowChecksInput,
   normalizeWorkflowDependsOn,
@@ -1243,6 +1244,178 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
+  // Sum cumulative spend over a set of runs across the three budget dimensions. tokens come from the
+  // run-level total the task router persists; wall-clock is each run's elapsed span (a live run counts
+  // up to now, a terminal run to its end stamp); run-count is the raw run tally. Generic over the run
+  // set so the same accounting serves the board ceiling and the per-goal / per-decompose-subtree
+  // breakdowns used in breach diagnostics.
+  function sumRunsBudget(runs) {
+    let nowTs = now();
+    let tokens = 0;
+    let wallClockMs = 0;
+    let runCount = 0;
+    for (let run of runs) {
+      runCount += 1;
+      let runTokens = Number(run.tokens);
+      if (Number.isFinite(runTokens) && runTokens > 0) tokens += runTokens;
+      let startedAt = Number(run.startedAt);
+      if (Number.isFinite(startedAt) && startedAt > 0) {
+        let endedAt = Number(run.completedAt ?? run.updatedAt);
+        let end = Number.isFinite(endedAt) && endedAt >= startedAt
+          ? endedAt
+          : (RUNNING_RUN_STATUSES.has(run.status) ? nowTs : startedAt);
+        wallClockMs += Math.max(0, end - startedAt);
+      }
+    }
+    return { tokens, wallClockMs, runCount };
+  }
+
+  function boardRuns(boardId) {
+    return Object.values(getCollection(stateGraph, 'workflowRuns')).filter(run => run.boardId === boardId);
+  }
+
+  // Cumulative spend for the whole board: one pass over its runs. This is the figure the admission
+  // breaker gates on, so it stays cheap (no subtree walk) for the hot path.
+  function boardBudgetSpend(boardId) {
+    return sumRunsBudget(boardRuns(boardId));
+  }
+
+  // Board budget status: cumulative spend evaluated against the board's configured budget. ok=true and
+  // configured=false when no budget is authored (uncapped — the prior behaviour).
+  function boardBudgetStatus(board) {
+    let automation = normalizeWorkflowBoardAutomation(board.automation);
+    let spend = boardBudgetSpend(board.id);
+    return { ...evaluateWorkflowBoardBudget(automation.budget ?? null, spend), spend };
+  }
+
+  function formatBudgetBreaches(breaches = []) {
+    return breaches
+      .map((breach) => {
+        if (breach.dimension === 'wallClockMs') {
+          return `wall-clock ${Math.round(breach.spent / 1000)}s/${Math.round(breach.limit / 1000)}s`;
+        }
+        let label = breach.dimension === 'runCount' ? 'runs' : breach.dimension;
+        return `${label} ${breach.spent}/${breach.limit}`;
+      })
+      .join(', ');
+  }
+
+  // Admission-time budget gate. A breach refuses admission; the daemon drain pass additionally trips
+  // the breaker (pause + escalate). Mirrors the boardCapacityAvailable shape so the two ceilings read
+  // the same at every call site.
+  function boardBudgetAvailable(board) {
+    let status = boardBudgetStatus(board);
+    if (status.ok) return { ok: true, budget: status.budget ?? null, spend: status.spend, breaches: [] };
+    return {
+      ok: false,
+      reason: `Board ${board.id} budget exhausted: ${formatBudgetBreaches(status.breaches)}.`,
+      budget: status.budget,
+      spend: status.spend,
+      breaches: status.breaches,
+    };
+  }
+
+  // Per-decompose-subtree spend, keyed by the root decompose parent. A child carries parentCardId; the
+  // root is the topmost ancestor on the board. Computed only when the breaker trips (rare) so the hot
+  // admission path never pays for the closure walk. Used to name the heaviest subtree in the
+  // escalation — the concrete "wide/deep decompose tree" that drove the board over budget.
+  function decomposeSubtreeSpend(boardId) {
+    let cards = Object.values(getCollection(stateGraph, 'workflowCards')).filter(card => card.boardId === boardId);
+    let byId = new Map(cards.map(card => [card.id, card]));
+    let rootOf = (card) => {
+      let current = card;
+      let guard = 0;
+      while (current.parentCardId && byId.has(current.parentCardId) && guard < cards.length) {
+        current = byId.get(current.parentCardId);
+        guard += 1;
+      }
+      return current.id;
+    };
+    let runsByCard = new Map();
+    for (let run of boardRuns(boardId)) {
+      if (!runsByCard.has(run.cardId)) runsByCard.set(run.cardId, []);
+      runsByCard.get(run.cardId).push(run);
+    }
+    let rootRuns = new Map();
+    for (let card of cards) {
+      let root = rootOf(card);
+      let runs = runsByCard.get(card.id) ?? [];
+      if (!runs.length) continue;
+      if (!rootRuns.has(root)) rootRuns.set(root, []);
+      rootRuns.get(root).push(...runs);
+    }
+    return [...rootRuns.entries()]
+      .map(([rootCardId, runs]) => ({ rootCardId, ...sumRunsBudget(runs) }))
+      .sort((a, b) => b.tokens - a.tokens);
+  }
+
+  // Per-goal spend, keyed by the goal a card's run is attached to (entityRefs.goalId). Computed with
+  // the subtree breakdown only at trip time for diagnostics.
+  function goalBudgetSpend(boardId) {
+    let cards = Object.values(getCollection(stateGraph, 'workflowCards')).filter(card => card.boardId === boardId);
+    let goalByCard = new Map(cards.map(card => [card.id, textOrNull(card.entityRefs?.goalId)]));
+    let byGoal = new Map();
+    for (let run of boardRuns(boardId)) {
+      let goalId = goalByCard.get(run.cardId);
+      if (!goalId) continue;
+      if (!byGoal.has(goalId)) byGoal.set(goalId, []);
+      byGoal.get(goalId).push(run);
+    }
+    return [...byGoal.entries()]
+      .map(([goalId, runs]) => ({ goalId, ...sumRunsBudget(runs) }))
+      .sort((a, b) => b.tokens - a.tokens);
+  }
+
+  // Trip the board budget breaker: flip the board to `paused` and raise a board-level `needs_decision`
+  // escalation naming the breached dimensions plus the heaviest decompose subtree / goal that drove the
+  // spend, so a human re-arms the board with intent. Idempotent — a second trip while already tripped
+  // writes nothing, so a paused board never spams escalations.
+  function tripBoardBudgetBreaker(board, status) {
+    let principal = daemonPrincipal();
+    let ts = now();
+    let alreadyTripped = board.mode === 'paused' && Boolean(asObject(board.metadata).budgetBreaker);
+    if (alreadyTripped) return { ok: true, board: clone(board), event: null, alreadyTripped: true };
+    let topSubtree = decomposeSubtreeSpend(board.id)[0] ?? null;
+    let topGoal = goalBudgetSpend(board.id)[0] ?? null;
+    let detail = `Board ${board.id} budget exhausted (${formatBudgetBreaches(status.breaches)}). `
+      + 'Admission refused and board paused.'
+      + (topSubtree ? ` Heaviest decompose subtree ${topSubtree.rootCardId}: ${topSubtree.tokens} tokens over ${topSubtree.runCount} run(s).` : '');
+    let breakerState = {
+      trippedAt: ts,
+      breaches: status.breaches,
+      budget: status.budget ?? null,
+      spend: status.spend,
+      ...(topSubtree ? { topSubtree } : {}),
+      ...(topGoal ? { topGoal } : {}),
+    };
+    let nextBoard = {
+      ...board,
+      mode: 'paused',
+      version: boardVersion(board) + 1,
+      updatedAt: ts,
+      metadata: { ...asObject(board.metadata), budgetBreaker: breakerState },
+    };
+    let event = boardEvent(nextBoard, principal, { reason: detail }, {
+      eventType: 'escalation',
+      status: 'accepted',
+      sideEffects: [{
+        type: 'budget_breaker',
+        status: 'tripped',
+        kind: 'needs_decision',
+        detail,
+        breaches: status.breaches,
+        spend: status.spend,
+        ...(topSubtree ? { topSubtree } : {}),
+        ...(topGoal ? { topGoal } : {}),
+      }],
+    });
+    stateGraph.commit([
+      { op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard },
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceForPrincipal(principal));
+    return { ok: true, board: nextBoard, event, tripped: true };
+  }
+
   function activeFileScopeConflicts(board, card, args = {}) {
     let files = cardFileScope(card, args);
     if (!files.length) return [];
@@ -1369,6 +1542,10 @@ export function createWorkflowBoardService(opts = {}) {
     let boardCapacity = boardCapacityAvailable(board, card);
     if (!boardCapacity.ok && !args.force) {
       return { ok: false, reason: boardCapacity.reason, automation, capacity, boardCapacity };
+    }
+    let boardBudget = boardBudgetAvailable(board);
+    if (!boardBudget.ok && !args.force) {
+      return { ok: false, reason: boardBudget.reason, automation, capacity, boardCapacity, boardBudget };
     }
     let fileConflicts = activeFileScopeConflicts(board, card, args);
     if (fileConflicts.length && !args.force) {
@@ -2624,6 +2801,17 @@ export function createWorkflowBoardService(opts = {}) {
     let admitted = [];
     let rolledBack = [];
     let skipped = [];
+
+    // Board budget breaker (Axis E): cumulative spend is a hard admission ceiling. Concurrency limits
+    // bound how many runs execute at once but not their total cost, so a wide/deep decompose tree can
+    // burn unbounded tokens/wall-clock. When the board's summed run cost crosses its configured budget,
+    // refuse admission for the whole pass, flip the board to paused, and raise a board-level escalation
+    // so a human re-arms it with intent. The pause then halts subsequent passes until re-armed.
+    let budgetStatus = boardBudgetStatus(board);
+    if (!budgetStatus.ok) {
+      tripBoardBudgetBreaker(board, budgetStatus);
+      return { ok: true, drained: false, reason: 'board_budget_exhausted', budget: budgetStatus, admitted, rolledBack, skipped };
+    }
 
     let lease = acquireAdmissionLease(board.id, owner);
     if (!lease.ok) {
@@ -5506,6 +5694,10 @@ export function createWorkflowBoardService(opts = {}) {
     let boardCapacity = boardCapacityAvailable(board, card);
     if (!boardCapacity.ok && !args.force) {
       throw new Error(boardCapacity.reason);
+    }
+    let boardBudget = boardBudgetAvailable(board);
+    if (!boardBudget.ok && !args.force) {
+      throw new Error(boardBudget.reason);
     }
     let fileConflicts = activeFileScopeConflicts(board, card, effectiveArgs);
     if (fileConflicts.length && !args.force) {

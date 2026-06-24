@@ -711,6 +711,47 @@ function normalizeDaemonFloorSignWaiver(input) {
   return normalized;
 }
 
+// Board-level cumulative cost budget (Axis E). Concurrency limits cap how many runs execute at once
+// but not how much they spend in total, so a wide/deep decompose tree can burn unbounded tokens and
+// wall-clock. This normalizes an opt-in ceiling across three cumulative dimensions; an absent or
+// non-positive value on a dimension means that dimension is uncapped. Absent budget entirely → the
+// prior unbounded behaviour, so existing boards are unaffected until a budget is authored.
+function normalizeWorkflowBoardBudget(input) {
+  let budget = objectOrNull(input);
+  if (!budget) return undefined;
+  let tokens = positiveIntegerOrUndefined(budget.tokens ?? budget.maxTokens ?? budget.max_tokens);
+  let wallClockMs = positiveIntegerOrUndefined(
+    budget.wallClockMs ?? budget.wall_clock_ms ?? budget.maxWallClockMs ?? budget.max_wall_clock_ms,
+  );
+  let runCount = positiveIntegerOrUndefined(
+    budget.runCount ?? budget.run_count ?? budget.maxRuns ?? budget.max_runs,
+  );
+  let normalized = {};
+  if (tokens !== undefined) normalized.tokens = tokens;
+  if (wallClockMs !== undefined) normalized.wallClockMs = wallClockMs;
+  if (runCount !== undefined) normalized.runCount = runCount;
+  return Object.keys(normalized).length ? normalized : undefined;
+}
+
+// Pure breach check: compare cumulative spend against a normalized board budget. The limit is a hard
+// ceiling — a dimension breaches once spend reaches it (>=), so the dimension's last admission is the
+// one that meets the cap and no further admission is granted. Returns the breached dimensions so the
+// caller can refuse admission, pause the board, and escalate with an attributable reason. An absent
+// or empty budget is never breached (uncapped), preserving the prior unbounded behaviour.
+export function evaluateWorkflowBoardBudget(budget, spend = {}) {
+  let normalized = normalizeWorkflowBoardBudget(budget);
+  if (!normalized) return { ok: true, configured: false, budget: null, breaches: [] };
+  let breaches = [];
+  for (let dimension of ['tokens', 'wallClockMs', 'runCount']) {
+    let limit = normalized[dimension];
+    if (limit === undefined) continue;
+    let spent = Number(spend?.[dimension]);
+    if (!Number.isFinite(spent)) spent = 0;
+    if (spent >= limit) breaches.push({ dimension, limit, spent });
+  }
+  return { ok: breaches.length === 0, configured: true, budget: normalized, breaches };
+}
+
 export function normalizeWorkflowBoardAutomation(input = {}) {
   let automation = objectOrEmpty(input);
   let fallbackAgents = textArray(
@@ -719,6 +760,7 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
   let daemonFloorSignWaiver = normalizeDaemonFloorSignWaiver(
     automation.daemonFloorSignWaiver ?? automation.daemon_floor_sign_waiver,
   );
+  let budget = normalizeWorkflowBoardBudget(automation.budget ?? automation.costBudget ?? automation.cost_budget);
   let globalParallelLimit = positiveIntegerOrUndefined(
     automation.globalParallelLimit ?? automation.global_parallel_limit,
   );
@@ -762,6 +804,7 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
       : Boolean(automation.decompositionClosesParent ?? automation.decomposition_closes_parent),
     ...(leaseTtlMs ? { leaseTtlMs } : {}),
     ...(daemonFloorSignWaiver ? { daemonFloorSignWaiver } : {}),
+    ...(budget ? { budget } : {}),
   };
 }
 
