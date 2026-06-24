@@ -659,9 +659,14 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
   let ledger;
   let service;
   let gitRepos;
+  // Stubbed release-gate test verdict (injected so the suite never spawns a real `npm` subprocess).
+  // Default available:false → the gate is a no-op, preserving every pre-gate test's behavior; the
+  // gate-specific tests below override it to assert pass/hold.
+  let releaseTestVerdict;
 
   beforeEach(() => {
     gitRepos = [];
+    releaseTestVerdict = { available: false };
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-runtime-reconcile-'));
     sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
@@ -678,6 +683,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       projectRoot: tmpDir,
       proxyManager: ledger.proxy,
       defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+      probeReleaseTests: async () => releaseTestVerdict,
     });
   });
 
@@ -961,6 +967,35 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(checkPassed(audit), true, 'the audit floor is signed under the waiver');
     assert.equal(audit.signedBy, 'daemon', 'the daemon is recorded as the signer');
     assert.equal(audit.waiver.approver, 'local-human', 'the waiver approver is recorded for attribution');
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+  });
+
+  it('release gate: a PASS verdict still runs the unit suite — a failing run holds the card, never ships', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-testfail');
+    releaseTestVerdict = { available: true, passed: false, failing: 1, reason: 'unit tests failed (1 failing)' };
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'failing unit tests hold the card despite a self-reported PASS');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'it is held for rework');
+    assert.equal(result.releaseTail.advanced.some(i => i.cardId === cardId), false, 'broken work never advances to commit');
+  });
+
+  it('release gate: a PASS verdict with a green unit suite advances to commit-publish', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-testpass');
+    releaseTestVerdict = { available: true, passed: true, passing: 869, reason: 'unit tests passed (869)' };
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'a green suite plus a PASS verdict advances the card');
     assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
   });
 
