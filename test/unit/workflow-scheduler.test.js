@@ -890,7 +890,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
 
   // Plant a card parked in quality-audit whose audit run has already terminated with `runStatus`,
   // mirroring a card the core reconcile advanced and whose on_enter audit then finished.
-  function plantAuditedCard(id, runStatus = 'completed', { cwd = null, executedBy = [] } = {}) {
+  function plantAuditedCard(id, runStatus = 'completed', { cwd = null, executedBy = [], leaseOwner = null } = {}) {
     let created = service.createOrUpdateCard({
       id,
       title: `Card ${id}`,
@@ -914,6 +914,7 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       { op: 'set', path: `workflowRuns/run-${id}`, value: {
         schema: 'workflow-run/v1', id: `run-${id}`, boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: id,
         status: runStatus, taskIds: [`task-${id}`], startedAt: 900, updatedAt: 1500, completedAt: 1500,
+        ...(leaseOwner ? { leaseOwner } : {}),
       } },
     ], 'test:plant-audited');
     return id;
@@ -973,6 +974,39 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     let card = service.getCard(cardId);
     assert.equal(card.columnId, 'commit-publish', 'an independent sign-off advances the card');
     assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+  });
+
+  it('autonomous tail: a configured reviewer agent PASS run is an independent sign-off (no human needed)', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    // The daemon executed the card; an independent reviewer agent (code-reviewer is a configured
+    // quality-audit agent) ran the audit and reported PASS — separated duty is satisfied without a human.
+    let cardId = plantAuditedCard('aud-reviewer', 'completed', { executedBy: ['daemon'], leaseOwner: 'code-reviewer' });
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'an independent reviewer-agent PASS advances the card autonomously');
+    let audit = sg.get(`workflowChecks/${cardId}`)?.checks?.audit;
+    assert.equal(checkPassed(audit), true, 'the floor is signed on the reviewer PASS');
+    assert.equal(audit.signedBy, 'code-reviewer', 'the sign is attributed to the independent reviewer, not the daemon');
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+  });
+
+  it('autonomous tail: a PASS run owned by a non-reviewer agent is NOT an independent sign-off (held)', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    // The run is owned by an executor agent, not a configured quality-audit reviewer — separated duty
+    // is not satisfied, so a daemon-executed card is held for a real independent sign-off.
+    let cardId = plantAuditedCard('aud-nonrev', 'completed', { executedBy: ['daemon'], leaseOwner: 'backend-engineer' });
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'a non-reviewer PASS does not advance a daemon-executed card');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'it is held for an independent sign-off');
   });
 
   it('separated-duty: an explicit per-board waiver lets the daemon self-sign, recording the approver', async () => {

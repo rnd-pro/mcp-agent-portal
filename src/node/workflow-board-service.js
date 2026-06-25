@@ -4464,10 +4464,18 @@ export function createWorkflowBoardService(opts = {}) {
           let separation = independentlySigned
             ? { ok: true, waiver: null }
             : floorSignSeparation(board, executedBy, principal);
-          // An INDEPENDENT audit pass (a signer not in executedBy) supersedes a lingering needs_audit
-          // flag — the fresh pass is authoritative, so it advances and the stale flag is cleared. A bare
-          // daemon self-sign still respects needs_audit (it may not self-pass a card flagged for rework).
-          if (verdict === 'pass' && separation.ok && (independentlySigned || !flags.has('needs_audit'))) {
+          // Autonomous independent audit: the latest audit run was performed by an agent the board
+          // configures as a quality-audit reviewer — a role kept disjoint from the executor agents — so
+          // its explicit PASS is an INDEPENDENT sign-off, not a daemon self-pass. This lets an autonomous
+          // board advance audited work without a human while preserving separated duty (auditor !=
+          // executor); only the rare extreme reaches a human via the orchestrator / needs_decision lane.
+          let auditAgents = textArray((board.columns ?? []).find(col => col.id === auditColumnId)?.automation?.agents);
+          let auditor = textOrNull(latestFinished.leaseOwner);
+          let auditorIndependent = verdict === 'pass' && !independentlySigned && !!auditor && auditAgents.includes(auditor);
+          // An INDEPENDENT audit pass (a recorded independent signer, or a configured reviewer agent's PASS
+          // run) supersedes a lingering needs_audit flag — the fresh pass is authoritative. A bare daemon
+          // self-sign still respects needs_audit (it may not self-pass a card flagged for rework).
+          if (verdict === 'pass' && (independentlySigned || auditorIndependent || (separation.ok && !flags.has('needs_audit')))) {
             // Release proof-contract: a self-reported PASS marker is not enough to ship. Actually run
             // the unit suite against the (still uncommitted) work before it advances to the commit
             // stage. Fail-closed — a failing or timed-out run holds the card for rework (re-execution
@@ -4486,7 +4494,20 @@ export function createWorkflowBoardService(opts = {}) {
               latestCard = held;
               continue;
             }
-            if (!independentlySigned) {
+            if (independentlySigned) {
+              // Already signed by an independent principal — nothing to record.
+            } else if (auditorIndependent) {
+              // Attribute the floor sign to the independent reviewer agent that ran the audit, so the
+              // pass stays auditable and auditSignedIndependently honours it on later passes.
+              let signed = {
+                status: 'passed',
+                signedBy: auditor,
+                reason: `autonomous mode: independent reviewer ${auditor} reported PASS`,
+                at: runtimeNow,
+              };
+              checks = { ...checks, audit: signed };
+              ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+            } else {
               // Daemon self-sign. Under a waiver, record the approver who accepted the separated-duty
               // bypass so it stays attributable; without one (no recorded executor) it is an ordinary
               // daemon signature.
