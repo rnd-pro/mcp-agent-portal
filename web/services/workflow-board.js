@@ -26,7 +26,7 @@ const DEFAULT_COLUMNS = [
   },
   {
     id: 'ready',
-    title: 'Tasks / Ready',
+    title: 'Tasks',
     description: 'Accepted work with owner and acceptance criteria.',
   },
   {

@@ -562,7 +562,7 @@ const DEFAULT_WORKFLOW_COLUMNS = [
   },
   {
     id: 'ready',
-    title: 'Tasks / Ready',
+    title: 'Tasks',
     automation: {
       trigger: 'on_enter',
       action: 'orchestrate',

@@ -109,8 +109,9 @@ const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
 // Bump to force refreshDefaultBoardPolicy to re-run its fill-only merge on every existing default
 // board once — v6 self-heals a column automation gap (e.g. a `quality-audit` that lost its `action`
 // to an older normalizer or a clobbered snapshot) so the on-enter audit and the autonomous release
-// tail resolve their columns by action again.
-const DEFAULT_WORKFLOW_POLICY_VERSION = 7;
+// tail resolve their columns by action again. v8 renames the legacy `ready` title 'Tasks / Ready'
+// (read as a status) to 'Tasks' — it is the task queue.
+const DEFAULT_WORKFLOW_POLICY_VERSION = 8;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
 // no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
@@ -917,10 +918,15 @@ export function createWorkflowBoardService(opts = {}) {
     let nextColumns = defaults.columns.map((defaultColumn) => {
       let current = columnsById.get(defaultColumn.id);
       if (!current) return { ...defaultColumn, automation: { ...defaultColumn.automation } };
+      // Fill-only preserves a customized title, EXCEPT the one-time v8 rename: the legacy `ready` title
+      // 'Tasks / Ready' read as a status, but the column is the task queue — re-sync that exact legacy
+      // value to the new default ('Tasks'). Any other custom title is kept.
+      let storedTitle = textOrNull(current.title);
+      if (defaultColumn.id === 'ready' && storedTitle === 'Tasks / Ready') storedTitle = null;
       return {
         ...current,
         id: defaultColumn.id,
-        title: textOrNull(current.title) ?? defaultColumn.title,
+        title: storedTitle ?? defaultColumn.title,
         // Fill-only: a stored automation gap (a missing/nullish field — e.g. an `action` lost to an
         // older normalizer or a clobbered snapshot) falls back to the default instead of overwriting
         // it, so the column's action/trigger/mode self-heal on every reconcile.

@@ -197,10 +197,10 @@ describe('workflow WS-C surface (S9)', () => {
       assert.equal(payload.result.ok, false, `${args.action} held`);
       assert.equal(payload.result.status, 'pendingApproval', `${args.action} pendingApproval`);
     }
-    // No agent-authored rename landed: the column title is unchanged.
+    // No agent-authored rename landed: the column title is unchanged (the default 'Tasks').
     assert.equal(
       service.ensureBoard(DEFAULT_WORKFLOW_BOARD_ID).columns.find(column => column.id === 'ready').title,
-      'Tasks / Ready',
+      'Tasks',
     );
 
     // The board-author (in-process human principal) succeeds at the same edit (idempotent re-gate of
