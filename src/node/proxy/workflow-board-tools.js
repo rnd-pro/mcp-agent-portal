@@ -26,6 +26,12 @@ const ACTIONS = {
     description: 'Get one board projection with columns, cards, optional events, runtime data, or a compact status view.',
     required: [],
   },
+  create_board: {
+    method: 'createWorkflowBoardFromSpec',
+    description: 'Author a non-default board from a column/transition spec. The graph is validated before it persists; an invalid graph is rejected and a non-author returns pendingApproval. Use the default board or define_* to modify an existing board.',
+    required: ['boardId', 'columns', 'transitions'],
+    mutates: true,
+  },
   create_item: {
     method: 'createWorkItem',
     description: 'Create a workflow card/work item.',
@@ -150,6 +156,20 @@ const ACTION_ORDER = Object.keys(ACTIONS);
 const ACTION_EXAMPLES = {
   help: { action: 'help' },
   get_board: { action: 'get_board', boardId: DEFAULT_WORKFLOW_BOARD_ID, projectId: 'project-id' },
+  create_board: {
+    action: 'create_board',
+    boardId: 'team-review-board',
+    title: 'Team Review Board',
+    columns: [
+      { id: 'intake', title: 'Intake', automation: { action: 'classify' } },
+      { id: 'review', title: 'Review', automation: { trigger: 'on_enter', action: 'audit', mode: 'gated', agents: ['code-reviewer'] } },
+      { id: 'done', title: 'Done', automation: { action: 'close', closeKind: 'success' } },
+    ],
+    transitions: [
+      { from: 'intake', to: 'review', gates: ['has_owner_and_acceptance'] },
+      { from: 'review', to: 'done', gates: ['audit_pass_or_explicit_waiver', 'clean_diff_and_hygiene'] },
+    ],
+  },
   create_item: {
     action: 'create_item',
     boardId: DEFAULT_WORKFLOW_BOARD_ID,
@@ -424,6 +444,16 @@ export const WORKFLOW_BOARD_TOOLS = [
           items: { type: 'object' },
           description: 'Child card definitions for action=decompose.',
         },
+        columns: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Column spec ({id,title,automation}) for action=create_board.',
+        },
+        transitions: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Transition spec ({from,to,gates}) for action=create_board. Validated by validateWorkflowTransitionGraph before the board persists.',
+        },
         kind: { type: 'string', description: 'Optional work-item kind.' },
         priority: { type: 'string', description: 'Optional priority.' },
         domain: { type: 'string', description: 'Optional work-item domain for classification gates.' },
@@ -463,7 +493,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         patch: { type: 'object', description: 'Fields to patch for update_item.' },
         checks: { type: 'object', description: 'Optional gate checks for update_item.' },
         fromColumnId: { type: 'string', description: 'Expected current column for transition.' },
-        toColumnId: { type: 'string', enum: DEFAULT_WORKFLOW_COLUMN_IDS, description: 'Destination column for transition.' },
+        toColumnId: { type: 'string', description: 'Destination column for transition; validated board-aware by the service (assertBoardColumn / known_column), so custom-board columns are accepted.' },
         from: { type: 'string', description: 'Source column for define_transition/define_gate.' },
         to: { type: 'string', description: 'Destination column for define_transition/define_gate.' },
         gates: {
@@ -615,17 +645,10 @@ function validateActionArgs(action, args = {}) {
     };
   }
 
-  if (action === 'transition' && !DEFAULT_WORKFLOW_COLUMN_IDS.includes(args.toColumnId)) {
-    return {
-      ok: false,
-      message: `Invalid toColumnId. Supported columns: ${DEFAULT_WORKFLOW_COLUMN_IDS.join(', ')}.`,
-      details: {
-        action,
-        columns: DEFAULT_WORKFLOW_COLUMN_IDS,
-        example: ACTION_EXAMPLES.transition,
-      },
-    };
-  }
+  // toColumnId is intentionally NOT range-checked here against the default ids: the service is
+  // board-aware (assertBoardColumn / the `known_column` transition failure) and is the single authority
+  // on which columns a board has, so a custom-board column would be wrongly rejected by a default-id
+  // guard. Presence is still enforced via config.required above.
 
   return { ok: true };
 }
@@ -659,6 +682,16 @@ function serviceArgsForAction(action, args = {}) {
       includeRuntime: args.includeRuntime,
       compact: args.compact,
       view: args.view,
+    });
+  }
+  if (action === 'create_board') {
+    return cleanUndefined({
+      ...common,
+      title: args.title,
+      mode: args.mode,
+      automation: args.automation,
+      columns: args.columns,
+      transitions: args.transitions,
     });
   }
   if (action === 'create_item') {

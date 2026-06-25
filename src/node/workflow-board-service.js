@@ -36,7 +36,13 @@ import {
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
   validateWorkflowTransitionGraph,
-  WORKFLOW_GATE_VOCABULARY,
+  createWorkflowBoard,
+  isKnownWorkflowGate,
+  listWorkflowGateIds,
+  isKnownWorkflowAction,
+  workflowActionIsExecution,
+  workflowActionHoldsPendingChange,
+  WORKFLOW_COLUMN_ACTIONS,
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
@@ -104,13 +110,13 @@ const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 // Execution-class column actions: a card in a column with one of these actions can carry an
 // in-flight run that needs recovery (orchestrate/execute/audit/publish each spawn or require a
 // run). The passive intake/close actions (classify/scope/close) never strand a run.
-const EXECUTION_COLUMN_ACTIONS = new Set(['orchestrate', 'execute', 'audit', 'publish']);
+const EXECUTION_COLUMN_ACTIONS = new Set(WORKFLOW_COLUMN_ACTIONS.filter(workflowActionIsExecution));
 // Columns whose action implies a card may hold UNCOMMITTED working-tree changes still pending
 // advance/audit/commit — there a TERMINAL run legitimately reserves file scope so a peer cannot clobber
 // the produced changes. `orchestrate` (pre-execution / `ready`) is intentionally absent: a card sitting
 // there has not started its current cycle, so a stale terminal run from a prior cycle must NOT reserve
 // files (else same-file rework returns piled into `ready` mutually deadlock).
-const PENDING_CHANGE_COLUMN_ACTIONS = new Set(['execute', 'audit', 'publish']);
+const PENDING_CHANGE_COLUMN_ACTIONS = new Set(WORKFLOW_COLUMN_ACTIONS.filter(workflowActionHoldsPendingChange));
 const TASK_ERROR_STATUSES = new Set(['lost', 'stale', 'error', 'failed', 'cancelled']);
 const RUNTIME_DONE_STATUSES = new Set(['done', 'finished', 'complete', 'completed', 'success']);
 const RUNTIME_READY_STATUSES = new Set(['queued', 'pending', 'requested', 'created']);
@@ -824,16 +830,32 @@ export function createWorkflowBoardService(opts = {}) {
     return clone(next);
   }
 
-  function ensureBoard(boardId = DEFAULT_WORKFLOW_BOARD_ID) {
+  // Lookup, then create-on-first-touch. A persisted board (default or non-default) is returned as-is.
+  // On a miss the board materializes from a factory: the default id from the fixed default factory, a
+  // non-default id ONLY when the caller supplies a column/transition `spec` (the multi-board path —
+  // `create_board` and any first-touch with a known spec). A non-default id with no spec still fails
+  // closed: a board cannot be fabricated without a graph. A spec-seeded board is graph-validated before
+  // it persists so the ensure path can never seed an unoperable board.
+  function ensureBoard(boardId = DEFAULT_WORKFLOW_BOARD_ID, opts = {}) {
     ensureWorkflowSchemaMigrated();
     let id = textOrNull(boardId) ?? DEFAULT_WORKFLOW_BOARD_ID;
     let existing = stateGraph.get(`workflowBoards/${id}`);
     if (existing) return refreshDefaultBoardPolicy(existing, id);
-    if (id !== DEFAULT_WORKFLOW_BOARD_ID) {
+    let spec = opts.spec && typeof opts.spec === 'object' ? opts.spec : null;
+    if (id !== DEFAULT_WORKFLOW_BOARD_ID && !spec) {
       throw new Error(`Workflow board not found: ${id}`);
     }
-    let board = createDefaultWorkflowBoard({ id, now: now() });
-    board.metadata = { defaultPolicyVersion: DEFAULT_WORKFLOW_POLICY_VERSION };
+    let board = spec
+      ? createWorkflowBoard({ ...spec, id, now: now() })
+      : createDefaultWorkflowBoard({ id, now: now() });
+    if (spec) {
+      let validation = validateWorkflowTransitionGraph(board);
+      if (!validation.ok) {
+        throw new Error(`Invalid workflow board graph for ${id}: ${validation.errors[0].detail}`);
+      }
+    } else {
+      board.metadata = { defaultPolicyVersion: DEFAULT_WORKFLOW_POLICY_VERSION };
+    }
     stateGraph.commit([{ op: 'set', path: `workflowBoards/${id}`, value: board }], sourceForPrincipal(daemonPrincipal()));
     return board;
   }
@@ -2672,6 +2694,14 @@ export function createWorkflowBoardService(opts = {}) {
       let position = resolveColumnInsertIndex(columns, args, columns.length);
       columns.splice(position, 0, column);
     }
+    // Closed action vocabulary (fail-closed). A column's automation.action selects its runtime behavior
+    // class from the dispatch table; an action absent from that table has no dispatch and is rejected at
+    // this authoring boundary, mirroring the closed gate vocabulary. Absent action is allowed (a passive
+    // waypoint column); only a present-but-unknown action is rejected.
+    let definedAction = textOrNull(columns.find(column => column.id === columnId)?.automation?.action);
+    if (definedAction && !isKnownWorkflowAction(definedAction)) {
+      throw new Error(`Unknown column action "${definedAction}". Supported: ${WORKFLOW_COLUMN_ACTIONS.join(', ')}`);
+    }
     let nextBoard = {
       ...board,
       columns,
@@ -2705,8 +2735,8 @@ export function createWorkflowBoardService(opts = {}) {
   function normalizeDefinedGates(gates) {
     let ids = textArray(gates);
     for (let id of ids) {
-      if (!WORKFLOW_GATE_VOCABULARY.includes(id)) {
-        throw new Error(`Unknown workflow gate "${id}". Supported: ${WORKFLOW_GATE_VOCABULARY.join(', ')}`);
+      if (!isKnownWorkflowGate(id)) {
+        throw new Error(`Unknown workflow gate "${id}". Supported: ${listWorkflowGateIds().join(', ')}`);
       }
     }
     return ids;
@@ -5301,6 +5331,43 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, boards };
   }
 
+  // create_board: author a NON-DEFAULT board from an explicit column/transition spec. policy.define
+  // gated (an unprivileged author returns pendingApproval, exactly like define_column/transition/gate).
+  // Create-only: it refuses to clobber an existing board (use the define_* surface to mutate one) and
+  // refuses to recreate the fixed default board through the spec path. The proposed board is graph-
+  // validated and persisted by the SAME commitDefinedBoard path the define_* authoring surface uses, so
+  // an invalid graph is rejected without persisting (inv 11) and the commit is attributed to the author.
+  function createWorkflowBoardFromSpec(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let id = textOrNull(args.boardId ?? args.board_id ?? args.id);
+    if (!id) throw new Error('create_board requires a board id.');
+    if (id === DEFAULT_WORKFLOW_BOARD_ID) {
+      throw new Error(`Cannot create the default board "${id}" from a spec; it is materialized from the fixed default factory.`);
+    }
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: id },
+    );
+    if (!policyGate.ok) return policyGate;
+    if (stateGraph.get(`workflowBoards/${id}`)) {
+      throw new Error(`Workflow board already exists: ${id}. Use define_column/define_transition/define_gate to modify it.`);
+    }
+    let ts = now();
+    let board = createWorkflowBoard({
+      id,
+      title: args.title,
+      mode: args.mode,
+      automation: args.automation,
+      columns: args.columns,
+      transitions: args.transitions,
+      now: ts,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return commitDefinedBoard(board, principal);
+  }
+
   async function getWorkflowBoard(args = {}, context = {}) {
     let projection = args.includeRuntime
       ? await getBoardProjectionWithRuntime(args, context)
@@ -7472,6 +7539,7 @@ export function createWorkflowBoardService(opts = {}) {
     listEvents,
     getRecoveryState,
     listWorkflowBoards,
+    createWorkflowBoardFromSpec,
     getWorkflowBoard,
     createWorkItem,
     updateWorkItem,

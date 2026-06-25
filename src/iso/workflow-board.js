@@ -460,8 +460,11 @@ export function normalizeWorkflowDependsOn(input) {
 }
 
 /**
- * Closed, frozen vocabulary of every built-in gate id — the keys of the build-time `GATE_CHECKS`
- * registry. Config may only REFERENCE these ids; an unknown gate id fails closed.
+ * Built-in gate vocabulary — the seed ids of the gate-predicate registry (`GATE_PREDICATES`). These
+ * are always present. The registry is open via `registerWorkflowGate`, so config may also REFERENCE a
+ * registered custom predicate id; a gate id that is neither built-in nor registered fails closed. Use
+ * `isKnownWorkflowGate` / `listWorkflowGateIds` for membership — never compare against this array
+ * directly, or registered customs would read as unknown.
  */
 export const WORKFLOW_GATE_VOCABULARY = [
   'classified_and_project_scoped',
@@ -508,6 +511,43 @@ export const ACTIVE_RECOVERY_COLUMN_IDS = [
   'quality-audit',
   'commit-publish',
 ];
+
+/**
+ * Column-automation action dispatch table — the closed vocabulary of column `automation.action` ids
+ * and the runtime behavior class each one drives. `execution` actions spawn or require a run (so a card
+ * in such a column can strand a recoverable run); `pendingChange` actions imply a worked card may hold
+ * uncommitted working-tree changes that reserve file scope. The board normalizer stays permissive
+ * (board-agnostic), so authoring is the validation boundary: `define_column` rejects an action absent
+ * from this table fail-closed, mirroring how the gate registry rejects an unknown gate id.
+ */
+export const WORKFLOW_ACTION_DISPATCH = {
+  classify: { kind: 'intake' },
+  scope: { kind: 'intake' },
+  orchestrate: { kind: 'execution', execution: true },
+  execute: { kind: 'execution', execution: true, pendingChange: true },
+  audit: { kind: 'execution', execution: true, pendingChange: true },
+  publish: { kind: 'execution', execution: true, pendingChange: true },
+  close: { kind: 'terminal' },
+  await_human: { kind: 'human' },
+};
+
+/** Every built-in column action id, in dispatch order. */
+export const WORKFLOW_COLUMN_ACTIONS = Object.keys(WORKFLOW_ACTION_DISPATCH);
+
+/** Is this a known column action? Unknown actions are rejected at the authoring boundary. */
+export function isKnownWorkflowAction(action) {
+  return WORKFLOW_COLUMN_ACTIONS.includes(textOrNull(action));
+}
+
+/** Does this action spawn or require a run (an execution-class column that can strand a run)? */
+export function workflowActionIsExecution(action) {
+  return Boolean(WORKFLOW_ACTION_DISPATCH[textOrNull(action)]?.execution);
+}
+
+/** Does this action imply a worked card may hold uncommitted changes that reserve file scope? */
+export function workflowActionHoldsPendingChange(action) {
+  return Boolean(WORKFLOW_ACTION_DISPATCH[textOrNull(action)]?.pendingChange);
+}
 
 const DEFAULT_WORKFLOW_COLUMNS = [
   {
@@ -667,7 +707,11 @@ const DEFAULT_WORKFLOW_TRANSITIONS = [
   },
 ];
 
-const GATE_CHECKS = {
+/**
+ * The built-in gate predicates that seed the registry. A predicate is `(card, checks, request) =>
+ * { ok, reason }`; `ok` is the pass/fail verdict and `reason` the failure explanation.
+ */
+const BUILT_IN_GATE_PREDICATES = {
   classified_and_project_scoped: (card) => ({
     ok: hasText(card.projectId) && hasText(card.domain),
     reason: 'Card must have projectId and domain before leaving ideas.',
@@ -708,6 +752,42 @@ const GATE_CHECKS = {
     reason: 'Resolution to rejected requires an open escalation, a failed audit, or an authorized decision.',
   }),
 };
+
+/**
+ * The gate-predicate registry: an open map seeded with every built-in predicate. Custom gates register
+ * a predicate under a new id (`registerWorkflowGate`); the validator and evaluator resolve gate ids
+ * through this map, so a registered gate is first-class everywhere a built-in is. A gate id absent from
+ * the map fails closed.
+ */
+const GATE_PREDICATES = new Map(Object.entries(BUILT_IN_GATE_PREDICATES));
+
+/**
+ * Register (or override) a gate predicate. `id` is the gate id config references; `predicate` is
+ * `(card, checks, request) => { ok, reason }`. Returns the id. Built-in ids may be overridden but the
+ * built-in seed list (`WORKFLOW_GATE_VOCABULARY`) is unchanged — overriding only swaps the predicate.
+ */
+export function registerWorkflowGate(id, predicate) {
+  let gateId = textOrNull(id);
+  if (!gateId) throw new Error('registerWorkflowGate requires a non-empty gate id.');
+  if (typeof predicate !== 'function') throw new Error(`registerWorkflowGate("${gateId}") requires a predicate function.`);
+  GATE_PREDICATES.set(gateId, predicate);
+  return gateId;
+}
+
+/** Resolve a gate predicate by id, or null if no built-in/registered predicate owns it. */
+export function getWorkflowGate(id) {
+  return GATE_PREDICATES.get(textOrNull(id)) ?? null;
+}
+
+/** Is this gate id known (built-in or registered)? Unknown ids fail closed. */
+export function isKnownWorkflowGate(id) {
+  return GATE_PREDICATES.has(textOrNull(id));
+}
+
+/** Every currently-known gate id (built-in + registered), insertion-ordered. */
+export function listWorkflowGateIds() {
+  return [...GATE_PREDICATES.keys()];
+}
 
 function checkFailed(value) {
   if (value === false) return true;
@@ -977,6 +1057,58 @@ export function createDefaultWorkflowBoard(opts = {}) {
   };
 }
 
+/**
+ * Build a board object from an explicit column/transition spec — the multi-board generalization of
+ * `createDefaultWorkflowBoard`. Pure: it shapes and normalizes the board but does NOT validate the
+ * graph or persist it (the service runs `validateWorkflowTransitionGraph` and commits). A spec that
+ * omits its own `columns`/`transitions` falls back to the default 7-column graph under the requested
+ * id, so an id-only spec still yields an operable, named board rather than an empty (invalid) one.
+ */
+export function createWorkflowBoard(spec = {}) {
+  let now = spec.now ?? Date.now();
+  let id = textOrNull(spec.id);
+  if (!id) throw new Error('createWorkflowBoard requires a board id.');
+  let columns = Array.isArray(spec.columns) ? spec.columns : null;
+  let transitions = Array.isArray(spec.transitions) ? spec.transitions : null;
+  if (!columns || !transitions) {
+    return createDefaultWorkflowBoard({
+      id,
+      now,
+      title: spec.title,
+      mode: spec.mode,
+      automation: spec.automation,
+      version: spec.version,
+      createdAt: spec.createdAt,
+      updatedAt: spec.updatedAt,
+    });
+  }
+  return {
+    schema: WORKFLOW_BOARD_SCHEMA,
+    id,
+    title: textOrNull(spec.title) ?? id,
+    mode: normalizeWorkflowBoardMode(spec.mode, 'armed'),
+    automation: normalizeWorkflowBoardAutomation(spec.automation),
+    columns: columns.map((column) => {
+      let columnId = textOrNull(column?.id);
+      if (!columnId) throw new Error('createWorkflowBoard column requires an id.');
+      return {
+        id: columnId,
+        title: textOrNull(column.title) ?? columnId,
+        automation: normalizeWorkflowAutomation(objectOrEmpty(column.automation)),
+      };
+    }),
+    transitions: transitions.map((transition) => {
+      let from = textOrNull(transition?.from);
+      let to = textOrNull(transition?.to);
+      if (!from || !to) throw new Error('createWorkflowBoard transition requires from and to.');
+      return { from, to, gates: textArray(transition.gates ?? transition.gate) };
+    }),
+    version: positiveVersion(spec.version),
+    createdAt: spec.createdAt ?? now,
+    updatedAt: spec.updatedAt ?? now,
+  };
+}
+
 export function normalizeWorkflowChecksInput(input = {}, opts = {}) {
   let now = opts.now ?? Date.now();
   let cardId = textOrNull(opts.cardId ?? input.cardId ?? input.card_id);
@@ -1163,7 +1295,7 @@ export function evaluateWorkflowTransitionGates({ board, card, checks = {}, requ
   let gateIds = textArray(transition.gates ?? transition.gate);
   let results = [];
   for (let gate of gateIds) {
-    let check = GATE_CHECKS[gate];
+    let check = getWorkflowGate(gate);
     if (!check) {
       failures.push({ gate, reason: `Unknown transition gate "${gate}".` });
       continue;
@@ -1299,7 +1431,7 @@ export function validateWorkflowTransitionGraph(board) {
   // (4) Unknown gate fails closed.
   for (let edge of classifier.edges) {
     for (let gate of edge.gates) {
-      if (!WORKFLOW_GATE_VOCABULARY.includes(gate)) {
+      if (!isKnownWorkflowGate(gate)) {
         errors.push({ code: 'unknown_gate', detail: `Transition ${edge.from} -> ${edge.to} references unknown gate "${gate}".` });
       }
     }
