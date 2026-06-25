@@ -642,6 +642,12 @@ const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   // children carry the idea forward (inherited context + parentCardId), so nothing is lost. Opt out
   // per board to keep the parent in place.
   decompositionClosesParent: true,
+  // Per-card git worktree isolation (autonomous mode). Each file-mutating card runs in its own worktree
+  // on a dedicated branch; the board commits and merges it back to base autonomously. With isolation on,
+  // the file-scope blocker only reserves files for a RUNNING run, so independent cards run in parallel
+  // and real overlaps surface as merge conflicts the board escalates. Opt out per board to fall back to
+  // the shared-working-tree model (a finished-but-uncommitted card reserves its files until merge).
+  worktreeIsolation: true,
 };
 
 const DEFAULT_WORKFLOW_TRANSITIONS = [
@@ -1015,6 +1021,9 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
     decompositionClosesParent: (automation.decompositionClosesParent ?? automation.decomposition_closes_parent) === undefined
       ? DEFAULT_WORKFLOW_BOARD_AUTOMATION.decompositionClosesParent
       : Boolean(automation.decompositionClosesParent ?? automation.decomposition_closes_parent),
+    worktreeIsolation: (automation.worktreeIsolation ?? automation.worktree_isolation) === undefined
+      ? DEFAULT_WORKFLOW_BOARD_AUTOMATION.worktreeIsolation
+      : Boolean(automation.worktreeIsolation ?? automation.worktree_isolation),
     ...(leaseTtlMs ? { leaseTtlMs } : {}),
     ...(daemonFloorSignWaiver ? { daemonFloorSignWaiver } : {}),
     ...(budget ? { budget } : {}),

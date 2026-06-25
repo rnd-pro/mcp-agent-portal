@@ -46,6 +46,15 @@ import {
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
 import { prepareDelegateTaskCall } from './proxy/chat-delegate-routing.js';
+import {
+  cardWorktreeRoot,
+  commitWorktree,
+  isGitRepo,
+  mergeWorktree,
+  provisionWorktree,
+  reapOrphanWorktrees,
+  removeWorktree,
+} from './workflow-worktree.js';
 import { CAP, daemonPrincipal, derivePrincipal, evaluateIntent, INTENT_CAPABILITY } from './server/principal.js';
 import { getStateGraph } from './state-graph.js';
 import { getTeamMemoryRoot } from '../../packages/agent-pool-mcp/src/runtime/paths.js';
@@ -684,10 +693,140 @@ export function createWorkflowBoardService(opts = {}) {
     // still fail-closes to anonymous (inv 45 preserved). It is NOT a way to grant rights to
     // an untrusted caller — only an embedder that already owns the process supplies it.
     defaultPrincipal = null,
+    // Where per-card worktrees are checked out. Defaults under the repo's .git dir (untracked, durable,
+    // invisible to the main working tree's `git status`). Overridable so the unit harness can point it
+    // at a throwaway repo.
+    worktreeRoot = cardWorktreeRoot(projectRoot),
+    // Worktree git ops seam — injectable so service-level tests stub the lifecycle instead of driving
+    // real git. Production uses the real module against the project repo.
+    worktreeOps = { isGitRepo, provisionWorktree, commitWorktree, mergeWorktree, removeWorktree, reapOrphanWorktrees },
   } = opts;
   if (!stateGraph) {
     throw new Error('Workflow board service requires a StateGraph instance.');
   }
+  // Memoized per-repo "is this a git work tree?" check (isolation requires one). Resolves once per
+  // base repo for the life of the service instead of spawning git on every dispatch.
+  let gitRepoChecks = new Map();
+  function repoIsGit(repoRoot) {
+    if (!gitRepoChecks.has(repoRoot)) gitRepoChecks.set(repoRoot, Promise.resolve(worktreeOps.isGitRepo(repoRoot)));
+    return gitRepoChecks.get(repoRoot);
+  }
+
+  // ── Per-card worktree isolation ──────────────────────────────────────────────────────────────────
+  // Isolation is an autonomous-mode feature: it is the mode that also commits and merges a card's work
+  // back to base without a human, so the worktree lifecycle (provision → commit → merge → remove) is
+  // owned by the same autonomous policy. In any other mode the board keeps the shared-working-tree model
+  // (a human commits), so no worktree is provisioned. Opt out per board via automation.worktreeIsolation.
+  function worktreeIsolationEnabled(board) {
+    if (board?.mode !== 'autonomous') return false;
+    return normalizeWorkflowBoardAutomation(board?.automation).worktreeIsolation !== false;
+  }
+
+  function cardColumnAction(board, card) {
+    let columns = Array.isArray(board?.columns) ? board.columns : [];
+    return textOrNull(columns.find(col => col.id === card?.columnId)?.automation?.action);
+  }
+
+  // The persisted worktree record for a card, if it owns one.
+  function cardWorktree(card) {
+    let wt = card?.metadata?.worktree;
+    return wt && textOrNull(wt.path) ? wt : null;
+  }
+
+  // Does this card currently run in its own isolated worktree? (true once provisioned, until merged.)
+  function cardIsIsolated(card) {
+    return Boolean(cardWorktree(card));
+  }
+
+  // The base repo a card's worktree is cut from: the repo captured at first provision, else the card's
+  // explicit cwd (an external project), else the board's project root.
+  function cardBaseRepo(card) {
+    return textOrNull(card?.metadata?.worktree?.repoRoot) ?? textOrNull(card?.cwd) ?? projectRoot;
+  }
+
+  // The working directory a card's runs / release-gate probes execute in: its worktree when isolated,
+  // else its explicit cwd, else the project root. Single source of truth for "where does this card run".
+  function cardWorkingDir(card) {
+    return textOrNull(card?.metadata?.worktree?.path) || textOrNull(card?.cwd) || projectRoot;
+  }
+
+  // Persist (or clear) the worktree record on a card. A shallow StateGraph merge replaces `metadata`
+  // wholesale, so the full metadata object is written; the live `card` is mutated in place so the
+  // caller sees the update without a re-read.
+  function persistCardMetadata(card, mutate) {
+    let latest = getCard(card.id) ?? card;
+    let metadata = { ...asObject(latest.metadata) };
+    mutate(metadata);
+    stateGraph.merge(`workflowCards/${card.id}`, { metadata }, WORKFLOW_SOURCE);
+    card.metadata = metadata;
+    return metadata;
+  }
+
+  // Provision (or reuse) a worktree for a card about to run a file-mutating stage. Returns the worktree
+  // record, or null when isolation does not apply (non-autonomous, non-git, or a non-mutating stage).
+  // A provision failure degrades transparently: it is RECORDED on the card (metadata.worktreeError) and
+  // the card falls back to the shared tree — never silently, and never blocking the run.
+  // Where a card's worktrees live for a given base repo: the injectable service root for the project
+  // repo (so the unit harness can redirect it), else that repo's own .git-local root.
+  function worktreeRootFor(repoRoot) {
+    return repoRoot === projectRoot ? worktreeRoot : cardWorktreeRoot(repoRoot);
+  }
+
+  async function ensureCardWorktree(card, board) {
+    if (!worktreeIsolationEnabled(board)) return null;
+    let existing = cardWorktree(card);
+    if (!existing && !PENDING_CHANGE_COLUMN_ACTIONS.has(cardColumnAction(board, card))) return null;
+    let repoRoot = cardBaseRepo(card);
+    if (!(await repoIsGit(repoRoot))) return null;
+    let prov = await worktreeOps.provisionWorktree({ repoRoot, worktreeRoot: worktreeRootFor(repoRoot), cardId: card.id });
+    if (!prov.ok) {
+      persistCardMetadata(card, (m) => { m.worktreeError = { reason: prov.error, at: now() }; });
+      onReconcileTickError(new Error(`worktree provision failed for ${card.id}: ${prov.error}`), board?.id);
+      return null;
+    }
+    let record = {
+      path: prov.path,
+      branch: prov.branch,
+      baseRef: prov.baseRef,
+      baseSha: prov.baseSha,
+      repoRoot,
+      provisionedAt: existing?.provisionedAt ?? now(),
+    };
+    persistCardMetadata(card, (m) => { m.worktree = record; delete m.worktreeError; });
+    return record;
+  }
+
+  // Reclaim worktrees that should no longer exist. Two sources: (1) a TERMINAL card (reject/done) still
+  // holding a worktree pointer — its work is finished or discarded, so remove the tree + branch and clear
+  // the pointer (this is the reject path, and the safety net for a done card whose merge cleanup did not
+  // run); (2) a worktree on the project repo whose card was DELETED outright, leaving no metadata to drive
+  // (1) — swept by branch prefix against the set of cards that may still legitimately own one. Best-effort
+  // and idempotent; runs each drive pass. A still-RUNNING terminal card is left alone until its run ends.
+  async function reconcileWorktreeCleanup(board) {
+    if (!worktreeIsolationEnabled(board)) return { removed: [], reaped: [] };
+    let classifier = classifyWorkflowGraph(board);
+    let cards = Object.values(getCollection(stateGraph, 'workflowCards')).filter(c => c.boardId === board.id);
+    let isRunning = (id) => getRunsForCard(id).some(run => RUNNING_RUN_STATUSES.has(run.status));
+    let removed = [];
+    for (let card of cards) {
+      let wt = cardWorktree(card);
+      if (!wt || !classifier.isTerminal(card.columnId) || isRunning(card.id)) continue;
+      await worktreeOps.removeWorktree({
+        repoRoot: wt.repoRoot ?? cardBaseRepo(card), worktreePath: wt.path, branch: wt.branch,
+      });
+      persistCardMetadata(card, (m) => { delete m.worktree; });
+      removed.push({ cardId: card.id, branch: wt.branch });
+    }
+    let liveCardIds = new Set(cards
+      .filter(c => !classifier.isTerminal(c.columnId) || isRunning(c.id))
+      .map(c => c.id));
+    let reaped = [];
+    if (await repoIsGit(projectRoot)) {
+      reaped = await worktreeOps.reapOrphanWorktrees({ repoRoot: projectRoot, worktreeRoot, liveCardIds });
+    }
+    return { removed, reaped };
+  }
+
   let embedderPrincipal = isPrincipal(defaultPrincipal) ? defaultPrincipal : null;
   // Per-instance fast-path for the one-time schema migration. The service is constructed
   // per-request on some paths, so this flag is NOT authoritative for correctness — the durable
@@ -1527,13 +1666,24 @@ export function createWorkflowBoardService(opts = {}) {
   function activeFileScopeConflicts(board, card, args = {}) {
     let files = cardFileScope(card, args);
     if (!files.length) return [];
+    // Worktree isolation removes the shared-tree clobber the blocker exists to prevent. A card that runs
+    // in its OWN worktree neither overwrites nor is overwritten by a peer, so it neither reserves shared
+    // file scope nor collides on it — real overlaps surface (serialized) at MERGE time as a conflict the
+    // board escalates, not as a pre-execution block. So: the starting card skips the blocker entirely
+    // when it will run isolated, and any candidate already running isolated reserves nothing. Only
+    // genuinely shared-tree cards (isolation off, non-git project, or a degraded provision) still
+    // serialize on file overlap — exactly the activity-only semantics the blocker was meant to have.
+    let cardWillIsolate = worktreeIsolationEnabled(board)
+      && (cardIsIsolated(card) || PENDING_CHANGE_COLUMN_ACTIONS.has(cardColumnAction(board, card)));
+    if (cardWillIsolate) return [];
     let activeColumnIds = new Set(activeRecoveryColumnIds(board));
     return Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(candidate => candidate.id !== card.id)
       .filter(candidate => candidate.boardId === board.id)
       .filter(candidate => !card.projectId || candidate.projectId === card.projectId)
       .filter(candidate => activeColumnIds.has(candidate.columnId))
-      // Scope-hold semantics. A RUNNING run is actively editing and always holds its file scope. A merely
+      // Scope-hold semantics. An ISOLATED candidate edits its own worktree and reserves nothing. For a
+      // shared-tree candidate: a RUNNING run is actively editing and always holds its file scope; a merely
       // TERMINAL run holds scope ONLY while the card is still in an execution/audit/publish column — there
       // its produced (uncommitted) changes are pending advance/audit/commit and a peer must not clobber
       // them. A card with no run, or one RETURNED to a pre-execution column (`orchestrate`/`ready`,
@@ -1541,6 +1691,7 @@ export function createWorkflowBoardService(opts = {}) {
       // NOT hold scope; otherwise N same-file cards piled into `ready` (e.g. several rework/return cards)
       // mutually deadlock and none can ever start.
       .filter((candidate) => {
+        if (cardIsIsolated(candidate)) return false;
         let runs = getRunsForCard(candidate.id);
         if (runs.some(run => RUNNING_RUN_STATUSES.has(run.status))) return true;
         let action = textOrNull(
@@ -4273,6 +4424,46 @@ export function createWorkflowBoardService(opts = {}) {
       textOrNull(column?.automation?.action) === 'await_human')?.id ?? null;
   }
 
+  // Park a card in the human-decision lane with a typed needs_decision escalation, returning the
+  // { ops, card } to apply (the caller batches or commits them). The board never fabricates a question
+  // here — this is the generic "the board cannot self-resolve this, hand it to a human" hand-off (e.g. an
+  // autonomous merge conflict). `extraMetadata` rides along on the card (e.g. the conflict detail); the
+  // worktree pointer is intentionally preserved so a human can resolve it in place.
+  function parkCardForDecisionOps(board, card, reason, sideEffect, principal, ts, extraMetadata = {}) {
+    let laneId = decisionColumnId(board);
+    if (!laneId) return null;
+    let priorState = card.metadata?.escalation ? normalizeWorkflowEscalationState(card.metadata.escalation) : {};
+    let escalation = normalizeWorkflowEscalationState({
+      ...priorState,
+      kind: 'needs_decision',
+      lastEscalation: { schema: 'workflow-escalation/v1', kind: 'needs_decision', detail: reason, options: [], at: ts },
+    });
+    let metadata = { ...asObject(card.metadata), ...extraMetadata, escalation };
+    delete metadata.reworkCycles;
+    let parkFlags = normalizeRecoveryFlags((card.recoveryFlags ?? []).filter(flag => flag !== 'needs_audit'));
+    let parked = normalizeWorkflowCardInput({
+      ...card, columnId: laneId, lifecycle: 'idle', recoveryFlags: parkFlags,
+      metadata, version: card.version + 1, updatedAt: ts, updatedBy: principal.label,
+    }, {
+      id: card.id, actor: principal.label, now: ts,
+      version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
+    });
+    let eventId = nextId(makeId, 'escalation');
+    let event = normalizeWorkflowTransitionEvent({
+      id: eventId, eventType: 'transition', boardId: board.id, cardId: card.id,
+      fromColumnId: card.columnId, toColumnId: laneId, actor: principal.label, mode: 'auto',
+      reason, status: 'accepted',
+      sideEffects: [sideEffect],
+    }, { id: eventId, now: ts });
+    return {
+      ops: [
+        { op: 'set', path: `workflowCards/${card.id}`, value: parked },
+        { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+      ],
+      card: parked,
+    };
+  }
+
   // A daemon-signed floor check. Autonomous mode delegates the human/independent sign-off to the
   // daemon; the signature records that delegation explicitly (signedBy:'daemon') for the audit trail.
   function daemonSignedCheck(reason, at) {
@@ -4479,6 +4670,8 @@ export function createWorkflowBoardService(opts = {}) {
     let ops = [];
     let advanced = [];
     let closed = [];
+    let merged = [];
+    let conflicted = [];
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id) continue;
       let cardRuns = getRunsForCard(card.id);
@@ -4526,7 +4719,7 @@ export function createWorkflowBoardService(opts = {}) {
             // the unit suite against the (still uncommitted) work before it advances to the commit
             // stage. Fail-closed — a failing or timed-out run holds the card for rework (re-execution
             // resets its checks and re-verifies); a verified absence of a test setup does not block.
-            let testProbe = await runReleaseTests(textOrNull(latestCard.cwd) || projectRoot);
+            let testProbe = await runReleaseTests(cardWorkingDir(latestCard));
             if (testProbe.available && !testProbe.passed) {
               let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
               let held = normalizeWorkflowCardInput({
@@ -4642,7 +4835,7 @@ export function createWorkflowBoardService(opts = {}) {
         // is unavailable (no git repo) or shows an empty diff / hygiene offenders, the card is HELD as
         // needs_audit rather than auto-closed — fail-closed, so unverifiable work never ships.
         if (needCleanDiff || needHygiene) {
-          let probe = probeReleaseGate(textOrNull(card.cwd) || projectRoot);
+          let probe = probeReleaseGate(cardWorkingDir(card));
           if (!probe.available || !probe.hasDiff || !probe.hygiene) {
             let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
             let held = normalizeWorkflowCardInput({
@@ -4665,6 +4858,51 @@ export function createWorkflowBoardService(opts = {}) {
           };
           ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
         }
+        // Autonomous publish = commit the card's isolated worktree to its branch and merge it back to
+        // base, then close. This is where the autonomous mode "publishes" the work without a human — the
+        // mode owns the merge. A non-isolated card (shared-tree fallback / non-git) skips straight to the
+        // close, leaving its uncommitted changes for a human exactly as before. A merge CONFLICT is the
+        // one case the board cannot self-resolve: the card parks in the decision lane with the conflict
+        // detail and its worktree intact, so a human resolves it instead of the board force-merging.
+        let wt = cardWorktree(latestCard);
+        if (wt) {
+          let repoRoot = wt.repoRoot ?? cardBaseRepo(latestCard);
+          let label = `${latestCard.title} (${latestCard.id})`;
+          let commitRes = await worktreeOps.commitWorktree({
+            worktreePath: wt.path, message: `Agent Portal: ${label}`,
+          });
+          let mergeRes = commitRes.ok
+            ? await worktreeOps.mergeWorktree({
+              repoRoot, branch: wt.branch, baseRef: wt.baseRef, message: `Agent Portal: merge ${label}`,
+            })
+            : { ok: false, conflict: false, detail: commitRes.reason };
+          if (!mergeRes.ok) {
+            let reason = mergeRes.conflict
+              ? `Autonomous merge of ${card.id} into ${wt.baseRef} hit a conflict (${mergeRes.detail}). Parked for a human to resolve the worktree at ${wt.path} on branch ${wt.branch}.`
+              : `Autonomous publish of ${card.id} could not merge (${mergeRes.detail}). Parked for a human (worktree ${wt.path}, branch ${wt.branch}).`;
+            let park = parkCardForDecisionOps(board, latestCard, reason, {
+              type: 'decision', resolution: 'needs_decision', detail: reason,
+              mergeConflict: { branch: wt.branch, baseRef: wt.baseRef, files: mergeRes.conflictFiles ?? [] },
+            }, principal, runtimeNow, {
+              mergeConflict: { at: runtimeNow, branch: wt.branch, baseRef: wt.baseRef, detail: mergeRes.detail, files: mergeRes.conflictFiles ?? [] },
+            });
+            if (park) {
+              ops.push(...park.ops);
+              latestCard = park.card;
+              conflicted.push({ cardId: card.id, branch: wt.branch, files: mergeRes.conflictFiles ?? [] });
+              continue;
+            }
+            // No decision lane configured — fall through and leave the card in publish (fail-closed).
+            continue;
+          }
+          // Merged (or already-merged on a crash-retry). Remove the worktree + branch best-effort (the
+          // orphan reaper backstops a failure here) and drop the worktree pointer so the closed card
+          // carries no stale reference.
+          await worktreeOps.removeWorktree({ repoRoot, worktreePath: wt.path, branch: wt.branch });
+          latestCard = { ...latestCard, metadata: { ...asObject(latestCard.metadata) } };
+          delete latestCard.metadata.worktree;
+          merged.push({ cardId: card.id, branch: wt.branch });
+        }
         let advance = runtimeAdvanceCardOps(
           board, latestCard, closeColumnId, principal, runtimeNow,
           `Autonomous release tail: published, closing ${card.id} to ${closeColumnId}.`,
@@ -4679,7 +4917,7 @@ export function createWorkflowBoardService(opts = {}) {
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
-    return { advanced, closed };
+    return { advanced, closed, merged, conflicted };
   }
 
   // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
@@ -5034,7 +5272,7 @@ export function createWorkflowBoardService(opts = {}) {
               (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
             );
             if (nextStatus === 'completed' && columnAction === 'execute') {
-              let probe = probeReleaseGate(textOrNull(latestCard.cwd) || projectRoot);
+              let probe = probeReleaseGate(cardWorkingDir(latestCard));
               if (probe.available && !probe.hasDiff) flags.add('needs_audit');
             }
           }
@@ -5255,6 +5493,9 @@ export function createWorkflowBoardService(opts = {}) {
     let releaseTail = null;
     if (drive && board.mode === 'autonomous') {
       releaseTail = await driveAutonomousReleaseTail(board, principal, now(), runtimeTasks);
+      // Reclaim worktrees of terminal/deleted cards (reject path + orphan reaper). After the release tail
+      // so a card that just merged + closed this pass is cleaned in the same pass.
+      await reconcileWorktreeCleanup(board);
     }
     // Human-decision parking runs in every mode (the orchestrator can ask for a human regardless of
     // autonomous self-drive): make any `needs_human` card visible in the decision lane.
@@ -6005,7 +6246,16 @@ export function createWorkflowBoardService(opts = {}) {
       : '';
     let markdownPath = textOrNull(card.metadata?.markdownPath);
     let fileHint = markdownPath ? `\n\nWorkflow work-item file: ${markdownPath}` : '';
-    let cwdHint = card.cwd ? `\n\nWorking directory: ${card.cwd}` : '';
+    // When the card runs in its own isolated worktree, tell the agent so: it works against a private
+    // checkout on a dedicated branch, and the board commits + merges it back to base on completion — the
+    // agent must NOT commit, push, or switch branches itself.
+    let isolated = cardWorktree(card);
+    let cwdHint = isolated
+      ? `\n\nWorking directory: ${isolated.path}`
+        + `\nThis is an ISOLATED git worktree on branch \`${isolated.branch}\` (cut from \`${isolated.baseRef}\`).`
+        + ' Make your changes here; the board commits and merges this branch back to base automatically.'
+        + ' Do not commit, push, switch, or delete branches yourself.'
+      : (card.cwd ? `\n\nWorking directory: ${card.cwd}` : '');
     let fileScope = cardFileScope(card, args);
     let fileScopeHint = fileScope.length
       ? `\n\nFile ownership scope:\n${fileScope.map(file => `- ${file}`).join('\n')}`
@@ -6136,6 +6386,13 @@ export function createWorkflowBoardService(opts = {}) {
       };
     }
 
+    // Provision (or reuse) the card's isolated worktree before dispatch when isolation is in force, so
+    // the run — and every later release-gate probe — executes against the card's own tree instead of the
+    // shared project working tree. Returns null (shared-tree fallback) outside autonomous mode, on a
+    // non-git repo, or for a non-mutating stage.
+    let board = ensureBoard(card.boardId);
+    let worktree = await ensureCardWorktree(card, board);
+
     let desiredAgent = textOrNull(args.agent ?? args.agent_slug ?? card.assignedAgent) ?? 'orchestrator';
     let chatId = textOrNull(card.entityRefs.chatId);
     let parentChatId = null;
@@ -6182,7 +6439,7 @@ export function createWorkflowBoardService(opts = {}) {
     let delegateArgs = {
       prompt,
       timeout: args.timeout || 600,
-      cwd: textOrNull(args.cwd ?? card.cwd) || projectRoot,
+      cwd: textOrNull(args.cwd) || worktree?.path || cardWorkingDir(card),
       chat_id: chatId,
       agent_slug: desiredAgent,
       context_mode: args.context_mode === 'off' ? 'off' : 'auto',
