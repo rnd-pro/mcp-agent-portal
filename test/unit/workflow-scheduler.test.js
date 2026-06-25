@@ -352,6 +352,38 @@ describe('workflow admission scheduler (WS-B1)', () => {
     assert.ok(drain.skipped.some(s => s.admissionId === entry.admissionId && s.reason === 'not_before'));
   });
 
+  it('rework backstop: past the hard ceiling the board parks an exhausted rework card in the decision lane', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'enable recovery' });
+    let board = service.ensureBoard();
+
+    let card = makeReadyCard(service, { title: 'rework-exhausted', resourceGroup: 'impl' });
+    let base = service.getCard(card.id);
+    let escalation = {
+      schema: 'workflow-escalation-state/v1', kind: 'rework', detail: 'needs rework',
+      attemptCount: 0, nextAttemptAt: null,
+      lastEscalation: { kind: 'rework', detail: 'needs rework' },
+    };
+    // reworkCycles past the hard ceiling (> DEFAULT_AUDIT_REWORK_LIMIT + 1): the orchestrator has had
+    // its rework chances and the loop must not hang — the board parks it for a human, the documented
+    // extreme. needs_audit is cleared and the card leaves the pending-change column (frees file scope).
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+      ...base, columnId: 'ready', recoveryFlags: ['needs_audit'],
+      metadata: { ...base.metadata, escalation, reworkCycles: 5 },
+    } }], 'test:seed-exhausted-rework', { durable: true });
+
+    let result = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(result.ok, true);
+
+    let parked = service.getCard(card.id);
+    assert.equal(parked.columnId, 'needs-decision', 'an exhausted rework card is parked in the decision lane');
+    assert.equal(parked.metadata.escalation.kind, 'needs_decision', 'parked as a needs_decision a human can act on');
+    assert.ok((result.terminated || []).some(t => t.cardId === card.id && t.kind === 'needs_decision'), 'reported as parked');
+    assert.equal((parked.recoveryFlags || []).includes('needs_audit'), false, 'needs_audit cleared on park');
+  });
+
   // F-SCH-1 regression: an idempotent existing ACTIVE run (orchestrateWorkItem returns
   // { ok:true, idempotent:true, run } when activeRunForCard finds a `requested`/`recovering`/`running`
   // run) must be treated as GRANTED. Pre-fix, a `requested` run gave granted=false + slotRejected=false

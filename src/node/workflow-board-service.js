@@ -6819,6 +6819,49 @@ export function createWorkflowBoardService(opts = {}) {
       // A `needs_human` episode is parked for an explicit human decision in the decision lane — the
       // board never auto re-engages it. The parking driver surfaces it; a human answer reactivates it.
       if (state.kind === 'needs_human') continue;
+      // Rework loop-safety backstop (checked BEFORE the backoff gate — an exhausted loop must not wait
+      // out an hours-long backoff window). reworkCycles persists across the completed re-execution runs
+      // that reset attemptCount, so an audit that never passes would loop forever and pin the card's
+      // file scope. Past a hard ceiling the board parks it in the decision lane for a human — the
+      // documented extreme ("autonomous; the extreme case → Needs Decision"): a generic exhaustion
+      // hand-off, not a fabricated question. needs-decision is not a pending-change column, so parking
+      // also releases the card's file scope and unblocks every card that shared it.
+      let reworkCyclesNow = Number(card.metadata?.reworkCycles ?? 0);
+      if (state.kind === 'rework' && reworkCyclesNow > DEFAULT_AUDIT_REWORK_LIMIT + 1) {
+        let decisionColumnId = (board.columns ?? [])
+          .find(col => textOrNull(col?.automation?.action) === 'await_human')?.id ?? null;
+        if (decisionColumnId) {
+          let reason = `Automatic rework exhausted for ${card.id} after ${reworkCyclesNow} audit cycles without an orchestrator terminal; parking in the decision lane for a human (rework, reject, or accept).`;
+          let parkedEscalation = normalizeWorkflowEscalationState({
+            ...state,
+            kind: 'needs_decision',
+            lastEscalation: { schema: 'workflow-escalation/v1', kind: 'needs_decision', detail: reason, options: [], at: currentNow },
+          });
+          let metadata = { ...card.metadata, escalation: parkedEscalation };
+          delete metadata.reworkCycles;
+          let parkFlags = normalizeRecoveryFlags((card.recoveryFlags ?? []).filter(flag => flag !== 'needs_audit'));
+          let parked = normalizeWorkflowCardInput({
+            ...card, columnId: decisionColumnId, lifecycle: 'idle', recoveryFlags: parkFlags,
+            metadata, version: card.version + 1, updatedAt: currentNow, updatedBy: principal.label,
+          }, {
+            id: card.id, actor: principal.label, now: currentNow,
+            version: card.version + 1, createdAt: card.createdAt, updatedAt: currentNow,
+          });
+          let eventId = nextId(makeId, 'escalation');
+          let event = normalizeWorkflowTransitionEvent({
+            id: eventId, eventType: 'transition', boardId: board.id, cardId: card.id,
+            fromColumnId: card.columnId, toColumnId: decisionColumnId, actor: principal.label, mode: 'auto',
+            reason, status: 'accepted',
+            sideEffects: [{ type: 'decision', resolution: 'needs_decision', detail: reason, reworkCycles: reworkCyclesNow }],
+          }, { id: eventId, now: currentNow });
+          stateGraph.commit([
+            { op: 'set', path: `workflowCards/${card.id}`, value: parked },
+            { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+          ], sourceForPrincipal(principal));
+          terminated.push({ cardId: card.id, kind: 'needs_decision', reworkCycles: reworkCyclesNow });
+          continue;
+        }
+      }
       if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
       // window plus this guard mean each round drives exactly one orchestration.
