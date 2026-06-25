@@ -163,7 +163,11 @@ const MAX_BLOCKED_AGE_MS = 24 * 60 * 60 * 1000;
 // covering the gap where a card finished its run but was never advanced and ages silently. The clock
 // is `card.metadata.enteredColumnAt` (stamped by the card normalizer on every column change). A
 // per-column `automation.staleAgeMs` overrides this; an explicit 0 disables aging for that column.
-const DEFAULT_COLUMN_STALE_AGE_MS = 24 * 60 * 60 * 1000;
+// 1h, not 24h: on an autonomous board a card that finished its run and then sat in a non-terminal
+// column without being advanced (no active escalation, no live run) is stuck — it should reach a human
+// in the decision lane within the hour, not idle for a day. escalateStaleCards skips cards in escalation
+// backoff or with a live run, so this only fires on genuinely-wedged work.
+const DEFAULT_COLUMN_STALE_AGE_MS = 60 * 60 * 1000;
 
 function priorityOrdinal(priority) {
   let key = textOrNull(priority);

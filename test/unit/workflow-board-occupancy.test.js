@@ -182,13 +182,13 @@ describe('workflow board occupancy + stale aging (Axis C)', () => {
       seedRun(board.id, card.id, 'completed'); // it ran and finished, but was never advanced
 
       // Before the budget: no escalation.
-      now = 1000 + 23 * 60 * 60 * 1000;
+      now = 1000 + 30 * 60 * 1000;
       let early = service.escalateStaleCards(DEFAULT_WORKFLOW_BOARD_ID);
-      assert.equal(early.escalated.length, 0, 'under the 24h budget → no escalation');
+      assert.equal(early.escalated.length, 0, 'under the 1h budget → no escalation');
       assert.equal(service.getCard(card.id).metadata?.escalation, undefined);
 
       // Past the budget: a typed needs_decision on the typed-escalation channel.
-      now = 1000 + 25 * 60 * 60 * 1000;
+      now = 1000 + 2 * 60 * 60 * 1000;
       let tick = service.escalateStaleCards(DEFAULT_WORKFLOW_BOARD_ID);
       assert.equal(tick.escalated.length, 1, 'stalled card escalates');
       assert.equal(tick.escalated[0].cardId, card.id);
