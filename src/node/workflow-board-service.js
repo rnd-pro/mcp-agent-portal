@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   checkPassed,
@@ -390,11 +391,22 @@ async function probeReleaseTests(cwd) {
     return { available: false, reason: 'no readable package.json to verify' };
   }
   if (!script) return { available: false, reason: 'no test script to verify' };
+  // Run the gate suite in an ISOLATED state environment. A release gate must never touch the live
+  // ~/.agent-portal snapshot: a test that builds an ownership-guarded StateGraph on the real state path
+  // would claim the single-writer token, make THIS backend see `ownership-lost` and exit — a
+  // self-inflicted restart-churn storm (the gate killing the server that launched it). Strip
+  // PORTAL_BACKEND (no ownership guard in spawned test StateGraphs) and redirect every state + gateway
+  // path to a throwaway temp dir so the run cannot read, write, or contend the production state.
+  let isoDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portal-release-test-'));
+  let env = { ...process.env, PORTAL_STATE_DIR: isoDir, PORTAL_LOCAL_GATEWAY_DIR: isoDir };
+  delete env.PORTAL_BACKEND;
+  delete env.PORTAL_STATE_PATH;
   return await new Promise((resolve) => {
+    let done = (result) => { fs.rm(isoDir, { recursive: true, force: true }).catch(() => {}); resolve(result); };
     execFile('npm', ['run', '--silent', script], {
-      cwd: dir, timeout: 300_000, maxBuffer: 64 * 1024 * 1024,
+      cwd: dir, timeout: 300_000, maxBuffer: 64 * 1024 * 1024, env,
     }, (err, stdout, stderr) => {
-      if (err && err.code === 'ENOENT') return resolve({ available: false, reason: 'npm unavailable' });
+      if (err && err.code === 'ENOENT') return done({ available: false, reason: 'npm unavailable' });
       let out = `${stdout || ''}\n${stderr || ''}`;
       let failMatch = out.match(/^# fail (\d+)/m);
       let passMatch = out.match(/^# pass (\d+)/m);
@@ -402,7 +414,7 @@ async function probeReleaseTests(cwd) {
       let timedOut = Boolean(err && err.killed);
       // Fail-closed: a non-zero exit (incl. timeout) OR a parsed failing-count > 0 fails the gate.
       let passed = !err && (failing === null || failing === 0);
-      resolve({
+      done({
         available: true,
         passed,
         failing,
