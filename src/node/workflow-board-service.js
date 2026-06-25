@@ -5948,8 +5948,9 @@ export function createWorkflowBoardService(opts = {}) {
         'Quality audit task:',
         '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
         '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
-        '- Record the verdict via the public `workflow_board` action `update_item` with a `checks` object: set `audit` to `passed` or `failed` (use `auditWaiver` only for an explicit human waiver).',
-        '- Do not advance the card yourself; the gate moves it once the audit check passes.',
+        '- If you can, also record the verdict via the public `workflow_board` action `update_item` with a `checks` object (set `audit` to `passed` or `failed`); this needs audit authority and may be unavailable to you.',
+        '- ALWAYS end your report with the explicit verdict marker on its own line, because that marker — not the bare run exit, and not a check you may lack rights to write — is what the autonomous gate reads to advance or rework the card: `COMPLETION_PROOF: PASS` when the work meets every acceptance criterion, or `COMPLETION_PROOF: FAIL` (with a one-line reason) when it does not.',
+        '- Do not advance the card yourself; the gate moves it once an independent reviewer reports PASS.',
       ].join('\n')
       : '';
     let escalationState = card.metadata?.escalation
