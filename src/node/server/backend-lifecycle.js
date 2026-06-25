@@ -243,6 +243,15 @@ export async function ensureBackend(rootPath, { force } = {}) {
         await terminateBackend(lockedExisting, 'version');
       } else if (await isBackendPortAlive(lockedExisting.port)) {
         return lockedExisting.port;
+      } else if (processExists(lockedExisting.pid)) {
+        // Port probe timed out but the PROCESS is alive — it is busy (e.g. serializing a large board
+        // projection, or mid WAL flush), not dead. Killing it here spawns a competitor that steals the
+        // single-writer ownership token; the live backend then sees `ownership-lost` and exits, the
+        // supervisor respawns, the new one is stolen from in turn — a self-sustaining restart-churn
+        // storm (especially with two supervisors sharing one ~/.agent-portal state). Treat a live
+        // process as the singleton: return its port and let the caller's connection retries ride out
+        // the transient unresponsiveness. A genuinely hung backend (process gone) still respawns below.
+        return lockedExisting.port;
       } else {
         await terminateBackend(lockedExisting, 'unresponsive');
         await new Promise(r => setTimeout(r, 1000));
