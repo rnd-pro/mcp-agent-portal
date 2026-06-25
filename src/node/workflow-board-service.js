@@ -647,7 +647,11 @@ export function createWorkflowBoardService(opts = {}) {
     projectRoot = process.cwd(),
     proxyManager = null,
     reconcileTickMs = DEFAULT_RECONCILE_TICK_MS,
-    onReconcileTickError = () => {},
+    // A swallowed reconcile exception silently stops a whole self-healing stage while the board keeps
+    // ticking and looks healthy. Surface it by default; the host may override with structured logging.
+    onReconcileTickError = (err, boardId) => {
+      console.error(`[workflow-board] reconcile tick failed for board ${boardId ?? '?'}:`, err?.stack || err);
+    },
     // Release-gate test verification (proof-contract). Injectable so the unit harness can stub it
     // instead of spawning a real `npm` subprocess; defaults to the module-level probe.
     probeReleaseTests: runReleaseTests = probeReleaseTests,
