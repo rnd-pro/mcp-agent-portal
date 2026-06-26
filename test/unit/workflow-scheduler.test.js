@@ -1090,6 +1090,23 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
   });
 
+  it('release gate: a docs-only changeset skips the unit suite (nothing to verify) and advances', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-docsonly', 'completed', { cwd: makeGitRepo('docsonly', { dirtyPaths: ['docs/note.md'] }) });
+    // A failing stub WOULD hold a code change — but a docs-only changeset must skip the gate entirely,
+    // so the load-sensitive suite can never falsely hold a change it could not verify anyway.
+    releaseTestVerdict = { available: true, passed: false, failing: 1, reason: 'unit tests failed (1 failing)' };
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'a docs-only change is not gated on the unit suite');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), false, 'not held for rework');
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+  });
+
   it('proof-contract: a completed audit run with NO verdict is held as needs_audit, never auto-passed', async () => {
     service.updateWorkflowBoard(
       { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },

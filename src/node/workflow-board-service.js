@@ -394,6 +394,20 @@ function probeReleaseGate(cwd) {
   };
 }
 
+// Documentation/prose paths whose change cannot affect the unit suite.
+const DOC_PATH_PATTERN = /\.(md|markdown|mdx|txt|rst|adoc)$/i;
+
+// Does a card's changeset include anything the unit suite could verify? The unit-test release gate is
+// only meaningful for code; a docs/prose-only change (e.g. a new `docs/*.md`) has nothing for the suite
+// to catch, so running the full, load-sensitive suite would only risk a FALSE hold under the live
+// board's CPU contention. Conservative/fail-safe: an unreadable or non-doc changeset keeps the gate. The
+// clean-diff + hygiene floor still gate every change regardless.
+function changesetTouchesCode(cwd) {
+  let probe = probeReleaseGate(cwd);
+  if (!probe.available || !probe.changedPaths.length) return true;
+  return !probe.changedPaths.every(p => DOC_PATH_PATTERN.test(p) || p.startsWith('docs/'));
+}
+
 // Real test verification for the release gate (proof-contract: ship only what passes). The audit run's
 // self-reported PASS marker is NOT trusted on its own — the project's unit suite is actually run against
 // the (still uncommitted) work before it advances to the commit stage. Fail-closed: a failing or
@@ -4770,8 +4784,12 @@ export function createWorkflowBoardService(opts = {}) {
             // Release proof-contract: a self-reported PASS marker is not enough to ship. Actually run
             // the unit suite against the (still uncommitted) work before it advances to the commit
             // stage. Fail-closed — a failing or timed-out run holds the card for rework (re-execution
-            // resets its checks and re-verifies); a verified absence of a test setup does not block.
-            let testProbe = await runReleaseTests(cardWorkingDir(latestCard));
+            // resets its checks and re-verifies); a verified absence of a test setup does not block. A
+            // docs/prose-only changeset has nothing the suite could verify, so skip it rather than risk a
+            // FALSE hold from the load-sensitive suite (the clean-diff + hygiene floor still gate it).
+            let testProbe = changesetTouchesCode(cardWorkingDir(latestCard))
+              ? await runReleaseTests(cardWorkingDir(latestCard))
+              : { available: false, reason: 'changeset touches no code; unit gate not applicable' };
             if (testProbe.available && !testProbe.passed) {
               let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
               let held = normalizeWorkflowCardInput({
