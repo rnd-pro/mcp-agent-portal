@@ -1334,4 +1334,35 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.ok(result.backlog.scopeNeeded.includes(cardId), 'a raw backlog card is surfaced for scope');
     assert.equal(result.backlog.promoted.some(p => p.cardId === cardId), false, 'a card with no contract is not promoted');
   });
+
+  it('autonomous inbox: a raw idea is auto-promoted from the classify column into backlog for scoping', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    service.createOrUpdateCard({
+      id: 'idea-1', title: 'Raw idea', body: 'Something to maybe do.', columnId: 'ideas',
+      projectId: 'agent-portal', actor: 'test',
+    });
+    assert.equal(service.getCard('idea-1').columnId, 'ideas', 'the idea starts in the inbox');
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    // The inbox driver promotes ideas → backlog; the backlog driver then keeps it in backlog for the
+    // one-shot scope (a raw idea has no execution contract yet). The board now runs idea → done with no
+    // human step at all.
+    assert.equal(service.getCard('idea-1').columnId, 'backlog', 'the idea is auto-promoted to backlog for scoping');
+  });
+
+  it('inbox promotion is autonomous-only: armed mode keeps the classify column a human inbox', async () => {
+    service.updateWorkflowBoard({ mode: 'armed' }, { gatedBy: 'board.control' });
+    service.createOrUpdateCard({
+      id: 'idea-armed', title: 'Idea', columnId: 'ideas', projectId: 'agent-portal', actor: 'test',
+    });
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    assert.equal(service.getCard('idea-armed').columnId, 'ideas', 'armed mode does not auto-promote ideas');
+  });
 });

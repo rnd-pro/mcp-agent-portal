@@ -4620,6 +4620,47 @@ export function createWorkflowBoardService(opts = {}) {
     return { detail, options };
   }
 
+  // Autonomous inbox self-start (opt-in: board.mode==='autonomous'). The very front of the pipeline: a
+  // raw idea dropped in the classify column (Ideas/Inbox) is auto-promoted into the scope column
+  // (Backlog), where driveAutonomousBacklog then triages it — the orchestrator scopes it into a contract
+  // or rejects junk — and drives it onward. With this the board runs idea → done with NO human step at
+  // all; in armed/manual mode the classify column stays a human triage inbox. Same guards as the backlog
+  // driver: a card with a live run, a recovery flag, a blocker, or unsatisfied dependencies is held.
+  // Columns resolved by automation.action, never by hardcoded id.
+  function driveAutonomousInbox(board, principal, runtimeNow) {
+    let columns = board.columns ?? [];
+    let byAction = (action) => columns.find(column => textOrNull(column?.automation?.action) === action)?.id ?? null;
+    let classifyColumnId = byAction('classify');
+    let scopeColumnId = byAction('scope');
+    let promoted = [];
+    let blockedByDependency = [];
+    if (!classifyColumnId || !scopeColumnId) return { promoted, blockedByDependency };
+    let classifier = classifyWorkflowGraph(board);
+    let ops = [];
+    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (card.boardId !== board.id || card.columnId !== classifyColumnId) continue;
+      if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+      let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+      if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      if (!allDependenciesSatisfied(card, board, classifier, releasedEdgesFor(card))) {
+        blockedByDependency.push(card.id);
+        continue;
+      }
+      let advance = runtimeAdvanceCardOps(
+        board, clone(card), scopeColumnId, principal, runtimeNow,
+        `Autonomous inbox: idea ${card.id} promoted to ${scopeColumnId} for scoping.`,
+        'autonomous_promote',
+      );
+      ops.push(...advance.ops);
+      promoted.push({ cardId: card.id, toColumnId: scopeColumnId });
+    }
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
+    return { promoted, blockedByDependency };
+  }
+
   // Autonomous backlog self-start (opt-in: board.mode==='autonomous'). The orchestrate column already
   // auto-fires on entry; this is the missing step before it. A backlog card (the `scope`-action column)
   // that already carries an execution contract (owner + acceptance) is promoted to the orchestrate
@@ -5468,6 +5509,9 @@ export function createWorkflowBoardService(opts = {}) {
     // board runs idea(human) → done without a human from backlog onward.
     let backlog = null;
     if (drive && board.mode === 'autonomous') {
+      // Front of the pipeline: promote raw ideas → backlog first, so a freshly-promoted idea is scoped
+      // by driveAutonomousBacklog in this same pass (it re-reads cards from the graph).
+      driveAutonomousInbox(board, principal, now());
       backlog = driveAutonomousBacklog(board, principal, now());
       // Level-triggered orchestration: drive freshly promoted/scoped cards AND any card parked idle in
       // the orchestrate column. The edge-triggered drive (the `advanced` loop) only fires on the tick a
