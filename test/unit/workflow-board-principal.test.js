@@ -16,11 +16,12 @@ import {
   derivePrincipal,
   evaluateIntent,
   humanPrincipal,
+  mcpClientPrincipal,
 } from '../../src/node/server/principal.js';
 import { normalizeWorkflowBoardAutomation } from '../../src/iso/workflow-board.js';
 
 const WORKFLOW_SOURCE = 'workflow-board';
-const KNOWN_LABELS = new Set(['anonymous', 'human', 'local-human', 'daemon']);
+const KNOWN_LABELS = new Set(['anonymous', 'mcp-client', 'human', 'local-human', 'daemon']);
 
 function knownCommitSource(source) {
   if (source === WORKFLOW_SOURCE) return true;
@@ -91,9 +92,15 @@ describe('workflow board principal layer', () => {
     assert.ok(!agent.capabilities.includes(CAP.AUDIT));
     assert.ok(!agent.capabilities.includes(CAP.DEFINE));
 
-    let mcpAnon = derivePrincipal({ channel: 'mcp' });
-    assert.equal(mcpAnon.kind, 'anonymous');
-    assert.deepEqual(mcpAnon.capabilities, [CAP.READ]);
+    // An unverified MCP client (no per-task secret) gets the local intake floor: read + submit/edit
+    // work items, but nothing that drives or authors the board.
+    let mcpIntake = derivePrincipal({ channel: 'mcp' });
+    assert.equal(mcpIntake.kind, 'mcp');
+    assert.deepEqual(mcpIntake.capabilities, [CAP.READ, CAP.WRITE_CARD]);
+    assert.ok(!mcpIntake.capabilities.includes(CAP.TRANSITION));
+    assert.ok(!mcpIntake.capabilities.includes(CAP.ORCHESTRATE));
+    assert.ok(!mcpIntake.capabilities.includes(CAP.AUTHOR));
+    assert.ok(!mcpIntake.capabilities.includes(CAP.AUDIT));
 
     let daemon = derivePrincipal({ channel: 'daemon' });
     assert.equal(daemon.kind, 'daemon');
@@ -108,13 +115,15 @@ describe('workflow board principal layer', () => {
   });
 
   it('never reads identity from a request body', () => {
+    // A forged payload actor/agent_slug is ignored: the MCP intake floor is identified by its fixed
+    // server-derived id, never a payload value, so no privileged identity can be laundered in.
     let forged = derivePrincipal({
       channel: 'mcp',
       actor: 'board-author',
       agent_slug: 'orchestrator',
     });
-    assert.equal(forged.kind, 'anonymous');
-    assert.equal(forged.id, 'anonymous');
+    assert.equal(forged.kind, 'mcp');
+    assert.equal(forged.id, 'mcp-client');
 
     let loopbackWithForgery = derivePrincipal({ channel: 'loopback', actor: 'system' });
     assert.equal(loopbackWithForgery.label, 'local-human');
@@ -123,6 +132,7 @@ describe('workflow board principal layer', () => {
   it('factories expose the frozen principal shape', () => {
     for (let principal of [
       anonymousPrincipal({ channel: 'unknown' }),
+      mcpClientPrincipal({ channel: 'mcp' }),
       humanPrincipal({ transport: { channel: 'loopback' } }),
       agentPrincipal({ slug: 'x', transport: { channel: 'mcp' } }),
       daemonPrincipal(),
@@ -154,34 +164,40 @@ describe('workflow board principal layer', () => {
 
   it('rejects principal forgery through the MCP seam: derived identity wins over payload actor', async () => {
     let service = makeService();
-    let calls = [];
     let proxyManager = { workflowBoardService: service };
 
-    // Drive create_item through the MCP seam with a forged privileged actor/agent_slug
-    // in the payload. The seam derives identity (no verified slug → anonymous), so the gate
-    // blocks the write: a forged payload actor can neither author a card nor produce a
-    // privileged commit source.
+    // Drive create_item through the MCP seam with a forged privileged actor/agent_slug in the payload.
+    // The intake floor (mcp-client) holds WRITE_CARD, so the create is accepted — but identity is
+    // server-derived: it commits under `mcp-client`, never the forged `board-author`/`orchestrator`.
     let result = await handleWorkflowBoardTool(proxyManager, 'workflow_board', {
       action: 'create_item',
       title: 'Forged identity card',
       projectId: 'agent-portal',
+      acceptanceCriteria: ['Done'],
       actor: 'board-author',
       agent_slug: 'orchestrator',
     }, 'mcp');
     let payload = JSON.parse(result.content[0].text);
-    // Anonymous lacks WRITE_CARD: the gate blocks the forged create.
-    assert.equal(payload.result.ok, false);
-    assert.equal(payload.result.status, 'blocked');
-    assert.equal(payload.result.failures[0].capability, CAP.WRITE_CARD);
+    assert.equal(payload.result.ok, true, 'the intake floor can submit a work item');
 
-    // No card commit happened at all, and certainly none under a forged privileged label.
-    let cardCommits = commitSources.filter(source => source !== WORKFLOW_SOURCE
-      && !source.endsWith(':daemon'));
-    for (let source of cardCommits) {
+    // The commit carries the server-derived label, never the forged privileged identity.
+    assert.ok(commitSources.includes(`${WORKFLOW_SOURCE}:mcp-client`));
+    for (let source of commitSources) {
+      assert.ok(knownCommitSource(source), `unexpected commit source: ${source}`);
       assert.ok(!source.includes('board-author'));
-      assert.ok(!source.includes('orchestrator'));
+      assert.ok(!source.includes(':orchestrator'));
     }
-    void calls;
+
+    // But the same unverified MCP caller cannot DRIVE the board: orchestration needs ORCHESTRATE, which
+    // the intake floor does not hold, so it is blocked (no privilege escalation via the seam).
+    let drive = await handleWorkflowBoardTool(proxyManager, 'workflow_board', {
+      action: 'orchestrate',
+      cardId: payload.result.card.id,
+    }, 'mcp');
+    let drivePayload = JSON.parse(drive.content[0].text);
+    assert.equal(drivePayload.result.ok, false);
+    assert.equal(drivePayload.result.status, 'blocked');
+    assert.equal(drivePayload.result.failures[0].capability, CAP.ORCHESTRATE);
   });
 
   it('D2.1: a context-carried verifiedSlug derives an agentPrincipal that can write a card', async () => {
@@ -210,21 +226,29 @@ describe('workflow board principal layer', () => {
     }
   });
 
-  it('D2.1: an MCP call with no verifiedSlug derives anonymous and is blocked', async () => {
+  it('D2.1: an MCP call with no verifiedSlug derives the intake floor — can submit, cannot drive', async () => {
     let service = makeService();
     let proxyManager = { workflowBoardService: service };
 
-    // Absent verifiedSlug (no secret, or one that failed to resolve) → anonymous read-only floor.
+    // Absent verifiedSlug (no secret, or one that failed to resolve) → the local intake floor.
     let result = await handleWorkflowBoardTool(proxyManager, 'workflow_board', {
       action: 'create_item',
-      title: 'Anonymous card',
+      title: 'Intake idea',
       projectId: 'agent-portal',
       acceptanceCriteria: ['Done'],
     }, 'mcp', { context: {} });
     let payload = JSON.parse(result.content[0].text);
-    assert.equal(payload.result.ok, false);
-    assert.equal(payload.result.status, 'blocked');
-    assert.equal(payload.result.failures[0].capability, CAP.WRITE_CARD);
+    assert.equal(payload.result.ok, true, 'an idea can be submitted via MCP');
+    assert.equal(payload.result.card.title, 'Intake idea');
+
+    // A drive intent (transition) on the same connection is still blocked — submit, not steer.
+    let move = await handleWorkflowBoardTool(proxyManager, 'workflow_board', {
+      action: 'transition', cardId: payload.result.card.id, toColumnId: 'backlog',
+    }, 'mcp', { context: {} });
+    let movePayload = JSON.parse(move.content[0].text);
+    assert.equal(movePayload.result.ok, false);
+    assert.equal(movePayload.result.status, 'blocked');
+    assert.equal(movePayload.result.failures[0].capability, CAP.TRANSITION);
   });
 
   it('a mutation without a principal fails closed to the anonymous least-privilege identity', () => {

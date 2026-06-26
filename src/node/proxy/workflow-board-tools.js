@@ -1059,9 +1059,10 @@ export async function handleWorkflowBoardTool(
   }
 
   // Server-derived MCP identity. Body-supplied actor/agent_slug is never trusted as
-  // identity. Per-task-secret → verifiedSlug correlation (D2.1) is wired at spawn in
-  // WS-B1/S8; until then MCP callers without a server-verified slug resolve to the
-  // least-privilege (anonymous) principal.
+  // identity. A per-task secret → verifiedSlug (D2.1) yields a full agent principal; without
+  // one, a local MCP caller resolves to the intake floor (mcp-client: READ + WRITE_CARD) — it
+  // can submit/edit work items but cannot drive or author the board. Identity stays
+  // server-derived, so a forged payload actor can never launder a privileged identity.
   let verifiedSlug = options.context?.verifiedSlug ?? options.verifiedSlug;
   let principal = derivePrincipal({ channel: 'mcp', verifiedSlug });
   let context = {

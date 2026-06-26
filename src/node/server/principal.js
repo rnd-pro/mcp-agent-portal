@@ -69,6 +69,26 @@ export function anonymousPrincipal(transport = {}) {
 }
 
 /**
+ * Unverified local MCP client (e.g. the operator's IDE connection, with no per-task
+ * secret). Under the same-uid trust model a local loopback HTTP request already maps to
+ * a FULL human principal, so a local MCP client granted READ + WRITE_CARD is strictly
+ * LESS privileged than what the same operator already has via the UI — it can submit and
+ * edit work items (drop an idea into the board), but it cannot transition, orchestrate,
+ * control, author policy, or sign audits. Identity stays server-derived (a fixed id,
+ * never a payload value), so this grants intake without enabling identity laundering.
+ * @param {object} transport
+ */
+export function mcpClientPrincipal(transport = {}) {
+  return {
+    kind: 'mcp',
+    id: 'mcp-client',
+    capabilities: [CAP.READ, CAP.WRITE_CARD],
+    label: 'mcp-client',
+    transport: normalizeTransport(transport),
+  };
+}
+
+/**
  * Privileged bootstrap identity under the accepted same-uid trust model. Separated
  * duty (splitting AUTHOR/AUDIT out) is a later slice.
  * @param {{ id?: string, label?: string, transport?: object }} input
@@ -141,7 +161,10 @@ export function derivePrincipal(transport = {}) {
     if (verifiedSlug) {
       return agentPrincipal({ slug: verifiedSlug, label: normalized.label, transport: normalized });
     }
-    return anonymousPrincipal(normalized);
+    // No server-verified slug → the local intake floor: a local MCP client may read and submit/edit
+    // work items, but not drive (transition/orchestrate/control) or author (define/author/audit) the
+    // board. Strictly less than the loopback-human rights the same local operator already holds.
+    return mcpClientPrincipal(normalized);
   }
   if (channel === 'daemon') {
     return daemonPrincipal(normalized);
