@@ -68,6 +68,10 @@ describe('workflow worktree isolation (real git)', () => {
     assert.ok(fs.existsSync(path.join(prov.path, 'a.txt')), 'worktree has the checked-out tree');
     assert.equal(fs.lstatSync(path.join(prov.path, 'node_modules')).isSymbolicLink(), true);
     assert.ok(fs.existsSync(path.join(prov.path, 'node_modules', 'left-pad', 'index.js')), 'deps resolve through the link');
+    // The node_modules SYMLINK dodges the `node_modules/` directory gitignore, so it is excluded
+    // per-worktree: it must NOT show up as a change (else a no-op card would look dirty and the symlink
+    // could be committed + merged into base).
+    assert.equal(git(['status', '--porcelain'], prov.path), '', 'node_modules is excluded from the worktree');
     // The worktree checkout lives under .git, so the main working tree stays clean.
     assert.equal(git(['status', '--porcelain']), '', 'main tree is unaffected by the worktree');
 

@@ -116,11 +116,31 @@ async function linkNodeModules(repoRoot, worktreePath) {
   }
   try {
     let existing = await fs.lstat(target).catch(() => null);
-    if (existing) return existing.isSymbolicLink();
-    await fs.symlink(source, target, 'dir');
+    if (!existing) await fs.symlink(source, target, 'dir');
+    // The repo's `.gitignore` matches `node_modules/` (a directory) but the worktree's node_modules is a
+    // SYMLINK (a file), which that pattern does NOT match — so without help `git add -A` would stage the
+    // symlink and `git status` would count it as a change. Exclude it per-worktree so it is invisible to
+    // both the commit and the clean-diff probe.
+    await excludeInWorktree(worktreePath, 'node_modules');
     return true;
   } catch {
     return false;
+  }
+}
+
+// Append an entry to a worktree's local git exclude file (idempotent, best-effort).
+async function excludeInWorktree(worktreePath, entry) {
+  let res = await git(['rev-parse', '--git-path', 'info/exclude'], worktreePath, { timeout: 5000 });
+  let rel = res.ok ? res.stdout.trim() : '';
+  if (!rel) return;
+  let excludePath = path.isAbsolute(rel) ? rel : path.join(worktreePath, rel);
+  try {
+    let current = await fs.readFile(excludePath, 'utf-8').catch(() => '');
+    if (current.split('\n').some(line => line.trim() === entry)) return;
+    await fs.mkdir(path.dirname(excludePath), { recursive: true });
+    await fs.appendFile(excludePath, `${current && !current.endsWith('\n') ? '\n' : ''}${entry}\n`);
+  } catch {
+    // best-effort; commitWorktree also excludes node_modules defensively
   }
 }
 
@@ -188,7 +208,9 @@ export async function commitWorktree({ worktreePath, message, committer = DEFAUL
   } catch {
     return { ok: true, committed: false, reason: 'worktree already removed' };
   }
-  let add = await git(['add', '-A'], worktreePath);
+  // Defensive node_modules exclude (belt-and-suspenders with the per-worktree exclude): never stage the
+  // symlink that dodges the directory-only gitignore pattern.
+  let add = await git(['add', '-A', '--', '.', ':(exclude)node_modules'], worktreePath);
   if (!add.ok) return { ok: false, committed: false, reason: `git add failed: ${(add.stderr || '').trim()}` };
   let status = await git(['status', '--porcelain'], worktreePath, { timeout: 10_000 });
   if (status.ok && status.stdout.trim() === '') {
