@@ -1,4 +1,5 @@
 node_modules/
+.agent-portal-worktrees/
 .project-graph-cache.json
 *.tgz
 .DS_Store

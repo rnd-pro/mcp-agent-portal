@@ -302,8 +302,12 @@ export async function reapOrphanWorktrees({
   return removed;
 }
 
+// Per-card worktree checkouts live here. NOT under `.git/`: an IDE/agent harness commonly blocks all
+// writes to any `/.git/` path as a sensitive-file guard, which would stop a worker from writing into its
+// own worktree. A gitignored top-level dir keeps the checkouts out of `git status` while staying inside
+// the project root (so the worker, whose cwd is the worktree, can write freely) and off the `.git/` path.
 export function cardWorktreeRoot(repoRoot) {
-  return path.join(repoRoot, '.git', 'agent-portal-worktrees');
+  return path.join(repoRoot, '.agent-portal-worktrees');
 }
 
 export const __testing = { sanitizeToken, worktreePathFor, branchFor };

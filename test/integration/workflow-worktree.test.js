@@ -42,7 +42,8 @@ describe('workflow worktree isolation (real git)', () => {
     git(['init', '-q', '-b', 'main']);
     writeFile('a.txt', 'line1\nline2\n');
     writeFile('b.txt', 'beta\n');
-    writeFile('.gitignore', 'node_modules/\n'); // mirror reality: node_modules is gitignored
+    // Mirror reality: node_modules and the worktree root are gitignored.
+    writeFile('.gitignore', 'node_modules/\n.agent-portal-worktrees/\n');
     git(['add', '-A']);
     git(['commit', '-qm', 'base']);
     worktreeRoot = cardWorktreeRoot(repoRoot);
@@ -65,6 +66,9 @@ describe('workflow worktree isolation (real git)', () => {
     assert.equal(prov.branch, 'agent-portal/card-1');
     assert.equal(prov.baseRef, 'main');
     assert.equal(prov.reused, false);
+    // The worktree must NOT live under .git/ — an agent harness commonly blocks all writes to /.git/
+    // paths, which would stop a worker writing into its own worktree.
+    assert.ok(!prov.path.split(path.sep).includes('.git'), 'worktree checkout is not under .git/');
     assert.ok(fs.existsSync(path.join(prov.path, 'a.txt')), 'worktree has the checked-out tree');
     assert.equal(fs.lstatSync(path.join(prov.path, 'node_modules')).isSymbolicLink(), true);
     assert.ok(fs.existsSync(path.join(prov.path, 'node_modules', 'left-pad', 'index.js')), 'deps resolve through the link');
