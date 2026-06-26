@@ -549,6 +549,45 @@ export function workflowActionHoldsPendingChange(action) {
   return Boolean(WORKFLOW_ACTION_DISPATCH[textOrNull(action)]?.pendingChange);
 }
 
+// The autonomy "volume slider" maps a level to a per-stage automation profile, keyed by column ACTION
+// (so a renamed/reordered board still maps correctly). Each level cumulatively unlocks more auto-advance
+// from the front of the pipeline: a human hands the card off at the first stage whose autoAdvance is
+// false. L5 is full autonomy (every stage auto-advances, board self-merges). 'manual' returns null — it
+// is the fully per-column custom board, so the preset overrides nothing.
+const AUTONOMY_AUTO_ADVANCE_BY_LEVEL = {
+  1: [],
+  2: ['classify', 'scope'],
+  3: ['classify', 'scope', 'orchestrate'],
+  4: ['classify', 'scope', 'orchestrate', 'execute', 'audit'],
+  5: ['classify', 'scope', 'orchestrate', 'execute', 'audit', 'publish'],
+};
+
+const AUTONOMY_PRESET_ACTIONS = ['classify', 'scope', 'orchestrate', 'execute', 'audit', 'publish'];
+
+/**
+ * Pure: describe the per-stage settings a numeric autonomy level implies, keyed by column action.
+ * Returns `{ publishMode, columns: { <action>: { autoAdvance, mode } } }`. L5 publishes after audit
+ * (auto-merge); L3/L4 keep `publishMode: 'manual'` (a human approves the merge). 'manual' returns null
+ * — the board keeps each column's individually-set autoAdvance/mode untouched.
+ */
+export function autonomyPreset(level) {
+  let normalized = normalizeAutonomyLevel(level, null);
+  if (normalized === 'manual' || normalized === null) return null;
+  let autoActions = new Set(AUTONOMY_AUTO_ADVANCE_BY_LEVEL[normalized] ?? []);
+  let columns = {};
+  for (let action of AUTONOMY_PRESET_ACTIONS) {
+    let autoAdvance = autoActions.has(action);
+    // An auto-advancing stage keeps its column's own configured mode (so full autonomy reproduces the
+    // board's tuned defaults exactly); a non-advancing stage is forced to `manual` so the daemon never
+    // auto-starts it and a human owns the hand-off.
+    columns[action] = autoAdvance ? { autoAdvance } : { autoAdvance, mode: 'manual' };
+  }
+  return {
+    publishMode: normalized >= 5 ? 'after_audit' : 'manual',
+    columns,
+  };
+}
+
 const DEFAULT_WORKFLOW_COLUMNS = [
   {
     id: 'ideas',
@@ -634,6 +673,10 @@ const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   returnWake: 'auto',
   stopPolicy: 'drain',
   publishMode: 'manual',
+  // Global autonomy level: an integer 1..5, or the string 'manual' for a fully per-column custom
+  // board. 5 is full autonomy (the default board ships at 5 via the L5 preset). The per-stage
+  // settings a numeric level implies are described by `autonomyPreset(level)`.
+  autonomyLevel: 5,
   defaultApprovalMode: 'plan',
   globalParallelLimit: 8,
   fallbackAgents: ['orchestrator'],
@@ -880,6 +923,12 @@ export function normalizeWorkflowAutomation(input = {}) {
     // service resolve the two terminals apart without hardcoding a column id (the board stays data-driven).
     closeKind: textOrNull(automation.closeKind ?? automation.close_kind),
     mode: textOrNull(automation.mode),
+    // Per-column autonomy knob: when a card's work in THIS column finishes, may the daemon
+    // auto-advance it onward / auto-start its stage? Default true preserves the current full-auto
+    // behavior; false leaves the card for a human (the daemon does not auto-advance it).
+    autoAdvance: (automation.autoAdvance ?? automation.auto_advance) === undefined
+      ? true
+      : Boolean(automation.autoAdvance ?? automation.auto_advance),
     agent: textOrNull(automation.agent ?? automation.agentSlug ?? automation.agent_slug),
     agents: textArray(automation.agents ?? automation.agentPool ?? automation.agent_pool),
     approvalMode: textOrNull(automation.approvalMode ?? automation.approval_mode),
@@ -971,6 +1020,15 @@ export function evaluateWorkflowBoardBudget(budget, spend = {}) {
   return { ok: breaches.length === 0, configured: true, budget: normalized, breaches };
 }
 
+// The global autonomy "volume slider": an integer 1..5 (clamped) or the literal 'manual'. Absent or
+// unrecognized input falls back to full autonomy (5), matching the default board.
+function normalizeAutonomyLevel(value, fallback = 5) {
+  if (textOrNull(value) === 'manual') return 'manual';
+  let level = Number(value);
+  if (!Number.isFinite(level)) return fallback;
+  return Math.min(5, Math.max(1, Math.floor(level)));
+}
+
 export function normalizeWorkflowBoardAutomation(input = {}) {
   let automation = objectOrEmpty(input);
   let fallbackAgents = textArray(
@@ -1012,6 +1070,10 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
       WORKFLOW_BOARD_PUBLISH_MODES,
       DEFAULT_WORKFLOW_BOARD_AUTOMATION.publishMode,
     ),
+    autonomyLevel: normalizeAutonomyLevel(
+      automation.autonomyLevel ?? automation.autonomy_level,
+      DEFAULT_WORKFLOW_BOARD_AUTOMATION.autonomyLevel,
+    ),
     defaultApprovalMode: textOrNull(automation.defaultApprovalMode ?? automation.default_approval_mode)
       ?? DEFAULT_WORKFLOW_BOARD_AUTOMATION.defaultApprovalMode,
     globalParallelLimit: globalParallelLimit ?? DEFAULT_WORKFLOW_BOARD_AUTOMATION.globalParallelLimit,
@@ -1043,18 +1105,58 @@ export function normalizeWorkflowEntityRefs(input = {}) {
   };
 }
 
+/**
+ * Apply a numeric autonomy level's preset to a board in place-ish (returns a new board object). For a
+ * numeric level it writes the preset publishMode, sets each column's automation.autoAdvance, and (where
+ * the preset names a mode) automation.mode, keyed by column action; it also stamps board.automation
+ * .autonomyLevel. 'manual' only stamps autonomyLevel='manual' and leaves the columns untouched (custom).
+ * Pure transform — the caller persists the result.
+ */
+export function applyAutonomyLevel(board = {}, level) {
+  let normalized = normalizeAutonomyLevel(level, 5);
+  let preset = autonomyPreset(normalized);
+  if (!preset) {
+    return {
+      ...board,
+      automation: { ...objectOrEmpty(board.automation), autonomyLevel: 'manual' },
+    };
+  }
+  let columns = (Array.isArray(board.columns) ? board.columns : []).map((column) => {
+    let action = textOrNull(column?.automation?.action);
+    let setting = action ? preset.columns[action] : null;
+    if (!setting) return column;
+    return {
+      ...column,
+      automation: {
+        ...objectOrEmpty(column.automation),
+        autoAdvance: setting.autoAdvance,
+        ...(setting.mode ? { mode: setting.mode } : {}),
+      },
+    };
+  });
+  return {
+    ...board,
+    automation: {
+      ...objectOrEmpty(board.automation),
+      publishMode: preset.publishMode,
+      autonomyLevel: normalized,
+    },
+    columns,
+  };
+}
+
 export function createDefaultWorkflowBoard(opts = {}) {
   let now = opts.now ?? Date.now();
   let id = textOrNull(opts.id) ?? DEFAULT_WORKFLOW_BOARD_ID;
-  return {
+  let board = {
     schema: WORKFLOW_BOARD_SCHEMA,
     id,
     title: textOrNull(opts.title) ?? 'Agent Workflow',
-    mode: normalizeWorkflowBoardMode(opts.mode, 'armed'),
+    mode: normalizeWorkflowBoardMode(opts.mode, 'autonomous'),
     automation: normalizeWorkflowBoardAutomation(opts.automation),
     columns: DEFAULT_WORKFLOW_COLUMNS.map(column => ({
       ...column,
-      automation: { ...column.automation },
+      automation: normalizeWorkflowAutomation(column.automation),
     })),
     transitions: DEFAULT_WORKFLOW_TRANSITIONS.map((transition) => ({
       ...transition,
@@ -1064,6 +1166,9 @@ export function createDefaultWorkflowBoard(opts = {}) {
     createdAt: opts.createdAt ?? now,
     updatedAt: opts.updatedAt ?? now,
   };
+  // The default board ships at FULL autonomy: the L5 preset (every stage auto-advances, board
+  // self-merges via publishMode 'after_audit'). An explicit opts.mode/automation still wins above.
+  return applyAutonomyLevel(board, board.automation.autonomyLevel);
 }
 
 /**

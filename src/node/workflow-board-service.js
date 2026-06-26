@@ -42,6 +42,7 @@ import {
   isKnownWorkflowAction,
   workflowActionIsExecution,
   workflowActionHoldsPendingChange,
+  applyAutonomyLevel as applyAutonomyLevelToBoard,
   WORKFLOW_COLUMN_ACTIONS,
 } from '../iso/workflow-board.js';
 import { parseMarkdownFrontmatter } from './agents/frontmatter.js';
@@ -1793,6 +1794,11 @@ export function createWorkflowBoardService(opts = {}) {
     if (automation.enabled === false) {
       return { ok: false, reason: 'column automation is disabled', automation };
     }
+    // Per-column autonomy gate: a stage whose autoAdvance is off is human-started — the daemon never
+    // auto-fires its on-enter orchestration (the card waits in the column for a human to advance it).
+    if (automation.autoAdvance === false) {
+      return { ok: false, reason: 'column autoAdvance is off; awaiting a human', automation };
+    }
     // Autonomous mode also auto-fires the `scope` action so the backlog self-starts (the orchestrator
     // scopes a raw card); armed/other modes keep scope manual — only on-enter orchestrate/audit auto-run.
     let autoActions = board.mode === 'autonomous'
@@ -3065,6 +3071,66 @@ export function createWorkflowBoardService(opts = {}) {
   function columnAutoAdmits(board, columnId) {
     let automation = columnAutomation(board, columnId);
     return automation.mode === 'auto' && (automation.trigger === 'on_enter' || automation.trigger === 'lease_required');
+  }
+
+  // Per-column autonomy gate (the "volume slider" applied per stage). When a card's work in this column
+  // finishes, may the daemon auto-advance it onward / auto-start its stage? Default true (an unset column
+  // is full-auto), so this is a SUBTRACTIVE gate: it only ever HOLDS a card when autoAdvance is explicitly
+  // false, leaving it for a human. Resolved by column id off the normalized automation.
+  function columnAutoAdvances(board, columnId) {
+    let automation = columnAutomation(board, columnId);
+    return automation.autoAdvance !== false;
+  }
+
+  // Mark a card as parked for a human at a stage whose autoAdvance is off, so the UI can surface it.
+  // Idempotent: re-marking the same stage is a no-op; advancing later clears it via clearAwaitingHuman.
+  function markAwaitingHuman(card, board, columnId, at) {
+    let automation = columnAutomation(board, columnId);
+    let action = textOrNull(automation.action);
+    let current = card?.metadata?.awaitingHuman;
+    if (current && current.stage === columnId && current.action === action) return card;
+    return {
+      ...card,
+      metadata: { ...asObject(card.metadata), awaitingHuman: { stage: columnId, action, at } },
+    };
+  }
+
+  // Drop a stale awaitingHuman marker once a card has been advanced past the stage that set it.
+  function clearAwaitingHuman(card) {
+    if (!card?.metadata?.awaitingHuman) return card;
+    let metadata = { ...asObject(card.metadata) };
+    delete metadata.awaitingHuman;
+    return { ...card, metadata };
+  }
+
+  // Stamp awaitingHuman on every settled card resting in a gated (autoAdvance:false) column so the UI can
+  // surface that the stage is parked for a human. Mirrors the driver guards (no live run, no recovery flag
+  // / blocker) and is idempotent (markAwaitingHuman skips a card already marked at this stage). Commits
+  // under the daemon bookkeeping gate, exactly like the advance it stands in for. Returns the held ids.
+  function markAwaitingHumanForColumn(board, columnId, principal, runtimeNow) {
+    let ops = [];
+    let held = [];
+    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (card.boardId !== board.id || card.columnId !== columnId) continue;
+      if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
+      let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+      if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      let marked = markAwaitingHuman(clone(card), board, columnId, runtimeNow);
+      if (marked === card || JSON.stringify(marked.metadata?.awaitingHuman) === JSON.stringify(card.metadata?.awaitingHuman)) continue;
+      let next = normalizeWorkflowCardInput({
+        ...marked, version: card.version + 1, updatedAt: runtimeNow, updatedBy: principal.label,
+      }, {
+        id: card.id, actor: principal.label, now: runtimeNow,
+        version: card.version + 1, createdAt: card.createdAt, updatedAt: runtimeNow,
+      });
+      ops.push({ op: 'set', path: `workflowCards/${card.id}`, value: next });
+      held.push(card.id);
+    }
+    if (ops.length) {
+      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
+      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
+    return held;
   }
 
   // ── Board-admission lease (D1.5, inv 31, 35; AD-10/16) ────────────────────────────────────────
@@ -4549,8 +4615,10 @@ export function createWorkflowBoardService(opts = {}) {
   // A daemon runtime advance: set the card's column + record the runtime transition event, mirroring
   // the per-run auto-advance shape. Returns the next card and the ops (card + transition).
   function runtimeAdvanceCardOps(board, card, toColumnId, principal, at, reason, sideEffectType) {
+    // A card that is actually advancing is no longer parked for a human at its prior stage.
+    let advancing = clearAwaitingHuman(card);
     let nextCard = normalizeWorkflowCardInput({
-      ...card,
+      ...advancing,
       columnId: toColumnId,
       lifecycle: 'idle',
       version: card.version + 1,
@@ -4653,7 +4721,13 @@ export function createWorkflowBoardService(opts = {}) {
     let scopeColumnId = byAction('scope');
     let promoted = [];
     let blockedByDependency = [];
-    if (!classifyColumnId || !scopeColumnId) return { promoted, blockedByDependency };
+    let awaitingHuman = [];
+    if (!classifyColumnId || !scopeColumnId) return { promoted, blockedByDependency, awaitingHuman };
+    // Per-column autonomy gate: when the classify column's autoAdvance is off a human owns the hand-off.
+    if (!columnAutoAdvances(board, classifyColumnId)) {
+      let held = markAwaitingHumanForColumn(board, classifyColumnId, principal, runtimeNow);
+      return { promoted, blockedByDependency, awaitingHuman: held };
+    }
     let classifier = classifyWorkflowGraph(board);
     let ops = [];
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
@@ -4677,7 +4751,7 @@ export function createWorkflowBoardService(opts = {}) {
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
-    return { promoted, blockedByDependency };
+    return { promoted, blockedByDependency, awaitingHuman: [] };
   }
 
   // Autonomous backlog self-start (opt-in: board.mode==='autonomous'). The orchestrate column already
@@ -4695,7 +4769,13 @@ export function createWorkflowBoardService(opts = {}) {
     let promoted = [];
     let scopeNeeded = [];
     let blockedByDependency = [];
-    if (!scopeColumnId || !orchestrateColumnId) return { promoted, scopeNeeded, blockedByDependency };
+    let awaitingHuman = [];
+    if (!scopeColumnId || !orchestrateColumnId) return { promoted, scopeNeeded, blockedByDependency, awaitingHuman };
+    // Per-column autonomy gate: a scope column with autoAdvance off parks its cards for a human promote.
+    if (!columnAutoAdvances(board, scopeColumnId)) {
+      let held = markAwaitingHumanForColumn(board, scopeColumnId, principal, runtimeNow);
+      return { promoted, scopeNeeded, blockedByDependency, awaitingHuman: held };
+    }
     let classifier = classifyWorkflowGraph(board);
     let ops = [];
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
@@ -4727,7 +4807,7 @@ export function createWorkflowBoardService(opts = {}) {
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
-    return { promoted, scopeNeeded, blockedByDependency };
+    return { promoted, scopeNeeded, blockedByDependency, awaitingHuman };
   }
 
   async function driveAutonomousReleaseTail(board, principal, runtimeNow, runtimeTasks) {
@@ -4738,6 +4818,7 @@ export function createWorkflowBoardService(opts = {}) {
     let closed = [];
     let merged = [];
     let conflicted = [];
+    let awaitingHuman = [];
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id) continue;
       let cardRuns = getRunsForCard(card.id);
@@ -4755,6 +4836,23 @@ export function createWorkflowBoardService(opts = {}) {
       // daemon is itself independent (no recorded executor) OR explicitly waived per board to self-sign.
       // A daemon that ran the card may not auto-pass its own work on its own authority; absent an
       // independent sign-off or a waiver it is held as needs_audit for a human/re-audit, never shipped.
+      // Per-column autonomy gate: a quality-audit column with autoAdvance off parks the card for a human
+      // review/merge instead of auto-advancing it to commit-publish (audit sign-off stays untouched).
+      if (latestCard.columnId === auditColumnId && publishColumnId
+        && !columnAutoAdvances(board, auditColumnId)) {
+        let marked = markAwaitingHuman(latestCard, board, auditColumnId, runtimeNow);
+        if (JSON.stringify(marked.metadata?.awaitingHuman) !== JSON.stringify(latestCard.metadata?.awaitingHuman)) {
+          let held = normalizeWorkflowCardInput({
+            ...marked, version: latestCard.version + 1, updatedAt: runtimeNow, updatedBy: principal.label,
+          }, {
+            id: latestCard.id, actor: principal.label, now: runtimeNow,
+            version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
+          });
+          ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+          awaitingHuman.push(latestCard.id);
+        }
+        continue;
+      }
       if (latestCard.columnId === auditColumnId && publishColumnId) {
         let finished = cardRuns.filter(run => TERMINAL_RUN_STATUSES.has(run.status));
         let latestFinished = finished.sort(
@@ -4895,8 +4993,24 @@ export function createWorkflowBoardService(opts = {}) {
         }
       }
 
-      // Stage 2 — commit-publish → done when publishMode delegates the publish to the board.
+      // Stage 2 — commit-publish → done when publishMode delegates the publish to the board AND the
+      // publish column's autoAdvance is on. With autoAdvance off a human owns the merge: the card waits in
+      // commit-publish (marked awaitingHuman) even under publishMode 'after_audit'.
       if (latestCard.columnId === publishColumnId && closeColumnId && publishMode === 'after_audit'
+        && !flags.has('needs_audit') && !columnAutoAdvances(board, publishColumnId)) {
+        let marked = markAwaitingHuman(latestCard, board, publishColumnId, runtimeNow);
+        if (JSON.stringify(marked.metadata?.awaitingHuman) !== JSON.stringify(latestCard.metadata?.awaitingHuman)) {
+          let held = normalizeWorkflowCardInput({
+            ...marked, version: latestCard.version + 1, updatedAt: runtimeNow, updatedBy: principal.label,
+          }, {
+            id: latestCard.id, actor: principal.label, now: runtimeNow,
+            version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
+          });
+          ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+          latestCard = held;
+          awaitingHuman.push(card.id);
+        }
+      } else if (latestCard.columnId === publishColumnId && closeColumnId && publishMode === 'after_audit'
         && !flags.has('needs_audit')) {
         let needCleanDiff = !checkPassed(checks.cleanDiff);
         let needHygiene = !(checkPassed(checks.hygiene) || checkPassed(checks.publicHygiene) || checkPassed(checks.packageHygiene));
@@ -4987,7 +5101,7 @@ export function createWorkflowBoardService(opts = {}) {
       let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
       if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
     }
-    return { advanced, closed, merged, conflicted };
+    return { advanced, closed, merged, conflicted, awaitingHuman };
   }
 
   // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
@@ -5323,6 +5437,15 @@ export function createWorkflowBoardService(opts = {}) {
         // per runtimeColumnForCard.
         let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
         let nextColumnId = resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(latestCard, nextStatus);
+        // Per-column autonomy gate: when the source column's autoAdvance is off, a cleanly-completed run
+        // does NOT auto-advance to audit — the card stays put for a human, marked awaitingHuman so the UI
+        // can surface it. A failure/interruption still routes (for recovery), so the gate is happy-path only.
+        let heldForHuman = terminal && nextStatus === 'completed' && !resumableInterruption
+          && nextColumnId !== latestCard.columnId && !columnAutoAdvances(board, latestCard.columnId);
+        if (heldForHuman) {
+          latestCard = markAwaitingHuman(latestCard, board, latestCard.columnId, currentNow);
+          nextColumnId = latestCard.columnId;
+        }
         let flags = new Set(normalizeRecoveryFlags(latestCard.recoveryFlags));
         if (terminal) {
           if (resumableInterruption) {
@@ -6041,6 +6164,51 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, board: clone(nextBoard), event: clone(event) };
   }
 
+  // Apply the global autonomy "volume slider" to a board: write the numeric level's preset publishMode
+  // and per-column autoAdvance/mode (keyed by column action), or — for 'manual' — only stamp
+  // autonomyLevel='manual' and leave the columns custom. The pure transform lives in the iso layer
+  // (applyAutonomyLevelToBoard); this method persists the result and records a board-update event. Gated
+  // like updateWorkflowBoard: board.control routes here pre-gated, otherwise policy.define is required.
+  function applyAutonomyLevel(args = {}, options = {}) {
+    let principal = resolvePrincipal(options);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    if (options.gatedBy !== 'board.control' && !isDaemonPrincipal(principal)) {
+      let policyGate = gate('policy.define', principal, { boardId: board.id });
+      if (!policyGate.ok) return policyGate;
+    }
+    let level = args.level ?? args.autonomyLevel ?? args.autonomy_level;
+    let ts = now();
+    let applied = applyAutonomyLevelToBoard(board, level);
+    let nextBoard = {
+      ...applied,
+      automation: normalizeWorkflowBoardAutomation(applied.automation),
+      version: boardVersion(board) + 1,
+      updatedAt: ts,
+      metadata: {
+        ...asObject(board.metadata),
+        defaultPolicyVersion: DEFAULT_WORKFLOW_POLICY_VERSION,
+        automationUpdatedAt: ts,
+      },
+    };
+    let changed = JSON.stringify({ automation: board.automation, columns: board.columns })
+      !== JSON.stringify({ automation: nextBoard.automation, columns: nextBoard.columns });
+    if (!changed) return { ok: true, board: clone(board), event: null, noop: true };
+    let event = boardEvent(nextBoard, principal, args, {
+      eventType: options.eventType ?? 'board_update',
+      reason: textOrNull(args.reason) ?? `Applied autonomy level ${nextBoard.automation.autonomyLevel}.`,
+      sideEffects: [{
+        type: 'board_automation_update',
+        mode: nextBoard.mode,
+        automation: nextBoard.automation,
+      }],
+    });
+    stateGraph.commit([
+      { op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard },
+      { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+    ], sourceForPrincipal(principal));
+    return { ok: true, board: clone(nextBoard), event: clone(event) };
+  }
+
   function activeCardsForBoardControl(board, args = {}) {
     let projectId = textOrNull(args.projectId ?? args.project_id);
     return Object.values(getCollection(stateGraph, 'workflowCards'))
@@ -6258,10 +6426,15 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function cardAutomation(board, card) {
-    return {
-      ...columnAutomation(board, card.columnId),
+    let column = columnAutomation(board, card.columnId);
+    let merged = {
+      ...column,
       ...asObject(card.automation),
     };
+    // autoAdvance is a COLUMN-stage property (the autonomy slider), never a per-card override: the card
+    // normalizer always stamps a default, so let the column's value win to keep the per-column gate honest.
+    if ('autoAdvance' in column) merged.autoAdvance = column.autoAdvance;
+    return merged;
   }
 
   function activeRunForCard(cardId) {
@@ -7875,6 +8048,7 @@ export function createWorkflowBoardService(opts = {}) {
     updateWorkItem,
     decomposeWorkItem,
     updateWorkflowBoard,
+    applyAutonomyLevel,
     updateWorkflowColumn,
     controlWorkflowBoard,
     requestWorkflowTransition,

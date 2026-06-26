@@ -959,7 +959,8 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
   }
 
   it('autonomous tail: a PASS verdict signs the audit floor check and advances to commit-publish', async () => {
-    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    // Pin publishMode 'manual' so the card halts at commit-publish (the L5 default auto-merges to done).
+    service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
     let cardId = plantAuditedCard('aud-pass');
 
     let result = await service.reconcileWorkflowRuntimeTasks(
@@ -1091,7 +1092,9 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
   });
 
   it('release gate: a docs-only changeset skips the unit suite (nothing to verify) and advances', async () => {
-    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    // Intent is the Stage-1 audit gate skip; pin publishMode 'manual' so the card halts at commit-publish
+    // (the L5 default would otherwise auto-merge it straight to done).
+    service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
     let cardId = plantAuditedCard('aud-docsonly', 'completed', { cwd: makeGitRepo('docsonly', { dirtyPaths: ['docs/note.md'] }) });
     // A failing stub WOULD hold a code change — but a docs-only changeset must skip the gate entirely,
     // so the load-sensitive suite can never falsely hold a change it could not verify anyway.
@@ -1300,7 +1303,9 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(checkPassed(checks.audit), false, 'no audit pass is fabricated for a failed run');
   });
 
-  it('armed mode (default): the autonomous tail stays off — a finished audit card waits for a human', async () => {
+  it('armed mode: the autonomous tail stays off — a finished audit card waits for a human', async () => {
+    // The default board is now L5 full-auto; this test pins armed to exercise the non-autonomous tail.
+    service.updateWorkflowBoard({ mode: 'armed' }, { gatedBy: 'board.control' });
     let cardId = plantAuditedCard('aud-armed');
 
     let result = await service.reconcileWorkflowRuntimeTasks(
@@ -1381,5 +1386,96 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     );
 
     assert.equal(service.getCard('idea-armed').columnId, 'ideas', 'armed mode does not auto-promote ideas');
+  });
+
+  it('default board is L5 full-auto: a verdict-passed card walks all the way to done with no human', async () => {
+    // No mode/automation override — the default board IS L5 (autonomous + after_audit + every autoAdvance).
+    assert.equal(service.ensureBoard().mode, 'autonomous');
+    assert.equal(service.ensureBoard().automation.autonomyLevel, 5);
+    let cardId = plantAuditedCard('aud-l5', 'completed', { cwd: makeGitRepo('l5', { dirtyPaths: ['src/x.js'] }) });
+    releaseTestVerdict = { available: true, passed: true };
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    assert.equal(service.getCard(cardId).columnId, 'done', 'L5 auto-advances + auto-merges the card to done');
+  });
+
+  it('per-column autoAdvance gate: a false quality-audit column holds the card for a human (Stage 1)', async () => {
+    service.updateWorkflowColumn(
+      { columnId: 'quality-audit', patch: { automation: { autoAdvance: false } }, actor: 'test', reason: 'gate audit' },
+    );
+    let cardId = plantAuditedCard('aud-gated', 'completed', { cwd: makeGitRepo('gated', { dirtyPaths: ['src/y.js'] }) });
+    releaseTestVerdict = { available: true, passed: true };
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'autoAdvance:false parks the card in quality-audit');
+    assert.equal(card.metadata?.awaitingHuman?.stage, 'quality-audit', 'the card is marked awaitingHuman');
+    assert.equal(result.releaseTail.advanced.some(i => i.cardId === cardId), false, 'the daemon does not advance it');
+    assert.ok(result.releaseTail.awaitingHuman.includes(cardId));
+  });
+
+  it('per-column autoAdvance gate: a true quality-audit column advances the card (control)', async () => {
+    assert.equal(service.ensureBoard().columns.find(c => c.id === 'quality-audit').automation.autoAdvance, true);
+    let cardId = plantAuditedCard('aud-ungated', 'completed', { cwd: makeGitRepo('ungated', { dirtyPaths: ['src/z.js'] }) });
+    releaseTestVerdict = { available: true, passed: true };
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, verdictTasks(cardId, 'Audit complete. COMPLETION_PROOF: PASS'), { drive: true },
+    );
+
+    assert.notEqual(service.getCard(cardId).columnId, 'quality-audit', 'autoAdvance:true advances past audit');
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId) || result.releaseTail.closed.includes(cardId));
+  });
+
+  it('per-column autoAdvance gate: a false commit-publish column halts the merge under after_audit (Stage 2)', async () => {
+    service.updateWorkflowColumn(
+      { columnId: 'commit-publish', patch: { automation: { autoAdvance: false } }, actor: 'test', reason: 'gate publish' },
+    );
+    // Plant the card already in commit-publish with its floor signed, so only Stage 2 (the merge) is left.
+    let cardId = plantAuditedCard('pub-gated', 'completed', { cwd: makeGitRepo('pubgated', { dirtyPaths: ['src/p.js'] }) });
+    sg.commit([
+      { op: 'set', path: `workflowCards/${cardId}`, value: { ...service.getCard(cardId), columnId: 'commit-publish' } },
+      { op: 'set', path: `workflowChecks/${cardId}`, value: {
+        schema: 'workflow-checks/v1', cardId,
+        checks: { audit: 'passed', cleanDiff: 'passed', hygiene: 'passed' }, updatedAt: 1500, updatedBy: 'test',
+      } },
+    ], 'test:plant-publish');
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'commit-publish', 'autoAdvance:false keeps the card in commit-publish for a human merge');
+    assert.equal(card.metadata?.awaitingHuman?.stage, 'commit-publish');
+    assert.equal(result.releaseTail.closed.includes(cardId), false, 'the board does not auto-merge it');
+  });
+
+  it('per-column autoAdvance gate: a false ready column does not auto-start on-enter orchestration', async () => {
+    service.updateWorkflowColumn(
+      { columnId: 'ready', patch: { automation: { autoAdvance: false } }, actor: 'test', reason: 'gate orchestrate' },
+    );
+    let created = service.createOrUpdateCard({
+      id: 'ready-gated', title: 'Ready but gated', columnId: 'in-progress', projectId: 'agent-portal', domain: 'backend',
+      owner: 'orchestrator', acceptanceCriteria: ['Done when shipped'], actor: 'test',
+    });
+    sg.commit([{ op: 'set', path: 'workflowCards/ready-gated', value: { ...created.card, columnId: 'backlog', lifecycle: 'idle' } }], 'test:plant-backlog');
+
+    // Moving INTO the ready column fires on-enter orchestration; the gate must skip the auto-start.
+    let moved = await service.requestWorkflowTransition({
+      cardId: 'ready-gated', fromColumnId: 'backlog', toColumnId: 'ready',
+      expectedVersion: service.getCard('ready-gated').version, actor: 'orchestrator', reason: 'ready',
+    });
+
+    assert.equal(moved.status, 'accepted');
+    assert.equal(moved.card.columnId, 'ready', 'the card stays in ready');
+    assert.equal(moved.orchestration.ok, false, 'a gated ready column does not auto-start execution');
+    assert.match(moved.orchestration.reason, /autoAdvance is off/);
   });
 });

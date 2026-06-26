@@ -152,7 +152,7 @@ describe('workflow board cost/token budget breaker (Axis E)', () => {
 
       assert.equal(drain.drained, true);
       assert.equal(service.getCard(card.id).lifecycle, 'running', 'under-budget card admits');
-      assert.equal(service.ensureBoard().mode, 'armed', 'board stays armed under budget');
+      assert.equal(service.ensureBoard().mode, 'autonomous', 'board stays in its default run mode under budget');
       assert.equal(budgetBreakerEvents().length, 0);
     });
 

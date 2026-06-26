@@ -10,6 +10,10 @@ import {
   RECOVERY_FLAGS,
   WORKFLOW_CARD_LIFECYCLE_STATES,
   WORKFLOW_ESCALATION_KINDS,
+  autonomyPreset,
+  applyAutonomyLevel,
+  normalizeWorkflowAutomation,
+  normalizeWorkflowBoardAutomation,
   classifyWorkflowGraph,
   createDefaultWorkflowBoard,
   isWorkflowLifecycleTransitionAllowed,
@@ -112,7 +116,12 @@ describe('workflow board model and service', () => {
     assert.equal(board.id, DEFAULT_WORKFLOW_BOARD_ID);
     assert.equal(board.schema, 'workflow-board/v2');
     assert.deepEqual(board.columns.map(column => column.id), DEFAULT_WORKFLOW_COLUMN_IDS);
-    assert.equal(board.mode, 'armed');
+    // The default board ships at FULL autonomy (L5): autonomous mode, after_audit auto-merge, and every
+    // column auto-advances.
+    assert.equal(board.mode, 'autonomous');
+    assert.equal(board.automation.autonomyLevel, 5);
+    assert.equal(board.automation.publishMode, 'after_audit');
+    assert.equal(board.columns.every(column => column.automation.autoAdvance !== false), true);
     assert.equal(board.automation.pickup, 'auto');
     assert.equal(board.automation.recovery, 'manual');
     assert.equal(board.automation.globalParallelLimit, 8);
@@ -155,6 +164,75 @@ describe('workflow board model and service', () => {
     assert.deepEqual(sg.get('workflowChecks'), {});
     assert.deepEqual(sg.get('workflowRuns'), {});
     assert.deepEqual(sg.get('workflowLeases'), {});
+  });
+
+  it('per-column normalizer defaults autoAdvance to true and round-trips an explicit false', () => {
+    assert.equal(normalizeWorkflowAutomation({ action: 'execute' }).autoAdvance, true);
+    assert.equal(normalizeWorkflowAutomation({ action: 'execute', autoAdvance: false }).autoAdvance, false);
+    assert.equal(normalizeWorkflowAutomation({ action: 'execute', auto_advance: false }).autoAdvance, false);
+  });
+
+  it('board automation normalizer defaults autonomyLevel to 5, clamps 1..5, and passes manual', () => {
+    assert.equal(normalizeWorkflowBoardAutomation({}).autonomyLevel, 5);
+    assert.equal(normalizeWorkflowBoardAutomation({ autonomyLevel: 0 }).autonomyLevel, 1);
+    assert.equal(normalizeWorkflowBoardAutomation({ autonomyLevel: 9 }).autonomyLevel, 5);
+    assert.equal(normalizeWorkflowBoardAutomation({ autonomyLevel: 3 }).autonomyLevel, 3);
+    assert.equal(normalizeWorkflowBoardAutomation({ autonomyLevel: 'manual' }).autonomyLevel, 'manual');
+    assert.equal(normalizeWorkflowBoardAutomation({ autonomyLevel: 'bogus' }).autonomyLevel, 5);
+  });
+
+  it('autonomyPreset maps each level to the expected per-stage autoAdvance + publishMode', () => {
+    let advancing = preset => Object.entries(preset.columns)
+      .filter(([, setting]) => setting.autoAdvance).map(([action]) => action).sort();
+
+    let l1 = autonomyPreset(1);
+    assert.deepEqual(advancing(l1), []);
+    assert.equal(l1.publishMode, 'manual');
+    assert.equal(Object.values(l1.columns).every(setting => setting.mode === 'manual'), true);
+
+    assert.deepEqual(advancing(autonomyPreset(2)), ['classify', 'scope']);
+    assert.equal(autonomyPreset(2).publishMode, 'manual');
+
+    let l3 = autonomyPreset(3);
+    assert.deepEqual(advancing(l3), ['classify', 'orchestrate', 'scope']);
+    assert.equal(l3.publishMode, 'manual');
+
+    let l4 = autonomyPreset(4);
+    assert.deepEqual(advancing(l4), ['audit', 'classify', 'execute', 'orchestrate', 'scope']);
+    assert.equal(l4.publishMode, 'manual');
+
+    let l5 = autonomyPreset(5);
+    assert.deepEqual(advancing(l5), ['audit', 'classify', 'execute', 'orchestrate', 'publish', 'scope']);
+    assert.equal(l5.publishMode, 'after_audit');
+    // An auto-advancing stage carries NO mode override, so full autonomy keeps the board's tuned modes.
+    assert.equal(Object.values(l5.columns).every(setting => setting.mode === undefined), true);
+
+    // 'manual' overrides nothing — the board stays fully per-column custom.
+    assert.equal(autonomyPreset('manual'), null);
+  });
+
+  it('applyAutonomyLevel writes the preset publishMode + per-column autoAdvance; manual leaves columns untouched', () => {
+    let board = createDefaultWorkflowBoard({ now: 1 });
+
+    let l2 = applyAutonomyLevel(board, 2);
+    assert.equal(l2.automation.autonomyLevel, 2);
+    assert.equal(l2.automation.publishMode, 'manual');
+    let byAction = (b, action) => b.columns.find(col => col.automation.action === action);
+    assert.equal(byAction(l2, 'classify').automation.autoAdvance, true);
+    assert.equal(byAction(l2, 'scope').automation.autoAdvance, true);
+    assert.equal(byAction(l2, 'orchestrate').automation.autoAdvance, false);
+    assert.equal(byAction(l2, 'orchestrate').automation.mode, 'manual');
+    assert.equal(byAction(l2, 'publish').automation.autoAdvance, false);
+
+    let l5 = applyAutonomyLevel(board, 5);
+    assert.equal(l5.automation.publishMode, 'after_audit');
+    assert.equal(l5.columns.every(col => col.automation.autoAdvance !== false), true);
+
+    // 'manual' only stamps autonomyLevel and leaves every column's autoAdvance/mode exactly as it was.
+    let custom = applyAutonomyLevel(board, 3);
+    let manual = applyAutonomyLevel(custom, 'manual');
+    assert.equal(manual.automation.autonomyLevel, 'manual');
+    assert.deepEqual(manual.columns, custom.columns);
   });
 
   it('fill-only refreshes a default board: preserves customizations, adds missing defaults (inv 17, 19)', () => {
@@ -757,7 +835,7 @@ describe('workflow board model and service', () => {
 
     assert.equal(detailed.columns.find(column => column.id === 'done').cards.length, 1);
     assert.equal(compact.view, 'status');
-    assert.equal(compact.board.mode, 'armed');
+    assert.equal(compact.board.mode, 'autonomous');
     assert.equal(compact.counts.done, 1);
     assert.equal(compactColumn.count, 1);
     assert.equal(compactColumn.cards, undefined);
@@ -1407,6 +1485,9 @@ links:
       proxyManager,
       defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
+    // This test exercises the file-scope blocker, not the autonomy default; pin armed mode so the
+    // on-enter orchestration is the only auto path under test.
+    service.updateWorkflowBoard({ mode: 'armed' }, { gatedBy: 'board.control' });
     let parent = service.createOrUpdateCard({
       title: 'Parent implementation',
       columnId: 'in-progress',
@@ -1522,6 +1603,9 @@ links:
       proxyManager,
       defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
     });
+    // The shared-tree file-scope hold is a non-isolation (non-autonomous) behavior; pin armed mode so the
+    // terminal run actually reserves its scope (autonomous mode would isolate the worktrees instead).
+    service.updateWorkflowBoard({ mode: 'armed' }, { gatedBy: 'board.control' });
     // A card mid-execution whose run just COMPLETED (terminal) but is still in `in-progress` — its
     // produced, uncommitted changes are pending advance/audit, so it MUST keep holding its file scope.
     let pending = service.createOrUpdateCard({
