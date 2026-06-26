@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -134,8 +134,7 @@ describe('backend lifecycle', () => {
       let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}`);
       mod.writePortFile(tmpProject, 12345);
 
-      let hash = createHash('md5').update(path.resolve(tmpProject)).digest('hex').slice(0, 8);
-      let portFile = path.join(tmpHome, '.local-gateway', 'backends', `portal-${hash}.json`);
+      let portFile = path.join(tmpHome, '.local-gateway', 'backends', 'portal.json');
       let data = JSON.parse(fs.readFileSync(portFile, 'utf8'));
       let pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
       let projectName = path.basename(tmpProject);
@@ -225,10 +224,8 @@ describe('backend lifecycle', () => {
     process.env.HOME = tmpHome;
 
     try {
-      // The lock is keyed on the shared state path, not the project root.
-      let statePath = path.join(tmpHome, '.agent-portal', 'agent-portal-state.json');
-      let hash = createHash('md5').update(path.resolve(statePath)).digest('hex').slice(0, 8);
-      let lockDir = path.join(tmpHome, '.local-gateway', 'backends', `portal-state-${hash}.lock`);
+      // The spawn lock is a single global path shared across all project roots.
+      let lockDir = path.join(tmpHome, '.local-gateway', 'backends', 'portal-state.lock');
       fs.mkdirSync(lockDir, { recursive: true });
       let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-fresh-lock`);
       let secondResolved = false;
@@ -252,6 +249,69 @@ describe('backend lifecycle', () => {
       process.env.HOME = originalHome;
       fs.rmSync(tmpHome, { recursive: true, force: true });
       fs.rmSync(tmpProject, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves the same global port file for any project root', async () => {
+    let tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-global-home-'));
+    let projectA = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-global-a-'));
+    let projectB = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-global-b-'));
+    let originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+
+    try {
+      let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-global-port`);
+      mod.writePortFile(projectA, 12345);
+
+      let backends = mod.listBackends();
+      assert.equal(backends.length, 1);
+      assert.equal(backends[0].port, 12345);
+
+      let portFile = path.join(tmpHome, '.local-gateway', 'backends', 'portal.json');
+      let writtenForA = JSON.parse(fs.readFileSync(portFile, 'utf8'));
+      assert.equal(writtenForA.project, path.resolve(projectA));
+
+      mod.writePortFile(projectB, 23456);
+      let writtenForB = JSON.parse(fs.readFileSync(portFile, 'utf8'));
+      assert.equal(writtenForB.port, 23456);
+      assert.equal(writtenForB.project, path.resolve(projectB));
+
+      assert.equal(mod.listBackends().length, 1);
+      mod.removePortFile(projectB);
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(projectA, { recursive: true, force: true });
+      fs.rmSync(projectB, { recursive: true, force: true });
+    }
+  });
+
+  it('discovers a backend registered by one root from ensureBackend of another root', async () => {
+    let tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-discover-home-'));
+    let projectA = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-discover-a-'));
+    let projectB = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-backend-discover-b-'));
+    let originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+
+    let server = net.createServer(socket => socket.destroy());
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    let livePort = server.address().port;
+
+    try {
+      let mod = await import(`../../src/node/server/backend-lifecycle.js?test=${Date.now()}-discover`);
+      mod.writePortFile(projectA, livePort);
+
+      let resolvedPort = await mod.ensureBackend(projectB);
+
+      assert.equal(resolvedPort, livePort);
+      assert.equal(mod.listBackends().length, 1);
+      mod.removePortFile(projectA);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+      process.env.HOME = originalHome;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(projectA, { recursive: true, force: true });
+      fs.rmSync(projectB, { recursive: true, force: true });
     }
   });
 

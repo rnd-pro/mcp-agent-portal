@@ -1,10 +1,8 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve, join, dirname } from 'node:path';
-import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { startWebServer } from './web-server.js';
-import { writePortFile, removePortFile } from './backend-lifecycle.js';
+import { writePortFile, removePortFile, readPortFile } from './backend-lifecycle.js';
 import { ensureGatewayAlive, getGatewayPort } from './local-gateway.js';
 import { registerLocal } from './mdns.js';
 
@@ -13,17 +11,9 @@ const projectRoot = resolve(process.argv[2] || '.');
 // Only remove port file if it belongs to THIS process (prevents restart race)
 function cleanup() {
   try {
-    const __dir = dirname(fileURLToPath(import.meta.url));
-    const gwRoot = process.env.PORTAL_LOCAL_GATEWAY_DIR
-      || join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.local-gateway');
-    const gwDir = join(gwRoot, 'backends');
-    const hash = createHash('md5').update(resolve(projectRoot)).digest('hex').slice(0, 8);
-    const portFile = join(gwDir, `portal-${hash}.json`);
-    if (existsSync(portFile)) {
-      const data = JSON.parse(readFileSync(portFile, 'utf8'));
-      if (data.pid === process.pid) {
-        removePortFile(projectRoot);
-      }
+    const data = readPortFile(projectRoot);
+    if (data && data.pid === process.pid) {
+      removePortFile(projectRoot);
     }
   } catch { /* non-critical */ }
 }

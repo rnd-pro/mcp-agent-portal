@@ -1,7 +1,6 @@
 // @ctx backend-lifecycle.ctx
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
@@ -21,27 +20,19 @@ function _getVersion() {
   }
 }
 
+// Discovery is global: every project resolves the SAME port file so a backend spawned from one
+// project root is found by ensureBackend(otherRoot) instead of each project spawning its own. The
+// rootPath parameter is kept for call-site compatibility.
 function getPortFilePath(rootPath) {
-  const absPath = resolve(rootPath);
-  const hash = createHash('md5').update(absPath).digest('hex').slice(0, 8);
-  return join(LOCAL_GATEWAY_DIR, `portal-${hash}.json`);
-}
-
-// Resolve the global state file the same way state-graph.js does. The backend lock is keyed on this
-// path — not on the project root — so a single PORTAL_BACKEND owns the shared snapshot.
-function getStatePath() {
-  const stateDir = process.env.PORTAL_STATE_DIR || join(homedir(), '.agent-portal');
-  return process.env.PORTAL_STATE_PATH || join(stateDir, 'agent-portal-state.json');
+  return join(LOCAL_GATEWAY_DIR, 'portal.json');
 }
 
 // State lives in one shared location (~/.agent-portal) but a backend can be spawned from any project
 // root. A per-root lock therefore lets several backends become legitimate concurrent writers of the
-// same snapshot — the multi-writer race that clobbers persistent state. Keying the lock on the
-// resolved state path makes every backend contend on one lock, so only one owns the global state.
+// same snapshot — the multi-writer race that clobbers persistent state. A single global spawn lock
+// makes every backend contend on one lock, so only one can spawn and own the global state at a time.
 function getLockDirPath() {
-  const absPath = resolve(getStatePath());
-  const hash = createHash('md5').update(absPath).digest('hex').slice(0, 8);
-  return join(LOCAL_GATEWAY_DIR, `portal-state-${hash}.lock`);
+  return join(LOCAL_GATEWAY_DIR, 'portal-state.lock');
 }
 
 function processExists(pid) {
@@ -109,7 +100,7 @@ export async function acquireBackendLock(rootPath, options = {}) {
   throw new Error(`Timed out waiting for Agent Portal backend lock: ${rootPath}`);
 }
 
-function readPortFile(rootPath) {
+export function readPortFile(rootPath) {
   const file = getPortFilePath(rootPath);
   if (!existsSync(file)) return null;
   try {
@@ -155,7 +146,7 @@ export function removePortFile(rootPath) {
 
 export function listBackends() {
   if (!existsSync(LOCAL_GATEWAY_DIR)) return [];
-  const files = readdirSync(LOCAL_GATEWAY_DIR).filter(f => f.endsWith('.json') && f.startsWith('portal-'));
+  const files = readdirSync(LOCAL_GATEWAY_DIR).filter(f => f.endsWith('.json') && f.startsWith('portal'));
   const active = [];
   for (const f of files) {
     try {
