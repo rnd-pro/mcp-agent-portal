@@ -208,9 +208,13 @@ export async function commitWorktree({ worktreePath, message, committer = DEFAUL
   } catch {
     return { ok: true, committed: false, reason: 'worktree already removed' };
   }
-  // Defensive node_modules exclude (belt-and-suspenders with the per-worktree exclude): never stage the
-  // symlink that dodges the directory-only gitignore pattern.
-  let add = await git(['add', '-A', '--', '.', ':(exclude)node_modules'], worktreePath);
+  // Keep the node_modules symlink out of the commit. The directory-only `.gitignore` pattern does not
+  // match a symlink, so ensure the git-exclude lists it, then a PLAIN `git add -A` skips it. (An explicit
+  // `:(exclude)node_modules` pathspec is NOT usable here: once node_modules is excluded, git errors that
+  // the explicitly-named path is ignored — plain `add -A` silently skips ignored paths, which is what we
+  // want.)
+  await excludeInWorktree(worktreePath, 'node_modules');
+  let add = await git(['add', '-A'], worktreePath);
   if (!add.ok) return { ok: false, committed: false, reason: `git add failed: ${(add.stderr || '').trim()}` };
   let status = await git(['status', '--porcelain'], worktreePath, { timeout: 10_000 });
   if (status.ok && status.stdout.trim() === '') {

@@ -118,6 +118,22 @@ describe('workflow worktree isolation (real git)', () => {
     assert.ok(!fs.existsSync(c2.path), 'reaped worktree is gone');
   });
 
+  it('commitWorktree skips the node_modules symlink and never stages it', async () => {
+    fs.mkdirSync(path.join(repoRoot, 'node_modules', 'pkg'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, 'node_modules', 'pkg', 'i.js'), '1');
+    let c = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-nm' });
+    fs.mkdirSync(path.join(c.path, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(c.path, 'docs', 'note.md'), '# note\n');
+
+    let res = await commitWorktree({ worktreePath: c.path, message: 'docs note' });
+    assert.equal(res.ok, true, 'commit succeeds despite the node_modules symlink');
+    assert.equal(res.committed, true);
+
+    let tree = git(['ls-tree', '-r', '--name-only', c.branch]).split('\n');
+    assert.ok(tree.includes('docs/note.md'), 'the doc is committed');
+    assert.ok(!tree.some(p => p.startsWith('node_modules')), 'node_modules is never committed');
+  });
+
   it('aborts a conflicting merge, restores the base tree, and keeps the worktree for a human', async () => {
     let c1 = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-1' });
     let c2 = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-2' });
