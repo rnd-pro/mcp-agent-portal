@@ -165,6 +165,18 @@ describe('per-card worktree isolation (service wiring)', () => {
     assert.equal(lastDelegateCwd(), '/wt/exec-1', 'the delegated run executes in the worktree, not the shared tree');
   });
 
+  it('provisions a worktree for the orchestrate stage too (work runs from the orchestrate column)', async () => {
+    autonomous();
+    createCard('orch-1', 'ready', { files: ['src/y.js'] });
+
+    await service.orchestrateWorkItem({ cardId: 'orch-1', force: true });
+
+    assert.ok(calls.some(c => c.op === 'provision' && c.cardId === 'orch-1'),
+      'a card worked from the orchestrate column gets its worktree, so the work runs isolated');
+    assert.equal(service.getCard('orch-1').metadata.worktree.path, '/wt/orch-1');
+    assert.equal(lastDelegateCwd(), '/wt/orch-1');
+  });
+
   it('does NOT provision a worktree outside autonomous mode (shared-tree fallback)', async () => {
     service.updateWorkflowBoard({ mode: 'armed' }, { gatedBy: 'board.control' });
     createCard('exec-armed', 'in-progress', { files: ['src/x.js'] });

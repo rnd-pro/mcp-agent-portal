@@ -776,7 +776,12 @@ export function createWorkflowBoardService(opts = {}) {
   async function ensureCardWorktree(card, board) {
     if (!worktreeIsolationEnabled(board)) return null;
     let existing = cardWorktree(card);
-    if (!existing && !PENDING_CHANGE_COLUMN_ACTIONS.has(cardColumnAction(board, card))) return null;
+    // Provision for ANY execution-class stage (orchestrate/execute/audit/publish), not just the
+    // pending-change ones: in the default board the work-doing run is dispatched while the card is still
+    // in the `orchestrate` column (it moves the card to in-progress as a side effect), so gating on
+    // pending-change only would run the actual file edits in the shared tree and leave the worktree
+    // empty. A pure-routing orchestrator that only decomposes gets an unused worktree the reaper cleans.
+    if (!existing && !EXECUTION_COLUMN_ACTIONS.has(cardColumnAction(board, card))) return null;
     let repoRoot = cardBaseRepo(card);
     if (!(await repoIsGit(repoRoot))) return null;
     let prov = await worktreeOps.provisionWorktree({ repoRoot, worktreeRoot: worktreeRootFor(repoRoot), cardId: card.id });
@@ -1680,7 +1685,7 @@ export function createWorkflowBoardService(opts = {}) {
     // genuinely shared-tree cards (isolation off, non-git project, or a degraded provision) still
     // serialize on file overlap — exactly the activity-only semantics the blocker was meant to have.
     let cardWillIsolate = worktreeIsolationEnabled(board)
-      && (cardIsIsolated(card) || PENDING_CHANGE_COLUMN_ACTIONS.has(cardColumnAction(board, card)));
+      && (cardIsIsolated(card) || EXECUTION_COLUMN_ACTIONS.has(cardColumnAction(board, card)));
     if (cardWillIsolate) return [];
     let activeColumnIds = new Set(activeRecoveryColumnIds(board));
     return Object.values(getCollection(stateGraph, 'workflowCards'))
