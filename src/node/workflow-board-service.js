@@ -16,6 +16,8 @@ import {
   normalizeWorkflowBoardAutomation,
   normalizeWorkflowBoardMode,
   evaluateWorkflowBoardBudget,
+  evaluateRootConvergence,
+  summarizeRealizationByRoot,
   normalizeWorkflowCardInput,
   normalizeWorkflowChecksInput,
   normalizeWorkflowDependsOn,
@@ -1710,14 +1712,17 @@ export function createWorkflowBoardService(opts = {}) {
     };
   }
 
-  // Per-decompose-subtree spend, keyed by the root decompose parent. A child carries parentCardId; the
-  // root is the topmost ancestor on the board. Computed only when the breaker trips (rare) so the hot
-  // admission path never pays for the closure walk. Used to name the heaviest subtree in the
-  // escalation — the concrete "wide/deep decompose tree" that drove the board over budget.
-  function decomposeSubtreeSpend(boardId) {
+  // One grouped pass over a board's cards + runs, keyed by each card's root. The root key prefers the
+  // stamped metadata.rootCardId (set transitively on every decomposed descendant) so it survives a
+  // retired parent, falling back to the topmost-ancestor id from the parentCardId walk for cards minted
+  // before the lean-brief precursor or with a pruned chain. Shared by both the per-decompose-subtree
+  // spend breakdown (breaker diagnostics) and the per-root convergence cap, so neither pays for a second
+  // walk. Returns rootKeyOf(card), descendantsByRoot (root → member cards incl. the root itself), and
+  // runsByRoot (root → runs charged anywhere in the subtree).
+  function rootIndex(boardId) {
     let cards = Object.values(getCollection(stateGraph, 'workflowCards')).filter(card => card.boardId === boardId);
     let byId = new Map(cards.map(card => [card.id, card]));
-    let rootOf = (card) => {
+    let topmostAncestor = (card) => {
       let current = card;
       let guard = 0;
       while (current.parentCardId && byId.has(current.parentCardId) && guard < cards.length) {
@@ -1726,22 +1731,96 @@ export function createWorkflowBoardService(opts = {}) {
       }
       return current.id;
     };
+    let rootKeyOf = (card) => textOrNull(card?.metadata?.rootCardId) ?? topmostAncestor(card);
+    let descendantsByRoot = new Map();
+    for (let card of cards) {
+      let root = rootKeyOf(card);
+      if (!descendantsByRoot.has(root)) descendantsByRoot.set(root, []);
+      descendantsByRoot.get(root).push(card);
+    }
     let runsByCard = new Map();
     for (let run of boardRuns(boardId)) {
       if (!runsByCard.has(run.cardId)) runsByCard.set(run.cardId, []);
       runsByCard.get(run.cardId).push(run);
     }
-    let rootRuns = new Map();
+    let runsByRoot = new Map();
     for (let card of cards) {
-      let root = rootOf(card);
       let runs = runsByCard.get(card.id) ?? [];
       if (!runs.length) continue;
-      if (!rootRuns.has(root)) rootRuns.set(root, []);
-      rootRuns.get(root).push(...runs);
+      let root = rootKeyOf(card);
+      if (!runsByRoot.has(root)) runsByRoot.set(root, []);
+      runsByRoot.get(root).push(...runs);
     }
-    return [...rootRuns.entries()]
+    return { byId, rootKeyOf, descendantsByRoot, runsByRoot };
+  }
+
+  // Per-decompose-subtree spend, keyed by the root decompose parent. Computed only when the breaker
+  // trips (rare) so the hot admission path never pays for the closure walk. Used to name the heaviest
+  // subtree in the escalation — the concrete "wide/deep decompose tree" that drove the board over budget.
+  function decomposeSubtreeSpend(boardId) {
+    let { runsByRoot } = rootIndex(boardId);
+    return [...runsByRoot.entries()]
       .map(([rootCardId, runs]) => ({ rootCardId, ...sumRunsBudget(runs) }))
       .sort((a, b) => b.tokens - a.tokens);
+  }
+
+  // The three monotonic per-root convergence dimensions for one root, fed to the iso evaluateRootConvergence
+  // gate. depth = the deepest decompose-nesting chain under the root (max ancestor hops among its members);
+  // fanout = total descendants sharing the root (the descendantsByRoot group size); runCount = cumulative
+  // runs charged anywhere in the root subtree. Each strictly increments on a fresh re-decompose wave
+  // (one more nesting level and/or sibling, and at least one new run), so the gate converges the otherwise
+  // unbounded happy-path loop. Shares the single rootIndex pass — one grouped walk per drive, not per root.
+  function perRootConvergenceCounts(board, root, index = rootIndex(board.id)) {
+    let { byId, descendantsByRoot, runsByRoot } = index;
+    let group = descendantsByRoot.get(root) ?? [];
+    let depthOf = (card) => {
+      let current = card;
+      let hops = 0;
+      let guard = 0;
+      while (current.parentCardId && byId.has(current.parentCardId) && current.id !== root && guard < group.length) {
+        current = byId.get(current.parentCardId);
+        hops += 1;
+        guard += 1;
+      }
+      return hops;
+    };
+    let depth = 0;
+    for (let card of group) depth = Math.max(depth, depthOf(card));
+    let runCount = sumRunsBudget(runsByRoot.get(root) ?? []).runCount;
+    return { depth, fanout: group.length, runCount };
+  }
+
+  // Admission-time per-root convergence gate. Mandatory and always-on (it never reads automation.budget
+  // and has no configured:false escape — the DEFAULT_ROOT_MAX_* constants always apply), so it bounds the
+  // otherwise-unbounded happy-path re-decompose loop even on an unauthored full-autonomy board. Resolves
+  // the card's root via the shared rootIndex pass, computes the three monotonic counts, and evaluates them
+  // against the board's optional automation.rootConvergence override. Returns the boardBudgetAvailable
+  // shape so the candidate gate reads the same at every ceiling; a breach names the breached dimensions
+  // and the root so the daemon sweep can route that root to a terminal with an attributable reason.
+  function perRootConvergenceAvailable(board, card) {
+    let index = rootIndex(board.id);
+    let root = index.rootKeyOf(card);
+    let counts = perRootConvergenceCounts(board, root, index);
+    let override = normalizeWorkflowBoardAutomation(board.automation).rootConvergence;
+    let result = evaluateRootConvergence(counts, override);
+    if (result.ok) return { ok: true, root, limits: result.limits, counts, breaches: [] };
+    return {
+      ok: false,
+      reason: `Root ${root} convergence cap reached: ${formatRootConvergenceBreaches(result.breaches)}.`,
+      root,
+      limits: result.limits,
+      counts,
+      breaches: result.breaches,
+    };
+  }
+
+  function formatRootConvergenceBreaches(breaches = []) {
+    return breaches
+      .map((breach) => {
+        let label = breach.dimension === 'runCount' ? 'runs' : breach.dimension;
+        return `${label} ${breach.spent}/${breach.limit}`;
+      })
+      .join(', ');
   }
 
   // Per-goal spend, keyed by the goal a card's run is attached to (entityRefs.goalId). Computed with
@@ -1975,6 +2054,14 @@ export function createWorkflowBoardService(opts = {}) {
     let boardBudget = boardBudgetAvailable(board);
     if (!boardBudget.ok && !args.force) {
       return { ok: false, reason: boardBudget.reason, automation, capacity, boardCapacity, occupancy, boardBudget };
+    }
+    // Mandatory per-root convergence cap: independent of the optional board budget and always-on, this is
+    // the binding bound that converges the otherwise-unbounded re-decompose loop (every wave re-orchestrates
+    // through here and strictly increments depth/fanout/runCount). A breach refuses admission; the daemon
+    // sweep routes the breached root to a terminal.
+    let rootConvergence = perRootConvergenceAvailable(board, card);
+    if (!rootConvergence.ok && !args.force) {
+      return { ok: false, reason: rootConvergence.reason, automation, capacity, boardCapacity, occupancy, boardBudget, rootConvergence };
     }
     let fileConflicts = activeFileScopeConflicts(board, card, args);
     if (fileConflicts.length && !args.force) {
@@ -2700,6 +2787,112 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, boardId: board.id, escalated };
   }
 
+  // Per-root convergence breach resolution (Step 4). The admission gate (perRootConvergenceAvailable,
+  // ~1975) REFUSES a fresh re-decompose wave once a root hits its depth/fanout/runCount cap, but a
+  // refusal alone leaves the breached root resting non-terminal — the happy-path loop would simply idle
+  // instead of converging. This sweep is the active half: a releaseDependencies/escalateStaleCards
+  // sibling run at the top of every admission pass that routes each capped root to a TERMINAL so the
+  // HARD INVARIANT (every card reaches a terminal) holds even when the orchestrator keeps asking for
+  // more waves. Per-root and orthogonal to tripBoardBudgetBreaker — it never pauses the board, it
+  // resolves one root at a time. The root parks in the human-decision lane (parkCardForDecisionOps) with
+  // a reason naming the breached dimensions + rootCardId; when the board defines no decision lane it is
+  // retired to the reject terminal so it can never silently stall. Idempotent: a root already terminal,
+  // or already carrying the convergence resolution marker, is skipped, so a re-tick never re-parks it.
+  // The cap is MONOTONIC and PERMANENT for the root, so the breaching wave's just-created children are
+  // un-admittable forever (admission refuses them, and they carry no run/escalation/return that any
+  // backstop would catch). The sweep therefore cascade-cancels every non-terminal descendant of the
+  // breached root that is not actively running — running members settle on their own, never-admitted
+  // members are retired to the reject terminal — so no descendant is stranded non-terminal.
+  function resolveRootConvergenceBreaches(boardId) {
+    let board = ensureBoard(boardId);
+    let classifier = classifyWorkflowGraph(board);
+    let principal = daemonPrincipal();
+    let index = rootIndex(board.id);
+    let resolved = [];
+    for (let root of index.descendantsByRoot.keys()) {
+      let rootCard = index.byId.get(root);
+      if (!rootCard) continue;
+      let verdict = perRootConvergenceAvailable(board, rootCard);
+      if (verdict.ok) continue;
+      let ts = now();
+      let reason = `Root ${verdict.root} hit its convergence cap (${formatRootConvergenceBreaches(verdict.breaches)}); the re-decompose loop is bounded — routing to a terminal for a decision.`;
+      // Resolve the ROOT card itself at most once. A root auto-closed by decompositionClosesParent is
+      // already terminal (the default), and a root routed for a prior breach carries the marker — in both
+      // cases it needs no re-routing. The breaching SUBTREE is still cascaded below regardless: the cap is
+      // a property of the subtree, not of the root card's column, so a closed root must not skip the cascade.
+      let rootHandled = classifier.isTerminal(rootCard.columnId) || Boolean(rootCard.metadata?.rootConvergenceBreached);
+      if (!rootHandled) {
+        let breachMarker = {
+          rootConvergenceBreached: {
+            root: verdict.root, at: ts, breaches: verdict.breaches, counts: verdict.counts, limits: verdict.limits,
+          },
+        };
+        let park = parkCardForDecisionOps(
+          board, clone(rootCard), reason,
+          { type: 'decision', resolution: 'needs_decision', detail: reason, rootConvergence: verdict.breaches },
+          principal, ts, breachMarker,
+        );
+        if (park) {
+          stateGraph.commit(park.ops, sourceForPrincipal(principal));
+          resolved.push({ cardId: rootCard.id, root: verdict.root, terminal: 'decision', breaches: verdict.breaches });
+        } else {
+          // No decision lane configured — retire to the reject terminal so the breached root still terminates.
+          let targetColumnId = rejectTerminalColumnId(board)
+            ?? board.columns.find(column => classifier.isTerminal(column.id))?.id
+            ?? null;
+          if (targetColumnId) {
+            let metadata = { ...asObject(rootCard.metadata), ...breachMarker };
+            delete metadata.dependencyBlock;
+            metadata.resolution = { status: 'rejected', reason, at: ts, by: principal.label };
+            let retired = normalizeWorkflowCardInput({
+              ...rootCard, columnId: targetColumnId, lifecycle: 'idle', metadata,
+              version: rootCard.version + 1, updatedAt: ts, updatedBy: principal.label,
+            }, {
+              id: rootCard.id, actor: principal.label, now: ts,
+              version: rootCard.version + 1, createdAt: rootCard.createdAt, updatedAt: ts,
+            });
+            let eventId = nextId(makeId, 'convergence');
+            let event = normalizeWorkflowTransitionEvent({
+              id: eventId, eventType: 'transition', boardId: board.id, cardId: rootCard.id,
+              fromColumnId: rootCard.columnId, toColumnId: targetColumnId, actor: principal.label, mode: 'auto',
+              reason, status: 'accepted',
+              sideEffects: [{ type: 'root_convergence', resolution: 'rejected', root: verdict.root, breaches: verdict.breaches }],
+            }, { id: eventId, now: ts });
+            stateGraph.commit([
+              { op: 'set', path: `workflowCards/${rootCard.id}`, value: retired },
+              { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+            ], sourceForPrincipal(principal));
+            resolved.push({ cardId: rootCard.id, root: verdict.root, terminal: 'rejected', breaches: verdict.breaches });
+          }
+        }
+      }
+      // Always cascade the breaching subtree's un-admittable descendants to a terminal — idempotent
+      // (already-terminal / still-running members are skipped), so this no-ops once a wave is retired and
+      // also catches a LATER wave's fresh children that the one-shot root marker would otherwise miss.
+      cascadeBreachedRootDescendants(board, index, root, classifier, principal, reason);
+    }
+    return { ok: true, boardId: board.id, resolved };
+  }
+
+  // Cascade the convergence breach to the breached root's descendants. The cap is monotonic per root, so
+  // a refused wave's just-created children (parentCardId lineage, no dependsOn edge to the root) can never
+  // be admitted and are caught by no other backstop (escalateStaleCards skips never-run cards; the
+  // re-engagement driver needs an escalation or queued return; cancelDependentCard cascades only along
+  // dependsOn, not parentCardId). This retires every non-terminal, non-running descendant of the root to
+  // the reject terminal so none is stranded — the root itself was already resolved by the caller, and a
+  // descendant with a live run is left to settle on its own.
+  function cascadeBreachedRootDescendants(board, index, root, classifier, principal, reason) {
+    let group = index.descendantsByRoot.get(root) ?? [];
+    for (let member of group) {
+      if (member.id === root) continue;
+      let live = stateGraph.get(`workflowCards/${member.id}`);
+      if (!live) continue;
+      if (classifier.isTerminal(live.columnId)) continue;
+      if (activeRunForCard(live.id)) continue;
+      cancelDependentCard(board, live, principal, reason);
+    }
+  }
+
   // Materialize a `join` subscription as a synthetic dependent card (S5). The join `dependsOn` every
   // member (releaseWhen: card_done); the per-member `onUpstreamFailure` is mapped from the
   // subscription's onFailure — `all_settled` => `release` (a failed member counts as settled, so the
@@ -2709,7 +2902,7 @@ export function createWorkflowBoardService(opts = {}) {
   // Reuses the createOrUpdateCard write path (which re-checks the cycle guard) and lifts the join's
   // priority to the max member priority via effectiveAdmissionPriority. Returns the created card, or
   // `{ ok:false, reason }` on a self-referential/cyclic join.
-  function materializeJoinCard(board, subscription, ownerCardId, principal = resolvePrincipal()) {
+  function materializeJoinCard(board, subscription, ownerCardId, principal = resolvePrincipal(), options = {}) {
     let normalized = normalizeWorkflowSubscription(subscription);
     if (!normalized || normalized.mode !== 'join') return { ok: false, reason: 'not_a_join' };
     let ensuredBoard = ensureBoard(board?.id ?? board ?? DEFAULT_WORKFLOW_BOARD_ID);
@@ -2736,6 +2929,10 @@ export function createWorkflowBoardService(opts = {}) {
       return Math.max(best, lifted);
     }, 0);
     let owner = stateGraph.get(`workflowCards/${ownerCardId}`);
+    // Re-armable per-wave join (S6): stamp the originating wave on the join so a later wave's
+    // orchestrate reuse guard skips a retired prior-wave join and mints a fresh one. Defaults to the
+    // owner's live decomposeWaveSeq, so a never-decomposed single-wave owner keeps waveSeq 0.
+    let joinWaveSeq = options.waveSeq ?? (Number(owner?.metadata?.decomposeWaveSeq) || 0);
     let created = createOrUpdateCard({
       id: joinId,
       boardId: ensuredBoard.id,
@@ -2748,12 +2945,56 @@ export function createWorkflowBoardService(opts = {}) {
       domain: owner?.domain ?? null,
       owner: owner?.owner ?? 'orchestrator',
       dependsOn,
-      metadata: { joinPolicy: normalized.joinPolicy, subscription: normalized },
+      metadata: { joinPolicy: normalized.joinPolicy, subscription: normalized, waveSeq: joinWaveSeq },
     }, principal);
     if (!created.ok) {
       return { ok: false, reason: created.failures?.[0]?.gate ?? 'join_create_failed', detail: created };
     }
     return created.card;
+  }
+
+  // Route a child/join return to its PARENT (owner) inbox (S5): mint a `routed` copy of `sourceEvent`
+  // keyed on the parent (correlationId = parentId) and coalesce it onto the owner card's metadata.returns,
+  // returning the owner `set` op for the caller's reconcile batch (or null when the owner is missing).
+  // A still-live child's typed return reaches the orchestrator parent through this seam BEFORE all
+  // children settle — the only prior parent delivery was wakeJoinOwner at full-join completion. The
+  // eventId is deterministic on sourceEvent.eventId + parentId, so re-routing the same source on a
+  // still-running run is a coalesce no-op (no double-wake). Skips when no parentId or no owner card.
+  //
+  // `drafts` is an optional per-pass Map<ownerId, ownerCard>: in a single reconcile pass several siblings
+  // can route to the SAME parent, and each produces a whole-object owner `set` over the same path. Without
+  // the draft, every call reads the identical PRE-PASS committed owner (the pass's ops are not yet applied)
+  // and the last set silently overwrites the others (state-graph commit has no same-path merge). When a
+  // draft map is supplied, each route reads/writes the accumulated owner draft so the returns stack, and
+  // the caller flushes ONE op per owner after the loop.
+  function routeReturnToParent(parentId, sourceEvent, ts, principal, drafts = null) {
+    let ownerId = textOrNull(parentId);
+    if (!ownerId || !sourceEvent) return null;
+    let owner = (drafts && drafts.get(ownerId)) || stateGraph.get(`workflowCards/${ownerId}`);
+    if (!owner) return null;
+    let eventId = `routed-${crypto.createHash('sha256').update(`${sourceEvent.eventId ?? ''}:${ownerId}`).digest('hex').slice(0, 24)}`;
+    let returnEvent = normalizeWorkflowReturnEvent(
+      { kind: sourceEvent.kind, detail: sourceEvent.detail, payload: sourceEvent.payload },
+      { now: ts, correlationId: ownerId, raisedBy: ESCALATION_ACTOR, eventId, routed: true },
+    );
+    if (!returnEvent) return null;
+    let nextReturns = coalesceReturnEvents(owner.metadata?.returns, returnEvent);
+    let ownerNext = normalizeWorkflowCardInput({
+      ...owner,
+      metadata: { ...(owner.metadata && typeof owner.metadata === 'object' ? owner.metadata : {}), returns: nextReturns },
+      version: owner.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: owner.id,
+      actor: principal.label,
+      now: ts,
+      version: owner.version + 1,
+      createdAt: owner.createdAt,
+      updatedAt: ts,
+    });
+    if (drafts) drafts.set(ownerId, ownerNext);
+    return { op: 'set', path: `workflowCards/${ownerId}`, value: ownerNext };
   }
 
   // A released JOIN card wakes its owner (S5): mint a `completed` return onto the owner's inbox so the
@@ -2792,29 +3033,18 @@ export function createWorkflowBoardService(opts = {}) {
     let ops = [{ op: 'set', path: `workflowCards/${joinCard.id}`, value: retired }];
     let ownerWoken = false;
     if (ownerId) {
-      let owner = stateGraph.get(`workflowCards/${ownerId}`);
-      if (owner) {
-        let eventId = `join-${crypto.createHash('sha256').update(joinCard.id).digest('hex').slice(0, 20)}`;
-        let returnEvent = normalizeWorkflowReturnEvent(
-          { kind: 'completed', payload: { join: joinCard.id, members } },
-          { now: ts, correlationId: ownerId, raisedBy: ESCALATION_ACTOR, eventId, routed: true },
-        );
-        let nextReturns = coalesceReturnEvents(owner.metadata?.returns, returnEvent);
-        let ownerNext = normalizeWorkflowCardInput({
-          ...owner,
-          metadata: { ...(owner.metadata && typeof owner.metadata === 'object' ? owner.metadata : {}), returns: nextReturns },
-          version: owner.version + 1,
-          updatedAt: ts,
-          updatedBy: principal.label,
-        }, {
-          id: owner.id,
-          actor: principal.label,
-          now: ts,
-          version: owner.version + 1,
-          createdAt: owner.createdAt,
-          updatedAt: ts,
-        });
-        ops.push({ op: 'set', path: `workflowCards/${ownerId}`, value: ownerNext });
+      // The join completion is itself a `completed` return routed to the owner — mint it through the
+      // shared routeReturnToParent helper. The synthetic source carries the stable per-join eventId so
+      // the routed copy's deterministic eventId is unchanged across reconcile passes (no double-wake).
+      let joinEventId = `join-${crypto.createHash('sha256').update(joinCard.id).digest('hex').slice(0, 20)}`;
+      let ownerOp = routeReturnToParent(
+        ownerId,
+        { kind: 'completed', payload: { join: joinCard.id, members }, eventId: joinEventId },
+        ts,
+        principal,
+      );
+      if (ownerOp) {
+        ops.push(ownerOp);
         ownerWoken = true;
       }
     }
@@ -3409,6 +3639,9 @@ export function createWorkflowBoardService(opts = {}) {
       // Occupancy-aging tick (Axis C): escalate any worked card that has lingered in its column past
       // the stale budget. Independent of the dependency clock above; idempotent across passes.
       escalateStaleCards(board.id);
+      // Per-root convergence sweep: route any root that hit its re-decompose cap to a terminal. Per-root,
+      // never board-pausing — orthogonal to the budget breaker below. Idempotent across passes.
+      resolveRootConvergenceBreaches(board.id);
     }
     let owner = textOrNull(opts.owner) ?? `drain-${slugSegment(board.id)}-${nextId(makeId, 'pass')}`;
     let budget = Number.isFinite(Number(opts.budget)) && Number(opts.budget) > 0
@@ -4185,6 +4418,31 @@ export function createWorkflowBoardService(opts = {}) {
       ...card,
       childCardIds: childIdsByParent.get(card.id) ?? [],
     }));
+    // Idea-realization rollup: stamp each ROOT card (no parent, or rootCardId === id) with a
+    // realization summary counting its subtree by terminal status. Group cards by rootCardId once,
+    // then summarize each group against its own members (group size, not the full list), so the pass
+    // stays O(cards). It rides metadata.realization — the raw/structured slot, not a flattened display
+    // field — so the web UI reads it off raw and never mistakes it for a board-level display column.
+    let terminalActions = new Map(
+      (Array.isArray(board?.columns) ? board.columns : []).map(column => [
+        column.id,
+        { action: textOrNull(column?.automation?.action), closeKind: textOrNull(column?.automation?.closeKind) },
+      ]),
+    );
+    let cardsByRoot = new Map();
+    for (let card of persistedBoardCards) {
+      let root = textOrNull(card.metadata?.rootCardId) ?? card.id;
+      let group = cardsByRoot.get(root) ?? [];
+      group.push(card);
+      cardsByRoot.set(root, group);
+    }
+    persistedBoardCards = persistedBoardCards.map((card) => {
+      let isRoot = !textOrNull(card.parentCardId ?? card.parent_card_id)
+        || textOrNull(card.metadata?.rootCardId) === card.id;
+      if (!isRoot) return card;
+      let realization = summarizeRealizationByRoot(cardsByRoot.get(card.id) ?? [card], card.id, { terminalActions });
+      return { ...card, metadata: { ...(card.metadata ?? {}), realization } };
+    });
     let linkedTaskIds = new Set(persistedBoardCards.flatMap(card => uniqueArray([
       ...card.entityRefs.taskIds,
       ...card.runs.flatMap(run => run.taskIds),
@@ -5485,6 +5743,12 @@ export function createWorkflowBoardService(opts = {}) {
     let chatId = textOrNull(filter.chatId ?? filter.chat_id);
     let currentNow = now();
     let ops = [];
+    // Per-pass owner-return drafts (finding: sibling routed returns clobbering on a shared ops batch).
+    // Several children of the same parent can route a return in one pass; each routeReturnToParent call
+    // reads/writes the accumulated owner draft here so the returns stack instead of last-write-wins, and
+    // the drafts are flushed to ONE op per owner after the card loop (a parent reconciled in this same
+    // pass merges its draft into its own card update so neither side is lost).
+    let ownerReturnDrafts = new Map();
     // Upstream cards whose run reached a terminal-failure this pass — their downstream dependency
     // edges are resolved after the reconcile commit (inv 22) so the upstream's failed status is
     // already durable when propagation reads it.
@@ -5589,6 +5853,15 @@ export function createWorkflowBoardService(opts = {}) {
             createdAt: latestCard.createdAt,
             updatedAt: currentNow,
           });
+          // Route an ACTIONABLE intermediate return to the live parent (owner) so the orchestrator can
+          // act on it before all children settle. Soft progress/partial (non-actionable) is skipped so
+          // the parent is not churned on every tick. Deterministic eventId + coalesce make a re-parse on
+          // a still-running run a no-op (no double-wake). Rides the SAME reconcile commit batch.
+          if (returnEvent.actionable && textOrNull(latestCard.parentCardId)) {
+            // Accumulate into the per-pass owner draft (flushed once after the loop) so two siblings
+            // routing to the same parent in this pass don't overwrite each other's appended return.
+            routeReturnToParent(latestCard.parentCardId, returnEvent, currentNow, principal, ownerReturnDrafts);
+          }
           cardChanged = true;
           continue;
         }
@@ -5669,7 +5942,10 @@ export function createWorkflowBoardService(opts = {}) {
         let mintedReturn = terminal && !resumableInterruption
           ? normalizeWorkflowReturnEvent(
             { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
-            { now: currentNow, correlationId: latestCard.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, seq: nextRun.version ?? null, raisedBy: ESCALATION_ACTOR },
+            // A per-run-distinct eventId so routeReturnToParent's derived `routed-<sha(eventId:owner)>` id
+            // differs across sibling terminal completions under the same parent — otherwise every sibling's
+            // routed copy would coalesce onto a single id and only the first ever reaches the orchestrator.
+            { now: currentNow, correlationId: latestCard.id, runId: run.id, taskId: uniqueArray(run.taskIds)[0] ?? null, seq: nextRun.version ?? null, raisedBy: ESCALATION_ACTOR, eventId: `term-${crypto.createHash('sha256').update(run.id).digest('hex').slice(0, 20)}` },
           )
           : returnEvent;
         if (mintedReturn) {
@@ -5678,6 +5954,13 @@ export function createWorkflowBoardService(opts = {}) {
           // S8: a hard-interrupt return ALSO folds onto metadata.escalation (same writer as the
           // escalation reconcile) so hasActiveEscalation stays true and the driver re-engages it.
           nextMetadata = foldReturnEscalation({ ...baseMetadata, returns: nextReturns }, mintedReturn, currentNow);
+          // Route an ACTIONABLE terminal/carried return to the live parent (owner) so the orchestrator
+          // sees a child's completed|failed (or carried intermediate) result before a full-join wake.
+          // Non-actionable progress/partial is skipped; deterministic eventId + coalesce dedup any
+          // re-route. Owner op rides the SAME reconcile commit batch (ops below at the pass commit).
+          if (mintedReturn.actionable && textOrNull(latestCard.parentCardId)) {
+            routeReturnToParent(latestCard.parentCardId, mintedReturn, currentNow, principal, ownerReturnDrafts);
+          }
         }
         // Orchestrator reject DECISION: a completed run that emitted `WORKFLOW_RESULT: rejected` retires
         // the card to the reject terminal with a resolution status instead of advancing it. The decision
@@ -5796,8 +6079,32 @@ export function createWorkflowBoardService(opts = {}) {
       }
 
       if (cardChanged) {
-        ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: latestCard });
+        // If this card also received routed returns as an owner EARLIER in THIS pass, the draft (built on
+        // the pre-pass owner base) would clobber this fresher own-update — merge the draft's routed entries
+        // onto latestCard. Then record the own-update INTO the drafts map so a child routing to this owner
+        // LATER in the pass bases its copy off this fresher value (not the stale committed owner), keeping
+        // a single final op per card whether the own-update or a routed return comes first.
+        let draft = ownerReturnDrafts.get(latestCard.id);
+        if (draft) {
+          let merged = latestCard;
+          let draftReturns = (Array.isArray(draft.metadata?.returns) ? draft.metadata.returns : []).filter(r => r?.routed === true);
+          for (let routed of draftReturns) {
+            let nextReturns = coalesceReturnEvents(merged.metadata?.returns, routed);
+            merged = normalizeWorkflowCardInput({
+              ...merged,
+              metadata: { ...(merged.metadata && typeof merged.metadata === 'object' ? merged.metadata : {}), returns: nextReturns },
+            }, { id: merged.id, actor: principal.label, now: currentNow, version: merged.version, createdAt: merged.createdAt, updatedAt: merged.updatedAt });
+          }
+          latestCard = merged;
+        }
+        ownerReturnDrafts.set(latestCard.id, latestCard);
       }
+    }
+
+    // Flush one op per card that was own-updated and/or routed-to this pass; the map holds the single
+    // merged final value per path (own-update fresher base + any routed returns), so neither side clobbers.
+    for (let draft of ownerReturnDrafts.values()) {
+      ops.push({ op: 'set', path: `workflowCards/${draft.id}`, value: draft });
     }
 
     let committed = false;
@@ -6085,6 +6392,11 @@ export function createWorkflowBoardService(opts = {}) {
     let board = ensureBoard(parent.boardId);
     let ts = now();
     let rootCardId = parent.metadata?.rootCardId ?? parent.id;
+    // Re-armable per-wave join (S6): each decompose strictly increments the parent's monotonic
+    // decomposeWaveSeq. The seq is stamped on this wave's children and (below) on the parent metadata
+    // even when the parent does not close, so the counter stays continuous across a closed+re-woken
+    // parent and a later wave can mint a FRESH join card keyed on its own waveSeq.
+    let currentWaveSeq = (Number(parent.metadata?.decomposeWaveSeq) || 0) + 1;
     let children = childItemsFromArgs(args).map((item) => {
       let childContext = textArray(item.context);
       let childRoutingHints = textArray(item.routingHints ?? item.routing_hints);
@@ -6117,7 +6429,7 @@ export function createWorkflowBoardService(opts = {}) {
         context: [...textArray(parent.context), ...childContext],
         // Transitive origin-idea pointer: a top-level idea's children stamp parent.id; a grandchild
         // inherits the parent child's already-stamped rootCardId, so every descendant points at the origin.
-        metadata: { ...asObject(item.metadata), rootCardId },
+        metadata: { ...asObject(item.metadata), rootCardId, waveSeq: currentWaveSeq },
         routingHints: [...textArray(parent.routingHints), ...childRoutingHints],
       }, {
         id,
@@ -6141,11 +6453,31 @@ export function createWorkflowBoardService(opts = {}) {
     let parentNextColumnId = parentCloses ? closeColumnId : parent.columnId;
     let resultParent = parent;
     let parentOps = [];
+    // Persist the bumped wave seq on the parent regardless of close: a non-closing decompose still
+    // advances the wave so a later re-orchestrate mints a fresh join rather than reusing a retired one.
+    let parentMetadata = { ...asObject(parent.metadata), decomposeWaveSeq: currentWaveSeq };
     if (parentCloses) {
       resultParent = normalizeWorkflowCardInput({
         ...parent,
         columnId: parentNextColumnId,
         lifecycle: 'idle',
+        metadata: parentMetadata,
+        version: parent.version + 1,
+        updatedAt: ts,
+        updatedBy: actor,
+      }, {
+        id: parent.id,
+        actor,
+        now: ts,
+        version: parent.version + 1,
+        createdAt: parent.createdAt,
+        updatedAt: ts,
+      });
+      parentOps.push({ op: 'set', path: `workflowCards/${parent.id}`, value: resultParent });
+    } else {
+      resultParent = normalizeWorkflowCardInput({
+        ...parent,
+        metadata: parentMetadata,
         version: parent.version + 1,
         updatedAt: ts,
         updatedBy: actor,
@@ -6730,9 +7062,76 @@ export function createWorkflowBoardService(opts = {}) {
         '  - needs_decision: set a precise blocker question via `workflow_board` `update_item` and stop; this needs a human or higher authority, not another execution attempt.',
         '  - rework (the common case): re-delegate the fix with the audit findings as acceptance criteria. But if the Detail above says automatic rework is exhausted, do NOT re-route again — decide a terminal: reject the card or, only in the extreme case, ask a human.',
         '- You own the routing decision when a card returns: rework with corrections (most often), reject (`WORKFLOW_RESULT: rejected`), or — the rare extreme — ask a human (`WORKFLOW_RESULT: needs_human`). The board never decides this for you.',
+        '- When this card is the origin of a decomposed idea and intermediate child returns plus the idea-realization rollup show more work is warranted, you may instead `decompose` another wave of child cards — a legitimate routing choice alongside rework/reject/needs_human. Treat the rollup + rendered returns as the evidence: re-decompose only while the idea is genuinely unrealized; otherwise let it rest closed.',
         '- Permission and approval policy stay board/human-owned; this channel only proposes.',
       ].filter(Boolean).join('\n')
       : '';
+    // Structured intermediate child results delivered to this card's inbox (routed from a live child, an
+    // intermediate self-return, or a join completion). Distinct from the ~5-line laundered reason string
+    // (summarizeQueuedReturns) the wake driver folds into args.reason: this renders the typed return —
+    // kind, detail, the routed/terminal/hardInterrupt flags, and a one-line payload digest — so the
+    // re-engaged orchestrator can act on the actual intermediate evidence, not a summary. Filtered to the
+    // wake-driving set (actionable + unconsumed + intermediate-or-routed), matching hasQueuedActionableReturn.
+    let queuedReturns = Array.isArray(card.metadata?.returns)
+      ? card.metadata.returns.filter(item => isWakeDrivingReturn(item))
+      : [];
+    let summarizeReturnPayload = (payload) => {
+      if (!payload || typeof payload !== 'object') return '';
+      let parts = Object.entries(payload)
+        .map(([key, value]) => {
+          let text = typeof value === 'string' ? value : JSON.stringify(value);
+          return `${key}=${text}`;
+        })
+        .join(', ');
+      return parts.length > 160 ? `${parts.slice(0, 157)}...` : parts;
+    };
+    let returnsBlock = queuedReturns.length
+      ? [
+        '',
+        '',
+        `Intermediate child returns (${queuedReturns.length}) delivered to this card — structured evidence for the routing decision below:`,
+        ...queuedReturns.map((item) => {
+          let flags = [
+            item.routed === true ? 'routed' : '',
+            item.terminal === true ? 'terminal' : '',
+            item.hardInterrupt === true ? 'hard-interrupt' : '',
+          ].filter(Boolean);
+          let payloadSummary = summarizeReturnPayload(item.payload);
+          return [
+            `- ${item.kind}`,
+            flags.length ? ` [${flags.join(', ')}]` : '',
+            item.detail ? `: ${item.detail}` : '',
+            payloadSummary ? ` — ${payloadSummary}` : '',
+          ].join('');
+        }),
+      ].join('\n')
+      : '';
+    // Cheap idea-realization rollup keyed on this card's root: counts the root plus every descendant
+    // sharing metadata.rootCardId, bucketed by terminal status (done/rejected/blocked/active). Terminal
+    // classification comes from the board's own columns (action/closeKind), so the iso helper stays
+    // board-agnostic. This is the evidence for the realized-vs-redecompose call, not a judged verdict.
+    let realizationBlock = '';
+    {
+      let board = ensureBoard(card.boardId);
+      let terminalActions = new Map(
+        (Array.isArray(board?.columns) ? board.columns : []).map(column => [
+          column.id,
+          { action: textOrNull(column?.automation?.action), closeKind: textOrNull(column?.automation?.closeKind) },
+        ]),
+      );
+      let boardCards = Object.values(getCollection(stateGraph, 'workflowCards'))
+        .filter(other => other.boardId === card.boardId);
+      let rollup = summarizeRealizationByRoot(boardCards, card.metadata?.rootCardId ?? card.id, { terminalActions });
+      if (rollup.total > 1) {
+        realizationBlock = [
+          '',
+          '',
+          `Idea-realization rollup for root ${rollup.root} (${rollup.total} cards in this idea's subtree):`,
+          `- done: ${rollup.done}  rejected: ${rollup.rejected}  blocked: ${rollup.blocked}  active: ${rollup.active}`,
+          '- Use this rollup with the intermediate returns above as the evidence for whether the idea is realized (close) or needs another wave (decompose).',
+        ].join('\n');
+      }
+    }
     let proofMarkers = requiredProofMarkersForWorkItem(card, args);
     let proofMarkerContract = proofMarkers.length
       ? [
@@ -6762,6 +7161,7 @@ export function createWorkflowBoardService(opts = {}) {
       proofMarkerContract,
       '- End with `WORKFLOW_RESULT: completed`, `WORKFLOW_RESULT: blocked`, or `WORKFLOW_RESULT: needs_follow_up`.',
       '- Orchestrator terminal DECISIONS — use only when routing a card you own, on a clean finish:',
+      '  - `decompose` (action via `workflow_board`) — when you own a decomposed idea and the rendered intermediate returns + idea-realization rollup show it is not yet realized, mint another wave of child cards instead of closing. This is a legitimate re-engagement choice alongside rework/reject/needs_human; re-decompose only while the idea is genuinely unrealized.',
       '  - `WORKFLOW_RESULT: rejected` — the card is not worth completing; it retires to the reject terminal. Put the reason on an `ESCALATION_DETAIL:` line.',
       '  - `WORKFLOW_RESULT: needs_human` — the extreme case: you genuinely cannot decide and must ask a human. Put the question on `ESCALATION_DETAIL:`, optional button choices on `ESCALATION_OPTIONS: choice a | choice b | choice c`. Write the question and every option label in the user\'s language (match the locale the user communicates in) — a person reads them. The card parks in the decision lane until a human answers, then the answer returns to you.',
       '- If you end with `WORKFLOW_RESULT: blocked`, emit a typed escalation on the lines just above it so the orchestrator can route it:',
@@ -6803,6 +7203,8 @@ export function createWorkflowBoardService(opts = {}) {
       fileScopeHint,
       auditBlock,
       escalationBlock,
+      returnsBlock,
+      realizationBlock,
       args.reason ? `\n\nTrigger reason: ${args.reason}` : '',
       outputContract,
     ].join('').trim();
@@ -7142,15 +7544,24 @@ export function createWorkflowBoardService(opts = {}) {
     stateGraph.commit(ops, sourceForPrincipal(principal));
     // S5 wiring: a persisted JOIN subscription materializes a synthetic join card that depends on the
     // members; when the join policy is satisfied its release wakes THIS owner through the return-loop
-    // (see releaseDependencies). Idempotent — a re-orchestrate of the same owner reuses its join card.
+    // (see releaseDependencies). Idempotent per WAVE — a same-wave re-orchestrate reuses that wave's
+    // join card, but a later wave (S6) skips the retired prior-wave join (different/absent waveSeq) and
+    // mints a FRESH join with its own ownerNotifiedAt=unset so the owner is woken once per wave.
     let joinCard = null;
     if (normalizedSubscription?.mode === 'join') {
+      // Wave key: the automatic decomposeWaveSeq (bumped by each decompose) is authoritative; an explicit
+      // subscription.wave is the manual override the contract documents — it keys the join for a specific
+      // wave when the caller drives waves without re-decomposing (decomposeWaveSeq unset). Both feed the
+      // same reuse guard, so a later wave skips a retired prior-wave join and mints a fresh one.
+      let currentWaveSeq = Number(card.metadata?.decomposeWaveSeq) || Number(normalizedSubscription.wave) || 0;
       let existingJoin = boardCardsFor(board.id).find(
-        other => other.kind === 'join' && other.parentCardId === card.id,
+        other => other.kind === 'join'
+          && other.parentCardId === card.id
+          && (Number(other.metadata?.waveSeq) || 0) === currentWaveSeq,
       );
       joinCard = existingJoin ?? null;
       if (!existingJoin) {
-        let made = materializeJoinCard(board, normalizedSubscription, card.id, principal);
+        let made = materializeJoinCard(board, normalizedSubscription, card.id, principal, { waveSeq: currentWaveSeq });
         if (made?.id) joinCard = made;
       }
     }
@@ -8169,6 +8580,8 @@ export function createWorkflowBoardService(opts = {}) {
             releaseDependencies(board.id);
             // Occupancy-aging tick (Axis C): escalate cards stalled in a column past the stale budget.
             escalateStaleCards(board.id);
+            // Per-root convergence sweep: terminate any root that hit its re-decompose cap (Step 4).
+            resolveRootConvergenceBreaches(board.id);
           }
           // Scheduler loop: a bounded admission pass drains the queue under the board-admission
           // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
@@ -8244,10 +8657,14 @@ export function createWorkflowBoardService(opts = {}) {
     claimWorkItem,
     releaseWorkItem,
     orchestrateWorkItem,
+    buildWorkItemPrompt,
     enqueueWorkItem,
     enqueueWorkflowCard,
     listQueueEntries,
     admissionOrder,
+    rootIndex,
+    perRootConvergenceCounts,
+    perRootConvergenceAvailable,
     drainWorkflowQueue,
     linkDependency,
     unlinkDependency,
@@ -8258,6 +8675,7 @@ export function createWorkflowBoardService(opts = {}) {
     defineWorkflowGate,
     releaseDependencies,
     escalateStaleCards,
+    resolveRootConvergenceBreaches,
     columnOccupancyAvailable,
     resumeWorkItem,
     controlWorkItem,

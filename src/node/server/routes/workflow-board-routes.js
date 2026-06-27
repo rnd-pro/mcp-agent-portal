@@ -54,6 +54,8 @@ export function createWorkflowBoardRoutes(ctx = {}) {
   };
 
   return {
+    // The per-root idea-realization rollup rides this existing projection response: the service stamps
+    // metadata.realization onto each root card. No new query param or route.
     'GET /api/workflow-board': async (req, res) => {
       try {
         let service = resolveService();
@@ -148,6 +150,10 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    // Iterative re-decomposition rides this existing route: each call bumps the parent's monotonic
+    // decomposeWaveSeq and stamps it (with rootCardId) onto the wave's children — per-wave join state
+    // rides the returned result, no new param or route. Per-root convergence is enforced service-side
+    // at the candidate-admission gate, not here.
     'POST /api/workflow-board/decompose': async (req, res) => {
       try {
         let body = await parseBody(req);
@@ -231,6 +237,9 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    // An optional `subscription.wave` ordinal rides the existing body passthrough into
+    // orchestrateWorkItem; the service's join reuse guard uses it to skip a retired prior-wave join and
+    // mint a fresh one for the current wave. No new param at this layer.
     'POST /api/workflow-board/orchestrate': async (req, res) => {
       try {
         let body = await parseBody(req);
@@ -271,6 +280,11 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    // An optional `automation.rootConvergence` override rides the existing body passthrough into
+    // updateWorkflowBoard, where normalizeWorkflowBoardAutomation merges it. Unlike the board budget it
+    // has no opt-in gate — the per-root convergence defaults always apply, and on breach the service
+    // routes the root to a terminal (needs-decision park, reject fallback) rather than looping. No new
+    // param at this layer.
     'POST /api/workflow-board/automation': async (req, res) => {
       try {
         let body = await parseBody(req);

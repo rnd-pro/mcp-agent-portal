@@ -373,9 +373,14 @@ export function normalizeWorkflowSubscription(input = {}) {
   let k = Number(policy.k);
   let quorumK = type === 'quorum' && Number.isFinite(k) && k >= 1 && k <= members.length ? Math.floor(k) : null;
   if (type === 'quorum' && quorumK === null) type = 'all';   // fail-safe: never under-wait
+  // Per-root re-decomposition mints a fresh join per wave; an optional `wave` ordinal (>=1) tags this
+  // subscription's join so the orchestrator's reuse guard distinguishes a still-live current-wave join
+  // from a retired prior-wave one. Absent → unset (the single-wave path is unchanged).
+  let wave = positiveIntegerOrUndefined(source.wave ?? source.waveSeq ?? source.wave_seq);
   return {
     schema: WORKFLOW_SUBSCRIPTION_SCHEMA, mode, onFailure, releaseWhen, members,
     joinPolicy: { type, ...(quorumK !== null ? { k: quorumK } : {}) },
+    ...(wave !== undefined ? { wave } : {}),
   };
 }
 
@@ -670,6 +675,16 @@ const DEFAULT_WORKFLOW_COLUMNS = [
   },
 ];
 
+// Per-root convergence cap (iterative re-decomposition). The optional board budget (Axis E) is opt-in
+// and defaults to uncapped, so a happy-path re-decompose loop — which accrues nothing in attemptCount
+// or reworkCycles — is otherwise UNBOUNDED. This cap is ALWAYS-ON (no configured:false escape): the
+// DEFAULT constants always apply, bounding a root's growth across three monotonic dimensions so every
+// re-decompose wave strictly advances toward a terminal. Sized generously so a genuinely large idea is
+// not clipped prematurely; a board may raise (or lower) any dimension via automation.rootConvergence.
+export const DEFAULT_ROOT_MAX_DEPTH = 6;     // ancestor-chain length under a root (decompose nesting)
+export const DEFAULT_ROOT_MAX_FANOUT = 64;   // total descendants sharing the root
+export const DEFAULT_ROOT_MAX_RUNS = 128;    // cumulative runs charged across the root subtree
+
 const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   pickup: 'auto',
   recovery: 'manual',
@@ -694,6 +709,14 @@ const DEFAULT_WORKFLOW_BOARD_AUTOMATION = {
   // and real overlaps surface as merge conflicts the board escalates. Opt out per board to fall back to
   // the shared-working-tree model (a finished-but-uncommitted card reserves its files until merge).
   worktreeIsolation: true,
+  // Always-on per-root convergence cap for iterative re-decomposition. Unlike the optional `budget`,
+  // this has no uncapped state: a missing dimension falls back to its DEFAULT_ROOT_MAX_* constant, so
+  // the re-decompose loop is bounded even on an unauthored full-autonomy board. Independent of `budget`.
+  rootConvergence: {
+    depth: DEFAULT_ROOT_MAX_DEPTH,
+    fanout: DEFAULT_ROOT_MAX_FANOUT,
+    runCount: DEFAULT_ROOT_MAX_RUNS,
+  },
 };
 
 const DEFAULT_WORKFLOW_TRANSITIONS = [
@@ -1023,6 +1046,73 @@ export function evaluateWorkflowBoardBudget(budget, spend = {}) {
   return { ok: breaches.length === 0, configured: true, budget: normalized, breaches };
 }
 
+// Normalize an optional board override for the per-root convergence cap. UNLIKE the budget there is no
+// configured:false / uncapped state — a missing or non-positive dimension falls back to its DEFAULT
+// constant, so the bound is on even on an unauthored full-autonomy board.
+function normalizeWorkflowRootConvergence(input) {
+  let source = objectOrEmpty(input);
+  let depth = positiveIntegerOrUndefined(source.depth ?? source.maxDepth ?? source.max_depth);
+  let fanout = positiveIntegerOrUndefined(source.fanout ?? source.maxFanout ?? source.max_fanout);
+  let runCount = positiveIntegerOrUndefined(source.runCount ?? source.run_count ?? source.maxRuns ?? source.max_runs);
+  return {
+    depth: depth ?? DEFAULT_ROOT_MAX_DEPTH,
+    fanout: fanout ?? DEFAULT_ROOT_MAX_FANOUT,
+    runCount: runCount ?? DEFAULT_ROOT_MAX_RUNS,
+  };
+}
+
+// Pure breach check for the per-root convergence cap. Each dimension is a hard ceiling — it breaches
+// once spend reaches it (>=), mirroring evaluateWorkflowBoardBudget exactly. The limits come from a
+// normalized rootConvergence record (always present via the DEFAULT constants), so — unlike the budget
+// — there is no uncapped branch: an unauthored board still bounds every root. Returns the breached
+// dimensions so the caller can refuse admission and route the root to a terminal with an attributable reason.
+export function evaluateRootConvergence({ depth, fanout, runCount } = {}, override) {
+  let limits = normalizeWorkflowRootConvergence(override);
+  let spend = { depth, fanout, runCount };
+  let breaches = [];
+  for (let dimension of ['depth', 'fanout', 'runCount']) {
+    let limit = limits[dimension];
+    let spent = Number(spend[dimension]);
+    if (!Number.isFinite(spent)) spent = 0;
+    if (spent >= limit) breaches.push({ dimension, limit, spent });
+  }
+  return { ok: breaches.length === 0, limits, breaches };
+}
+
+// Cheap idea-realization rollup keyed on rootCardId. Counts the root plus every descendant sharing
+// `metadata.rootCardId` (root-as-self fallback when a card's rootCardId is unstamped), bucketed by
+// terminal status: `done` = resting in a success-close column, `rejected` = in the reject-close
+// terminal, `blocked` = lifecycle 'blocked', `active` = everything else (still in flight). Terminal-
+// column classification is passed in (`terminalActions`: a Map/object columnId → { action, closeKind }
+// derived from board.columns by the caller), so this helper stays Node-safe and board-agnostic — it
+// never hardcodes a column id. Surfaced into the orchestrator's re-engagement prompt and the board
+// projection as the evidence for a realized-vs-redecompose call.
+export function summarizeRealizationByRoot(cards, rootCardId, { terminalActions } = {}) {
+  let root = textOrNull(rootCardId);
+  let list = Array.isArray(cards) ? cards : [];
+  let actionOf = (columnId) => {
+    if (!columnId) return null;
+    if (terminalActions instanceof Map) return terminalActions.get(columnId) ?? null;
+    return objectOrEmpty(terminalActions)[columnId] ?? null;
+  };
+  let summary = { root, total: 0, done: 0, rejected: 0, active: 0, blocked: 0 };
+  for (let card of list) {
+    let source = objectOrEmpty(card);
+    let id = textOrNull(source.id);
+    if (!id) continue;
+    let cardRoot = textOrNull(objectOrEmpty(source.metadata).rootCardId) ?? id;
+    if (cardRoot !== root) continue;
+    summary.total += 1;
+    let action = actionOf(textOrNull(source.columnId));
+    let isClose = action?.action === 'close';
+    if (isClose && textOrNull(action.closeKind) === 'rejected') summary.rejected += 1;
+    else if (isClose) summary.done += 1;
+    else if (normalizeWorkflowLifecycle(source.lifecycle) === 'blocked') summary.blocked += 1;
+    else summary.active += 1;
+  }
+  return summary;
+}
+
 // The global autonomy "volume slider": an integer 1..5 (clamped) or the literal 'manual'. Absent or
 // unrecognized input falls back to full autonomy (5), matching the default board.
 function normalizeAutonomyLevel(value, fallback = 5) {
@@ -1041,6 +1131,9 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
     automation.daemonFloorSignWaiver ?? automation.daemon_floor_sign_waiver,
   );
   let budget = normalizeWorkflowBoardBudget(automation.budget ?? automation.costBudget ?? automation.cost_budget);
+  let rootConvergence = normalizeWorkflowRootConvergence(
+    automation.rootConvergence ?? automation.root_convergence,
+  );
   let globalParallelLimit = positiveIntegerOrUndefined(
     automation.globalParallelLimit ?? automation.global_parallel_limit,
   );
@@ -1089,6 +1182,9 @@ export function normalizeWorkflowBoardAutomation(input = {}) {
     worktreeIsolation: (automation.worktreeIsolation ?? automation.worktree_isolation) === undefined
       ? DEFAULT_WORKFLOW_BOARD_AUTOMATION.worktreeIsolation
       : Boolean(automation.worktreeIsolation ?? automation.worktree_isolation),
+    // Always present (no configured:false escape): the per-root convergence cap that bounds the
+    // otherwise-unbounded re-decompose loop, independent of the optional `budget`.
+    rootConvergence,
     ...(leaseTtlMs ? { leaseTtlMs } : {}),
     ...(daemonFloorSignWaiver ? { daemonFloorSignWaiver } : {}),
     ...(budget ? { budget } : {}),

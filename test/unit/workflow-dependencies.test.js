@@ -540,6 +540,39 @@ describe('workflow board task dependencies', () => {
     assert.equal(again.joinCardId, result.joinCardId, 're-orchestrate reuses the join card (no duplicate)');
   });
 
+  it('S6 subscription.wave keys the join waveSeq when decomposeWaveSeq is unset, and re-keys the reuse guard', async () => {
+    // The contract documents subscription.wave (>=1) as the manual per-wave join key for a caller that
+    // drives waves WITHOUT re-decomposing (so the automatic decomposeWaveSeq is unset). It must actually
+    // key the materialized join's waveSeq and the orchestrate reuse guard, else the param is inert.
+    makeCard('wv-owner', { columnId: 'ready' });
+    makeCard('wv-m1');
+    makeCard('wv-m2');
+
+    let waveTwo = await service.orchestrateWorkItem({
+      cardId: 'wv-owner',
+      delegate: false,
+      subscription: { mode: 'join', members: ['wv-m1', 'wv-m2'], wave: 2, joinPolicy: { type: 'all' } },
+    });
+    assert.ok(waveTwo.joinCardId, 'a join is materialized');
+    assert.equal(service.getCard(waveTwo.joinCardId).metadata.waveSeq, 2, 'subscription.wave keys the join waveSeq');
+
+    // Re-orchestrating with the SAME wave reuses that wave's join (no duplicate).
+    let sameWave = await service.orchestrateWorkItem({
+      cardId: 'wv-owner', delegate: false, force: true,
+      subscription: { mode: 'join', members: ['wv-m1', 'wv-m2'], wave: 2, joinPolicy: { type: 'all' } },
+    });
+    assert.equal(sameWave.joinCardId, waveTwo.joinCardId, 'a same-wave re-orchestrate reuses the join');
+
+    // A LATER wave mints a FRESH join — the reuse guard distinguishes the wave, so the owner is woken
+    // once per wave instead of reusing the retired prior-wave join.
+    let waveThree = await service.orchestrateWorkItem({
+      cardId: 'wv-owner', delegate: false, force: true,
+      subscription: { mode: 'join', members: ['wv-m1', 'wv-m2'], wave: 3, joinPolicy: { type: 'all' } },
+    });
+    assert.notEqual(waveThree.joinCardId, waveTwo.joinCardId, 'a later wave mints a fresh join');
+    assert.equal(service.getCard(waveThree.joinCardId).metadata.waveSeq, 3, 'the fresh join carries the new wave');
+  });
+
   it('S5 join release wakes the owner via a completed return and retires the join card', async () => {
     makeCard('jo-owner', { columnId: 'ready' });
     makeCard('jo-m1');

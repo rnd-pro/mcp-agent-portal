@@ -23,7 +23,7 @@ const ACTIONS = {
   },
   get_board: {
     method: 'getWorkflowBoard',
-    description: 'Get one board projection with columns, cards, optional events, runtime data, or a compact status view.',
+    description: 'Get one board projection with columns, cards, optional events, runtime data, or a compact status view. Each root card (no parentCardId, or rootCardId===id) carries a per-root realization rollup (card.realization: {total,done,rejected,active,blocked} over the root subtree) that rides the existing projection passthrough.',
     required: [],
   },
   create_board: {
@@ -40,7 +40,7 @@ const ACTIONS = {
   },
   decompose: {
     method: 'decomposeWorkItem',
-    description: 'Split a broad workflow card into first-class child cards without starting them automatically. The origin idea is NOT auto-copied into children: each child\'s `body` and `context` must be self-contained. Carry any binding proof marker (e.g. COMPLETION_PROOF, RELEASE_AUTH_PACKET) or hard constraint from the origin idea explicitly into the specific child that must satisfy it. Children inherit a stamped metadata.rootCardId pointing at the origin idea and dereference it by reading that root card.',
+    description: 'Split a broad workflow card into first-class child cards without starting them automatically. The origin idea is NOT auto-copied into children: each child\'s `body` and `context` must be self-contained. Carry any binding proof marker (e.g. COMPLETION_PROOF, RELEASE_AUTH_PACKET) or hard constraint from the origin idea explicitly into the specific child that must satisfy it. Children inherit a stamped metadata.rootCardId pointing at the origin idea and dereference it by reading that root card. Re-decomposable: a re-engaged orchestrator (re-woken on a child\'s routed intermediate return) may decompose ANOTHER wave instead of rework/reject/needs_human — each decompose bumps the parent\'s monotonic metadata.decomposeWaveSeq and mints a FRESH per-wave join (the retired prior-wave join is one-shot), so a later wave\'s completion still wakes the owner exactly once. The always-on per-root convergence cap (automation.rootConvergence) bounds total waves/fan-out/runs so the re-decompose loop always converges; once a root breaches the cap, admission is refused and the root is routed to a terminal (needs-decision park, reject fallback), never an unbounded loop.',
     required: ['cardId', 'childItems'],
     mutates: true,
   },
@@ -52,7 +52,7 @@ const ACTIONS = {
   },
   update_board: {
     method: 'updateWorkflowBoard',
-    description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit. Pass autonomyLevel (1..5 or "manual") to instead cascade that level\'s preset to columns (per-stage autoAdvance/mode + board publishMode) via the autonomy slider; routing to applyAutonomyLevel, which still requires DEFINE/CONTROL.',
+    description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit. Optional automation.rootConvergence ({depth,fanout,runCount}) overrides the per-root re-decomposition convergence cap; UNLIKE the optional cost budget it is always-on (the DEFAULT_ROOT_MAX_* limits apply even unconfigured) and independent of automation.budget, so a runaway re-decompose loop always converges. The cap is enforced at candidate admission: when any dimension is breached the root is routed to a terminal through the existing path — parked in the needs-decision lane (reject-terminal fallback when no decision lane exists) with a reason naming the breached dimension(s) and rootCardId — never silently stalled or looped. Pass autonomyLevel (1..5 or "manual") to instead cascade that level\'s preset to columns (per-stage autoAdvance/mode + board publishMode) via the autonomy slider; routing to applyAutonomyLevel, which still requires DEFINE/CONTROL.',
     required: [],
     mutates: true,
   },
@@ -129,7 +129,7 @@ const ACTIONS = {
   },
   orchestrate: {
     method: 'orchestrateWorkItem',
-    description: 'Ask the Portal orchestrator to run an eligible work item.',
+    description: 'Ask the Portal orchestrator to run an eligible work item. A live child\'s typed intermediate return is now routed to the parent (owner) inbox before all children settle, so a parent can be re-woken and re-engaged on partial results; on re-engagement the orchestrator may emit a decompose (another wave) as a legitimate terminal-routing decision alongside rework/reject/needs_human, evidenced by the rendered returns and the per-root realization rollup.',
     required: ['cardId'],
     mutates: true,
   },
@@ -208,6 +208,7 @@ const ACTION_EXAMPLES = {
     boardId: DEFAULT_WORKFLOW_BOARD_ID,
     cardId: 'card-id',
     reason: 'Card entered the ready column',
+    subscription: { members: ['child-a', 'child-b'], wave: 2 },
   },
   enqueue: {
     action: 'enqueue',
@@ -289,6 +290,7 @@ const ACTION_EXAMPLES = {
         pickup: 'auto',
         globalParallelLimit: 8,
         fallbackAgents: ['orchestrator'],
+        rootConvergence: { depth: 6, fanout: 64, runCount: 128 },
       },
     },
   },
@@ -473,7 +475,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         columnId: { type: 'string', description: 'Initial column for create_item; the target column for update_column, define_column, and delete_column.' },
         childColumnId: { type: 'string', description: 'Initial column for child cards created by action=decompose.' },
         cwd: { type: 'string', description: 'Optional working directory for delegated workflow execution. Captured on the card at intake; it also selects the repo the card\'s isolated worktree is cut from, so a card targeting another project runs in that project\'s repo. Absent, the card falls back to its registered project path, then the board project root.' },
-        automation: { type: 'object', description: 'Column automation patch for action=update_column.' },
+        automation: { type: 'object', description: 'Column automation patch for action=update_column; board-level automation patch for action=update_board (pickup, recovery, stop policy, fallbackAgents, globalParallelLimit). For update_board it may also carry automation.rootConvergence ({depth,fanout,runCount}) to override the always-on per-root re-decomposition convergence cap (independent of the optional automation.budget cost breaker).' },
         owner: { type: 'string', description: 'Optional work-item owner.' },
         assignedAgent: { type: 'string', description: 'Optional preferred agent for create_item routing.' },
         acceptanceCriteria: {
@@ -502,7 +504,7 @@ export const WORKFLOW_BOARD_TOOLS = [
           description: 'Structured file ownership scope for create_item, childItems, and orchestration.',
         },
         metadata: { type: 'object', description: 'Optional work-item metadata for create_item.' },
-        subscription: { type: 'object', description: 'Optional orchestrator return subscription (e.g. a join over members) for create_item or orchestrate. Persisted on the card so the join materializes on first orchestration, including by auto-pickup.' },
+        subscription: { type: 'object', description: 'Optional orchestrator return subscription (e.g. a join over members) for create_item or orchestrate. Persisted on the card so the join materializes on first orchestration, including by auto-pickup. Pass subscription.wave (>=1) to tag the join for a specific re-decomposition wave: each re-decompose mints a FRESH join keyed on the parent\'s current wave, so a later wave\'s completion still wakes the owner exactly once; absent leaves the single-wave path unchanged.' },
         patch: { type: 'object', description: 'Fields to patch for update_item.' },
         checks: { type: 'object', description: 'Optional gate checks for update_item.' },
         fromColumnId: { type: 'string', description: 'Expected current column for transition.' },

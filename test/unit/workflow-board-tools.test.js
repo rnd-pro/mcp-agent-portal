@@ -446,6 +446,66 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[0].context.source, 'mcp-test');
   });
 
+  it('documents the iterative re-decomposition contract in help text and forwards its params', async () => {
+    let help = parseResult(await handleWorkflowBoardTool(
+      {},
+      'workflow_board',
+      { action: 'help' },
+      'test-source',
+      { workflowService: {} },
+    ));
+
+    // decompose: re-engaged orchestrator may decompose another wave; the per-root cap converges it.
+    assert.match(help.actions.decompose.description, /another wave/i);
+    assert.match(help.actions.decompose.description, /rootConvergence/);
+    // decompose: the re-armable per-wave join is named (decomposeWaveSeq) and breach terminal-resolves.
+    assert.match(help.actions.decompose.description, /decomposeWaveSeq/);
+    assert.match(help.actions.decompose.description, /needs-decision/i);
+    // orchestrate: a live child's typed return now reaches the parent before full join.
+    assert.match(help.actions.orchestrate.description, /before all children settle/i);
+    assert.match(help.actions.orchestrate.description, /realization rollup/i);
+    // update_board: always-on per-root convergence cap, independent of the optional cost budget.
+    assert.match(help.actions.update_board.description, /rootConvergence/);
+    assert.match(help.actions.update_board.description, /always-on/i);
+    // update_board: a cap breach terminal-resolves (decision-lane park, reject fallback), never loops.
+    assert.match(help.actions.update_board.description, /needs-decision/i);
+    assert.match(help.actions.update_board.description, /reject-terminal fallback/i);
+    // get_board projection carries the per-root realization rollup.
+    assert.match(help.actions.get_board.description, /realization/i);
+
+    let schema = WORKFLOW_BOARD_TOOLS[0].inputSchema;
+    assert.match(schema.properties.subscription.description, /subscription\.wave/);
+    assert.match(schema.properties.automation.description, /rootConvergence/);
+
+    // subscription.wave rides the orchestrate subscription passthrough.
+    let orchestrateCalls = [];
+    let orchestrateService = {
+      orchestrateWorkItem: async args => { orchestrateCalls.push(args); return { ok: true }; },
+    };
+    await handleWorkflowBoardTool(
+      {},
+      'workflow_board',
+      { action: 'orchestrate', cardId: 'parent', subscription: { members: ['a', 'b'], wave: 2 } },
+      'mcp-test',
+      { workflowService: orchestrateService },
+    );
+    assert.deepEqual(orchestrateCalls[0].subscription, { members: ['a', 'b'], wave: 2 });
+
+    // automation.rootConvergence rides the update_board automation passthrough.
+    let boardCalls = [];
+    let boardService = {
+      updateWorkflowBoard: async args => { boardCalls.push(args); return { ok: true }; },
+    };
+    await handleWorkflowBoardTool(
+      {},
+      'workflow_board',
+      { action: 'update_board', automation: { rootConvergence: { depth: 6, fanout: 64, runCount: 128 } } },
+      'mcp-test',
+      { workflowService: boardService },
+    );
+    assert.deepEqual(boardCalls[0].automation, { rootConvergence: { depth: 6, fanout: 64, runCount: 128 } });
+  });
+
   it('returns guided MCP errors for old tools, unknown actions, and missing fields', async () => {
     let oldTool = await handleWorkflowBoardTool(
       {},
