@@ -1244,6 +1244,19 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.notEqual(card.columnId, 'needs-decision', 'the answered card leaves the decision lane back toward the orchestrator');
   });
 
+  it('convergence: a daemon-executed card with an independently-signed PASS audit advances out of quality-audit', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-signed', 'completed', { executedBy: ['daemon'] });
+    // An independent reviewer (NOT the executor) signs the audit floor PASS via the update_item AUDIT path.
+    let reviewer = humanPrincipal({ id: 'code-reviewer', label: 'code-reviewer' });
+    let signed = service.createOrUpdateCard({ cardId, checks: { audit: 'passed' } }, reviewer);
+    assert.equal(signed.ok !== false, true, 'the independent reviewer can sign the audit floor');
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true });
+    let card = service.getCard(cardId);
+    assert.notEqual(card.columnId, 'quality-audit',
+      `a daemon-executed card with an independently-signed PASS audit must advance out of quality-audit; stuck in ${card.columnId}`);
+  });
+
   it('autonomous tail + publishMode after_audit: walks a verdict-passed card all the way to done', async () => {
     service.updateWorkflowBoard(
       { mode: 'autonomous', automation: { publishMode: 'after_audit' } }, { gatedBy: 'board.control' },
