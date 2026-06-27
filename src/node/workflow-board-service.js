@@ -115,7 +115,7 @@ const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
 // (read as a status) to 'Tasks' — it is the task queue. v9 materializes the autonomy "volume slider":
 // it stamps automation.autonomyLevel (default 5) and cascades the level preset to per-column
 // autoAdvance/mode + board publishMode so the live board surfaces the level on its projection.
-const DEFAULT_WORKFLOW_POLICY_VERSION = 9;
+const DEFAULT_WORKFLOW_POLICY_VERSION = 10;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
 // no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
@@ -1044,6 +1044,12 @@ export function createWorkflowBoardService(opts = {}) {
         // older normalizer or a clobbered snapshot) falls back to the default instead of overwriting
         // it, so the column's action/trigger/mode self-heal on every reconcile.
         automation: { ...defaultColumn.automation, ...definedOnly(current.automation) },
+        // A default column's entry marker tracks the factory canonical (the human entry column,
+        // `ideas`, is entryPoint:true; every other default column false), self-healing like the
+        // column action/trigger/mode and the title re-sync above — a board that predates the marker
+        // gains it on this refresh. A bespoke entry point lives on a CUSTOM column, which is appended
+        // as-is below and keeps its stored entryPoint.
+        entryPoint: defaultColumn.entryPoint ?? false,
       };
     });
     for (let column of currentColumns) {

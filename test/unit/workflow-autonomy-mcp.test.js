@@ -107,6 +107,43 @@ describe('autonomy level over MCP + default-board materialization', () => {
     assert.ok(board.version > 35);
   });
 
+  it('the policy refresh materializes the entryPoint marker onto a board that predates it', async () => {
+    // Seed a default board whose columns carry no entryPoint field (pre-marker). The fill-only refresh
+    // must stamp the default (ideas → entryPoint:true, every other column false) without clobbering.
+    let seed = createDefaultWorkflowBoard({ id: DEFAULT_WORKFLOW_BOARD_ID });
+    let stale = {
+      ...seed,
+      columns: seed.columns.map(({ entryPoint, ...column }) => column),
+      version: 35,
+      metadata: { defaultPolicyVersion: 7 },
+    };
+    sg.commit([{ op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: stale }], 'test-seed');
+
+    let board = await readBoard(makeService());
+    assert.equal(board.columns.find(column => column.id === 'ideas').entryPoint, true, 'ideas is the entry point');
+    assert.equal(board.columns.find(column => column.id === 'backlog').entryPoint, false, 'non-entry columns are false');
+  });
+
+  it('the policy refresh preserves a bespoke entryPoint on a custom column', async () => {
+    // The factory re-sync only governs default columns; a human-added column carries its own entry
+    // marker through the refresh untouched (it is appended as-is, not merged against a default).
+    let seed = createDefaultWorkflowBoard({ id: DEFAULT_WORKFLOW_BOARD_ID });
+    let stale = {
+      ...seed,
+      columns: [
+        ...seed.columns.map(({ entryPoint, ...column }) => column),
+        { id: 'triage', title: 'Triage', entryPoint: true, automation: { trigger: 'manual', action: 'classify' } },
+      ],
+      version: 35,
+      metadata: { defaultPolicyVersion: 7 },
+    };
+    sg.commit([{ op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: stale }], 'test-seed');
+
+    let board = await readBoard(makeService());
+    assert.equal(board.columns.find(column => column.id === 'ideas').entryPoint, true, 'default entry materializes');
+    assert.equal(board.columns.find(column => column.id === 'triage').entryPoint, true, 'custom entry preserved');
+  });
+
   it('the policy refresh preserves a per-column autoAdvance customization on a numeric-level board', async () => {
     // Seed a stale default board that still sits at numeric autonomyLevel 5 but whose `ready`
     // (orchestrate) column a human deliberately pinned to {autoAdvance:false, mode:'manual'} via
