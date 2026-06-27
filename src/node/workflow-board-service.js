@@ -23,6 +23,7 @@ import {
   normalizeWorkflowLifecycle,
   normalizeWorkflowRunInput,
   normalizeWorkflowAutomation,
+  normalizeColumnEntryPoint,
   normalizeWorkflowSubscription,
   isFloorGateMonotonic,
   isWorkflowLifecycleTransitionAllowed,
@@ -111,8 +112,10 @@ const RETURN_MARKER_PATTERN = /WORKFLOW_RETURN:\s*([a-z_]+)\s*(\{[\s\S]*\})?/i;
 // board once — v6 self-heals a column automation gap (e.g. a `quality-audit` that lost its `action`
 // to an older normalizer or a clobbered snapshot) so the on-enter audit and the autonomous release
 // tail resolve their columns by action again. v8 renames the legacy `ready` title 'Tasks / Ready'
-// (read as a status) to 'Tasks' — it is the task queue.
-const DEFAULT_WORKFLOW_POLICY_VERSION = 8;
+// (read as a status) to 'Tasks' — it is the task queue. v9 materializes the autonomy "volume slider":
+// it stamps automation.autonomyLevel (default 5) and cascades the level preset to per-column
+// autoAdvance/mode + board publishMode so the live board surfaces the level on its projection.
+const DEFAULT_WORKFLOW_POLICY_VERSION = 9;
 // Persisted board/card schema version. The iso normalizers are always-forward, so a single
 // one-time sweep (ensureWorkflowSchemaMigrated) rewrites every persisted board + card to v2 once;
 // no read-time `schema === 'v1'` branch ever exists. The durable `workflowSchema` marker guards it.
@@ -332,6 +335,79 @@ function cardFileScope(card = {}, args = {}) {
     ...textArray(card.entityRefs?.files),
     ...textArray(card.metadata?.files),
   ]);
+}
+
+// Specialty map for stage-agent selection, expressed as data so a host can extend it without
+// touching the scorer. Each rule scores a slug when a card's files match a path pattern, its
+// `domain` matches, or one of its `routingHints` matches. Path signal outweighs hint/domain so a
+// concrete file scope wins over a coarse label. A card with no signal scores 0 against every rule,
+// which lets the caller fall back to the connected pool's first agent.
+export const DEFAULT_STAGE_AGENT_SPECIALTIES = [
+  {
+    slug: 'ui-engineer',
+    paths: [/(^|\/)symbiote-ui(\/|$)/i, /(^|\/)ui(\/|$)/i, /\.(css|html)$/i, /web-?components?/i],
+    domains: ['ui', 'frontend', 'web', 'design'],
+    hints: ['ui', 'css', 'component', 'web', 'frontend', 'theme'],
+  },
+  {
+    slug: 'provider-engineer',
+    paths: [/(^|\/)provider/i, /(^|\/)engine(\/|$)/i, /\.driver(\.|$)/i, /(^|\/)(manifest|tokens)(\.|\/|$)/i],
+    domains: ['provider', 'engine', 'driver'],
+    hints: ['provider', 'engine', 'driver', 'manifest', 'tokens'],
+  },
+  {
+    slug: 'tooling-engineer',
+    paths: [/(^|\/)packages\/[^/]+-mcp(\/|$)/i, /(^|\/)scripts(\/|$)/i, /\.config\./i, /(^|\/)proxy(\/|$)/i, /(^|\/)mcp(\/|$)/i],
+    domains: ['tooling', 'mcp', 'build', 'infra'],
+    hints: ['tooling', 'mcp', 'build', 'proxy', 'script', 'infra'],
+  },
+  {
+    slug: 'backend-engineer',
+    paths: [/(^|\/)src\/node(\/|$)/i, /(^|\/)server(\/|$)/i, /(^|\/)src\/iso(\/|$)/i],
+    domains: ['backend', 'server', 'node', 'service'],
+    hints: ['backend', 'server', 'node', 'service', 'api'],
+  },
+];
+
+const STAGE_AGENT_PATH_WEIGHT = 3;
+const STAGE_AGENT_DOMAIN_WEIGHT = 2;
+const STAGE_AGENT_HINT_WEIGHT = 1;
+
+// Pure, deterministic specialty score for one slug against a card's domain/files/routingHints. Only
+// the rule whose slug matches contributes; an unknown slug (no rule) scores 0. Higher is a better fit.
+export function scoreStageAgent(slug, card = {}, files = [], specialties = DEFAULT_STAGE_AGENT_SPECIALTIES) {
+  let target = textOrNull(slug);
+  if (!target) return 0;
+  let rule = specialties.find((entry) => entry.slug === target);
+  if (!rule) return 0;
+  let domain = textOrNull(card.domain)?.toLowerCase() ?? null;
+  let hints = textArray(card.routingHints).map((h) => h.toLowerCase());
+  let scope = uniqueArray(files);
+  let score = 0;
+  for (let file of scope) {
+    if ((rule.paths ?? []).some((pattern) => pattern.test(file))) score += STAGE_AGENT_PATH_WEIGHT;
+  }
+  if (domain && (rule.domains ?? []).includes(domain)) score += STAGE_AGENT_DOMAIN_WEIGHT;
+  for (let hint of hints) {
+    if ((rule.hints ?? []).includes(hint)) score += STAGE_AGENT_HINT_WEIGHT;
+  }
+  return score;
+}
+
+// Choose the best-fitting slug from a connected pool by specialty score. Returns null when no slug
+// scores above zero so the caller can apply its own fallback. Ties resolve to pool order (the first
+// connected agent), keeping selection deterministic.
+export function pickStageAgentFromPool(pool = [], card = {}, files = [], specialties = DEFAULT_STAGE_AGENT_SPECIALTIES) {
+  let best = null;
+  let bestScore = 0;
+  for (let slug of pool) {
+    let score = scoreStageAgent(slug, card, files, specialties);
+    if (score > bestScore) {
+      best = slug;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 // Scratch/junk/secret-bearing path patterns that must never reach a published changeset. A release
@@ -716,6 +792,9 @@ export function createWorkflowBoardService(opts = {}) {
     // Worktree git ops seam — injectable so service-level tests stub the lifecycle instead of driving
     // real git. Production uses the real module against the project repo.
     worktreeOps = { isGitRepo, provisionWorktree, commitWorktree, mergeWorktree, removeWorktree, reapOrphanWorktrees },
+    // Specialty map that biases per-card stage-agent selection toward the best-fitting connected
+    // agent. Data-driven and overridable so a host can extend the heuristics without forking the scorer.
+    stageAgentSpecialties = DEFAULT_STAGE_AGENT_SPECIALTIES,
   } = opts;
   if (!stateGraph) {
     throw new Error('Workflow board service requires a StateGraph instance.');
@@ -754,10 +833,24 @@ export function createWorkflowBoardService(opts = {}) {
     return Boolean(cardWorktree(card));
   }
 
+  // The filesystem repo of the project a card belongs to, resolved from the persisted `projects/<id>`
+  // record's `path`. This is the single hook a card with a `projectId` but no explicit `cwd` uses to
+  // reach its own repo: per-project isolation is driven by `card.cwd` captured at intake, and this
+  // backstops the case where only the project id travelled. Returns null when the id is absent or has
+  // no registered path, so `cardBaseRepo` falls through to the board's project root unchanged.
+  function resolveRepoForProject(projectId) {
+    let id = textOrNull(projectId);
+    if (!id) return null;
+    return textOrNull(stateGraph.get(`projects/${id}`)?.path);
+  }
+
   // The base repo a card's worktree is cut from: the repo captured at first provision, else the card's
-  // explicit cwd (an external project), else the board's project root.
+  // explicit cwd (an external project), else its project's registered repo, else the board's project root.
   function cardBaseRepo(card) {
-    return textOrNull(card?.metadata?.worktree?.repoRoot) ?? textOrNull(card?.cwd) ?? projectRoot;
+    return textOrNull(card?.metadata?.worktree?.repoRoot)
+      ?? textOrNull(card?.cwd)
+      ?? resolveRepoForProject(card?.projectId)
+      ?? projectRoot;
   }
 
   // The working directory a card's runs / release-gate probes execute in: its worktree when isolated,
@@ -973,20 +1066,43 @@ export function createWorkflowBoardService(opts = {}) {
       if (!defaultTransitionKeys.has(transitionKey(transition))) nextTransitions.push(transition);
     }
 
-    let changed = JSON.stringify(currentColumns) !== JSON.stringify(nextColumns)
-      || JSON.stringify(currentTransitions) !== JSON.stringify(nextTransitions);
     let metadata = {
       ...asObject(board.metadata),
       defaultPolicyVersion: DEFAULT_WORKFLOW_POLICY_VERSION,
     };
     let automation = normalizeWorkflowBoardAutomation(board.automation);
-    changed = changed || JSON.stringify(asObject(board.automation)) !== JSON.stringify(automation);
+    // Materialize the autonomy "volume slider" so the live default board surfaces it on its projection:
+    // cascade the board's normalized autonomyLevel (default 5 — full autonomy — for a board that never
+    // carried one) to the board publishMode and to per-column autoAdvance/mode. A board already stamped
+    // 'manual' is left per-column custom by the transform. The default behavior is unchanged: L5 is the
+    // full-autonomy preset the factory already ships.
+    // Fill-only (inv 17): a numeric level only materializes autoAdvance for a column whose stored
+    // automation never carried an explicit `autoAdvance`; a column a human deliberately tuned via
+    // updateWorkflowColumn (so the stored value is present, even `false`) keeps its setting — the
+    // one-time migration must not revert a per-column customization made while the slider stayed numeric.
+    let explicitAutoAdvanceColumnIds = new Set(
+      currentColumns
+        .filter(column => asObject(column?.automation).autoAdvance !== undefined)
+        .map(column => textOrNull(column?.id))
+        .filter(Boolean),
+    );
+    let leveled = applyAutonomyLevelToBoard({ ...board, automation, columns: nextColumns }, automation.autonomyLevel);
+    let leveledById = new Map(leveled.columns.map(column => [textOrNull(column?.id), column]));
+    let nextColumnsLeveled = nextColumns.map((column) => {
+      let columnId = textOrNull(column?.id);
+      if (explicitAutoAdvanceColumnIds.has(columnId)) return column;
+      return leveledById.get(columnId) ?? column;
+    });
+    let automationLeveled = normalizeWorkflowBoardAutomation(leveled.automation);
+    let changed = JSON.stringify(currentColumns) !== JSON.stringify(nextColumnsLeveled)
+      || JSON.stringify(currentTransitions) !== JSON.stringify(nextTransitions)
+      || JSON.stringify(asObject(board.automation)) !== JSON.stringify(automationLeveled);
     if (!changed && JSON.stringify(asObject(board.metadata)) === JSON.stringify(metadata)) return board;
     let next = {
       ...board,
       metadata,
-      automation,
-      columns: nextColumns,
+      automation: automationLeveled,
+      columns: nextColumnsLeveled,
       transitions: nextTransitions,
       version: Number.isFinite(Number(board.version)) ? Math.floor(Number(board.version)) + 1 : 1,
       updatedAt: ts,
@@ -1763,7 +1879,11 @@ export function createWorkflowBoardService(opts = {}) {
     if (explicit && (!pool.length || pool.includes(explicit))) return explicit;
     let assigned = textOrNull(card.assignedAgent);
     if (assigned && (!pool.length || pool.includes(assigned))) return assigned;
-    return pool[0] ?? explicit ?? assigned ?? 'orchestrator';
+    // No explicit or assigned agent: the stage's connected pool defines the candidate actions and the
+    // orchestrator picks which connected agent fits THIS card by specialty. Only ever returns a slug
+    // already in the pool; when no signal scores, fall back to the pool's first connected agent.
+    let scored = pickStageAgentFromPool(pool, card, cardFileScope(card, args), stageAgentSpecialties);
+    return scored ?? pool[0] ?? explicit ?? assigned ?? 'orchestrator';
   }
 
   function readyCardHasExecutionContract(card = {}) {
@@ -2858,11 +2978,16 @@ export function createWorkflowBoardService(opts = {}) {
     let index = columns.findIndex(column => column.id === columnId);
     let title = textOrNull(args.title);
     let automationPatch = asObject(args.automation);
+    let entryPointInput = args.entryPoint ?? args.entry_point;
     if (index >= 0) {
       let current = columns[index];
       columns[index] = {
         ...current,
         title: title ?? current.title,
+        // Preserve the existing marker when the patch omits it; an explicit value (even false) wins.
+        entryPoint: entryPointInput === undefined
+          ? normalizeColumnEntryPoint(current.entryPoint)
+          : normalizeColumnEntryPoint(entryPointInput),
         automation: Object.keys(automationPatch).length
           ? normalizeWorkflowAutomation({ ...asObject(current.automation), ...automationPatch })
           : asObject(current.automation),
@@ -2871,6 +2996,7 @@ export function createWorkflowBoardService(opts = {}) {
       let column = {
         id: columnId,
         title: title ?? columnId,
+        entryPoint: normalizeColumnEntryPoint(entryPointInput),
         automation: normalizeWorkflowAutomation(automationPatch),
       };
       let position = resolveColumnInsertIndex(columns, args, columns.length);
@@ -2895,6 +3021,59 @@ export function createWorkflowBoardService(opts = {}) {
       column: clone(columns.find(column => column.id === columnId)),
     });
     return outcome;
+  }
+
+  // delete_column: remove a board column. Gate policy.define. Reject (no mutation) if any live card
+  // still occupies the column. Drop the column and every transition that references it (mirroring the
+  // transitions handling), then re-validate: a removal that orphans the entry or strands a terminal is
+  // rejected with the validator error rather than persisting a broken board. Commit durably, bump
+  // version, report the removed column/transitions in the result.
+  function deleteWorkflowColumn(args = {}, context = {}) {
+    let principal = resolvePrincipal(context);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let policyGate = gate(
+      isDaemonPrincipal(principal) ? 'daemon.bookkeeping' : 'policy.define',
+      principal,
+      { boardId: board.id },
+    );
+    if (!policyGate.ok) return policyGate;
+    let columnId = textOrNull(args.columnId ?? args.column_id ?? args.id);
+    if (!columnId) throw new Error('deleteWorkflowColumn requires columnId.');
+    let columns = Array.isArray(board.columns) ? board.columns.slice() : [];
+    let index = columns.findIndex(column => column.id === columnId);
+    if (index < 0) throw new Error(`Workflow column not found: ${columnId}.`);
+    let occupants = Object.values(getCollection(stateGraph, 'workflowCards'))
+      .filter(card => card.boardId === board.id && card.columnId === columnId)
+      .map(card => card.id);
+    if (occupants.length) {
+      return {
+        ok: false,
+        status: 'blocked',
+        failures: [{
+          gate: 'column_occupied',
+          reason: `Workflow column "${columnId}" still holds ${occupants.length} card(s); move or remove them first.`,
+          cardIds: occupants,
+        }],
+      };
+    }
+    let removedColumn = clone(columns[index]);
+    columns.splice(index, 1);
+    let transitions = Array.isArray(board.transitions) ? board.transitions.slice() : [];
+    let removedTransitions = transitions.filter(transition => transition.from === columnId || transition.to === columnId);
+    let nextTransitions = transitions.filter(transition => transition.from !== columnId && transition.to !== columnId);
+    let ts = now();
+    let nextBoard = {
+      ...board,
+      columns,
+      transitions: nextTransitions,
+      version: bumpBoardVersion(board),
+      updatedAt: ts,
+      metadata: { ...asObject(board.metadata), columnSettingsUpdatedAt: ts },
+    };
+    return commitDefinedBoard(nextBoard, principal, {
+      column: removedColumn,
+      removedTransitions: clone(removedTransitions),
+    });
   }
 
   // Insertion index for a NEW column: after `args.after` (column id), else at `args.position` (clamped),
@@ -5820,7 +5999,7 @@ export function createWorkflowBoardService(opts = {}) {
     return {
       ok: true,
       ...result,
-      card: orchestration.ok ? orchestration.result.card : result.card,
+      card: orchestration.ok ? (orchestration.result?.card ?? result.card) : result.card,
       orchestration,
       sideEffects: orchestration.sideEffects || [],
     };
@@ -8065,6 +8244,7 @@ export function createWorkflowBoardService(opts = {}) {
     unlinkDependency,
     materializeJoinCard,
     defineWorkflowColumn,
+    deleteWorkflowColumn,
     defineWorkflowTransition,
     defineWorkflowGate,
     releaseDependencies,

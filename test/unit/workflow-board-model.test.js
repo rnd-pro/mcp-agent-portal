@@ -172,6 +172,60 @@ describe('workflow board model and service', () => {
     assert.equal(normalizeWorkflowAutomation({ action: 'execute', auto_advance: false }).autoAdvance, false);
   });
 
+  it('marks the default ideas column as the human entry point and others false', () => {
+    let board = createDefaultWorkflowBoard({ now: 123 });
+    assert.equal(board.columns.find(column => column.id === 'ideas').entryPoint, true);
+    assert.equal(
+      board.columns.filter(column => column.id !== 'ideas').every(column => column.entryPoint === false),
+      true,
+    );
+  });
+
+  it('define_column sets, clears, and preserves a column entryPoint marker', () => {
+    // The default ideas column ships as an entry point. An in-place update keeps a valid graph.
+    let cleared = service.defineWorkflowColumn({
+      boardId: DEFAULT_WORKFLOW_BOARD_ID,
+      columnId: 'ideas',
+      entryPoint: false,
+    });
+    assert.equal(cleared.ok !== false, true);
+    assert.equal(cleared.column.entryPoint, false);
+
+    // Omitting entryPoint on an update preserves the (now-cleared) value.
+    let renamed = service.defineWorkflowColumn({
+      boardId: DEFAULT_WORKFLOW_BOARD_ID,
+      columnId: 'ideas',
+      title: 'Ideas / Inbox (renamed)',
+    });
+    assert.equal(renamed.column.entryPoint, false);
+
+    // An explicit true re-marks the column as an entry point.
+    let marked = service.defineWorkflowColumn({
+      boardId: DEFAULT_WORKFLOW_BOARD_ID,
+      columnId: 'ideas',
+      entryPoint: true,
+    });
+    assert.equal(marked.column.entryPoint, true);
+
+    // A non-entry-point column (backlog) stays false when its update omits entryPoint.
+    let backlog = service.defineWorkflowColumn({
+      boardId: DEFAULT_WORKFLOW_BOARD_ID,
+      columnId: 'backlog',
+      title: 'Backlog (renamed)',
+    });
+    assert.equal(backlog.column.entryPoint, false);
+  });
+
+  it('board projection surfaces each column entryPoint marker', () => {
+    let projection = service.getBoardProjection();
+    let ideasColumn = projection.columns.find(column => column.id === 'ideas');
+    assert.equal(ideasColumn.entryPoint, true);
+    assert.equal(
+      projection.columns.filter(column => column.id !== 'ideas').every(column => column.entryPoint === false),
+      true,
+    );
+  });
+
   it('board automation normalizer defaults autonomyLevel to 5, clamps 1..5, and passes manual', () => {
     assert.equal(normalizeWorkflowBoardAutomation({}).autonomyLevel, 5);
     assert.equal(normalizeWorkflowBoardAutomation({ autonomyLevel: 0 }).autonomyLevel, 1);

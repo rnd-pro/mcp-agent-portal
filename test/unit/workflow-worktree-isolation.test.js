@@ -16,8 +16,8 @@ function makeWorktreeStub(overrides = {}) {
   let calls = [];
   let base = {
     isGitRepo: async () => true,
-    provisionWorktree: async ({ cardId }) => {
-      calls.push({ op: 'provision', cardId });
+    provisionWorktree: async ({ cardId, repoRoot, worktreeRoot }) => {
+      calls.push({ op: 'provision', cardId, repoRoot, worktreeRoot });
       return {
         ok: true, path: `/wt/${cardId}`, branch: `agent-portal/${cardId}`,
         baseRef: 'main', baseSha: 'deadbeef', reused: false,
@@ -306,5 +306,95 @@ describe('per-card worktree isolation (service wiring)', () => {
       /file scope/i,
       'without isolation, the shared-tree file-scope block still serializes same-file cards',
     );
+  });
+
+  // The per-project working directory is captured onto the card at intake (createWorkItem →
+  // createOrUpdateCard → normalizeWorkflowCardInput) so a card carrying a `cwd` reaches its own repo.
+  describe('cwd capture at intake', () => {
+    it('persists args.cwd onto the card through createWorkItem', async () => {
+      // Park the board out of autonomous mode so create just persists (no auto-orchestrate dispatch).
+      service.updateWorkflowBoard({ mode: 'armed' }, { gatedBy: 'board.control' });
+      let extRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-intake-'));
+      let result = await service.createWorkItem({
+        title: 'External card', columnId: 'backlog', cwd: extRepo, actor: 'test',
+      }, { gatedBy: 'card.write' });
+      assert.equal(result.ok, true);
+      assert.equal(result.card.cwd, extRepo, 'cwd survives createWorkItem onto card.cwd');
+      assert.equal(service.getCard(result.card.id).cwd, extRepo, 'and is persisted in the graph');
+      fs.rmSync(extRepo, { recursive: true, force: true });
+    });
+
+    it('accepts the working_directory / workingDirectory aliases', () => {
+      let snake = service.createOrUpdateCard({ id: 'cwd-snake', title: 'A', columnId: 'backlog', working_directory: '/repo/a' }).card;
+      assert.equal(snake.cwd, '/repo/a');
+      let camel = service.createOrUpdateCard({ id: 'cwd-camel', title: 'B', columnId: 'backlog', workingDirectory: '/repo/b' }).card;
+      assert.equal(camel.cwd, '/repo/b');
+    });
+  });
+
+  // The base repo a card's worktree is cut from, and where its run executes, follow a fixed precedence:
+  //   metadata.worktree.repoRoot > card.cwd > resolveRepoForProject(projectId) > projectRoot.
+  // These cover each rung. A card with no cwd and no project-path registration must fall back to
+  // projectRoot byte-for-byte (the single-repo default).
+  describe('cardBaseRepo / cardWorkingDir repo precedence', () => {
+    function lastProvision() {
+      return calls.filter(c => c.op === 'provision').at(-1) ?? null;
+    }
+
+    it('uses the board projectRoot when a card carries neither cwd nor a registered project path', async () => {
+      autonomous();
+      createCard('base-default', 'in-progress', { files: ['src/x.js'] });
+
+      await service.orchestrateWorkItem({ cardId: 'base-default', force: true });
+
+      assert.equal(lastProvision().repoRoot, tmpDir, 'no cwd / no project path → the board project root');
+      assert.equal(lastDelegateCwd(), '/wt/base-default', 'the run executes in the worktree cut from that root');
+    });
+
+    it('cuts the worktree from the card cwd when set (an external project repo)', async () => {
+      autonomous();
+      let extRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-ext-'));
+      createCard('base-cwd', 'in-progress', { files: ['src/x.js'], cwd: extRepo });
+
+      await service.orchestrateWorkItem({ cardId: 'base-cwd', force: true });
+
+      assert.equal(lastProvision().repoRoot, extRepo, 'card.cwd is the base repo');
+      fs.rmSync(extRepo, { recursive: true, force: true });
+    });
+
+    it('resolves the base repo from the registered project path when only projectId travels', async () => {
+      autonomous();
+      let projRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-proj-'));
+      sg.commit([{ op: 'set', path: 'projects/proj-x', value: { name: 'Proj X', path: projRepo } }], 'test:register-project');
+      createCard('base-proj', 'in-progress', { files: ['src/x.js'], projectId: 'proj-x' });
+
+      await service.orchestrateWorkItem({ cardId: 'base-proj', force: true });
+
+      assert.equal(lastProvision().repoRoot, projRepo, 'projectId → projects/<id>.path is the base repo');
+      fs.rmSync(projRepo, { recursive: true, force: true });
+    });
+
+    it('prefers card cwd over the registered project path', async () => {
+      autonomous();
+      let projRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-proj-'));
+      let cwdRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-cwd-'));
+      sg.commit([{ op: 'set', path: 'projects/proj-y', value: { name: 'Proj Y', path: projRepo } }], 'test:register-project');
+      createCard('base-cwd-wins', 'in-progress', { files: ['src/x.js'], projectId: 'proj-y', cwd: cwdRepo });
+
+      await service.orchestrateWorkItem({ cardId: 'base-cwd-wins', force: true });
+
+      assert.equal(lastProvision().repoRoot, cwdRepo, 'explicit cwd outranks the project-path fallback');
+      fs.rmSync(projRepo, { recursive: true, force: true });
+      fs.rmSync(cwdRepo, { recursive: true, force: true });
+    });
+
+    it('falls back to projectRoot when the card projectId has no registered path (resolveRepoForProject → null)', async () => {
+      autonomous();
+      createCard('base-unknown-proj', 'in-progress', { files: ['src/x.js'], projectId: 'never-registered' });
+
+      await service.orchestrateWorkItem({ cardId: 'base-unknown-proj', force: true });
+
+      assert.equal(lastProvision().repoRoot, tmpDir, 'an unknown projectId leaves the projectRoot default unchanged');
+    });
   });
 });

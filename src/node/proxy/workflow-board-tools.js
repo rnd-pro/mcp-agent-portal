@@ -52,8 +52,8 @@ const ACTIONS = {
   },
   update_board: {
     method: 'updateWorkflowBoard',
-    description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit.',
-    required: ['patch'],
+    description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit. Pass autonomyLevel (1..5 or "manual") to instead cascade that level\'s preset to columns (per-stage autoAdvance/mode + board publishMode) via the autonomy slider; routing to applyAutonomyLevel, which still requires DEFINE/CONTROL.',
+    required: [],
     mutates: true,
   },
   control_board: {
@@ -105,7 +105,7 @@ const ACTIONS = {
   },
   define_column: {
     method: 'defineWorkflowColumn',
-    description: 'Add or update a board column. Re-validates the transition graph; an invalid graph is rejected. Authoring is policy.define.',
+    description: 'Add or update a board column. Pass entryPoint:true to mark it as a human entry point (where new intake/human-authored cards land); omit entryPoint on update to preserve the current value. Re-validates the transition graph; an invalid graph is rejected. Authoring is policy.define.',
     required: ['columnId'],
     mutates: true,
   },
@@ -119,6 +119,12 @@ const ACTIONS = {
     method: 'defineWorkflowGate',
     description: 'Replace the gate list on an existing transition. Floor gates may not be weakened on a forward edge. Authoring is policy.define.',
     required: ['from', 'to', 'gates'],
+    mutates: true,
+  },
+  delete_column: {
+    method: 'deleteWorkflowColumn',
+    description: 'Remove a board column and every transition that references it. Rejects if a live card still occupies the column, or if the removal would leave an invalid graph. Authoring is policy.define.',
+    required: ['columnId'],
     mutates: true,
   },
   orchestrate: {
@@ -247,6 +253,12 @@ const ACTION_EXAMPLES = {
     from: 'quality-audit',
     to: 'commit-publish',
     gates: ['audit_pass_or_explicit_waiver'],
+  },
+  delete_column: {
+    action: 'delete_column',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    columnId: 'design-review',
+    reason: 'Retire the design-review stage',
   },
   delete_item: {
     action: 'delete_item',
@@ -398,6 +410,7 @@ function createRemoteWorkflowBoardService(backend) {
     linkDependency: args => post('/api/workflow-board/dependencies/link', args, true),
     unlinkDependency: args => post('/api/workflow-board/dependencies/unlink', args, true),
     defineWorkflowColumn: args => post('/api/workflow-board/columns/define', args, true),
+    deleteWorkflowColumn: args => post('/api/workflow-board/columns/delete', args, true),
     defineWorkflowTransition: args => post('/api/workflow-board/transitions/define', args, true),
     defineWorkflowGate: args => post('/api/workflow-board/gates/define', args, true),
     orchestrateWorkItem: args => post('/api/workflow-board/orchestrate', args, true),
@@ -457,9 +470,9 @@ export const WORKFLOW_BOARD_TOOLS = [
         kind: { type: 'string', description: 'Optional work-item kind.' },
         priority: { type: 'string', description: 'Optional priority.' },
         domain: { type: 'string', description: 'Optional work-item domain for classification gates.' },
-        columnId: { type: 'string', description: 'Initial column for create_item.' },
+        columnId: { type: 'string', description: 'Initial column for create_item; the target column for update_column, define_column, and delete_column.' },
         childColumnId: { type: 'string', description: 'Initial column for child cards created by action=decompose.' },
-        cwd: { type: 'string', description: 'Optional working directory for delegated workflow execution.' },
+        cwd: { type: 'string', description: 'Optional working directory for delegated workflow execution. Captured on the card at intake; it also selects the repo the card\'s isolated worktree is cut from, so a card targeting another project runs in that project\'s repo. Absent, the card falls back to its registered project path, then the board project root.' },
         automation: { type: 'object', description: 'Column automation patch for action=update_column.' },
         owner: { type: 'string', description: 'Optional work-item owner.' },
         assignedAgent: { type: 'string', description: 'Optional preferred agent for create_item routing.' },
@@ -502,6 +515,7 @@ export const WORKFLOW_BOARD_TOOLS = [
           description: 'Closed-vocabulary gate ids for define_transition/define_gate.',
         },
         title: { type: 'string', description: 'Column title for define_column.' },
+        entryPoint: { type: 'boolean', description: 'Mark this column as a human entry point for define_column (where new intake/human-authored cards land). Default false; omit on update to preserve the current value.' },
         after: { type: 'string', description: 'Insert a new define_column column after this column id.' },
         position: { type: 'number', description: 'Insert a new define_column column at this index.' },
         dependsOn: {
@@ -512,6 +526,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         notBefore: { type: 'number', description: 'Earliest admission timestamp for enqueue.' },
         mode: { type: 'string', enum: ['manual', 'auto', 'gated'], description: 'Transition or orchestration mode.' },
         boardMode: { type: 'string', enum: ['passive', 'armed', 'autonomous', 'manual', 'paused', 'draining', 'stopped', 'maintenance', 'recovery_only'], description: 'Board mode for action=control_board resume overrides.' },
+        autonomyLevel: { type: ['number', 'string'], enum: [1, 2, 3, 4, 5, 'manual'], description: 'Global autonomy "volume slider" for action=update_board. A number 1..5 cascades that level\'s preset to columns (per-stage autoAdvance/mode and board publishMode); 5 is full autonomy. "manual" stamps autonomyLevel=manual and leaves columns custom. Routes to applyAutonomyLevel (DEFINE/CONTROL gated).' },
         control: { type: 'string', enum: ['pause', 'stop', 'cancel', 'resume', 'drain', 'maintenance', 'manual', 'recovery_only', 'arm'], description: 'Runtime control action for action=control or board action for action=control_board.' },
         reason: { type: 'string', description: 'Human/audit reason.' },
         entityRefs: { type: 'object', description: 'Linked goals, chats, tasks, or files.' },
@@ -645,6 +660,18 @@ function validateActionArgs(action, args = {}) {
     };
   }
 
+  if (action === 'update_board'
+    && !hasValue(args.patch) && !hasValue(args.automation) && !hasValue(args.boardMode) && !hasValue(args.autonomyLevel)) {
+    return {
+      ok: false,
+      message: 'update_board needs at least one of patch, automation, boardMode, or autonomyLevel.',
+      details: {
+        action,
+        example: ACTION_EXAMPLES.update_board,
+      },
+    };
+  }
+
   // toColumnId is intentionally NOT range-checked here against the default ids: the service is
   // board-aware (assertBoardColumn / the `known_column` transition failure) and is the single authority
   // on which columns a board has, so a custom-board column would be wrongly rejected by a default-id
@@ -740,6 +767,7 @@ function serviceArgsForAction(action, args = {}) {
       ...common,
       mode: args.boardMode,
       automation: args.automation,
+      autonomyLevel: args.autonomyLevel,
       patch: args.patch,
     });
   }
@@ -794,9 +822,16 @@ function serviceArgsForAction(action, args = {}) {
       ...common,
       columnId: args.columnId,
       title: args.title,
+      entryPoint: args.entryPoint,
       automation: args.automation,
       after: args.after,
       position: args.position,
+    });
+  }
+  if (action === 'delete_column') {
+    return cleanUndefined({
+      ...common,
+      columnId: args.columnId,
     });
   }
   if (action === 'define_transition' || action === 'define_gate') {
@@ -916,11 +951,11 @@ function nextForAction(action, args = {}, result = {}) {
       call: cleanUndefined({ action: 'queue', boardId, projectId: args.projectId }),
     };
   }
-  if (action === 'define_column' || action === 'define_transition' || action === 'define_gate') {
+  if (action === 'define_column' || action === 'delete_column' || action === 'define_transition' || action === 'define_gate') {
     if (result.ok === false) {
       return {
         recommendedAction: 'help',
-        reason: 'The board edit was rejected by the graph validator or held for approval; read failures, then retry.',
+        reason: 'The board edit was rejected by the graph validator, blocked because the column is still occupied, or held for approval; read failures, then retry.',
         call: { action: 'help' },
       };
     }
@@ -948,7 +983,7 @@ function hintsForAction(action, result = {}) {
   if (action === 'get_board' || action === 'queue') {
     hints.push('Use action=transition for column moves; do not mutate columnId directly.');
   }
-  if (action === 'define_column' || action === 'define_transition' || action === 'define_gate') {
+  if (action === 'define_column' || action === 'delete_column' || action === 'define_transition' || action === 'define_gate') {
     hints.push('Board authoring is policy.define: a non-author edit returns pendingApproval, and an invalid graph is rejected with the validator error.');
   }
   if (action === 'enqueue') {
@@ -1004,8 +1039,19 @@ export async function resolveWorkflowBoardService(proxyManager = null, options =
   );
 }
 
-function getWorkflowServiceMethod(service, action) {
-  let methodName = ACTIONS[action]?.method;
+// An update_board call that carries an autonomy level is the "volume slider": it cascades a level
+// preset to every column, so it routes to applyAutonomyLevel instead of the plain mode/automation
+// patch. Gating is unchanged — applyAutonomyLevel needs DEFINE/CONTROL, so an mcp-client (READ +
+// WRITE_CARD) is still held, exactly as the plain update_board path holds it.
+function methodNameForAction(action, args = {}) {
+  if (action === 'update_board' && (hasValue(args.autonomyLevel) || hasValue(args.level))) {
+    return 'applyAutonomyLevel';
+  }
+  return ACTIONS[action]?.method;
+}
+
+function getWorkflowServiceMethod(service, action, args = {}) {
+  let methodName = methodNameForAction(action, args);
   if (!methodName) return null;
   if (typeof service?.[methodName] !== 'function') {
     throw new Error(
@@ -1051,9 +1097,11 @@ export async function handleWorkflowBoardTool(
     return errorResult(error.message, { action });
   }
 
+  let serviceArgs = serviceArgsForAction(action, args);
+
   let method;
   try {
-    method = getWorkflowServiceMethod(service, action);
+    method = getWorkflowServiceMethod(service, action, serviceArgs);
   } catch (error) {
     return errorResult(error.message, { action });
   }
@@ -1073,7 +1121,6 @@ export async function handleWorkflowBoardTool(
     proxyManager,
     principal,
   };
-  let serviceArgs = serviceArgsForAction(action, args);
   let result;
   try {
     result = await method(serviceArgs, context);

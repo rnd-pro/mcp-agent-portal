@@ -590,8 +590,11 @@ export function autonomyPreset(level) {
 
 const DEFAULT_WORKFLOW_COLUMNS = [
   {
+    // The explicit human entry point: new work (MCP intake, human-authored cards) lands here. A board
+    // marks exactly the columns humans feed cards into; the default board's intake column is `ideas`.
     id: 'ideas',
     title: 'Ideas / Inbox',
+    entryPoint: true,
     automation: { trigger: 'manual', action: 'classify', mode: 'gated' },
   },
   {
@@ -1105,6 +1108,12 @@ export function normalizeWorkflowEntityRefs(input = {}) {
   };
 }
 
+// A column's explicit human-entry marker: does the board feed new human/intake work into this column?
+// Default false — a board names its entry columns explicitly (the default board marks `ideas`).
+export function normalizeColumnEntryPoint(value) {
+  return Boolean(value);
+}
+
 /**
  * Apply a numeric autonomy level's preset to a board in place-ish (returns a new board object). For a
  * numeric level it writes the preset publishMode, sets each column's automation.autoAdvance, and (where
@@ -1156,6 +1165,7 @@ export function createDefaultWorkflowBoard(opts = {}) {
     automation: normalizeWorkflowBoardAutomation(opts.automation),
     columns: DEFAULT_WORKFLOW_COLUMNS.map(column => ({
       ...column,
+      entryPoint: normalizeColumnEntryPoint(column.entryPoint),
       automation: normalizeWorkflowAutomation(column.automation),
     })),
     transitions: DEFAULT_WORKFLOW_TRANSITIONS.map((transition) => ({
@@ -1208,6 +1218,7 @@ export function createWorkflowBoard(spec = {}) {
       return {
         id: columnId,
         title: textOrNull(column.title) ?? columnId,
+        entryPoint: normalizeColumnEntryPoint(column.entryPoint ?? column.entry_point),
         automation: normalizeWorkflowAutomation(objectOrEmpty(column.automation)),
       };
     }),
@@ -1699,6 +1710,7 @@ export function migrateWorkflowBoardToV2(board) {
     schema: WORKFLOW_BOARD_SCHEMA,
     columns: columns.map(column => ({
       ...column,
+      entryPoint: normalizeColumnEntryPoint(column?.entryPoint ?? column?.entry_point),
       automation: { ...objectOrEmpty(column?.automation) },
     })),
     transitions: transitions.map(transition => ({

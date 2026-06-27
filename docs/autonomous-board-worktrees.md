@@ -33,6 +33,24 @@ a board can opt out via `automation.worktreeIsolation: false`. A provision
 failure degrades transparently — it is recorded on the card and the run falls
 back to the shared tree rather than crashing the reconcile pass.
 
+## Which repo a card's worktree is cut from
+
+Per-project isolation is driven by the working directory captured on the card at
+intake. `cardBaseRepo` resolves the base repo with a fixed precedence:
+
+1. `metadata.worktree.repoRoot` — the repo pinned when the worktree was first
+   provisioned (so a card never changes repos mid-flight).
+2. `card.cwd` — an explicit working directory passed to `create_item`/`decompose`,
+   for a card that targets another project's repo.
+3. `resolveRepoForProject(card.projectId)` — the `path` of the card's registered
+   `projects/<id>` record, as a backstop when only the project id travelled.
+4. the board's `projectRoot` — the single-repo default.
+
+A card with no `cwd` and no registered project path resolves to `projectRoot`
+unchanged, so the common single-repo board is unaffected. `resolveRepoForProject`
+is the one hook a richer project registry plugs into; it returns null today for
+any project id with no `path` on its state record.
+
 ## Commit and merge on publish
 
 When an autonomous card reaches publish, the board commits and merges its work

@@ -213,6 +213,72 @@ describe('workflow WS-C surface (S9)', () => {
     assert.equal(authored.ok, true);
   });
 
+  // ── delete_column ─────────────────────────────────────────────────────────────────────────────
+
+  it('delete_column removes the column and every transition that references it, bumping the version', () => {
+    insertDesignReview();
+    let before = service.ensureBoard(DEFAULT_WORKFLOW_BOARD_ID);
+    assert.ok(before.transitions.some(t => t.to === 'design-review'));
+    assert.ok(before.transitions.some(t => t.from === 'design-review'));
+
+    let deleted = service.deleteWorkflowColumn({ columnId: 'design-review' });
+    assert.equal(deleted.ok, true);
+    assert.equal(deleted.column.id, 'design-review');
+    // Both touching edges are reported as removed.
+    let removedKeys = deleted.removedTransitions.map(t => `${t.from}->${t.to}`).sort();
+    assert.deepEqual(removedKeys, ['design-review->in-progress', 'ready->design-review']);
+
+    let after = service.ensureBoard(DEFAULT_WORKFLOW_BOARD_ID);
+    assert.equal(after.columns.some(column => column.id === 'design-review'), false);
+    assert.equal(after.transitions.some(t => t.from === 'design-review' || t.to === 'design-review'), false);
+    assert.equal(after.version, before.version + 1);
+  });
+
+  it('delete_column rejects (no mutation) while a live card occupies the column', () => {
+    insertDesignReview();
+    let card = makeCard('occupant', { columnId: 'design-review' });
+
+    let rejected = service.deleteWorkflowColumn({ columnId: 'design-review' });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.status, 'blocked');
+    assert.equal(rejected.failures[0].gate, 'column_occupied');
+    assert.deepEqual(rejected.failures[0].cardIds, [card.id]);
+
+    // The column and its edges are untouched by the rejected delete.
+    let board = service.ensureBoard(DEFAULT_WORKFLOW_BOARD_ID);
+    assert.ok(board.columns.some(column => column.id === 'design-review'));
+    assert.ok(board.transitions.some(t => t.to === 'design-review'));
+  });
+
+  it('delete_column rejects with the validator error when removal would break the graph', () => {
+    // Removing `in-progress` strands `quality-audit`: every forward path into it ran through
+    // in-progress, so the remaining graph fails reachability/dead-end validation and is not persisted.
+    let rejected = service.deleteWorkflowColumn({ columnId: 'in-progress' });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.status, 'blocked');
+    assert.equal(rejected.failures[0].gate, 'invalid_board_graph');
+
+    // No commit: the column survives the rejected delete.
+    assert.ok(service.ensureBoard(DEFAULT_WORKFLOW_BOARD_ID).columns.some(column => column.id === 'in-progress'));
+  });
+
+  it('a non-DEFINE principal is held (pendingApproval) on delete_column', async () => {
+    insertDesignReview();
+    let proxyManager = { workflowBoardService: service };
+    let payload = JSON.parse((await handleWorkflowBoardTool(
+      proxyManager,
+      'workflow_board',
+      { action: 'delete_column', columnId: 'design-review', actor: 'board-author' },
+      'mcp',
+      { context: { verifiedSlug: 'code-reviewer' } },
+    )).content[0].text);
+    assert.equal(payload.result.ok, false);
+    assert.equal(payload.result.status, 'pendingApproval');
+
+    // The held edit did not land: the column is still present.
+    assert.ok(service.ensureBoard(DEFAULT_WORKFLOW_BOARD_ID).columns.some(column => column.id === 'design-review'));
+  });
+
   // ── Dependencies + enqueue for a card-writer ──────────────────────────────────────────────────
 
   it('link_dependency works for a card-writer and blocks the dependent', () => {

@@ -201,6 +201,16 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    'POST /api/workflow-board/columns/delete': async (req, res) => {
+      try {
+        let body = await parseBody(req);
+        let result = resolveService().deleteWorkflowColumn(body, mutationContext(req));
+        json(res, { ok: true, result });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'POST /api/workflow-board/transitions/define': async (req, res) => {
       try {
         let body = await parseBody(req);
