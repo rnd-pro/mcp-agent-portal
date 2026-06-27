@@ -976,6 +976,29 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(result.releaseTail.closed.includes(cardId), false, 'manual publishMode does not auto-close');
   });
 
+  it('autonomous scope: a backlog card with acceptance but no owner gets an owner and self-advances', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
+    let created = service.createOrUpdateCard({
+      title: 'Self-scope me',
+      body: 'Arrived without an owner.',
+      columnId: 'backlog',
+      projectId: 'agent-portal',
+      domain: 'ui',
+      acceptanceCriteria: ['It runs'],
+      files: ['symbiote-ui/widget.js'],
+      actor: 'test',
+    });
+    assert.equal(created.card.owner ?? null, null, 'no owner at intake');
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true },
+    );
+
+    let card = service.getCard(created.card.id);
+    assert.notEqual(card.columnId, 'backlog', 'the autonomous scope stage advanced the card out of backlog');
+    assert.ok(card.owner, 'the autonomous scope stage assigned an owner so the execution contract is met');
+  });
+
   it('separated-duty: the daemon may NOT self-sign+advance a card it executed without a waiver', async () => {
     service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
     // The daemon both ran AND reconciles this card (autonomous mode): 'daemon' is in executedBy.

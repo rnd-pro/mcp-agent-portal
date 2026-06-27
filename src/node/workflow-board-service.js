@@ -5234,9 +5234,19 @@ export function createWorkflowBoardService(opts = {}) {
         blockedByDependency.push(card.id);
         continue;
       }
-      if (readyCardHasExecutionContract(card)) {
+      // Autonomous self-scope: the scope stage assigns no owner on its own, so a card that arrived with
+      // acceptance criteria but no owner would otherwise stall here forever. Give it the execute-stage
+      // routed agent (by domain/files) as owner so it satisfies the execution contract and self-advances.
+      let scopedCard = card;
+      if (board.mode === 'autonomous' && !textOrNull(card.owner)
+        && Array.isArray(card.acceptanceCriteria) && card.acceptanceCriteria.length) {
+        let executeColumnId = byAction('execute');
+        let owner = chooseStageAgent(executeColumnId ? columnAutomation(board, executeColumnId) : {}, card, {});
+        scopedCard = { ...card, owner: owner ?? 'orchestrator' };
+      }
+      if (readyCardHasExecutionContract(scopedCard)) {
         let advance = runtimeAdvanceCardOps(
-          board, clone(card), orchestrateColumnId, principal, runtimeNow,
+          board, clone(scopedCard), orchestrateColumnId, principal, runtimeNow,
           `Autonomous backlog: scoped card ${card.id} promoted to ${orchestrateColumnId}.`,
           'autonomous_promote',
         );
@@ -6474,6 +6484,11 @@ export function createWorkflowBoardService(opts = {}) {
         updatedAt: ts,
       });
       parentOps.push({ op: 'set', path: `workflowCards/${parent.id}`, value: resultParent });
+      // A decomposed parent's work is now its children — it must not keep an execution lease. Releasing
+      // it stops the retired parent from holding stage occupancy or being read as still mid-execution
+      // (which can re-engage the closed card into orchestration and thrash on a delegation that never
+      // starts a task). Re-decomposition wakes the owner via CHILD returns, not the parent's own lease.
+      parentOps.push({ op: 'delete', path: `workflowLeases/${parent.id}` });
     } else {
       resultParent = normalizeWorkflowCardInput({
         ...parent,
