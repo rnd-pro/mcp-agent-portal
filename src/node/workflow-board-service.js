@@ -6084,10 +6084,7 @@ export function createWorkflowBoardService(opts = {}) {
     let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
     let board = ensureBoard(parent.boardId);
     let ts = now();
-    // The idea travels with each child as context, so an executor (human or agent) sees the original
-    // intent at the point of work even when the parent card is no longer on the active board.
-    let parentBody = textOrNull(parent.body);
-    let ideaContext = [`Origin idea "${parent.title}"${parentBody ? `: ${parentBody}` : ''}`];
+    let rootCardId = parent.metadata?.rootCardId ?? parent.id;
     let children = childItemsFromArgs(args).map((item) => {
       let childContext = textArray(item.context);
       let childRoutingHints = textArray(item.routingHints ?? item.routing_hints);
@@ -6114,7 +6111,13 @@ export function createWorkflowBoardService(opts = {}) {
         owner: textOrNull(item.owner) ?? parent.owner,
         resourceGroup: textOrNull(item.resourceGroup ?? item.resource_group) ?? parent.resourceGroup,
         approvalMode: textOrNull(item.approvalMode ?? item.approval_mode) ?? parent.approvalMode,
-        context: [...ideaContext, ...textArray(parent.context), ...childContext],
+        // The child carries only the orchestrator-authored scoped context (inherited parent context plus
+        // this child's own context); the origin idea is dereferenced via metadata.rootCardId, never
+        // flattened into the worker-visible context.
+        context: [...textArray(parent.context), ...childContext],
+        // Transitive origin-idea pointer: a top-level idea's children stamp parent.id; a grandchild
+        // inherits the parent child's already-stamped rootCardId, so every descendant points at the origin.
+        metadata: { ...asObject(item.metadata), rootCardId },
         routingHints: [...textArray(parent.routingHints), ...childRoutingHints],
       }, {
         id,

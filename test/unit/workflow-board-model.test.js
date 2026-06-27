@@ -690,15 +690,62 @@ describe('workflow board model and service', () => {
     );
 
     // Processed-idea close: the parent's work IS the decomposition, so it auto-closes to the terminal
-    // column and leaves the active lanes; the children carry the idea forward as context.
+    // column and leaves the active lanes; the children carry only orchestrator-authored scoped context,
+    // dereferencing the origin idea via metadata.rootCardId instead of inheriting its body inline.
     assert.equal(result.parentClosed, true);
     assert.equal(projectedParent.columnId, 'done', 'the decomposed parent is closed to the terminal column');
     assert.equal(result.event.toColumnId, 'done');
     assert.ok(
-      result.children.every(child => child.context.some(line => line.includes('Implement broad workflow board work'))),
-      'each child inherits the origin idea as context',
+      result.children.every(child => !child.context.some(line => line.includes('Implement broad workflow board work'))),
+      'the origin idea title/body is not flattened into child context',
+    );
+    assert.ok(
+      result.children.every(child => child.context.includes('Parent context')),
+      'children inherit the orchestrator-authored parent context',
+    );
+    assert.ok(
+      result.children.every(child => child.metadata.rootCardId === parent.card.id),
+      'each child is stamped with the origin-idea pointer',
     );
     assert.ok(result.children[1].context.includes('Child-specific context'), 'child-specific context is preserved');
+  });
+
+  it('stamps the origin-idea rootCardId transitively through grandchildren', () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Origin idea', projectId: 'agent-portal', domain: 'orchestration',
+      columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
+    });
+    let firstPass = service.decomposeWorkItem({
+      cardId: parent.card.id, actor: 'test',
+      childItems: [{ title: 'Intermediate child', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
+    });
+    let child = firstPass.children[0];
+    assert.equal(child.metadata.rootCardId, parent.card.id, 'a direct child points at the origin idea');
+    let secondPass = service.decomposeWorkItem({
+      cardId: child.id, actor: 'test',
+      childItems: [{ title: 'Grandchild', owner: 'backend-engineer', acceptanceCriteria: ['z'] }],
+    });
+    assert.equal(
+      secondPass.children[0].metadata.rootCardId,
+      parent.card.id,
+      'a grandchild inherits the origin-idea pointer, not the intermediate child id',
+    );
+  });
+
+  it('does not flatten an origin-idea proof-marker token into narrow child context', () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Ship the release',
+      body: 'When done, emit COMPLETION_PROOF: PASS and a RELEASE_AUTH_PACKET.',
+      projectId: 'agent-portal', domain: 'orchestration',
+      columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
+    });
+    let result = service.decomposeWorkItem({
+      cardId: parent.card.id, actor: 'test',
+      childItems: [{ title: 'Rename a helper', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
+    });
+    let childContext = result.children[0].context.join('\n');
+    assert.ok(!childContext.includes('COMPLETION_PROOF'), 'the idea body marker token is not flattened into the child');
+    assert.ok(!childContext.includes('RELEASE_AUTH_PACKET'), 'the idea body marker token is not flattened into the child');
   });
 
   it('keeps the decomposed parent in place when decompositionClosesParent is disabled', () => {

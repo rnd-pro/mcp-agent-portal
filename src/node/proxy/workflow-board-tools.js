@@ -40,7 +40,7 @@ const ACTIONS = {
   },
   decompose: {
     method: 'decomposeWorkItem',
-    description: 'Split a broad workflow card into first-class child cards without starting them automatically.',
+    description: 'Split a broad workflow card into first-class child cards without starting them automatically. The origin idea is NOT auto-copied into children: each child\'s `body` and `context` must be self-contained. Carry any binding proof marker (e.g. COMPLETION_PROOF, RELEASE_AUTH_PACKET) or hard constraint from the origin idea explicitly into the specific child that must satisfy it. Children inherit a stamped metadata.rootCardId pointing at the origin idea and dereference it by reading that root card.',
     required: ['cardId', 'childItems'],
     mutates: true,
   },
@@ -455,7 +455,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         childItems: {
           type: 'array',
           items: { type: 'object' },
-          description: 'Child card definitions for action=decompose.',
+          description: 'Child card definitions for action=decompose. Each child must be self-contained: its `body` and `context` are the only intent the worker sees — the origin idea is never copied in. Put any binding proof marker or hard constraint from the origin idea into the relevant child\'s brief. Children are stamped with metadata.rootCardId (the origin idea) for on-demand dereference.',
         },
         columns: {
           type: 'array',
