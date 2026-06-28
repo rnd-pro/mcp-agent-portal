@@ -64,6 +64,7 @@ export const panelTypes = {
   'pipeline-mgr': { title: tPortal('text.pipelines'),     icon: 'schema',        component: 'pg-pipeline-mgr' },
   'group-mgr':    { title: tPortal('text.resourceGroups'),icon: 'groups',        component: 'pg-group-manager' },
   'theme-editor': { title: tPortal('text.theme'),         icon: 'palette',       component: 'pg-theme-editor-panel' },
+  'notification-editor': { title: tPortal('text.notifications'), icon: 'notifications', component: 'pg-notification-editor-panel' },
   'agent-portal-tree': { title: '.agent-portal', icon: 'folder',    component: 'pg-agent-portal-tree' },
   'agent-portal-library': { title: tPortal('text.openLibrary'), icon: 'public', component: 'pg-agent-portal-library' },
   'skill-mgr':    { title: tPortal('text.markdownEditor'), icon: 'edit_note', component: 'pg-skill-manager' },

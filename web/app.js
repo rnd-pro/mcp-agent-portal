@@ -44,6 +44,7 @@ import "./panels/PeerReview/PeerReview.js";
 import "./components/ProjectTabs/ProjectTabs.js";
 import "./components/PgWorkspace/PgWorkspace.js";
 import "./components/ThemeEditorPanel/ThemeEditorPanel.js";
+import "./components/NotificationEditorPanel/NotificationEditorPanel.js";
 import { state as dashState, emit as dashEmit } from "./dashboard-state.js";
 import { stateSync } from "./state-sync.js";
 import { persistLayout, persistUiValue, readUiValue, writeStringCache } from "./common/ui-state.js";
@@ -449,10 +450,22 @@ function openThemeEditorPanel(event) {
   });
 }
 
+function openNotificationEditorPanel(event) {
+  event.preventDefault?.();
+  let layout = getActiveWorkspaceLayout();
+  if (!layout || typeof layout.openPanel !== 'function') return;
+  layout.openPanel('notification-editor', {
+    reuseExisting: true,
+    uiInvoked: true,
+    source: 'notification-widget',
+  });
+}
+
 async function u() {
   n(document.documentElement, o);
   document.documentElement.dataset.themeScope = 'default-provider';
   document.addEventListener('cascade-theme-open-full', openThemeEditorPanel);
+  document.addEventListener('notification-open-full', openNotificationEditorPanel);
   let runtimeApi = {
     getProject: (projectId = null) => getPortalProjectRuntime(projectId).getProject(),
     applyTransaction: applyRuntimeTransaction,
