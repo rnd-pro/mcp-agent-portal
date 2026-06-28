@@ -175,4 +175,33 @@ describe('ensureNotificationWidget', () => {
     assert.equal(created.attributes.locale, 'es');
     assert.equal(doc.body.appended.length, 1);
   });
+
+  it('mounts into the top bar before the theme widget when a top bar exists', () => {
+    let theme = { tag: 'cascade-theme-widget' };
+    let topbarRight = {
+      children: [theme],
+      querySelector(sel) { return sel === 'cascade-theme-widget' ? theme : null; },
+      insertBefore(node, ref) {
+        this.children.splice(this.children.indexOf(ref), 0, node);
+        node.parentElement = this;
+      },
+      appendChild(node) { this.children.push(node); node.parentElement = this; },
+    };
+    let doc = fakeDocument();
+    let baseQuery = doc.querySelector.bind(doc);
+    doc.querySelector = (sel) =>
+      /topbar-right/.test(sel) ? topbarRight : baseQuery(sel);
+
+    let created = ensureNotificationWidget({ documentRef: doc, storageKey: 'k' });
+    assert.equal(created.parentElement, topbarRight, 'mounted in the top bar');
+    assert.equal(topbarRight.children[0], created, 'sits before the theme widget');
+    assert.equal(topbarRight.children[1], theme);
+    assert.equal(doc.body.appended.length, 0, 'not appended to the body');
+
+    // Idempotent: a second call re-homes nothing and adds no duplicate.
+    doc._widgets.push(created);
+    let again = ensureNotificationWidget({ documentRef: doc });
+    assert.equal(again, created);
+    assert.equal(topbarRight.children.length, 2);
+  });
 });

@@ -86,9 +86,12 @@ export function installBoardNotifier(options = {}) {
 }
 
 /**
- * Ensure a single <notification-widget> is mounted on the document body, mirror
- * the way other global portal widgets (quick-open, follow-ribbon) are surfaced.
- * Safe to call repeatedly; returns the existing instance if already present.
+ * Ensure a single <notification-widget> is mounted in the top-bar action area,
+ * sitting alongside the cascade theme widget so notifications are discoverable
+ * exactly where the theme control lives. Falls back to the document body when the
+ * top bar is not present (e.g. minimal shells, tests). Safe to call repeatedly;
+ * returns the existing instance if already present, re-homing it into the top bar
+ * once the top bar appears.
  *
  * @param {object} [options]
  * @param {Document} [options.documentRef]
@@ -101,13 +104,33 @@ export function ensureNotificationWidget(options = {}) {
   let doc = options.documentRef || (typeof document !== 'undefined' ? document : null);
   if (!doc?.body) return null;
   let widget = doc.querySelector(NOTIFICATION_WIDGET_TAG);
+  let created = false;
   if (!widget) {
     widget = doc.createElement(NOTIFICATION_WIDGET_TAG);
     if (options.storageKey) widget.setAttribute('storage-key', options.storageKey);
-    doc.body.appendChild(widget);
+    created = true;
   }
+  mountInTopbar(doc, widget, created);
   if (options.locale) widget.setAttribute('locale', options.locale);
   return widget;
+}
+
+/**
+ * Place the widget into `.topbar-right`, just before the theme widget, so it lines
+ * up with the other shell actions. Re-homes a body-mounted widget into the top bar
+ * once it appears; falls back to appending a freshly-created widget to the body
+ * when no top bar exists (minimal shells, tests).
+ */
+function mountInTopbar(doc, widget, created) {
+  let topbarRight = doc.querySelector('.app-topbar .topbar-right') || doc.querySelector('.topbar-right');
+  if (!topbarRight) {
+    if (created) doc.body.appendChild(widget);
+    return;
+  }
+  if (widget.parentElement === topbarRight) return;
+  let themeWidget = topbarRight.querySelector('cascade-theme-widget');
+  if (themeWidget) topbarRight.insertBefore(widget, themeWidget);
+  else topbarRight.appendChild(widget);
 }
 
 export default installBoardNotifier;
