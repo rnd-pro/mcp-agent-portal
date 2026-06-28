@@ -7,6 +7,7 @@ import { applyPortalProjectTransaction, getPortalProjectRuntime } from "./servic
 import { getTransactionLayoutRoots } from "./services/project-runtime-package.js";
 import { followController } from "./follow-controller.js";
 import "./components/FollowRibbon/FollowRibbon.js";
+import { ensureNotificationWidget, installBoardNotifier } from "./common/board-notifier.js";
 import { subscribe as s, onEvent as i } from "./state.js";
 import "./panels/FileTree/FileTree.js";
 import "./panels/CodeViewer/CodeViewer.js";
@@ -559,9 +560,16 @@ function g(e) { let t = document.getElementById("agent-badge"); if (!t) { const 
 function f() { document.querySelector("pg-quick-open") || document.body.appendChild(document.createElement("pg-quick-open")) }
 function h() { const btn = document.getElementById("follow-btn"); if (!btn) return; let active = false; btn.addEventListener("click", () => { active = !active; if (active) { btn.setAttribute("data-active", ""); btn.classList.add("active"); followController.enable(); location.hash = "follow" } else { btn.removeAttribute("data-active"); btn.classList.remove("active"); const prev = followController.getPreviousHash(); followController.disable(); if (prev && prev !== "#follow") location.hash = prev.replace(/^#/, "") } events.dispatchEvent(new CustomEvent("follow-mode-changed", { detail: { enabled: active } })) }); events.addEventListener("follow-state-changed", e => { const en = e.detail?.enabled; if (en && !active) { active = true; btn.setAttribute("data-active", ""); btn.classList.add("active") } else if (!en && active) { active = false; btn.removeAttribute("data-active"); btn.classList.remove("active") } }); window.addEventListener("hashchange", () => { const sec = (location.hash.replace("#", "").split("?")[0].split("/")[0]) || "explorer"; if (sec === "follow" && !active) { active = true; btn.setAttribute("data-active", ""); btn.classList.add("active"); followController.enable() } else if (sec !== "follow" && active) { active = false; btn.removeAttribute("data-active"); btn.classList.remove("active"); followController.disable() } }) }
 function _initRibbon() { if (!document.querySelector("follow-ribbon")) document.body.appendChild(document.createElement("follow-ribbon")) }
+function _initNotifications() {
+  // Follow the portal's active interface locale (set on <html lang> by the
+  // localization bootstrap) so board notifications narrate in the UI language.
+  let locale = document.documentElement?.lang || "";
+  ensureNotificationWidget({ storageKey: "agentPortal.notifications", locale });
+  installBoardNotifier();
+}
 
 if ("loading" === document.readyState) {
-  document.addEventListener("DOMContentLoaded", () => { u(), f(), followController.init(events, emit), h(), _initRibbon() });
+  document.addEventListener("DOMContentLoaded", () => { u(), f(), followController.init(events, emit), h(), _initRibbon(), _initNotifications() });
 } else {
-  u(), f(), followController.init(events, emit), h(), _initRibbon();
+  u(), f(), followController.init(events, emit), h(), _initRibbon(), _initNotifications();
 }

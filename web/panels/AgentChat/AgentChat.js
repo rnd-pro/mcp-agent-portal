@@ -27,6 +27,7 @@ import {
   voiceWakeStartErrorMessage,
   wakeCommandCandidates,
 } from 'symbiote-ui/ui';
+import { getDefaultVoiceArbitrationChannel } from 'symbiote-ui';
 import template from './AgentChat.tpl.js';
 import css from './AgentChat.css.js';
 import { ICONS } from '../../common/icons.js';
@@ -79,6 +80,10 @@ export class AgentChat extends Symbiote {
   static isoMode = true;
   _audioRecorder = new VoiceRuntime();
   _voiceController = new VoiceController({
+    // Share the process-wide speaking channel so chat mic capture (listening) and
+    // chat voice replies (speech) preempt notification narration, and narration
+    // never overlaps the chat. Chat holds the higher arbitration priority.
+    arbitration: getDefaultVoiceArbitrationChannel(),
     getLanguage: () => this._voiceRecognitionLanguage(),
     getWakeCandidates: () => this._getWakeCommandCandidates(),
     onWakeTriggered: () => this._triggerVoiceInputFromWake(),
