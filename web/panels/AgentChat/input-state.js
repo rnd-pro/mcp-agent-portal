@@ -1,4 +1,8 @@
 import { tPortal } from '../../common/localization.js';
+import {
+  normalizeChatInputState,
+  CHAT_INPUT_PLACEHOLDER_KEYS,
+} from 'symbiote-ui/chat/input-state.js';
 
 export function getAgentChatInputState({
   adapter = 'pool',
@@ -6,17 +10,9 @@ export function getAgentChatInputState({
   isSubagentChat = false,
   adapterMeta = null,
 } = {}) {
-  if (isSubagentChat) {
-    return {
-      disabled: true,
-      placeholder: tPortal('chat.placeholder.subagent'),
-    };
-  }
-
-  let hasGroup = chatParams?.resource_group && chatParams.resource_group !== 'none';
+  let hasGroup = Boolean(chatParams?.resource_group && chatParams.resource_group !== 'none');
   let isModelRequired = adapter === 'pool' || adapter === 'opencode';
   let hasModel = Boolean(chatParams?.model);
-  let disabled = isModelRequired && !hasModel && !hasGroup;
 
   // Build model info string for placeholder
   let modelInfo = '';
@@ -32,13 +28,19 @@ export function getAgentChatInputState({
     modelInfo = `${provider} / ${shortModel}`;
   }
 
+  let { disabled, placeholderKey } = normalizeChatInputState({
+    hasModel,
+    hasGroup,
+    isModelRequired,
+    isSubagent: isSubagentChat,
+    modelInfo,
+  });
+
   let placeholder;
-  if (disabled) {
-    placeholder = tPortal('chat.placeholder.missingModel');
-  } else if (modelInfo) {
+  if (placeholderKey === CHAT_INPUT_PLACEHOLDER_KEYS.MODEL_INFO) {
     placeholder = `${modelInfo}  ·  @ mentions, / workflows`;
   } else {
-    placeholder = tPortal('chat.placeholder.ready');
+    placeholder = tPortal(placeholderKey);
   }
 
   return { disabled, placeholder };

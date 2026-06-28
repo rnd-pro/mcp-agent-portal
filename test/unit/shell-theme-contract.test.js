@@ -718,7 +718,10 @@ describe('portal shell theme contract', () => {
 
     assert.ok(chatSource.includes('fetchGoalWorkflowSummary'), 'AgentChat must use the workflow summary helper');
     assert.ok(chatSource.includes('buildGoalWorkflowBoardHash'), 'AgentChat must use the workflow board hash helper');
-    assert.match(summarySource, /card\.entityRefs/);
+    // Workflow-ref scoping (card.entityRefs) now lives in the symbiote-ui library; the portal delegates to it.
+    assert.ok(summarySource.includes("from 'symbiote-ui/chat/workflow-summary.js'"), 'Portal workflow summary must delegate to the symbiote-ui module');
+    let librarySummarySource = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/chat/workflow-summary.js'), 'utf8');
+    assert.match(librarySummarySource, /card\.entityRefs/);
     assert.ok(summarySource.includes("params.set('goal', goalId)"), 'Chat workflow deep link must carry active goal id');
     assert.ok(summarySource.includes("params.set('chat', chatId)"), 'Chat workflow deep link must carry active chat id');
     assert.equal(summarySource.includes('messages.length'), false, 'Workflow metrics must not derive task state from chat message count');

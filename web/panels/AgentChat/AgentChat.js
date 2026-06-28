@@ -52,6 +52,18 @@ import {
 import { getAgentChatInputState } from './input-state.js';
 import { tPortal } from '../../common/localization.js';
 import { getLocalization } from 'symbiote-ui/locale';
+import {
+  MESSAGE_STREAMING_PHASE,
+  createLiveStatusMeta,
+  advanceStreamingPhase,
+} from 'symbiote-ui/chat/live-status.js';
+import {
+  createMessageWindow,
+  extendMessageWindow,
+  messageWindowFromPage,
+  intersectPages,
+  validateBoundaries,
+} from 'symbiote-ui/chat/message-window.js';
 import { sanitizeVoiceResponseText } from './voice-response-text.js';
 import {
   buildChatTitleRequestNote,
@@ -2081,17 +2093,7 @@ export class AgentChat extends Symbiote {
   _extendMessageWindow(count = 0) {
     let windowState = this.$.messageWindow || null;
     if (!windowState || count <= 0) return;
-    let end = Number.isFinite(windowState.end)
-      ? windowState.end
-      : (windowState.startIndex || 0) + (windowState.count || 0);
-    let total = Number.isFinite(windowState.totalItems) ? windowState.totalItems : end;
-    this.$.messageWindow = {
-      ...windowState,
-      count: (windowState.count || 0) + count,
-      totalItems: total + count,
-      end: end + count,
-      hasNewer: false,
-    };
+    this.$.messageWindow = extendMessageWindow(windowState, count);
   }
 
   _appendVisibleMessages(messages = [], { persisted = false } = {}) {
@@ -2102,18 +2104,27 @@ export class AgentChat extends Symbiote {
   }
 
   _messageWindowFromPage(page = {}) {
-    let start = Number.isFinite(page.start) ? page.start : 0;
-    let end = Number.isFinite(page.end) ? page.end : start + (Array.isArray(page.messages) ? page.messages.length : 0);
-    let total = Number.isFinite(page.total) ? page.total : end;
-    return {
-      startIndex: start,
-      count: Math.max(0, end - start),
-      totalItems: total,
-      hasOlder: Boolean(page.hasBefore),
-      hasNewer: Boolean(page.hasAfter),
-      start,
-      end,
-    };
+    return messageWindowFromPage(page);
+  }
+
+  /**
+   * Read-only consistency check for a newly built window before it is committed
+   * to the reactive store. Verifies the window's boundaries are internally
+   * sound and that a freshly fetched older page does not overlap the currently
+   * loaded window. Never mutates state or alters return values — it only warns.
+   * @param {object} nextWindow - Window built from the incoming page.
+   * @param {object} page - The fetched page slice the window was built from.
+   */
+  _assertWindowBoundaries(nextWindow, page) {
+    let current = this.$.messageWindow || createMessageWindow();
+    let { valid, errors } = validateBoundaries(nextWindow);
+    if (!valid) {
+      console.warn('[AgentChat] message window boundary check:', errors.join('; '));
+    }
+    let overlap = intersectPages(page, current);
+    if (overlap.overlaps) {
+      console.warn('[AgentChat] message window overlap:', overlap.count, 'item(s)');
+    }
   }
 
   async _fetchMessagePage(chatId, opts = {}) {
@@ -2176,6 +2187,7 @@ export class AgentChat extends Symbiote {
     let messages = this._cleanLoadedMessages(page.messages || []);
     if (!messages.length) return;
     let nextWindow = this._messageWindowFromPage({ ...page, messages });
+    this._assertWindowBoundaries(nextWindow, { ...page, messages });
     let nextMessages = [...messages, ...(this.$.messages || [])];
     this.$.messageWindow = nextWindow;
     this._setMessagesWithoutRender(nextMessages);
@@ -2709,7 +2721,21 @@ export class AgentChat extends Symbiote {
    * @param {object|null} meta - { phase, messageCount, lastToolName, thinkingStatus } or null to clear
    */
   _renderLiveStatus(meta) {
-    this._getTranscript()?.renderLiveStatus(meta);
+    this._getTranscript()?.renderLiveStatus(this._normalizeLiveStatus(meta));
+  }
+
+  /**
+   * Resolve a raw transport meta-delta into the live-status meta the transcript
+   * renders. Phase/meta tracking is owned by the live-status state machine; a
+   * `null` delta clears back to the idle, contentless state.
+   * @param {object|null} meta - Raw `{ phase, messageCount, lastToolName, thinkingStatus }` or null.
+   * @returns {(import('symbiote-ui/chat/live-status.js').LiveStatusMeta|null)}
+   */
+  _normalizeLiveStatus(meta) {
+    if (meta == null) return null;
+    let phase = meta.phase ?? MESSAGE_STREAMING_PHASE.THINKING;
+    let next = advanceStreamingPhase(createLiveStatusMeta(), { ...meta, phase, type: 'meta' });
+    return next.active ? next : createLiveStatusMeta({ ...meta, phase });
   }
 
   _isStaleTaskEvent(detail = {}) {
