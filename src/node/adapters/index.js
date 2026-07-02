@@ -3,7 +3,7 @@ import { createClaudeAdapter } from './claude.js';
 import { createCodexAdapter } from './codex.js';
 import { getStateGraph } from '../state-graph.js';
 import { listGroups } from '../../../packages/agent-pool-mcp/src/tools/groups.js';
-import { getTeamMemoryRoot } from '../../../packages/agent-pool-mcp/src/runtime/paths.js';
+import { getSkillsRoot, getTeamMemoryRoot } from '../../../packages/agent-pool-mcp/src/runtime/paths.js';
 import { execFile } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { loadAgents, getAgentCatalog } from '../agents/agent-parser.js';
@@ -215,7 +215,7 @@ function resolveAgentRoot() {
   return getTeamMemoryRoot();
 }
 
-/** Pin the team-memory content root so agent-parser can find agents/ and skills/. */
+/** Pin the team-memory content root so agent-parser can find agents/. */
 export function setPortalRoot(root) {
   _portalRoot = root;
   _agentCache = null;
@@ -231,13 +231,14 @@ export function setPortalRoot(root) {
 export function getAgentList() {
   let root = resolveAgentRoot();
   if (!root) return [];
-  if (_agentCache && _agentCacheKey === root && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
+  let skillsDir = getSkillsRoot() || join(root, 'skills');
+  let cacheKey = `${root}:${skillsDir || ''}`;
+  if (_agentCache && _agentCacheKey === cacheKey && (Date.now() - _agentCacheTime < 5000)) return _agentCache;
   let agentsDir = join(root, 'agents');
-  let skillsDir = join(root, 'skills');
   let agents = loadAgents(agentsDir, skillsDir);
   _agentCache = getAgentCatalog(agents);
   _agentCacheTime = Date.now();
-  _agentCacheKey = root;
+  _agentCacheKey = cacheKey;
   return _agentCache;
 }
 

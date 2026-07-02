@@ -228,6 +228,30 @@ export function setTeamMemoryRoot(dir) {
   return config.agentPortal.teamMemoryRoot;
 }
 
+/**
+ * Get the configured global skills directory, or null when unset.
+ * Resolution at runtime also honors AGENT_PORTAL_SKILLS_ROOT and otherwise
+ * falls back to `<teamMemoryRoot>/skills`; this returns only the persisted setting.
+ * @returns {string|null}
+ */
+export function getSkillsRoot() {
+  let config = readConfig();
+  return config.agentPortal?.skillsRoot || null;
+}
+
+/**
+ * Persist the global skills directory setting.
+ * @param {string|null} dir Absolute path to the global skills directory, or null to clear.
+ * @returns {string|null}
+ */
+export function setSkillsRoot(dir) {
+  let config = readConfig();
+  if (!config.agentPortal) config.agentPortal = {};
+  config.agentPortal.skillsRoot = dir ? String(dir) : null;
+  writeConfig(config);
+  return config.agentPortal.skillsRoot;
+}
+
 // ── Open Tabs ───────────────────────────────────────────
 
 /** @returns {string[]} */

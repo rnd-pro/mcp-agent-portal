@@ -100,6 +100,24 @@ describe('config-store', () => {
     });
   });
 
+  it('stores Agent Portal root settings independently', async () => {
+    let {
+      getSkillsRoot,
+      getTeamMemoryRoot,
+      setSkillsRoot,
+      setTeamMemoryRoot,
+    } = await importConfigStore();
+
+    assert.equal(getTeamMemoryRoot(), null);
+    assert.equal(getSkillsRoot(), null);
+
+    assert.equal(setTeamMemoryRoot('/tmp/team-memory'), '/tmp/team-memory');
+    assert.equal(setSkillsRoot('/tmp/team-memory/skills'), '/tmp/team-memory/skills');
+
+    assert.equal(getTeamMemoryRoot(), '/tmp/team-memory');
+    assert.equal(getSkillsRoot(), '/tmp/team-memory/skills');
+  });
+
   it('caches chat writes while persisting them asynchronously', async () => {
     let {
       appendChatMessage,
