@@ -11,6 +11,7 @@ import { getStateGraph } from '../state-graph.js';
 import { getWorkflowBoardService } from '../workflow-board-service.js';
 import { logTrajectory } from '../mlops/flywheel.js';
 import { findInRegistry } from '../server/marketplace-registry.js';
+import { getSkillsRoot, getTeamMemoryRoot } from '../../../packages/agent-pool-mcp/src/runtime/paths.js';
 import { ChatWsServer } from './chat-ws-server.js';
 import { TaskRouter } from './task-router.js';
 import { MCPMultiplexer } from './mcp-multiplexer.js';
@@ -379,6 +380,10 @@ export class MCPProxyManager {
     });
 
     let env = { ...process.env, ...settings.env };
+    let teamMemoryRoot = getTeamMemoryRoot();
+    let skillsRoot = getSkillsRoot();
+    if (teamMemoryRoot && !env.AGENT_PORTAL_MEMORY_ROOT) env.AGENT_PORTAL_MEMORY_ROOT = teamMemoryRoot;
+    if (skillsRoot && !env.AGENT_PORTAL_SKILLS_ROOT) env.AGENT_PORTAL_SKILLS_ROOT = skillsRoot;
     // PORTAL_BACKEND=1 is the single-writer ownership trigger: ONLY the long-lived backend process may
     // enforce ownership of the shared ~/.agent-portal state (see getStateGraph). It must NOT leak into
     // child MCP servers (e.g. the agent-pool) or their descendants (worker `claude -p` agents) — a

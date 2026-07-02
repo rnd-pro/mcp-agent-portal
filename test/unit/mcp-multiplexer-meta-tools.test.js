@@ -57,6 +57,69 @@ test('MCP proxy client telemetry summarizes live clients without root paths', as
   }
 });
 
+test('MCP proxy passes configured memory and skills roots to child servers', async () => {
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-mcp-child-env-'));
+  let originalConfigPath = process.env.PORTAL_CONFIG_PATH;
+  let originalMemoryRoot = process.env.AGENT_PORTAL_MEMORY_ROOT;
+  let originalSkillsRoot = process.env.AGENT_PORTAL_SKILLS_ROOT;
+  let memoryRoot = path.join(tmpDir, 'team-memory');
+  let skillsRoot = path.join(tmpDir, 'skills');
+  process.env.PORTAL_CONFIG_PATH = path.join(tmpDir, 'agent-portal.json');
+  delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+  delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+  fs.writeFileSync(process.env.PORTAL_CONFIG_PATH, JSON.stringify({
+    agentPortal: {
+      teamMemoryRoot: memoryRoot,
+      skillsRoot,
+    },
+  }));
+
+  try {
+    let { MCPProxyManager } = await import(`../../src/node/proxy/mcp-proxy.js?test=${Date.now()}-${Math.random()}`);
+    let manager = new MCPProxyManager(tmpDir);
+    let script = [
+      'setTimeout(() => {',
+      'console.log(JSON.stringify({',
+      'memoryRoot: process.env.AGENT_PORTAL_MEMORY_ROOT,',
+      'skillsRoot: process.env.AGENT_PORTAL_SKILLS_ROOT,',
+      '}));',
+      '}, 10);',
+    ].join('');
+    manager.servers.set('env-probe', {
+      command: process.execPath,
+      args: ['-e', script],
+      agents: 0,
+      pid: null,
+      process: null,
+      crashes: 0,
+      respawnTimer: null,
+    });
+
+    manager.spawnServer('env-probe');
+    let child = manager.servers.get('env-probe').process;
+    let output = await new Promise((resolve, reject) => {
+      let chunks = '';
+      let timer = setTimeout(() => reject(new Error('timed out waiting for child env output')), 5000);
+      child.stdout.on('data', data => { chunks += data.toString(); });
+      child.on('exit', () => {
+        clearTimeout(timer);
+        resolve(chunks);
+      });
+      child.on('error', reject);
+    });
+
+    assert.deepEqual(JSON.parse(output.trim()), { memoryRoot, skillsRoot });
+  } finally {
+    if (originalConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+    else process.env.PORTAL_CONFIG_PATH = originalConfigPath;
+    if (originalMemoryRoot === undefined) delete process.env.AGENT_PORTAL_MEMORY_ROOT;
+    else process.env.AGENT_PORTAL_MEMORY_ROOT = originalMemoryRoot;
+    if (originalSkillsRoot === undefined) delete process.env.AGENT_PORTAL_SKILLS_ROOT;
+    else process.env.AGENT_PORTAL_SKILLS_ROOT = originalSkillsRoot;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('resume_chat meta-tool exposes structured context controls', () => {
   let resumeChat = META_TOOLS.find(tool => tool.name === 'resume_chat');
   let properties = resumeChat.inputSchema.properties;
