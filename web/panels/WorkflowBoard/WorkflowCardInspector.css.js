@@ -51,12 +51,12 @@ pg-workflow-card-inspector .wci-badge {
   font-family: var(--sn-font-mono);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--sn-chip-bg, rgba(127, 119, 221, 0.18));
+  background: var(--sn-chip-bg, color-mix(in oklch, var(--sn-sys-accent) 18%, transparent));
   color: var(--sn-text-dim);
 }
-pg-workflow-card-inspector .wci-badge[data-kind="error"] { background: rgba(226, 75, 74, 0.18); color: #e24b4a; }
-pg-workflow-card-inspector .wci-badge[data-kind="warning"] { background: rgba(239, 159, 39, 0.18); color: #ef9f27; }
-pg-workflow-card-inspector .wci-badge[data-kind="ok"] { background: rgba(29, 158, 117, 0.18); color: #1d9e75; }
+pg-workflow-card-inspector .wci-badge[data-kind="error"] { background: color-mix(in oklch, var(--sn-sys-danger) 18%, transparent); color: var(--sn-sys-danger); }
+pg-workflow-card-inspector .wci-badge[data-kind="warning"] { background: color-mix(in oklch, var(--sn-sys-warning) 18%, transparent); color: var(--sn-sys-warning); }
+pg-workflow-card-inspector .wci-badge[data-kind="ok"] { background: color-mix(in oklch, var(--sn-sys-success) 18%, transparent); color: var(--sn-sys-success); }
 
 @keyframes wci-spin { to { transform: rotate(360deg); } }
 pg-workflow-card-inspector .wci-spinner {
@@ -65,7 +65,7 @@ pg-workflow-card-inspector .wci-spinner {
   width: 12px;
   height: 12px;
   border: 2px solid var(--sn-node-border);
-  border-top-color: var(--sn-accent, #7f77dd);
+  border-top-color: var(--sn-accent, var(--sn-sys-accent));
   border-radius: 50%;
   animation: wci-spin 0.8s linear infinite;
 }
@@ -75,9 +75,9 @@ pg-workflow-card-inspector .wci-held {
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 11px;
-  background: rgba(239, 159, 39, 0.15);
-  color: #ef9f27;
-  border: 1px solid rgba(239, 159, 39, 0.3);
+  background: color-mix(in oklch, var(--sn-sys-warning) 15%, transparent);
+  color: var(--sn-sys-warning);
+  border: 1px solid color-mix(in oklch, var(--sn-sys-warning) 30%, transparent);
 }
 
 pg-workflow-card-inspector .wci-audit-verdict {
@@ -108,7 +108,7 @@ pg-workflow-card-inspector .wci-audit-returned {
   margin-block-start: 8px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--sn-danger-color, #e24b4a);
+  color: var(--sn-danger-color, var(--sn-sys-danger));
 }
 
 pg-workflow-card-inspector .wci-audit-detail {
@@ -169,7 +169,7 @@ pg-workflow-card-inspector .wci-agent-dot {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--sn-accent, #7f77dd);
+  background: var(--sn-accent, var(--sn-sys-accent));
   transform: rotate(45deg);
 }
 
@@ -195,7 +195,14 @@ pg-workflow-card-inspector .wci-chat-btn {
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-chat-btn:hover {
-  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
+}
+/* U15: title-attribute tooltip is not reachable by keyboard alone; a visible focus ring gives
+   keyboard/AT users the same "this is interactive, here's what it does" affordance sighted
+   mouse users get from hover. */
+pg-workflow-card-inspector .wci-chat-btn:focus-visible {
+  outline: var(--sn-sys-focus-ring-width) solid var(--sn-sys-focus-ring);
+  outline-offset: var(--sn-sys-focus-ring-offset);
 }
 
 pg-workflow-card-inspector .wci-metrics {
@@ -264,9 +271,9 @@ pg-workflow-card-inspector .wci-history-dot {
   background: var(--sn-text-dim);
   align-self: center;
 }
-pg-workflow-card-inspector .wci-history-item[data-kind="error"] .wci-history-dot { background: #e24b4a; }
-pg-workflow-card-inspector .wci-history-item[data-kind="warning"] .wci-history-dot { background: #ef9f27; }
-pg-workflow-card-inspector .wci-history-item[data-kind="ok"] .wci-history-dot { background: #1d9e75; }
+pg-workflow-card-inspector .wci-history-item[data-kind="error"] .wci-history-dot { background: var(--sn-sys-danger); }
+pg-workflow-card-inspector .wci-history-item[data-kind="warning"] .wci-history-dot { background: var(--sn-sys-warning); }
+pg-workflow-card-inspector .wci-history-item[data-kind="ok"] .wci-history-dot { background: var(--sn-sys-success); }
 
 pg-workflow-card-inspector .wci-history-label {
   flex: 1 1 auto;
@@ -306,9 +313,9 @@ pg-workflow-card-inspector .wci-run-dot {
   border-radius: 50%;
   background: var(--sn-text-dim);
 }
-pg-workflow-card-inspector .wci-run-item[data-kind="error"] .wci-run-dot { background: #e24b4a; }
-pg-workflow-card-inspector .wci-run-item[data-kind="warning"] .wci-run-dot { background: #ef9f27; }
-pg-workflow-card-inspector .wci-run-item[data-kind="ok"] .wci-run-dot { background: #1d9e75; }
+pg-workflow-card-inspector .wci-run-item[data-kind="error"] .wci-run-dot { background: var(--sn-sys-danger); }
+pg-workflow-card-inspector .wci-run-item[data-kind="warning"] .wci-run-dot { background: var(--sn-sys-warning); }
+pg-workflow-card-inspector .wci-run-item[data-kind="ok"] .wci-run-dot { background: var(--sn-sys-success); }
 
 pg-workflow-card-inspector .wci-run-agent {
   flex: 0 0 auto;
@@ -346,7 +353,13 @@ pg-workflow-card-inspector .wci-run-chat {
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-run-chat:hover {
-  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
+}
+/* U15: icon-only button, label carried solely by [title]; keyboard users get no hover tooltip,
+   so a visible focus ring is the equivalent affordance (see .wci-chat-btn note above). */
+pg-workflow-card-inspector .wci-run-chat:focus-visible {
+  outline: var(--sn-sys-focus-ring-width) solid var(--sn-sys-focus-ring);
+  outline-offset: var(--sn-sys-focus-ring-offset);
 }
 
 pg-workflow-card-inspector .wci-body-section {
@@ -365,7 +378,7 @@ pg-workflow-card-inspector .wci-view {
 /* Human-decision panel: the orchestrator's parked question, its button options, and a free-text answer
    that routes back to the orchestrator (or rejects the card). */
 pg-workflow-card-inspector .wci-decision-section {
-  background: rgba(127, 119, 221, 0.06);
+  background: color-mix(in oklch, var(--sn-sys-accent) 6%, transparent);
 }
 pg-workflow-card-inspector .wci-decision-question {
   font-size: 12px;
@@ -393,11 +406,11 @@ pg-workflow-card-inspector .wci-decision-option {
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-decision-option:hover:not(:disabled) {
-  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
 }
 pg-workflow-card-inspector .wci-decision-option-reject {
-  border-color: rgba(226, 75, 74, 0.4);
-  color: #e24b4a;
+  border-color: color-mix(in oklch, var(--sn-sys-danger) 40%, transparent);
+  color: var(--sn-sys-danger);
 }
 pg-workflow-card-inspector .wci-decision-text {
   width: 100%;
@@ -428,11 +441,11 @@ pg-workflow-card-inspector .wci-decision-btn {
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-decision-send {
-  border-color: var(--sn-accent, #7f77dd);
-  color: var(--sn-accent, #7f77dd);
+  border-color: var(--sn-accent, var(--sn-sys-accent));
+  color: var(--sn-accent, var(--sn-sys-accent));
 }
 pg-workflow-card-inspector .wci-decision-btn:hover:not(:disabled) {
-  background: var(--sn-node-hover, rgba(127, 119, 221, 0.12));
+  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
 }
 pg-workflow-card-inspector .wci-decision-btn:disabled,
 pg-workflow-card-inspector .wci-decision-option:disabled {
@@ -444,7 +457,7 @@ pg-workflow-card-inspector .wci-decision-status {
   font-size: 11px;
   color: var(--sn-text-dim);
 }
-pg-workflow-card-inspector .wci-decision-status[data-kind="error"] { color: #e24b4a; }
-pg-workflow-card-inspector .wci-decision-status[data-kind="ok"] { color: #1d9e75; }
-pg-workflow-card-inspector .wci-decision-status[data-kind="warning"] { color: #ef9f27; }
+pg-workflow-card-inspector .wci-decision-status[data-kind="error"] { color: var(--sn-sys-danger); }
+pg-workflow-card-inspector .wci-decision-status[data-kind="ok"] { color: var(--sn-sys-success); }
+pg-workflow-card-inspector .wci-decision-status[data-kind="warning"] { color: var(--sn-sys-warning); }
 `;

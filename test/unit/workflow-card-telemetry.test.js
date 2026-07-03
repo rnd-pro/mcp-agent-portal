@@ -22,9 +22,16 @@ describe('workflow card telemetry helpers', () => {
   });
 
   it('returns a live duration for a started-but-unfinished run and empty for no start', () => {
-    assert.ok(formatDuration({ startedAt: '2020-01-01T00:00:00.000Z' }).length > 0);
+    assert.ok(formatDuration({ startedAt: '2020-01-01T00:00:00.000Z', status: 'running' }).length > 0);
     assert.equal(formatDuration({}), '');
     assert.equal(formatDuration(null), '');
+  });
+
+  it('does not fabricate elapsed time for a started run with no active status and no completion (U03)', () => {
+    // A run that has a startedAt but neither an end time nor a live/active status is dead or stale —
+    // showing "now minus startedAt" would report absurd durations on long-dead runs.
+    assert.equal(formatDuration({ startedAt: '2020-01-01T00:00:00.000Z' }), '');
+    assert.equal(formatDuration({ startedAt: '2020-01-01T00:00:00.000Z', status: 'paused' }), '');
   });
 
   it('formats token totals with k/M suffixes and rejects invalid values', () => {

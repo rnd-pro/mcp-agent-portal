@@ -69,7 +69,7 @@ describe('portal shell theme contract', () => {
     assert.match(widgetSource, /let target = this\.\#resolveTarget\(\)/);
     assert.match(widgetSource, /applyCascadeTheme\(target, this\.\#state, \{ notify: false \}\)/);
     assert.match(widgetSource, /this\.\#syncPopoverTheme\(target\)/);
-    assert.match(widgetSource, /mountOverlayToDocument\(popover, this\.\#resolveTarget\(\)\)/);
+    assert.match(widgetSource, /mountOverlayToDocument\(popover, this\.\#resolveOverlayThemeTarget\(this\.\#resolveTarget\(\)\)\)/);
     assert.match(widgetStyles, /cascade-theme-widget \.ctw-trigger \{/);
     assert.match(widgetStyles, /display: inline-flex;/);
     assert.match(widgetStyles, /min-height: var\(--sn-shell-menu-action-height/);
@@ -214,13 +214,17 @@ describe('portal shell theme contract', () => {
     assert.equal(actionTemplate.includes('pg-event-item'), false, 'ActionBoard must not render local event item widgets');
     for (let token of [
       '--sn-font-mono',
-      '--sn-node-hover',
       '--sn-cat-server',
-      '--sn-success-color',
-      '--sn-danger-color',
+      '--sn-sys-success',
+      '--sn-sys-danger',
     ]) {
       assert.ok(eventFeedCss.includes(token), `EventFeed must consume ${token}`);
     }
+    assert.match(
+      eventFeedCss,
+      /color-mix\(in oklch, var\(--sn-sys-accent\) var\(--sn-sys-state-hover-mix\), var\(--sn-sys-surface-raised\)\)/,
+      'EventFeed must consume the sanctioned hover state-layer mix instead of the legacy --sn-node-hover token',
+    );
   });
 
   it('keeps graph flow surfaces on provider theme tokens', () => {

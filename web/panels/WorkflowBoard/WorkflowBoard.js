@@ -41,15 +41,17 @@ import { checkPassed } from '../../../src/iso/workflow-board.js';
 const DEFAULT_SCOPE = 'home';
 const BOARD_VIEWS = new Set(['kanban', 'graph']);
 const FALLBACK_REFRESH_INTERVAL_MS = 60_000;
-// A distinct glyph per resource group so a card's group reads at a glance even where the chip color
-// (data-kind) does not apply; unknown groups fall back to a neutral marker.
-const GROUP_GLYPH = {
-  integrity: '◆',
-  resilience: '▲',
-  model: '●',
-  governance: '■',
-  'collab-observability': '◇',
+// U06: a distinct material-symbols icon per resource group so a card's group reads at a glance even
+// where the chip color (data-kind) does not apply; unknown groups fall back to a neutral marker. Uses
+// the chip `icon` field (rendered by sn-kanban-board via material-symbols-outlined), not literal glyphs.
+const GROUP_ICON = {
+  integrity: 'verified',
+  resilience: 'shield',
+  model: 'model_training',
+  governance: 'gavel',
+  'collab-observability': 'monitoring',
 };
+const GROUP_ICON_FALLBACK = 'category';
 const REALTIME_DEBOUNCE_MS = 200;
 const REALTIME_STATE_KEYS = ['workflowCards', 'workflowRuns', 'workflowLeases', 'workflowTransitions', 'tasks'];
 const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
@@ -123,23 +125,48 @@ function makeIcon(name) {
   return icon;
 }
 
-function makeChip(text, kind = '') {
-  let chip = makeElement('span', 'wb-chip', text);
+// U15: chip semantics never rely on color alone — pair an icon + label, and always set a title so an
+// icon-adjacent tooltip/label is available (not just a bare colored pill).
+function makeChip(text, kind = '', options = {}) {
+  let chip = makeElement('span', 'wb-chip');
+  if (options.icon) chip.append(makeIcon(options.icon));
+  chip.append(document.createTextNode(text));
   if (kind) chip.dataset.kind = kind;
+  if (options.title) chip.title = options.title;
   return chip;
 }
 
-function automationChips(automation = {}) {
-  let chips = [];
-  if (automation.trigger) chips.push({ label: formatLabel(automation.trigger), kind: automation.trigger === 'on_enter' ? 'status' : '' });
-  if (automation.action) chips.push({ label: formatLabel(automation.action), kind: automation.action === 'orchestrate' ? 'status' : '' });
-  if (automation.mode) chips.push({ label: formatLabel(automation.mode), kind: automation.mode === 'auto' ? 'warning' : '' });
+// U09: column headers previously dumped the full automation config (trigger/action/mode/agents/
+// parallelLimit) as undifferentiated chips — automation debug info, not a header. Reduce to a single
+// primary indicator (auto/gated/manual); the full config already lives in the column-settings popover
+// (the gear affordance rendered by #renderColumnSettingsControl) as its authoritative surface.
+function automationSummary(automation = {}) {
+  let mode = normalizeText(automation.mode).toLowerCase();
   let agents = asArray(automation.agents).map(item => normalizeText(item)).filter(Boolean);
   if (automation.agent) agents.unshift(automation.agent);
-  let agentText = [...new Set(agents)].slice(0, 3).join(', ');
-  if (agentText) chips.push({ label: agentText, kind: 'status' });
-  if (automation.parallelLimit) chips.push({ label: `x${automation.parallelLimit}`, kind: '' });
-  return chips;
+  let agentCount = new Set(agents).size;
+  if (mode === 'auto') {
+    return {
+      label: 'Auto',
+      kind: 'warning',
+      icon: 'bolt',
+      title: `Fully automated${agentCount ? ` · ${agentCount} agent${agentCount === 1 ? '' : 's'}` : ''}${automation.parallelLimit ? ` · parallel limit ${automation.parallelLimit}` : ''}`,
+    };
+  }
+  if (mode === 'gated') {
+    return {
+      label: 'Gated',
+      kind: 'status',
+      icon: 'checklist',
+      title: `Requires approval before proceeding${agentCount ? ` · ${agentCount} agent${agentCount === 1 ? '' : 's'}` : ''}`,
+    };
+  }
+  return {
+    label: 'Manual',
+    kind: '',
+    icon: 'pan_tool',
+    title: 'No automation — moved by hand',
+  };
 }
 
 function flagKind(flag = '') {
@@ -156,6 +183,17 @@ function statusKind(status = '') {
   if (key === 'blocked' || key === 'error' || key === 'lost') return 'error';
   if (key === 'stale' || key === 'recovering' || key === 'needs_resume') return 'warning';
   return 'status';
+}
+
+// U04: priority previously always mapped to `{ kind: 'status' }`, which sn-kanban-board renders as
+// the success/filled treatment — every priority, including "high", read as a green "all good" signal.
+// Severity must scale with priority: high/urgent reads danger, medium reads warning, low/normal is
+// unweighted (plain, kind-less) so it does not compete visually with signals that need attention.
+function priorityKind(priority = '') {
+  let key = normalizeText(priority).toLowerCase();
+  if (key === 'high' || key === 'urgent' || key === 'critical') return 'error';
+  if (key === 'medium') return 'warning';
+  return '';
 }
 
 // Audit kickback escalation kinds (auditor rejected → routed back to the orchestrator for rework).
@@ -345,6 +383,7 @@ export class WorkflowBoard extends Symbiote {
     this.ref.importBtn.onclick = () => this.importWorkItems();
     this.ref.reconcileBtn.onclick = () => this.reconcileRecovery();
     this.ref.saveBoardSettingsBtn.onclick = () => this.saveBoardSettings();
+    this.#groupToolbarControls();
     this.ref.boardView.addEventListener('sn-board-card-select', (event) => this.#onBoardCardSelect(event));
     this.ref.boardView.addEventListener('sn-board-card-action', (event) => this.#onBoardCardAction(event));
     this.ref.boardView.addEventListener('sn-board-card-drop', (event) => this.#onBoardCardDrop(event));
@@ -905,14 +944,65 @@ export class WorkflowBoard extends Symbiote {
     this.#publishSelection('empty-shell');
   }
 
+  // U12: the toolbar was 7 icon-only buttons in one flat row with no grouping and no active-state
+  // indication. Re-parent the existing button refs (already created by the template) into labeled
+  // groups once at init: a mode-toggle group (Pause/Resume collapse into one control below), a
+  // destructive-automation group (Drain/Stop), and a routine-maintenance group (Import/Reconcile) —
+  // separated by a visible divider so destructive actions are not adjacent to routine ones.
+  #groupToolbarControls() {
+    let actions = this.ref.pauseBoardBtn.parentElement;
+    if (!actions || actions.dataset.wbGrouped === 'true') return;
+    actions.dataset.wbGrouped = 'true';
+
+    // U12: surface the recovery count as its own visible flag ahead of the routine status text
+    // instead of burying it in the truncating readout string.
+    let recoveryFlag = makeElement('span', 'wb-recovery-flag');
+    recoveryFlag.hidden = true;
+    recoveryFlag.setAttribute('role', 'status');
+    this.ref.boardReadout.before(recoveryFlag);
+    this.ref.boardRecoveryFlag = recoveryFlag;
+
+    let modeGroup = makeElement('div', 'wb-toolbar-group');
+    modeGroup.setAttribute('role', 'group');
+    modeGroup.setAttribute('aria-label', 'Board automation mode');
+    modeGroup.append(this.ref.pauseBoardBtn, this.ref.resumeBoardBtn);
+
+    let destructiveGroup = makeElement('div', 'wb-toolbar-group wb-toolbar-group-danger');
+    destructiveGroup.setAttribute('role', 'group');
+    destructiveGroup.setAttribute('aria-label', 'Stop or drain workflow runs');
+    destructiveGroup.append(this.ref.drainBoardBtn, this.ref.stopBoardBtn);
+
+    let maintenanceGroup = makeElement('div', 'wb-toolbar-group');
+    maintenanceGroup.setAttribute('role', 'group');
+    maintenanceGroup.setAttribute('aria-label', 'Import and recovery tools');
+    maintenanceGroup.append(this.ref.importBtn, this.ref.reconcileBtn);
+
+    let viewToggle = actions.querySelector('.wb-view-toggle');
+    let boardSettings = this.ref.boardSettings;
+    actions.replaceChildren();
+    if (viewToggle) actions.append(viewToggle);
+    actions.append(modeGroup, destructiveGroup, maintenanceGroup);
+    if (boardSettings) actions.append(boardSettings);
+  }
+
   #syncBoardAutomationControls() {
     let board = this.#board;
     let mode = normalizeText(board?.mode, 'passive');
     let hasBoard = Boolean(board);
-    this.ref.pauseBoardBtn.disabled = !hasBoard || mode === 'paused' || mode === 'stopped';
-    this.ref.resumeBoardBtn.disabled = !hasBoard || (!RESUMABLE_BOARD_MODES.has(mode) && mode !== 'manual' && mode !== 'passive');
+    let canResume = RESUMABLE_BOARD_MODES.has(mode) || mode === 'manual' || mode === 'passive';
+    let isPaused = mode === 'paused' || mode === 'stopped';
+    // Pause and Resume previously were both always visible regardless of board mode. Show only the
+    // action that currently applies — a single mode-aware toggle instead of two competing buttons.
+    this.ref.pauseBoardBtn.hidden = isPaused;
+    this.ref.resumeBoardBtn.hidden = !isPaused;
+    this.ref.pauseBoardBtn.disabled = !hasBoard || isPaused;
+    this.ref.resumeBoardBtn.disabled = !hasBoard || !canResume;
     this.ref.drainBoardBtn.disabled = !hasBoard || mode === 'draining' || mode === 'stopped';
+    this.ref.drainBoardBtn.classList.toggle('is-active', mode === 'draining');
+    this.ref.drainBoardBtn.setAttribute('aria-pressed', String(mode === 'draining'));
     this.ref.stopBoardBtn.disabled = !hasBoard || mode === 'stopped';
+    this.ref.stopBoardBtn.classList.toggle('is-active', mode === 'stopped');
+    this.ref.stopBoardBtn.setAttribute('aria-pressed', String(mode === 'stopped'));
     this.ref.importBtn.disabled = !hasBoard;
     this.ref.reconcileBtn.disabled = !hasBoard;
     if (!hasBoard || this.ref.boardSettings?.open) return;
@@ -933,6 +1023,11 @@ export class WorkflowBoard extends Symbiote {
     this.ref.emptyState.textContent = 'Workflow board data is unavailable.';
   }
 
+  // U12: the readout previously buried the one alarming signal (recovery count) among routine facts
+  // in a single ellipsis-truncating string. Surface "N recovery" as its own warning-kind chip ahead
+  // of the routine readout text, and give the routine text a title/aria-label carrying the FULL
+  // string (not just the visibly truncated portion) so a hover or screen reader gets everything
+  // that does not fit — an accessible alternative to a title-attribute-only tooltip.
   #renderStatusReadout() {
     let scope = this.#scopeState();
     let count = this.#visibleCards().length;
@@ -940,17 +1035,33 @@ export class WorkflowBoard extends Symbiote {
     let counters = this.#board?.counters || {};
     let automation = this.#board?.automation || {};
     let lastEvent = asArray(this.#board?.events).filter(event => normalizeText(event.eventType).startsWith('board_')).at(-1);
-    this.ref.boardReadout.textContent = [
+    let recoveryCount = Number(counters.recovery) || 0;
+
+    if (this.ref.boardRecoveryFlag) {
+      this.ref.boardRecoveryFlag.hidden = recoveryCount <= 0;
+      if (recoveryCount > 0) {
+        let detail = `${recoveryCount} card${recoveryCount === 1 ? '' : 's'} in recovery — check the board history and reconcile if needed.`;
+        this.ref.boardRecoveryFlag.textContent = `${recoveryCount} in recovery`;
+        // U15: the detail is exposed both visibly (title) and to assistive tech (aria-label), not
+        // as a title-attribute-only tooltip.
+        this.ref.boardRecoveryFlag.title = detail;
+        this.ref.boardRecoveryFlag.setAttribute('aria-label', detail);
+      }
+    }
+
+    let readoutText = [
       `${count} visible`,
       scope.goalId ? `goal ${scope.goalId.slice(0, 8)}` : '',
       scope.chatId ? `chat ${scope.chatId.slice(0, 8)}` : '',
       counters.active ? `${counters.active} active` : '',
-      counters.recovery ? `${counters.recovery} recovery` : '',
       automation.pickup ? `pickup ${automation.pickup}` : '',
       automation.globalParallelLimit ? `limit ${automation.globalParallelLimit}` : '',
       lastEvent ? `last ${formatLabel(lastEvent.eventType)}` : '',
       updated ? `updated ${updated}` : '',
     ].filter(Boolean).join(' · ');
+    this.ref.boardReadout.textContent = readoutText;
+    this.ref.boardReadout.title = readoutText;
+    this.ref.boardReadout.setAttribute('aria-label', readoutText);
   }
 
   #renderBoardHistory() {
@@ -1018,6 +1129,12 @@ export class WorkflowBoard extends Symbiote {
     return counts;
   }
 
+  // U05: chip budget. A card needs at most a handful of at-a-glance signals — everything else
+  // belongs to the inspector, not the card face. `FOOTER_CHIP_BUDGET` footer chips render in full;
+  // any remainder collapses into one "+N" overflow chip (sn-kanban-board's `data-kind="overflow"`
+  // affordance) instead of dumping every available signal onto the card.
+  static #FOOTER_CHIP_BUDGET = 4;
+
   #toKanbanCard(card, downstream = new Map()) {
     let nextColumn = getAdjacentColumn(this.#board, card.columnId, 1);
     let runtimeOnly = isRuntimeOnlyCard(card);
@@ -1037,6 +1154,29 @@ export class WorkflowBoard extends Symbiote {
       .filter(flag => !(auditChip && flag === 'needs_audit'))
       .slice(0, 2)
       .map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) }));
+
+    // Priority-ordered candidates: state first (what's happening now), then lock/unlock, then audit
+    // verdict, then supporting telemetry, then flags — the front of this list is what a glance needs.
+    let footerCandidates = [
+      liveStatus ? { label: formatStatusLabel(liveStatus), kind: busy ? 'warning' : statusKind(liveStatus) } : null,
+      blockedBy ? { label: String(blockedBy), icon: 'lock', kind: 'dep-blocked', title: `Blocked by ${blockedBy} upstream card(s)` } : null,
+      auditChip,
+      unlocks ? { label: String(unlocks), icon: 'lock_open', kind: 'dep-unlocks', title: `Unlocks ${unlocks} downstream card(s)` } : null,
+      agent ? { label: agent, icon: 'smart_toy', kind: 'status' } : null,
+      duration ? { label: duration, icon: 'schedule', kind: 'status' } : null,
+      tokens ? { label: `${tokens} tok`, icon: 'toll', kind: 'status' } : null,
+      ...flagChips,
+    ].filter(Boolean);
+    let footer = footerCandidates.slice(0, WorkflowBoard.#FOOTER_CHIP_BUDGET);
+    let overflowCount = footerCandidates.length - footer.length;
+    if (overflowCount > 0) {
+      footer.push({
+        label: `+${overflowCount}`,
+        kind: 'overflow',
+        title: `${overflowCount} more signal${overflowCount === 1 ? '' : 's'} — open the card for details`,
+      });
+    }
+
     return {
       id: card.id,
       columnId: card.columnId,
@@ -1044,21 +1184,12 @@ export class WorkflowBoard extends Symbiote {
       summary: card.summary || 'No summary provided.',
       busy,
       meta: [
-        group ? { label: `${GROUP_GLYPH[group] ?? '⊟'} ${group}`, kind: `group-${group}`, title: `Resource group: ${group}` } : null,
+        group ? { label: group, icon: GROUP_ICON[group] ?? GROUP_ICON_FALLBACK, kind: `group-${group}`, title: `Resource group: ${group}` } : null,
         card.projectId ? { label: card.projectId } : null,
         card.kind ? { label: card.kind } : null,
-        card.priority ? { label: card.priority, kind: 'status' } : null,
+        card.priority ? { label: card.priority, kind: priorityKind(card.priority), title: `Priority: ${card.priority}` } : null,
       ].filter(Boolean),
-      footer: [
-        blockedBy ? { label: `⟸ ${blockedBy}`, kind: 'dep-blocked', title: `Blocked by ${blockedBy} upstream card(s)` } : null,
-        unlocks ? { label: `⟹ ${unlocks}`, kind: 'dep-unlocks', title: `Unlocks ${unlocks} downstream card(s)` } : null,
-        liveStatus ? { label: formatStatusLabel(liveStatus), kind: busy ? 'warning' : statusKind(liveStatus) } : null,
-        agent ? { label: agent, kind: 'status' } : null,
-        duration ? { label: duration, kind: 'status' } : null,
-        tokens ? { label: `${tokens} tok`, kind: 'status' } : null,
-        auditChip,
-        ...flagChips,
-      ].filter(Boolean),
+      footer,
       actions: this.#cardActions(card, nextColumn, runtimeOnly),
       draggable: !runtimeOnly,
       raw: card,
@@ -1120,11 +1251,10 @@ export class WorkflowBoard extends Symbiote {
     if (column.description) {
       copy.append(makeElement('div', 'sn-kanban-column-description', column.description));
     }
-    let chips = makeElement('div', 'wb-column-policy');
-    for (let chip of automationChips(column.raw?.automation || column.automation || {})) {
-      chips.append(makeChip(chip.label, chip.kind));
-    }
-    if (chips.childElementCount) copy.append(chips);
+    let summary = automationSummary(column.raw?.automation || column.automation || {});
+    let policy = makeElement('div', 'wb-column-policy');
+    policy.append(makeChip(summary.label, summary.kind, { icon: summary.icon, title: summary.title }));
+    copy.append(policy);
     let tools = makeElement('div', 'wb-column-tools');
     tools.append(
       makeElement('span', 'sn-kanban-column-count', String(column.count)),

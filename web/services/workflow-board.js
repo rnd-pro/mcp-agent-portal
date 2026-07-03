@@ -97,10 +97,37 @@ function titleFromId(value) {
     .join(' ');
 }
 
-function compactText(value, limit = 220) {
-  let text = normalizeText(value);
+const SUMMARY_MARKER_PREFIX = /^\s*(?:#{1,6}\s+|[-*]\s+|(?:WHAT|TASK|GOAL|SUMMARY|CONTEXT|WHY|SCOPE)\s*:\s*)/i;
+const SUMMARY_LIMIT = 140;
+
+function summarizeCardText(value, limit = SUMMARY_LIMIT) {
+  let raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  // Take the first non-empty line only — prompt/description bodies are
+  // multi-line, but a card summary is a single-purpose label, not a dump.
+  let firstLine = raw.split(/\r?\n/).find(line => line.trim()) || '';
+  let text = firstLine
+    .replace(SUMMARY_MARKER_PREFIX, '')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+
+  // Prefer stopping at the first sentence boundary when it keeps the
+  // summary reasonably short; otherwise fall back to a hard cap that
+  // breaks on a word boundary instead of mid-word.
+  let sentenceMatch = text.match(/^.{1,}?[.!?](?:\s|$)/);
+  if (sentenceMatch && sentenceMatch[0].trim().length <= limit) {
+    return sentenceMatch[0].trim();
+  }
+
   if (text.length <= limit) return text;
-  return `${text.slice(0, limit - 3)}...`;
+  let truncated = text.slice(0, limit - 1);
+  let lastSpace = truncated.lastIndexOf(' ');
+  if (lastSpace > limit * 0.6) truncated = truncated.slice(0, lastSpace);
+  return `${truncated.trimEnd()}…`;
 }
 
 function normalizeTimestamp(value) {
@@ -301,7 +328,7 @@ function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID
     id,
     title,
     body: normalizeBodyText(card.body || card.markdown || card.description || card.prompt || ''),
-    summary: compactText(card.description || card.summary || card.body || card.prompt || ''),
+    summary: summarizeCardText(card.description || card.summary || card.body || card.prompt || ''),
     columnId,
     parentCardId: normalizeText(card.parentCardId || card.parent_card_id),
     childCardIds: normalizeStringList(card.childCardIds || card.child_card_ids),

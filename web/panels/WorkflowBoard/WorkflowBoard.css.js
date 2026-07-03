@@ -47,7 +47,7 @@ pg-workflow-board .wb-control-actions {
   justify-content: flex-end;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -61,6 +61,50 @@ pg-workflow-board .wb-control-actions sn-button {
 pg-workflow-board .wb-control-meta .material-symbols-outlined,
 pg-workflow-board .wb-control-actions .material-symbols-outlined {
   font-size: 17px;
+}
+
+/* U12: toolbar grouping. Related actions (mode toggle / destructive automation / routine
+   maintenance) are wrapped by #groupToolbarControls into labeled groups that read as clusters
+   instead of one flat row of 7 identical icon buttons. */
+pg-workflow-board .wb-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--sn-sys-outline);
+  border-radius: var(--sn-button-radius, 8px);
+  background: var(--sn-sys-surface-panel);
+}
+
+/* Destructive automation (Drain/Stop) gets a quiet danger-tinted outline so it reads as separate
+   in intent from routine maintenance (Import/Reconcile), without shouting via a filled color. */
+pg-workflow-board .wb-toolbar-group-danger {
+  border-color: color-mix(in oklch, var(--sn-sys-danger) 32%, var(--sn-sys-outline));
+}
+
+/* U12: visible pressed/active state for toggle-like toolbar buttons (Drain/Stop reflecting the
+   current board mode), built from the shared state-layer mix — never a new hardcoded color. */
+pg-workflow-board .wb-toolbar-group sn-button.is-active,
+pg-workflow-board .wb-toolbar-group sn-button[aria-pressed="true"] {
+  --sn-button-bg: color-mix(in oklch, var(--sn-sys-danger) var(--sn-sys-state-selected-mix), transparent);
+  color: var(--sn-sys-danger);
+}
+
+/* U12: the one alarming signal (cards stuck in recovery) as its own visible warning flag ahead of
+   the routine status text, instead of buried inside a truncating string. */
+pg-workflow-board .wb-recovery-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in oklch, var(--sn-sys-warning) 46%, var(--sn-sys-outline));
+  border-radius: 999px;
+  background: var(--sn-sys-warning-container);
+  color: var(--sn-sys-on-warning-container);
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 pg-workflow-board .wb-board-settings {
@@ -100,7 +144,7 @@ pg-workflow-board .wb-board-settings-panel {
   border: 1px solid var(--sn-node-border);
   border-radius: var(--sn-card-radius);
   background: var(--sn-panel-bg);
-  box-shadow: var(--sn-elevation-2, 0 10px 28px rgba(0, 0, 0, 0.28));
+  box-shadow: var(--sn-elevation-2, var(--sn-sys-shadow-overlay));
 }
 
 pg-workflow-board .wb-status {
@@ -221,6 +265,7 @@ pg-workflow-board .wb-graph-empty {
 pg-workflow-board .wb-chip {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   max-width: 100%;
   min-height: 19px;
   padding: 2px 6px;
@@ -235,19 +280,29 @@ pg-workflow-board .wb-chip {
   white-space: nowrap;
 }
 
+pg-workflow-board .wb-chip .material-symbols-outlined {
+  font-size: 12px;
+}
+
+/* U09/U15: the column-header automation indicator carries a filled container per kind (status =
+   gated, warning = auto) so its meaning does not rely on color alone — it already pairs an icon
+   (bolt/checklist/pan_tool) and label text from automationSummary(). */
 pg-workflow-board .wb-chip[data-kind="status"] {
-  color: var(--sn-node-selected);
-  border-color: color-mix(in srgb, var(--sn-node-selected) 42%, var(--sn-node-border));
+  border-color: color-mix(in oklch, var(--sn-sys-info) 46%, var(--sn-node-border));
+  background: var(--sn-sys-info-container);
+  color: var(--sn-sys-on-info-container);
 }
 
 pg-workflow-board .wb-chip[data-kind="warning"] {
-  color: var(--sn-warning-color);
-  border-color: color-mix(in srgb, var(--sn-warning-color) 50%, var(--sn-node-border));
+  border-color: color-mix(in oklch, var(--sn-sys-warning) 50%, var(--sn-node-border));
+  background: var(--sn-sys-warning-container);
+  color: var(--sn-sys-on-warning-container);
 }
 
 pg-workflow-board .wb-chip[data-kind="error"] {
-  color: var(--sn-danger-color);
-  border-color: color-mix(in srgb, var(--sn-danger-color) 50%, var(--sn-node-border));
+  border-color: color-mix(in oklch, var(--sn-sys-danger) 50%, var(--sn-node-border));
+  background: var(--sn-sys-danger-container);
+  color: var(--sn-sys-on-danger-container);
 }
 
 pg-workflow-board .wb-empty {
@@ -467,35 +522,40 @@ pg-workflow-board [hidden] {
   }
 }
 
-/* Resource-group accents: a categorical color per group (the glyph carries the distinction where the
-   color does not apply); the border tints from the group color so it reads without shouting. */
+/* U14: resource-group accents. .sn-kanban-chip[data-kind="..."] plus the chip icon field are the
+   documented public extension contract (icon glyph is the non-color signal per group; the group
+   name is also in the chip label text, so the group never depends on color alone — U15). Group
+   hues resolve through symbiote-ui T2 system roles instead of hardcoded hsl()/hex literals: no two
+   groups share a role, spanning the danger/warning/accent/success/info system-role families so
+   each stays visually distinct without inventing new domain-palette colors from this panel. */
 sn-kanban-board .sn-kanban-chip[data-kind^="group-"] {
   font-weight: 600;
-  border-color: color-mix(in srgb, currentColor 38%, var(--sn-node-border));
+  border-color: color-mix(in oklch, currentColor 38%, var(--sn-sys-outline));
 }
-sn-kanban-board .sn-kanban-chip[data-kind="group-integrity"] { color: hsl(355 75% 62%); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-resilience"] { color: hsl(28 85% 58%); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-model"] { color: hsl(210 82% 64%); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-governance"] { color: hsl(265 70% 70%); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-collab-observability"] { color: hsl(175 62% 52%); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-integrity"] { color: var(--sn-sys-danger); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-resilience"] { color: var(--sn-sys-warning); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-model"] { color: var(--sn-sys-info); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-governance"] { color: var(--sn-sys-accent); }
+sn-kanban-board .sn-kanban-chip[data-kind="group-collab-observability"] { color: var(--sn-sys-success); }
 
-/* Dependency degree: blocked-by (caution) vs unlocks (positive). */
+/* Dependency degree: blocked-by (caution) vs unlocks (positive) — public data-kind contract,
+   T2-role colors, paired with the lock/lock_open icon field so kind is never color-only. */
 sn-kanban-board .sn-kanban-chip[data-kind="dep-blocked"] {
-  color: var(--sn-warning-color);
-  border-color: color-mix(in srgb, var(--sn-warning-color) 46%, var(--sn-node-border));
+  color: var(--sn-sys-warning);
+  border-color: color-mix(in oklch, var(--sn-sys-warning) 46%, var(--sn-sys-outline));
 }
 sn-kanban-board .sn-kanban-chip[data-kind="dep-unlocks"] {
-  color: var(--sn-success-color);
-  border-color: color-mix(in srgb, var(--sn-success-color) 40%, var(--sn-node-border));
+  color: var(--sn-sys-success);
+  border-color: color-mix(in oklch, var(--sn-sys-success) 40%, var(--sn-sys-outline));
 }
 
 /* Quality-audit verdict: a passed audit (success) vs. a rejected audit routed back as rework (danger). */
 sn-kanban-board .sn-kanban-chip[data-kind="audit-pass"] {
-  color: var(--sn-success-color);
-  border-color: color-mix(in srgb, var(--sn-success-color) 46%, var(--sn-node-border));
+  color: var(--sn-sys-success);
+  border-color: color-mix(in oklch, var(--sn-sys-success) 46%, var(--sn-sys-outline));
 }
 sn-kanban-board .sn-kanban-chip[data-kind="audit-reject"] {
-  color: var(--sn-danger-color);
-  border-color: color-mix(in srgb, var(--sn-danger-color) 50%, var(--sn-node-border));
+  color: var(--sn-sys-danger);
+  border-color: color-mix(in oklch, var(--sn-sys-danger) 50%, var(--sn-sys-outline));
 }
 `;

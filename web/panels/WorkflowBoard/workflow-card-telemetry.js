@@ -74,11 +74,23 @@ export function agentName(card = null, run = null) {
   );
 }
 
+// Duration is only meaningful for a run that is either genuinely finished (has both a start and an end
+// timestamp) or genuinely in progress right now (has a start, no end, AND a live/active status). Anything
+// else — no start, or an end-less run sitting in a terminal/detection state like recovery_detected — has
+// no honest duration to show: ticking Date.now() - startedAt against a corpse produces fabricated numbers
+// like "254h 45m" on a run that died days ago. Callers render '' as the neutral "—" fallback.
 export function formatDuration(run = null) {
   let start = Date.parse(run?.startedAt || '');
   if (!Number.isFinite(start)) return '';
   let end = Date.parse(run?.completedAt || '');
-  let ms = Math.max(0, (Number.isFinite(end) ? end : Date.now()) - start);
+  let ms;
+  if (Number.isFinite(end)) {
+    ms = Math.max(0, end - start);
+  } else if (ACTIVE_RUN_STATUSES.has(asText(run?.status).toLowerCase())) {
+    ms = Math.max(0, Date.now() - start);
+  } else {
+    return '';
+  }
   let s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   let m = Math.floor(s / 60);
