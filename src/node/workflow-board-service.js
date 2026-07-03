@@ -7358,7 +7358,7 @@ export function createWorkflowBoardService(opts = {}) {
         'Quality audit task:',
         '- This card is in the Quality Audit stage. Act as a reviewer, not an implementer.',
         '- Verify the work against every acceptance criterion and run the hygiene/test checks relevant to the changed files.',
-        '- If you can, also record the verdict via the public `workflow_board` action `update_item` with a `checks` object (set `audit` to `passed` or `failed`); this needs audit authority and may be unavailable to you.',
+        '- Do not call `workflow_board update_item` or the CLI fallback to record your own audit verdict. Audit workers may lack board-write authority, and the autonomous gate reads your proof marker directly.',
         '- ALWAYS end your report with the explicit verdict marker on its own line, because that marker — not the bare run exit, and not a check you may lack rights to write — is what the autonomous gate reads to advance or rework the card: `COMPLETION_PROOF: PASS` when the work meets every acceptance criterion, or `COMPLETION_PROOF: FAIL` (with a one-line reason) when it does not.',
         '- Do not advance the card yourself; the gate moves it once an independent reviewer reports PASS.',
       ].join('\n')
@@ -7470,8 +7470,12 @@ export function createWorkflowBoardService(opts = {}) {
       '- Treat the workflow card and workflow run as the task source of truth; the chat is only the execution channel.',
       '- For broad work with independent scopes, use `workflow_board` action `decompose` to create child cards with owners and acceptance criteria before doing or delegating the child work.',
       '- Do not ask the user to approve workflow tool calls from inside a workflow item; approval policy is owned by the host runner and blocked tools must be handled as runtime evidence.',
-      `- If a Codex MCP call to \`workflow_board\` returns \`user cancelled MCP tool call\` or \`empty_result\`, immediately retry the same public workflow_board call through the CLI fallback: \`${workflowBoardCliFallback(projectRoot)}\`. Replace \`<json-args>\` with the exact JSON arguments for the workflow_board action.`,
-      '- If `workflow_board` is unavailable, permission-blocked, approval-blocked, or the agent cannot call it directly, use the same CLI fallback before reporting that the workflow is blocked.',
+      ...(isAudit ? [
+        '- For this audit task, do not retry blocked `workflow_board` calls through the CLI fallback; report the audit verdict with the required proof marker instead.',
+      ] : [
+        `- If a Codex MCP call to \`workflow_board\` returns \`user cancelled MCP tool call\` or \`empty_result\`, immediately retry the same public workflow_board call through the CLI fallback: \`${workflowBoardCliFallback(projectRoot)}\`. Replace \`<json-args>\` with the exact JSON arguments for the workflow_board action.`,
+        '- If `workflow_board` is unavailable, permission-blocked, approval-blocked, or the agent cannot call it directly, use the same CLI fallback before reporting that the workflow is blocked.',
+      ]),
       '- Move ready child cards through the workflow board so their runs, chats, task ids, checks, and transitions remain visible in board state and development maps.',
       '- Aggregate child-card results only after verifying their evidence against current files and runtime state.',
       '',

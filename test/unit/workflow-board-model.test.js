@@ -2777,6 +2777,9 @@ links:
     assert.equal(delegateCalls.length, 1);
     assert.match(delegateCalls[0].payload.arguments.prompt, /Quality audit task:/);
     assert.match(delegateCalls[0].payload.arguments.prompt, /Act as a reviewer/);
+    assert.match(delegateCalls[0].payload.arguments.prompt, /Do not call `workflow_board update_item`/);
+    assert.match(delegateCalls[0].payload.arguments.prompt, /do not retry blocked `workflow_board` calls through the CLI fallback/);
+    assert.doesNotMatch(delegateCalls[0].payload.arguments.prompt, /mcp-agent-portal\.js" call workflow_board/);
   });
 
   it('clears needs_audit on reconcile when the audit check passes', async () => {
