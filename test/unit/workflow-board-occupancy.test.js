@@ -8,6 +8,7 @@ import {
   DEFAULT_WORKFLOW_BOARD_ID,
   normalizeWorkflowAutomation,
   normalizeWorkflowCardInput,
+  normalizeWorkflowReturnEvent,
 } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
@@ -205,6 +206,33 @@ describe('workflow board occupancy + stale aging (Axis C)', () => {
       // Idempotent: a second tick does not re-escalate the already-escalated card.
       now += 60 * 60 * 1000;
       assert.equal(service.escalateStaleCards(DEFAULT_WORKFLOW_BOARD_ID).escalated.length, 0);
+    });
+
+    it('does not stale-escalate a worked card that is already waiting on a queued return', () => {
+      let board = service.ensureBoard();
+      let card = makeCard({ columnId: 'in-progress' });
+      seedRun(board.id, card.id, 'completed');
+      let event = normalizeWorkflowReturnEvent({
+        kind: 'discovered',
+        correlationId: card.id,
+        detail: 'child returned new routing evidence',
+      }, { now: 1001 });
+      let base = sg.get(`workflowCards/${card.id}`);
+      sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+        ...base,
+        metadata: { ...base.metadata, returns: [event] },
+      } }], 'test:seed-return-wait');
+
+      now = 1000 + 2 * 60 * 60 * 1000;
+      let liveness = service.auditBoardLiveness(DEFAULT_WORKFLOW_BOARD_ID);
+      assert.ok(
+        liveness.waiting.some(wait => wait.cardId === card.id && wait.reason === 'return'),
+        'precondition: the card is already waiting on the return wake',
+      );
+
+      let tick = service.escalateStaleCards(DEFAULT_WORKFLOW_BOARD_ID);
+      assert.equal(tick.escalated.length, 0, 'a named return wait is not stale occupancy');
+      assert.equal(service.getCard(card.id).metadata?.escalation, undefined);
     });
 
     it('does not flag a card that never ran, is still running, or sits in a terminal column', () => {

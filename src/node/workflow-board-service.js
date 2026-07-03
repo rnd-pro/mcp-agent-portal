@@ -2077,11 +2077,11 @@ export function createWorkflowBoardService(opts = {}) {
     if (automation.action === 'scope' && readyCardHasExecutionContract(card)) {
       return { ok: false, reason: 'card already has an execution contract; promote instead of scope', automation };
     }
+    let waiting = deriveCardWaiting(board, card, { now: now() });
     if (
       automation.action === 'orchestrate'
       && decompositionCloseColumnIdForParent(board, card)
-      && !hasQueuedActionableReturn(card)
-      && !hasActiveEscalation(card)
+      && !waitingDrivesReengagement(waiting)
     ) {
       return { ok: false, reason: 'decomposed parent waits for child returns instead of re-running', automation };
     }
@@ -2091,7 +2091,6 @@ export function createWorkflowBoardService(opts = {}) {
     // the unanswered question via the completed-run escalation clear — half-done work ships and the
     // human is never asked. Carve-outs live on the same derived waiting contract: a human reply (AU06)
     // or a hard-interrupt child return is new input that must be delivered exactly once.
-    let waiting = deriveCardWaiting(board, card, { now: now() });
     let wake = waiting?.wake ?? {};
     let hasWakeCarveOut = wake.humanReply === true
       || wake.hardInterrupt === true
@@ -2960,14 +2959,14 @@ export function createWorkflowBoardService(opts = {}) {
     return DEFAULT_COLUMN_STALE_AGE_MS;
   }
 
-  // Stale/aging escalation (Axis C). Independent of the dependency-block clock (releaseDependencies):
-  // a card that ran and stopped but was never advanced occupies its column and ages silently — no
-  // dependency block, no concurrency pressure (its run is done), so nothing else flags it. For each
-  // non-terminal card that has been worked (>=1 run), is not currently running, is not dependency-
-  // blocked (that path owns its own clock), and carries no active escalation, escalate to a typed
-  // `needs_decision` once its time-in-column exceeds the budget. Idempotent: the raised escalation
-  // sets hasActiveEscalation, so a re-tick skips the card (no escalation spam). Runs in the reconcile
-  // loop and at the top of the drain pass, mirroring releaseDependencies.
+  // Stale/aging escalation (Axis C). A card that ran and stopped but was never advanced occupies its
+  // column and ages silently. This is the fallback only when the derived waiting contract has NO named
+  // reason for the stop: dependency waits, escalation backoff, queued returns, and recovery flags all
+  // own their own drivers/clocks. For each non-terminal card that has been worked (>=1 run), is not
+  // currently running, and has no derived waiting reason, escalate to a typed `needs_decision` once its
+  // time-in-column exceeds the budget. Idempotent: the raised escalation becomes a waiting reason, so a
+  // re-tick skips the card (no escalation spam). Runs in the reconcile loop and at the top of the drain
+  // pass, mirroring releaseDependencies.
   function escalateStaleCards(boardId) {
     let board = ensureBoard(boardId);
     let classifier = classifyWorkflowGraph(board);
@@ -2976,12 +2975,16 @@ export function createWorkflowBoardService(opts = {}) {
     let escalated = [];
     for (let card of boardCardsFor(board.id)) {
       if (classifier.isTerminal(card.columnId)) continue;
-      // A dependency-blocked card is the MAX_BLOCKED_AGE clock's domain — keep the two independent.
-      if (normalizeWorkflowLifecycle(card.lifecycle) === 'blocked') continue;
-      if (hasActiveEscalation(card)) continue;
       // A live run is progress, not staleness; and a card never worked is intake, not a stalled run.
       if (activeRunForCard(card.id)) continue;
       if (!getRunsForCard(card.id).length) continue;
+      let waiting = deriveCardWaiting(board, card, {
+        now: currentNow,
+        classifier,
+        isTerminal: false,
+        hasActiveRun: false,
+      });
+      if (waiting) continue;
       let budget = resolveColumnStaleAgeMs(cardAutomation(board, card));
       if (!(budget > 0)) continue;
       let enteredAt = Number(card.metadata?.enteredColumnAt);
@@ -4825,6 +4828,14 @@ export function createWorkflowBoardService(opts = {}) {
       hasActiveRun: Boolean(hasActiveRun),
       maxBlockedAgeMs: MAX_BLOCKED_AGE_MS,
     });
+  }
+
+  function waitingDrivesReengagement(waiting) {
+    return waiting?.wake?.actionableReturn === true || waiting?.reason === 'backoff';
+  }
+
+  function cardHasReengagementSignal(board, card, opts = {}) {
+    return waitingDrivesReengagement(deriveCardWaiting(board, card, opts));
   }
 
   function projectCardV2(card, context = {}) {
@@ -8706,7 +8717,12 @@ export function createWorkflowBoardService(opts = {}) {
       .filter(card => card.boardId === board.id)
       .filter(card => !projectId || card.projectId === projectId)
       .filter(card => !terminalClassifier.isTerminal(card.columnId))
-      .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card))
+      .filter(card => cardHasReengagementSignal(board, card, {
+        now: currentNow,
+        classifier: terminalClassifier,
+        isTerminal: false,
+        hasActiveRun: false,
+      }))
       .map(card => card.id);
 
     for (let cardId of candidateIds) {
@@ -8719,13 +8735,13 @@ export function createWorkflowBoardService(opts = {}) {
       // whole decision + commit.
       let card = getCard(cardId);
       if (!card || card.boardId !== board.id) continue;
-      if (!(hasActiveEscalation(card) || hasQueuedActionableReturn(card))) continue;
       let waiting = deriveCardWaiting(board, card, {
         now: currentNow,
         classifier: terminalClassifier,
         isTerminal: false,
         hasActiveRun: false,
       });
+      if (!waitingDrivesReengagement(waiting)) continue;
       let wake = waiting?.wake ?? {};
       let hardInterruptWake = wake.hardInterrupt === true;
       let humanReplyWake = wake.humanReply === true;
