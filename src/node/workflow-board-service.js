@@ -5515,6 +5515,25 @@ export function createWorkflowBoardService(opts = {}) {
     return null;
   }
 
+  function auditStageAgents(board, auditColumnId) {
+    return textArray((board.columns ?? []).find(col => col.id === auditColumnId)?.automation?.agents);
+  }
+
+  function isAuditStageRun(run, board, auditColumnId, card = null) {
+    let agents = auditStageAgents(board, auditColumnId);
+    let owner = textOrNull(run?.leaseOwner);
+    if (!owner) return true;
+    if (!agents.length) return true;
+    if (agents.includes(owner)) return true;
+    let enteredColumn = textOrNull(card?.metadata?.enteredColumn);
+    let enteredAt = Number(card?.metadata?.enteredColumnAt);
+    let startedAt = Number(run?.startedAt);
+    return !(enteredColumn === auditColumnId
+      && Number.isFinite(enteredAt)
+      && Number.isFinite(startedAt)
+      && startedAt < enteredAt);
+  }
+
   // Structured expected-red release-gate allowance (AU21). A card that legitimately expects specific
   // tests to be red (a TDD red-phase card, or one whose change breaks a downstream slice repaired in a
   // sibling card) may advance past a FAILING release suite — but ONLY under a typed, scoped contract, not
@@ -5795,7 +5814,9 @@ export function createWorkflowBoardService(opts = {}) {
         continue;
       }
       if (latestCard.columnId === auditColumnId && publishColumnId) {
-        let finished = cardRuns.filter(run => TERMINAL_RUN_STATUSES.has(run.status));
+        let finished = cardRuns
+          .filter(run => TERMINAL_RUN_STATUSES.has(run.status))
+          .filter(run => isAuditStageRun(run, board, auditColumnId, latestCard));
         let latestFinished = finished.sort(
           (a, b) => (Number(a.completedAt ?? a.updatedAt ?? 0) - Number(b.completedAt ?? b.updatedAt ?? 0)),
         ).at(-1);
@@ -5813,7 +5834,7 @@ export function createWorkflowBoardService(opts = {}) {
           // its explicit PASS is an INDEPENDENT sign-off, not a daemon self-pass. This lets an autonomous
           // board advance audited work without a human while preserving separated duty (auditor !=
           // executor); only the rare extreme reaches a human via the orchestrator / needs_decision lane.
-          let auditAgents = textArray((board.columns ?? []).find(col => col.id === auditColumnId)?.automation?.agents);
+          let auditAgents = auditStageAgents(board, auditColumnId);
           let auditor = textOrNull(latestFinished.leaseOwner);
           // Separated duty at the AGENT level (AU01): a configured reviewer agent's PASS counts as an
           // INDEPENDENT sign-off ONLY if that agent did not also produce the work. Without the

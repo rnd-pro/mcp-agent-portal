@@ -1133,6 +1133,41 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(result.releaseTail.closed.includes(cardId), false, 'manual publishMode does not auto-close');
   });
 
+  it('autonomous tail: ignores non-audit terminal runs instead of treating them as audit no-verdict', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-non-audit-run', 'completed', {
+      leaseOwner: 'orchestrator',
+      executedBy: ['daemon'],
+    });
+    let seeded = service.getCard(cardId);
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${cardId}`,
+      value: {
+        ...seeded,
+        metadata: {
+          ...seeded.metadata,
+          enteredColumn: 'quality-audit',
+          enteredColumnAt: 1000,
+        },
+        version: seeded.version + 1,
+      },
+    }], 'test:entered-audit-after-execution-run-start');
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      verdictTasks(cardId, 'The execution stage completed.\nWORKFLOW_RESULT: completed'),
+      { drive: true },
+    );
+
+    let card = service.getCard(cardId);
+    assert.equal(card.columnId, 'quality-audit', 'a non-audit run cannot advance or rework the audit stage');
+    assert.equal(card.metadata?.escalation, undefined, 'the release tail must not invent a no-verdict audit escalation');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), false, 'no false audit flag is added from a non-audit run');
+    assert.equal(result.releaseTail.advanced.some(item => item.cardId === cardId), false, 'non-audit evidence does not advance');
+    assert.equal(result.releaseTail.reworked.some(item => item.cardId === cardId), false, 'non-audit evidence does not rework');
+  });
+
   it('autonomous scope: a backlog card with acceptance but no owner gets an owner and self-advances', async () => {
     service.updateWorkflowBoard({ mode: 'autonomous' }, { gatedBy: 'board.control' });
     let created = service.createOrUpdateCard({
