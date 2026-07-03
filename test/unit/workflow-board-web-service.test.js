@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildWorkflowBoardUrl,
   decomposeWorkflowCard,
+  fetchWorkflowBoardProjection,
   normalizeWorkflowBoardPayload,
 } from '../../web/services/workflow-board.js';
 
@@ -63,5 +64,51 @@ describe('workflow board web service', () => {
       buildWorkflowBoardUrl({ projectId: 'agent-portal', importMarkdown: true, reconcileRuntime: true }),
       '/api/workflow-board?projectId=agent-portal&importMarkdown=true&reconcileRuntime=true',
     );
+    assert.equal(
+      buildWorkflowBoardUrl({
+        projectId: 'agent-portal',
+        view: 'status',
+        eventLimit: 5,
+        includeCards: false,
+        includeEvents: false,
+        includeRuntime: true,
+        compact: true,
+      }),
+      '/api/workflow-board?projectId=agent-portal&view=status&eventLimit=5&includeCards=false&includeEvents=false&includeRuntime=true&compact=true',
+    );
+  });
+
+  it('returns raw compact projections for readout-only refreshes', async () => {
+    let calls = [];
+    let projection = {
+      schema: 'workflow-board-compact-projection/v1',
+      view: 'status',
+      runtime: { runningTaskCount: 2 },
+      activity: { latestEventAt: '2026-07-03T12:00:00.000Z' },
+    };
+    let fetchImpl = async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({ ok: true, projection }),
+      };
+    };
+
+    let result = await fetchWorkflowBoardProjection({
+      projectId: 'agent-portal',
+      view: 'status',
+      compact: true,
+      includeCards: false,
+      includeEvents: false,
+      includeRuntime: true,
+      eventLimit: 1,
+    }, { fetchImpl });
+
+    assert.equal(result, projection);
+    assert.equal(
+      calls[0].url,
+      '/api/workflow-board?projectId=agent-portal&view=status&eventLimit=1&includeCards=false&includeEvents=false&includeRuntime=true&compact=true',
+    );
+    assert.deepEqual(calls[0].options.headers, { Accept: 'application/json' });
   });
 });

@@ -116,10 +116,12 @@ export function formatTokens(value) {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-export function relativeTime(iso) {
+export function relativeTime(iso, options = {}) {
   let t = Date.parse(iso || '');
   if (!Number.isFinite(t)) return '';
-  let s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  let now = Number(options.now);
+  let base = Number.isFinite(now) ? now : Date.now();
+  let s = Math.max(0, Math.round((base - t) / 1000));
   if (s < 60) return `${s}s`;
   let m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;

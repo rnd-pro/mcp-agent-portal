@@ -51,7 +51,11 @@ const DEFAULT_COLUMNS = [
   },
 ];
 
-const ACTIVE_COLUMN_IDS = new Set(['ready', 'in-progress', 'quality-audit', 'commit-publish']);
+// Run statuses that mean an agent is actively working a card right now (mirrors the board card /
+// inspector activity semantics in workflow-card-telemetry.js — services must not import panels).
+const ACTIVE_RUN_STATUS_KEYS = new Set([
+  'requested', 'running', 'recovering', 'started', 'active', 'streaming',
+]);
 const RECOVERY_FLAG_KEYS = new Set([
   'needs_resume',
   'needs-audit',
@@ -407,9 +411,9 @@ function ensureColumns(columns, cards) {
         gate: '',
         limit: null,
         order: byId.size,
-    policy: {},
-    automation: {},
-    cards: [],
+        policy: {},
+        automation: {},
+        cards: [],
       });
     }
   }
@@ -430,10 +434,29 @@ function flagNeedsRecovery(flag) {
   return RECOVERY_FLAG_KEYS.has(key);
 }
 
+// A card counts as ACTIVE when work is genuinely happening on it — its newest run reports an
+// active status, it holds an unexpired lease, or its lifecycle is mid-execution. Column membership
+// is NOT activity: a card parked in "In Progress" with no run is idle, and boards with renamed
+// columns would otherwise read zero forever.
+function cardIsGenuinelyActive(card, now = Date.now()) {
+  let newest = null;
+  for (let run of [card.run, ...card.runs]) {
+    if (!run || (!run.id && !run.status)) continue;
+    let time = Date.parse(run.updatedAt || run.startedAt || '') || 0;
+    if (!newest || time > newest.time) newest = { time, status: normalizeText(run.status).toLowerCase() };
+  }
+  if (newest && ACTIVE_RUN_STATUS_KEYS.has(newest.status)) return true;
+  let leaseExpires = Date.parse(card.lease?.leaseExpiresAt || '');
+  if (Number.isFinite(leaseExpires) && leaseExpires > now) return true;
+  let lifecycle = normalizeText(card.lifecycle).toLowerCase();
+  return lifecycle === 'running' || lifecycle === 'admitting';
+}
+
 function deriveCounters(cards, columns) {
+  let now = Date.now();
   let counters = {
     total: cards.length,
-    active: cards.filter(card => ACTIVE_COLUMN_IDS.has(card.columnId)).length,
+    active: cards.filter(card => cardIsGenuinelyActive(card, now)).length,
     blocked: cards.filter(card => card.flags.some(flag => normalizeText(flag).toLowerCase() === 'blocked')).length,
     recovery: cards.filter(card => card.flags.some(flagNeedsRecovery)).length,
     done: cards.filter(card => card.columnId === 'done').length,
@@ -456,6 +479,31 @@ function normalizeCounters(rawCounters, derived) {
   };
 }
 
+// The freshest activity timestamp across the whole payload: card updates, run progress, lease
+// renewals, and events — NOT the board record's own updatedAt, which only moves when the board
+// CONFIG changes (columns/automation edits) and can lag live card activity by days.
+function deriveLastActivityAt(source, cards, events) {
+  let times = [];
+  let push = (value) => {
+    let time = Date.parse(value || '');
+    if (Number.isFinite(time)) times.push(time);
+  };
+  push(source.updatedAt || source.updated_at);
+  for (let card of cards) {
+    push(card.updatedAt);
+    push(card.createdAt);
+    push(card.lease?.updatedAt);
+    for (let run of card.runs) {
+      push(run.updatedAt);
+      push(run.completedAt);
+      push(run.startedAt);
+    }
+    for (let event of card.events) push(event.timestamp);
+  }
+  for (let event of events) push(event.timestamp);
+  return times.length ? new Date(Math.max(...times)).toISOString() : '';
+}
+
 function assignCardsToColumns(columns, cards) {
   let byColumn = new Map(columns.map(column => [column.id, { ...column, cards: [] }]));
   for (let card of sortCards(cards)) {
@@ -470,6 +518,10 @@ function appendParam(params, key, value) {
   if (text) params.set(key, text);
 }
 
+function appendBooleanParam(params, key, value) {
+  if (typeof value === 'boolean') params.set(key, String(value));
+}
+
 export function buildWorkflowBoardUrl(filters = {}, endpoint = WORKFLOW_BOARD_ENDPOINT) {
   let params = new URLSearchParams();
   appendParam(params, 'scope', filters.scope);
@@ -478,10 +530,36 @@ export function buildWorkflowBoardUrl(filters = {}, endpoint = WORKFLOW_BOARD_EN
   appendParam(params, 'chatId', filters.chatId);
   appendParam(params, 'boardId', filters.boardId);
   appendParam(params, 'mode', filters.mode);
+  appendParam(params, 'view', filters.view);
+  appendParam(params, 'eventLimit', filters.eventLimit);
+  appendBooleanParam(params, 'includeCards', filters.includeCards);
+  appendBooleanParam(params, 'includeEvents', filters.includeEvents);
+  appendBooleanParam(params, 'includeRuntime', filters.includeRuntime);
+  appendBooleanParam(params, 'compact', filters.compact);
   if (filters.importMarkdown === true) params.set('importMarkdown', 'true');
   if (filters.reconcileRuntime === true) params.set('reconcileRuntime', 'true');
   let query = params.toString();
   return query ? `${endpoint}?${query}` : endpoint;
+}
+
+async function fetchWorkflowBoardJson(filters = {}, options = {}) {
+  let fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Workflow board fetch failed: fetch is not available in this runtime.');
+  }
+
+  let response = await fetchImpl(buildWorkflowBoardUrl(filters, options.endpoint), {
+    signal: options.signal,
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Workflow board fetch failed: /api/workflow-board returned HTTP ${response.status}.`);
+  }
+  let payload = await response.json();
+  if (payload?.error) {
+    throw new Error(`Workflow board fetch failed: ${payload.error}`);
+  }
+  return payload;
 }
 
 export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
@@ -516,8 +594,11 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
   let transitions = asArray(source.transitions || root.transitions)
     .map(normalizeTransition)
     .filter(Boolean);
+  // `projection.counts` is the PER-COLUMN card-count map ({ backlog: 3, ... }), not a counters
+  // object — feeding it here let a column whose id collides with a counter name (done, blocked,
+  // recovery, ...) silently hijack that counter with its column size.
   let counters = normalizeCounters(
-    source.counters || source.summary || projection.counts || projection.counters || root.counters,
+    source.counters || source.summary || projection.counters || root.counters,
     deriveCounters(normalizedCards, columns),
   );
   let boardId = normalizeText(source.id || source.boardId || source.board_id || projection.boardId || filters.boardId, DEFAULT_BOARD_ID);
@@ -543,6 +624,9 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
       ? Number(source.version || projection.version || root.version)
       : null,
     updatedAt: normalizeTimestamp(source.updatedAt || source.updated_at || root.updatedAt),
+    // The "board is fresh as of" readout binding: latest card/run/lease/event activity, falling
+    // back to the payload receive time so an empty board still reads as just-synced.
+    lastActivityAt: deriveLastActivityAt(source, normalizedCards, events) || normalizeTimestamp(Date.now()),
     columns,
     cards: normalizedCards,
     transitions,
@@ -555,23 +639,13 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
 }
 
 export async function fetchWorkflowBoard(filters = {}, options = {}) {
-  let fetchImpl = options.fetchImpl || globalThis.fetch;
-  if (typeof fetchImpl !== 'function') {
-    throw new Error('Workflow board fetch failed: fetch is not available in this runtime.');
-  }
-
-  let response = await fetchImpl(buildWorkflowBoardUrl(filters, options.endpoint), {
-    signal: options.signal,
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(`Workflow board fetch failed: /api/workflow-board returned HTTP ${response.status}.`);
-  }
-  let payload = await response.json();
-  if (payload?.error) {
-    throw new Error(`Workflow board fetch failed: ${payload.error}`);
-  }
+  let payload = await fetchWorkflowBoardJson(filters, options);
   return normalizeWorkflowBoardPayload(payload, filters);
+}
+
+export async function fetchWorkflowBoardProjection(filters = {}, options = {}) {
+  let payload = await fetchWorkflowBoardJson(filters, options);
+  return payload?.projection || payload;
 }
 
 export async function requestWorkflowTransition(input = {}, options = {}) {

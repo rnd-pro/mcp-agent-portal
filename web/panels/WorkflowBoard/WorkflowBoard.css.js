@@ -284,13 +284,19 @@ pg-workflow-board .wb-chip .material-symbols-outlined {
   font-size: 12px;
 }
 
-/* U09/U15: the column-header automation indicator carries a filled container per kind (status =
-   gated, warning = auto) so its meaning does not rely on color alone — it already pairs an icon
-   (bolt/checklist/pan_tool) and label text from automationSummary(). */
+/* U09/U15: the column-header effective-mode indicator carries a filled container per kind (state =
+   live automation, status = gated automation) so its meaning does not rely on color alone — it
+   already pairs an icon (bolt/checklist/pan_tool) and label text from effectiveColumnAutomation(). */
+pg-workflow-board .wb-chip[data-kind="state"] {
+  border-color: color-mix(in oklch, var(--sn-sys-accent) 46%, var(--sn-sys-outline));
+  background: var(--sn-sys-accent-container);
+  color: var(--sn-sys-on-accent-container);
+}
+
 pg-workflow-board .wb-chip[data-kind="status"] {
-  border-color: color-mix(in oklch, var(--sn-sys-info) 46%, var(--sn-sys-outline));
-  background: var(--sn-sys-info-container);
-  color: var(--sn-sys-on-info-container);
+  border-color: color-mix(in oklch, var(--sn-sys-success) 46%, var(--sn-sys-outline));
+  background: var(--sn-sys-success-container);
+  color: var(--sn-sys-on-success-container);
 }
 
 pg-workflow-board .wb-chip[data-kind="warning"] {
@@ -522,24 +528,11 @@ pg-workflow-board [hidden] {
   }
 }
 
-/* U14: resource-group accents. .sn-kanban-chip[data-kind="..."] plus the chip icon field are the
-   documented public extension contract (icon glyph is the non-color signal per group; the group
-   name is also in the chip label text, so the group never depends on color alone — U15). Group
-   hues resolve through symbiote-ui T2 system roles instead of hardcoded hsl()/hex literals: no two
-   groups share a role, spanning the danger/warning/accent/success/info system-role families so
-   each stays visually distinct without inventing new domain-palette colors from this panel. */
-sn-kanban-board .sn-kanban-chip[data-kind^="group-"] {
-  font-weight: 600;
-  border-color: color-mix(in oklch, currentColor 38%, var(--sn-sys-outline));
-}
-sn-kanban-board .sn-kanban-chip[data-kind="group-integrity"] { color: var(--sn-sys-danger); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-resilience"] { color: var(--sn-sys-warning); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-model"] { color: var(--sn-sys-info); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-governance"] { color: var(--sn-sys-accent); }
-sn-kanban-board .sn-kanban-chip[data-kind="group-collab-observability"] { color: var(--sn-sys-success); }
-
 /* Dependency degree: blocked-by (caution) vs unlocks (positive) — public data-kind contract,
-   T2-role colors, paired with the lock/lock_open icon field so kind is never color-only. */
+   T2-role colors, paired with the lock/lock_open icon field so kind is never color-only. The rest
+   of the card chip taxonomy (state/status/error/warning/agent/'' quiet) is styled by
+   sn-kanban-board itself; resource groups read through their per-group icon (U06) as quiet
+   telemetry, and audit verdicts ride the shared status/error kinds. */
 sn-kanban-board .sn-kanban-chip[data-kind="dep-blocked"] {
   color: var(--sn-sys-warning);
   border-color: color-mix(in oklch, var(--sn-sys-warning) 46%, var(--sn-sys-outline));
@@ -547,15 +540,5 @@ sn-kanban-board .sn-kanban-chip[data-kind="dep-blocked"] {
 sn-kanban-board .sn-kanban-chip[data-kind="dep-unlocks"] {
   color: var(--sn-sys-success);
   border-color: color-mix(in oklch, var(--sn-sys-success) 40%, var(--sn-sys-outline));
-}
-
-/* Quality-audit verdict: a passed audit (success) vs. a rejected audit routed back as rework (danger). */
-sn-kanban-board .sn-kanban-chip[data-kind="audit-pass"] {
-  color: var(--sn-sys-success);
-  border-color: color-mix(in oklch, var(--sn-sys-success) 46%, var(--sn-sys-outline));
-}
-sn-kanban-board .sn-kanban-chip[data-kind="audit-reject"] {
-  color: var(--sn-sys-danger);
-  border-color: color-mix(in oklch, var(--sn-sys-danger) 50%, var(--sn-sys-outline));
 }
 `;

@@ -4,12 +4,12 @@ import 'symbiote-ui/board';
 import { state as dashState } from '../../dashboard-state.js';
 import { stateSync } from '../../state-sync.js';
 import {
+  fetchWorkflowBoardProjection,
   fetchWorkflowBoard,
   controlWorkflowCard,
   controlWorkflowBoard,
   deleteWorkflowCard,
   getAdjacentColumn,
-  getCardTransitions,
   importWorkflowWorkItems,
   normalizeWorkflowBoardPayload,
   orchestrateWorkflowCard,
@@ -29,31 +29,24 @@ import cssLocal from './WorkflowBoard.css.js';
 import { setWorkflowBoardSelection } from './workflow-board-selection.js';
 import { openChat } from '../../common/open-chat.js';
 import { tPortal } from '../../common/localization.js';
+import { latestRun, agentName, isCardActive } from './workflow-card-telemetry.js';
 import {
-  latestRun,
-  agentName,
-  formatDuration,
-  formatTokens,
-  effectiveStatus,
-  isCardActive,
-  formatStatusLabel,
-} from './workflow-card-telemetry.js';
-import { checkPassed } from '../../../src/iso/workflow-board.js';
+  cardFooterChips,
+  cardMetaChips,
+  deriveCardTicker,
+  effectiveColumnAutomation,
+  localizeWorkflowEnum,
+} from './workflow-card-presentation.js';
+import {
+  buildWorkflowBoardProjectionFromContext,
+  createWorkflowBoardRenderContext,
+  workflowBoardRenderScopeKey,
+} from './workflow-board-render-context.js';
+import { decideWorkflowBoardRealtimeRefresh } from './workflow-board-realtime.js';
 
 const DEFAULT_SCOPE = 'home';
 const BOARD_VIEWS = new Set(['kanban', 'graph']);
 const FALLBACK_REFRESH_INTERVAL_MS = 60_000;
-// U06: a distinct material-symbols icon per resource group so a card's group reads at a glance even
-// where the chip color (data-kind) does not apply; unknown groups fall back to a neutral marker. Uses
-// the chip `icon` field (rendered by sn-kanban-board via material-symbols-outlined), not literal glyphs.
-const GROUP_ICON = {
-  integrity: 'verified',
-  resilience: 'shield',
-  model: 'model_training',
-  governance: 'gavel',
-  'collab-observability': 'monitoring',
-};
-const GROUP_ICON_FALLBACK = 'category';
 const REALTIME_DEBOUNCE_MS = 200;
 const REALTIME_STATE_KEYS = ['workflowCards', 'workflowRuns', 'workflowLeases', 'workflowTransitions', 'tasks'];
 const LAUNCH_COLUMNS = new Set(['ideas', 'backlog']);
@@ -94,26 +87,8 @@ function formatLabel(value) {
     .join(' ');
 }
 
-// UI-chrome vocabulary (board modes, automation enums, control verbs) is localized through
-// portal.workflow.enum.* keys; unknown tokens fall back to the prettified identifier so user-defined
-// values (board DATA) pass through untranslated.
-function tEnum(value, fallbackValue = value) {
-  let token = normalizeText(value).toLowerCase();
-  if (!token) return '';
-  let key = `workflow.enum.${token}`;
-  let translated = tPortal(key);
-  return translated === `portal.${key}` ? formatLabel(fallbackValue) : translated;
-}
-
-// Recovery/blocking flags carry curated labels under portal.workflow.flag.*; unknown flags fall back
-// to the prettified flag token.
-function flagLabel(flag) {
-  let token = normalizeText(flag).toLowerCase();
-  if (!token) return '';
-  let key = `workflow.flag.${token}`;
-  let translated = tPortal(key);
-  return translated === `portal.${key}` ? formatLabel(token) : translated;
-}
+// UI-chrome enum localization is shared with the card-presentation module (single vocabulary).
+const tEnum = localizeWorkflowEnum;
 
 function formatMode(value) {
   return tEnum(value || 'passive');
@@ -157,126 +132,6 @@ function makeChip(text, kind = '', options = {}) {
   if (kind) chip.dataset.kind = kind;
   if (options.title) chip.title = options.title;
   return chip;
-}
-
-// U09: column headers previously dumped the full automation config (trigger/action/mode/agents/
-// parallelLimit) as undifferentiated chips — automation debug info, not a header. Reduce to a single
-// primary indicator (auto/gated/manual); the full config already lives in the column-settings popover
-// (the gear affordance rendered by #renderColumnSettingsControl) as its authoritative surface.
-function automationSummary(automation = {}) {
-  let mode = normalizeText(automation.mode).toLowerCase();
-  let agents = asArray(automation.agents).map(item => normalizeText(item)).filter(Boolean);
-  if (automation.agent) agents.unshift(automation.agent);
-  let agentCount = new Set(agents).size;
-  let agentsPart = agentCount ? tPortal('workflow.automation.agents', { count: agentCount }) : '';
-  if (mode === 'auto') {
-    return {
-      label: tPortal('workflow.automation.auto'),
-      kind: 'warning',
-      icon: 'bolt',
-      title: [
-        tPortal('workflow.automation.autoTitle'),
-        agentsPart,
-        automation.parallelLimit ? tPortal('workflow.automation.parallelLimit', { limit: automation.parallelLimit }) : '',
-      ].filter(Boolean).join(' · '),
-    };
-  }
-  if (mode === 'gated') {
-    return {
-      label: tPortal('workflow.automation.gated'),
-      kind: 'status',
-      icon: 'checklist',
-      title: [tPortal('workflow.automation.gatedTitle'), agentsPart].filter(Boolean).join(' · '),
-    };
-  }
-  return {
-    label: tPortal('workflow.automation.manual'),
-    kind: '',
-    icon: 'pan_tool',
-    title: tPortal('workflow.automation.manualTitle'),
-  };
-}
-
-function flagKind(flag = '') {
-  let key = normalizeText(flag).toLowerCase();
-  if (key === 'blocked' || key === 'lost') return 'error';
-  if (key.includes('audit') || key.includes('resume') || key === 'recovering' || key === 'stale') {
-    return 'warning';
-  }
-  return '';
-}
-
-function statusKind(status = '') {
-  let key = normalizeText(status).toLowerCase();
-  if (key === 'blocked' || key === 'error' || key === 'lost') return 'error';
-  if (key === 'stale' || key === 'recovering' || key === 'needs_resume') return 'warning';
-  return 'status';
-}
-
-// U04: priority previously always mapped to `{ kind: 'status' }`, which sn-kanban-board renders as
-// the success/filled treatment — every priority, including "high", read as a green "all good" signal.
-// Severity must scale with priority: high/urgent reads danger, medium reads warning, low/normal is
-// unweighted (plain, kind-less) so it does not compete visually with signals that need attention.
-function priorityKind(priority = '') {
-  let key = normalizeText(priority).toLowerCase();
-  if (key === 'high' || key === 'urgent' || key === 'critical') return 'error';
-  if (key === 'medium') return 'warning';
-  return '';
-}
-
-// Audit kickback escalation kinds (auditor rejected → routed back to the orchestrator for rework).
-const AUDIT_ESCALATION_KINDS = new Set(['insufficient_permission', 'insufficient_context', 'needs_decision', 'rework']);
-
-// The original check object form lives on `card.raw.checks` (the projection); the normalized card keeps
-// only a display array under `card.checks`, so read verdicts from the raw side.
-function rawCardCheck(card, key) {
-  let checks = card?.raw?.checks;
-  if (!checks || typeof checks !== 'object') return undefined;
-  return checks[key];
-}
-
-function auditRejected(value) {
-  if (value === false) return true;
-  if (value === null || value === undefined || value === true) return false;
-  if (typeof value === 'object') return auditRejected(value.status);
-  return ['failed', 'fail', 'rejected', 'reject'].includes(String(value).trim().toLowerCase());
-}
-
-function cardHasAuditEscalation(card = {}) {
-  let state = card?.metadata?.escalation;
-  let kind = state?.kind || state?.lastEscalation?.kind;
-  return Boolean(kind && AUDIT_ESCALATION_KINDS.has(String(kind)));
-}
-
-// The kanban footer verdict chip for a card that has reached the quality audit: a success chip when the
-// audit passed (or was waived), a danger "rework" chip when the auditor rejected it (an explicit failed
-// audit check, or a needs_audit flag paired with an audit-related escalation). Returns null otherwise.
-function auditVerdictChip(card = {}) {
-  let audit = rawCardCheck(card, 'audit');
-  let waiver = rawCardCheck(card, 'auditWaiver');
-  if (checkPassed(audit) || checkPassed(waiver)) {
-    let signedBy = audit && typeof audit === 'object' ? normalizeText(audit.signedBy) : '';
-    let passTitle = tPortal('workflow.card.auditPassTitle');
-    return {
-      label: tPortal('workflow.card.auditPass'),
-      kind: 'audit-pass',
-      title: signedBy ? `${passTitle} · ${signedBy}` : passTitle,
-    };
-  }
-  let needsAudit = asArray(card.flags).includes('needs_audit');
-  if (auditRejected(audit) || (needsAudit && cardHasAuditEscalation(card))) {
-    let state = card?.metadata?.escalation;
-    let reason = (audit && typeof audit === 'object' ? normalizeText(audit.reason) : '')
-      || normalizeText(state?.detail || state?.lastEscalation?.detail)
-      || normalizeText(state?.kind || state?.lastEscalation?.kind);
-    let rejectTitle = tPortal('workflow.card.auditRejectTitle');
-    return {
-      label: tPortal('workflow.card.auditRework'),
-      kind: 'audit-reject',
-      title: reason ? `${rejectTitle} · ${reason}` : rejectTitle,
-    };
-  }
-  return null;
 }
 
 function isRuntimeOnlyCard(card = {}) {
@@ -345,51 +200,6 @@ function eventDetail(board, card, extra = {}) {
   };
 }
 
-// Reconstruct a `workflow-board-projection/v2`-shaped object from the normalized board so the pure
-// board-graph adapter receives the frozen projection contract. The web normalizer keeps the original
-// projection card on `card.raw`, which carries `lifecycle` / `dependsOn` / `queue`; surface those here
-// without inventing values.
-function projectionFromBoard(board, columns, cards) {
-  let projectionCards = asArray(cards).map((card) => {
-    let raw = card.raw && typeof card.raw === 'object' ? card.raw : {};
-    return {
-      id: card.id,
-      columnId: card.columnId,
-      title: card.title,
-      priority: card.priority,
-      status: card.status,
-      lifecycle: raw.lifecycle ?? card.lifecycle ?? 'idle',
-      dependsOn: raw.dependsOn ?? raw.depends_on ?? card.dependsOn ?? [],
-      queue: raw.queue ?? card.queue ?? {},
-    };
-  });
-  return {
-    schema: 'workflow-board-projection/v2',
-    boardId: board?.boardId || board?.id || '',
-    board: {
-      id: board?.boardId || board?.id || '',
-      columns: asArray(columns).map(column => ({
-        id: column.id,
-        title: column.title,
-        description: column.description || '',
-        gate: column.gate || '',
-        automation: column.automation || {},
-      })),
-      transitions: asArray(board?.transitions),
-    },
-    columns: asArray(columns).map(column => ({
-      id: column.id,
-      title: column.title,
-      description: column.description || '',
-      gate: column.gate || '',
-      automation: column.automation || {},
-      cards: asArray(column.cards).map(card => projectionCards.find(item => item.id === card.id)).filter(Boolean),
-    })),
-    cards: projectionCards,
-    version: board?.version ?? null,
-  };
-}
-
 export class WorkflowBoard extends Symbiote {
   static get observedAttributes() {
     return ['scope', 'project-id', 'board-id', 'mode'];
@@ -412,6 +222,19 @@ export class WorkflowBoard extends Symbiote {
   #visibilitySyncHandler = null;
   #realtimeUnsubscribers = [];
   #realtimeRefreshTimer = null;
+  #realtimeRefreshMode = '';
+  #statusAbortController = null;
+  #renderContext = null;
+  #renderContextBoard = null;
+  #renderContextScopeKey = '';
+  // Per-column header memoization: the same DOM node is returned while the column's rendered config
+  // is unchanged, so the board's keyed reconciliation never rebuilds a header (or tears down its
+  // open settings popover) on a silent refresh. Keyed by column id → { key, element, stale }.
+  #columnHeaderCache = new Map();
+  #columnHeaderRevision = 0;
+  // One stable closure across setBoard calls — a fresh closure per render would read as a changed
+  // renderer and force header rebuilds even when nothing changed.
+  #renderColumnHeaderBound = (column) => this.#memoizedColumnHeader(column);
 
   initCallback() {
     this.#localizeChrome();
@@ -448,6 +271,8 @@ export class WorkflowBoard extends Symbiote {
     super.disconnectedCallback?.();
     this.#abortController?.abort();
     this.#abortController = null;
+    this.#statusAbortController?.abort();
+    this.#statusAbortController = null;
     if (this.#routeSyncHandler) {
       globalThis.removeEventListener?.('hashchange', this.#routeSyncHandler);
       this.#routeSyncHandler = null;
@@ -491,6 +316,7 @@ export class WorkflowBoard extends Symbiote {
 
   setBoardData(payload = {}) {
     this.#board = normalizeWorkflowBoardPayload(payload, this.#scopeState());
+    this.#invalidateRenderContext();
     this.#ensureSelection();
     this.#render();
     this.#publishSelection('set-board-data');
@@ -534,6 +360,7 @@ export class WorkflowBoard extends Symbiote {
       ]);
       if (loadKey !== this.#lastLoadKey) return null;
       this.#board = board;
+      this.#invalidateRenderContext();
       this.#ensureSelection();
       this.#clearBanner();
       this.#render();
@@ -561,25 +388,97 @@ export class WorkflowBoard extends Symbiote {
 
   #subscribeRealtime() {
     let ready = false;
-    let onPatch = () => {
+    let onPatch = (key, value) => {
       // Ignore the synchronous initial delivery emitted while subscribing; the
       // first board load is driven by loadBoard() in initCallback.
-      if (ready) this.#scheduleRealtimeRefresh();
+      if (ready) this.#scheduleRealtimeRefresh(this.#realtimeRefreshDecision(key, value));
     };
     for (let key of REALTIME_STATE_KEYS) {
-      this.#realtimeUnsubscribers.push(stateSync.on(key, onPatch));
+      this.#realtimeUnsubscribers.push(stateSync.on(key, value => onPatch(key, value)));
     }
     ready = true;
   }
 
-  #scheduleRealtimeRefresh() {
+  #realtimeRefreshDecision(key, value) {
+    return decideWorkflowBoardRealtimeRefresh({
+      key,
+      value,
+      board: this.#board,
+      scope: this.#scopeState(),
+    });
+  }
+
+  #scheduleRealtimeRefresh(mode = 'full') {
+    if (mode === 'skip') return;
+    if (mode === 'full' || !this.#realtimeRefreshMode) this.#realtimeRefreshMode = mode;
     // Coalesce a burst of patches (e.g. a multi-card transition) into one refresh.
     if (this.#realtimeRefreshTimer) return;
     this.#realtimeRefreshTimer = globalThis.setTimeout?.(() => {
+      let nextMode = this.#realtimeRefreshMode || 'full';
       this.#realtimeRefreshTimer = null;
+      this.#realtimeRefreshMode = '';
       if (!this.isConnected || globalThis.document?.hidden) return;
-      this.loadBoard({ silent: true, reason: 'realtime-sync' });
+      if (nextMode === 'status') {
+        this.#loadBoardStatus({ reason: 'realtime-status-sync' });
+      } else {
+        this.loadBoard({ silent: true, reason: 'realtime-sync' });
+      }
     }, REALTIME_DEBOUNCE_MS) || null;
+  }
+
+  async #loadBoardStatus(options = {}) {
+    if (!this.#board) return this.loadBoard({ silent: true, reason: options.reason || 'status-sync' });
+    let filters = {
+      ...this.#scopeState(),
+      view: 'status',
+      compact: true,
+      includeCards: false,
+      includeEvents: false,
+      includeRuntime: true,
+      eventLimit: 1,
+    };
+    this.#statusAbortController?.abort();
+    this.#statusAbortController = new AbortController();
+    try {
+      let projection = await fetchWorkflowBoardProjection(filters, {
+        signal: this.#statusAbortController.signal,
+      });
+      this.#applyStatusProjection(projection);
+      this.#renderStatusReadout();
+      this.#dispatch('workflow-board-status-loaded', {
+        ...eventDetail(this.#board, this.#selectedCard()),
+        reason: options.reason || 'status-sync',
+      });
+      return projection;
+    } catch (error) {
+      if (error?.name !== 'AbortError') this.#dispatch('workflow-board-error', {
+        error,
+        message: error?.message || String(error),
+        filters,
+      });
+      return null;
+    }
+  }
+
+  #applyStatusProjection(projection = {}) {
+    let load = projection.load || {};
+    let activity = projection.activity || {};
+    let columns = asArray(projection.columns);
+    this.#board = {
+      ...this.#board,
+      lastActivityAt: activity.latestEventAt || this.#board.lastActivityAt,
+      counters: {
+        ...(this.#board.counters || {}),
+        active: Number.isFinite(Number(load.activeCardCount)) ? Number(load.activeCardCount) : this.#board.counters?.active,
+        blocked: Number.isFinite(Number(load.blockedCardCount)) ? Number(load.blockedCardCount) : this.#board.counters?.blocked,
+        recovery: columns.reduce((sum, column) => sum + (Number(column.recoveryCount) || 0), 0),
+      },
+      raw: {
+        ...(this.#board.raw || {}),
+        statusProjection: projection,
+      },
+    };
+    this.#invalidateRenderContext();
   }
 
   #startFallbackRefresh() {
@@ -868,25 +767,31 @@ export class WorkflowBoard extends Symbiote {
     return { scope, projectId, boardId, mode, goalId, chatId };
   }
 
-  #visibleCards() {
-    let cards = asArray(this.#board?.cards);
-    let { goalId, chatId } = this.#scopeState();
-    return cards
-      .filter(card => !goalId || card.entityRefs?.goalId === goalId)
-      .filter(card => !chatId || card.entityRefs?.chatId === chatId);
+  #invalidateRenderContext() {
+    this.#renderContext = null;
+    this.#renderContextBoard = null;
+    this.#renderContextScopeKey = '';
   }
 
-  #columnsWithVisibleCards() {
-    let visible = new Map(this.#visibleCards().map(card => [card.id, card]));
-    return asArray(this.#board?.columns).map(column => ({
-      ...column,
-      cards: asArray(column.cards).filter(card => visible.has(card.id)),
-    }));
+  #getRenderContext() {
+    let scope = this.#scopeState();
+    let scopeKey = workflowBoardRenderScopeKey(scope);
+    if (
+      this.#renderContext
+      && this.#renderContextBoard === this.#board
+      && this.#renderContextScopeKey === scopeKey
+    ) {
+      return this.#renderContext;
+    }
+    this.#renderContext = createWorkflowBoardRenderContext(this.#board, scope);
+    this.#renderContextBoard = this.#board;
+    this.#renderContextScopeKey = scopeKey;
+    return this.#renderContext;
   }
 
-  #ensureSelection() {
-    let cards = this.#visibleCards();
-    if (cards.some(card => card.id === this.#selectedCardId)) return;
+  #ensureSelection(context = this.#getRenderContext()) {
+    let cards = context.visibleCards;
+    if (context.visibleCardById.has(this.#selectedCardId)) return;
     this.#selectedCardId = cards[0]?.id || '';
   }
 
@@ -896,17 +801,17 @@ export class WorkflowBoard extends Symbiote {
 
   #cardById(cardId = '') {
     let id = normalizeText(cardId);
-    return asArray(this.#board?.cards).find(card => card.id === id) || null;
+    return this.#getRenderContext().cardsById.get(id) || null;
   }
 
   #columnTitle(columnId = '') {
-    let column = asArray(this.#board?.columns).find(item => item.id === columnId);
+    let column = this.#getRenderContext().columnById.get(columnId);
     return column?.title || formatLabel(columnId);
   }
 
   #columnById(columnId = '') {
     let id = normalizeText(columnId);
-    return asArray(this.#board?.columns).find(item => item.id === id) || null;
+    return this.#getRenderContext().columnById.get(id) || null;
   }
 
   #render() {
@@ -915,7 +820,8 @@ export class WorkflowBoard extends Symbiote {
       this.#renderEmptyShell();
       return;
     }
-    this.#ensureSelection();
+    let context = this.#getRenderContext();
+    this.#ensureSelection(context);
     this.$.modeLabel = formatMode(board.mode);
     this.$.scopeLabel = board.projectId
       ? tPortal('workflow.scope.project', { projectId: board.projectId })
@@ -923,9 +829,9 @@ export class WorkflowBoard extends Symbiote {
     this.ref.modeBadge.setAttribute('variant', BOARD_MODE_VARIANTS[board.mode] || 'info');
     this.#syncBoardAutomationControls();
     this.#renderBoardHistory();
-    this.#renderStatusReadout();
-    this.#renderColumns();
-    if (this.#activeView === 'graph') this.#renderGraph();
+    this.#renderStatusReadout(context);
+    this.#renderColumns(context);
+    if (this.#activeView === 'graph') this.#renderGraph(context);
   }
 
   setView(view = 'kanban') {
@@ -949,10 +855,9 @@ export class WorkflowBoard extends Symbiote {
     this.ref.graphViewBtn.classList.toggle('is-active', isGraph);
   }
 
-  #renderGraph() {
-    let columns = this.#columnsWithVisibleCards();
-    let cards = this.#visibleCards();
-    let projection = projectionFromBoard(this.#board, columns, cards);
+  #renderGraph(context = this.#getRenderContext()) {
+    let cards = context.visibleCards;
+    let projection = buildWorkflowBoardProjectionFromContext(context);
     let graphModel = buildWorkflowBoardGraphModel(projection);
     let canvasModel = buildWorkflowBoardCanvasGraphModel(projection);
     let hasCards = cards.length > 0;
@@ -1125,10 +1030,12 @@ export class WorkflowBoard extends Symbiote {
   // of the routine readout text, and give the routine text a title/aria-label carrying the FULL
   // string (not just the visibly truncated portion) so a hover or screen reader gets everything
   // that does not fit — an accessible alternative to a title-attribute-only tooltip.
-  #renderStatusReadout() {
+  #renderStatusReadout(context = this.#getRenderContext()) {
     let scope = this.#scopeState();
-    let count = this.#visibleCards().length;
-    let updated = formatDateTime(this.#board?.updatedAt);
+    let count = context.visibleCards.length;
+    // "Updated" must reflect real board ACTIVITY (cards/runs/leases/events), not board.updatedAt —
+    // that field only moves on board CONFIG changes and read days stale on a live autonomous board.
+    let updated = formatDateTime(this.#board?.lastActivityAt || this.#board?.updatedAt);
     let counters = this.#board?.counters || {};
     let automation = this.#board?.automation || {};
     let lastEvent = asArray(this.#board?.events).filter(event => normalizeText(event.eventType).startsWith('board_')).at(-1);
@@ -1185,40 +1092,31 @@ export class WorkflowBoard extends Symbiote {
     }));
   }
 
-  #renderColumns() {
-    let columns = this.#columnsWithVisibleCards();
+  #renderColumns(context = this.#getRenderContext()) {
+    let columns = context.columns;
     let hasCards = columns.some(column => column.cards.length);
     this.ref.emptyState.hidden = hasCards;
     this.ref.emptyState.textContent = hasCards ? '' : tPortal('workflow.empty.cards');
-    let downstream = this.#downstreamDependencyCounts(columns);
+    let downstream = context.downstreamDependencyCounts;
     this.ref.boardView.setBoard({
       id: this.#board?.boardId || this.#board?.id || '',
       title: this.#board?.title || tPortal('text.workflowBoard'),
+      mode: this.#board?.mode || '',
       columns: columns.map(column => ({
         id: column.id,
         title: column.title,
         description: column.description || column.gate || '',
         automation: column.automation,
+        boardMode: this.#board?.mode || '',
+        headerRevision: this.#columnHeaderRevision,
         cards: column.cards.map(card => this.#toKanbanCard(card, downstream)),
       })),
     }, {
-      renderColumnHeader: (column) => this.#renderColumnHeader(column),
+      renderColumnHeader: this.#renderColumnHeaderBound,
     });
-  }
-
-  // Count, per card id, how many other cards declare it as an upstream dependency (downstream fan-out).
-  // Upstream count lives on each card (its own dependsOn); this is the reverse edge for "unlocks N".
-  #downstreamDependencyCounts(columns) {
-    let counts = new Map();
-    for (let column of columns) {
-      for (let card of column.cards) {
-        for (let dep of asArray(card.raw?.dependsOn ?? card.dependsOn)) {
-          let upstreamId = typeof dep === 'string' ? dep : (dep?.cardId ?? dep?.card_id);
-          if (upstreamId) counts.set(upstreamId, (counts.get(upstreamId) ?? 0) + 1);
-        }
-      }
+    for (let id of this.#columnHeaderCache.keys()) {
+      if (!columns.some(column => column.id === id)) this.#columnHeaderCache.delete(id);
     }
-    return counts;
   }
 
   // U05: chip budget. A card needs at most a handful of at-a-glance signals — everything else
@@ -1244,35 +1142,15 @@ export class WorkflowBoard extends Symbiote {
   #toKanbanCard(card, downstream = new Map()) {
     let nextColumn = getAdjacentColumn(this.#board, card.columnId, 1);
     let runtimeOnly = isRuntimeOnlyCard(card);
-    let run = latestRun(card);
-    let agent = agentName(card, run);
-    let duration = formatDuration(run);
-    let tokens = formatTokens(run?.tokens);
-    let busy = isCardActive(card);
-    let liveStatus = effectiveStatus(card);
-    let group = normalizeText(card.resourceGroup ?? card.raw?.resourceGroup) || '';
+    let agent = agentName(card, latestRun(card));
     let blockedBy = asArray(card.raw?.dependsOn ?? card.dependsOn).length;
     let unlocks = downstream.get(card.id) ?? 0;
-    // Prefer the explicit audit verdict chip over the raw `needs_audit` flag chip when a verdict exists,
-    // so the card reads "✓ audit" / "✗ rework" instead of a bare "Needs audit".
-    let auditChip = auditVerdictChip(card);
-    let flagChips = asArray(card.flags)
-      .filter(flag => !(auditChip && flag === 'needs_audit'))
-      .slice(0, 2)
-      .map(flag => ({ label: flagLabel(flag), kind: flagKind(flag) }));
 
-    // Priority-ordered candidates: state first (what's happening now), then lock/unlock, then audit
-    // verdict, then supporting telemetry, then flags — the front of this list is what a glance needs.
-    let footerCandidates = [
-      liveStatus ? { label: formatStatusLabel(liveStatus), kind: busy ? 'warning' : statusKind(liveStatus) } : null,
-      blockedBy ? { label: String(blockedBy), icon: 'lock', kind: 'dep-blocked', title: tPortal('workflow.card.blockedByTitle', { count: blockedBy }) } : null,
-      auditChip,
-      unlocks ? { label: String(unlocks), icon: 'lock_open', kind: 'dep-unlocks', title: tPortal('workflow.card.unlocksTitle', { count: unlocks }) } : null,
-      agent ? WorkflowBoard.#agentChip(agent) : null,
-      duration ? { label: duration, icon: 'schedule', kind: 'status' } : null,
-      tokens ? { label: tPortal('workflow.card.tokens', { tokens }), icon: 'toll', kind: 'status' } : null,
-      ...flagChips,
-    ].filter(Boolean);
+    let footerCandidates = cardFooterChips(card, {
+      blockedBy,
+      unlocks,
+      agentChip: agent ? WorkflowBoard.#agentChip(agent) : null,
+    });
     let footer = footerCandidates.slice(0, WorkflowBoard.#FOOTER_CHIP_BUDGET);
     let overflowCount = footerCandidates.length - footer.length;
     if (overflowCount > 0) {
@@ -1287,14 +1165,13 @@ export class WorkflowBoard extends Symbiote {
       id: card.id,
       columnId: card.columnId,
       title: card.title,
-      summary: card.summary || tPortal('workflow.card.noSummary'),
-      busy,
-      meta: [
-        group ? { label: group, icon: GROUP_ICON[group] ?? GROUP_ICON_FALLBACK, kind: `group-${group}`, title: tPortal('workflow.card.groupTitle', { group }) } : null,
-        card.projectId ? { label: card.projectId } : null,
-        card.kind ? { label: card.kind } : null,
-        card.priority ? { label: card.priority, kind: priorityKind(card.priority), title: tPortal('workflow.card.priorityTitle', { priority: card.priority }) } : null,
-      ].filter(Boolean),
+      // Backward-compat only: the fixed-geometry card no longer renders a summary line (long texts
+      // live in the inspector), but the normalized model still accepts the field.
+      summary: card.summary || '',
+      busy: isCardActive(card),
+      // The one-line "last agent action / live status" row between title and footer.
+      ticker: deriveCardTicker(card),
+      meta: cardMetaChips(card),
       footer,
       actions: this.#cardActions(card, nextColumn, runtimeOnly),
       draggable: !runtimeOnly,
@@ -1350,6 +1227,41 @@ export class WorkflowBoard extends Symbiote {
     return actions;
   }
 
+  // Memoization wrapper around #renderColumnHeader: an unchanged column config returns the SAME
+  // element (no rebuild); a changed config with an OPEN settings popover keeps serving the stale
+  // header and reconciles when the popover closes, so a silent refresh never eats an in-progress edit.
+  #memoizedColumnHeader(column) {
+    let automation = column.raw?.automation || column.automation || {};
+    let key = JSON.stringify({
+      id: column.id,
+      title: column.title,
+      description: column.description || '',
+      count: column.count ?? null,
+      boardMode: this.#board?.mode || '',
+      automation,
+    });
+    let cached = this.#columnHeaderCache.get(column.id);
+    if (cached) {
+      if (cached.key === key) return cached.element;
+      if (cached.element.querySelector('details[open]')) {
+        cached.stale = true;
+        return cached.element;
+      }
+    }
+    let element = this.#renderColumnHeader(column);
+    let entry = { key, element, stale: false };
+    element.querySelector('details.wb-column-settings')?.addEventListener('toggle', (event) => {
+      if (!event.target.open && entry.stale) {
+        entry.stale = false;
+        this.#columnHeaderCache.delete(column.id);
+        this.#columnHeaderRevision += 1;
+        this.#renderColumns();
+      }
+    });
+    this.#columnHeaderCache.set(column.id, entry);
+    return element;
+  }
+
   #renderColumnHeader(column) {
     let root = makeElement('div', 'wb-column-head');
     let copy = makeElement('div', 'wb-column-copy');
@@ -1357,7 +1269,9 @@ export class WorkflowBoard extends Symbiote {
     if (column.description) {
       copy.append(makeElement('div', 'sn-kanban-column-description', column.description));
     }
-    let summary = automationSummary(column.raw?.automation || column.automation || {});
+    // The chip shows the EFFECTIVE execution mode (board mode × column mode); the configured mode
+    // and trigger live in the tooltip and the settings popover, not in the chip row.
+    let summary = effectiveColumnAutomation(this.#board?.mode, column.raw?.automation || column.automation || {});
     let policy = makeElement('div', 'wb-column-policy');
     policy.append(makeChip(summary.label, summary.kind, { icon: summary.icon, title: summary.title }));
     copy.append(policy);

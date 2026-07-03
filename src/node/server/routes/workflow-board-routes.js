@@ -68,6 +68,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
           includeEvents: queryBoolean(req, 'includeEvents', false),
           includeRuntime: queryBoolean(req, 'includeRuntime', false),
           compact: queryBoolean(req, 'compact', false),
+          eventLimit: queryValue(req, 'eventLimit'),
           view: queryValue(req, 'view'),
           mode: queryValue(req, 'mode'),
           importMarkdown: queryBoolean(req, 'importMarkdown', false),

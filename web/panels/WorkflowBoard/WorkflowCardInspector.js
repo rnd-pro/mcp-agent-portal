@@ -19,6 +19,7 @@ import {
   isCardActive,
   formatStatusLabel,
 } from './workflow-card-telemetry.js';
+import { statusChipKind } from './workflow-card-presentation.js';
 import { replyToCard } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
 
@@ -91,13 +92,9 @@ function text(value, fallback = '') {
   return out || fallback;
 }
 
-function statusKind(value = '') {
-  let key = text(value).toLowerCase();
-  if (['error', 'failed', 'cancelled', 'blocked', 'lost'].includes(key)) return 'error';
-  if (['recovering', 'stale', 'needs_resume', 'needs_audit', 'pendingapproval'].includes(key)) return 'warning';
-  if (['completed', 'done', 'success', 'accepted'].includes(key)) return 'ok';
-  return '';
-}
+// The inspector shares the board's separated status taxonomy (workflow-card-presentation.js):
+// 'state' execution, 'status' positive outcome, 'error' / 'warning' problems, '' quiet.
+const statusKind = statusChipKind;
 
 function formatColumnId(id) {
   let t = text(id);
@@ -173,6 +170,10 @@ export class WorkflowCardInspector extends Symbiote {
     openChat(this._chatId);
   }
 
+  // Build vs update: a NEW card id rebuilds every section; a silent refresh of the SAME card
+  // patches values in place (textContent/dataset on fixed refs) and only rebuilds a list/section
+  // whose derived content actually changed — so an open decision draft, focus, and scroll survive
+  // realtime refreshes.
   renderSelection(selection = null) {
     let card = selection?.card || null;
     let board = selection?.board || null;
@@ -180,6 +181,8 @@ export class WorkflowCardInspector extends Symbiote {
       this._chatId = null;
       this._decisionCard = null;
       this._decisionBoard = null;
+      this._renderedCardId = '';
+      this._sig = null;
       this.ref.title.textContent = tPortal('text.cardInspector');
       this.ref.statusBadge.hidden = true;
       this.ref.resolutionBadge.hidden = true;
@@ -190,6 +193,9 @@ export class WorkflowCardInspector extends Symbiote {
     }
     this._decisionCard = card;
     this._decisionBoard = board;
+    let sameCard = this._renderedCardId === card.id;
+    this._renderedCardId = card.id;
+    if (!sameCard || !this._sig) this._sig = {};
 
     this.ref.empty.hidden = true;
     this.ref.content.hidden = false;
@@ -202,7 +208,7 @@ export class WorkflowCardInspector extends Symbiote {
     this.ref.spinner.hidden = !active;
     if (status) {
       this.ref.statusBadge.textContent = formatStatusLabel(status);
-      this.ref.statusBadge.dataset.kind = active ? 'warning' : statusKind(status);
+      this.ref.statusBadge.dataset.kind = statusKind(status);
       this.ref.statusBadge.hidden = false;
     } else {
       this.ref.statusBadge.hidden = true;
@@ -233,14 +239,15 @@ export class WorkflowCardInspector extends Symbiote {
 
     this.#renderResolution(card);
     this.#renderAudit(card, board);
-    this.#renderDecision(card);
-    this.#renderRuns(card);
-    this.#renderHistory(card);
+    this.#renderDecision(card, sameCard);
+    this.#renderRuns(card, sameCard);
+    this.#renderHistory(card, sameCard);
 
-    this.ref.viewer?.setContent?.(
-      text(card.body || card.raw?.body || card.summary, tPortal('inspector.empty')),
-      'markdown',
-    );
+    let body = text(card.body || card.raw?.body || card.summary, tPortal('inspector.empty'));
+    if (!sameCard || this._sig.body !== body) {
+      this._sig.body = body;
+      this.ref.viewer?.setContent?.(body, 'markdown');
+    }
   }
 
   // Surface the quality-audit outcome: the verdict (pass / reject / pending), the auditor and any
@@ -268,7 +275,7 @@ export class WorkflowCardInspector extends Symbiote {
     let badge = this.ref.auditBadge;
     if (passed) {
       badge.textContent = tPortal('inspector.auditPassed');
-      badge.dataset.kind = 'ok';
+      badge.dataset.kind = 'status';
     } else if (rejected) {
       badge.textContent = tPortal('inspector.auditRejected');
       badge.dataset.kind = 'error';
@@ -348,13 +355,24 @@ export class WorkflowCardInspector extends Symbiote {
   // escalation). The human only ANSWERS the orchestrator's question — picks one of the orchestrator's
   // options or types a free-text reply. The answer is minted as a routed return into the orchestrator's
   // inbox; the orchestrator decides how to route the card. The human never routes or rejects directly.
-  #renderDecision(card) {
+  #renderDecision(card, sameCard = false) {
     let state = needsHumanEscalation(card);
     let inLane = (card.columnId || card.raw?.columnId) === DECISION_COLUMN_ID;
     if (!state && !inLane) {
       this.ref.decisionSection.hidden = true;
+      if (this._sig) this._sig.decision = '';
       return;
     }
+    // A silent refresh of the same unchanged question must not wipe the human's draft answer,
+    // the option buttons' disabled state, or an in-flight "submitting" status.
+    let signature = JSON.stringify({
+      inLane,
+      detail: text(state?.detail || state?.lastEscalation?.detail),
+      options: (Array.isArray(state?.lastEscalation?.options) ? state.lastEscalation.options : [])
+        .map(opt => [text(opt?.id), text(opt?.label)]),
+    });
+    if (sameCard && this._sig?.decision === signature && !this.ref.decisionSection.hidden) return;
+    if (this._sig) this._sig.decision = signature;
     this.ref.decisionSection.hidden = false;
     this.ref.decisionQuestion.textContent = text(
       state?.detail || state?.lastEscalation?.detail,
@@ -405,7 +423,7 @@ export class WorkflowCardInspector extends Symbiote {
     this.#setDecisionStatus(tPortal('inspector.decisionSubmitting'), 'warning');
     try {
       await replyToCard({ boardId, cardId, optionId, body, actor: 'human' });
-      this.#setDecisionStatus(tPortal('inspector.decisionDone'), 'ok');
+      this.#setDecisionStatus(tPortal('inspector.decisionDone'), 'status');
       if (this.ref.decisionText) this.ref.decisionText.value = '';
     } catch (error) {
       this.#setDecisionStatus(error?.message || String(error), 'error');
@@ -425,10 +443,16 @@ export class WorkflowCardInspector extends Symbiote {
     return '';
   }
 
-  #renderRuns(card) {
+  #renderRuns(card, sameCard = false) {
     let runs = (Array.isArray(card.runs) ? card.runs : [])
       .slice()
       .sort((a, b) => (Date.parse(a.startedAt || '') || 0) - (Date.parse(b.startedAt || '') || 0));
+
+    let signature = JSON.stringify(runs.map(run => [
+      run.leaseOwner, run.status, run.startedAt, run.completedAt, run.tokens, run.chatId,
+    ]));
+    if (sameCard && this._sig?.runs === signature) return;
+    if (this._sig) this._sig.runs = signature;
 
     let list = this.ref.runsList;
     list.replaceChildren();
@@ -478,11 +502,17 @@ export class WorkflowCardInspector extends Symbiote {
     }
   }
 
-  #renderHistory(card) {
+  #renderHistory(card, sameCard = false) {
     let events = (Array.isArray(card.events) ? card.events : [])
       .slice()
       .sort((a, b) => (Date.parse(b.timestamp || '') || 0) - (Date.parse(a.timestamp || '') || 0))
       .slice(0, HISTORY_LIMIT);
+
+    let signature = JSON.stringify(events.map(event => [
+      event.id, event.label, event.eventType, event.status, event.actor, event.timestamp, event.note,
+    ]));
+    if (sameCard && this._sig?.history === signature) return;
+    if (this._sig) this._sig.history = signature;
 
     let list = this.ref.historyList;
     list.replaceChildren();

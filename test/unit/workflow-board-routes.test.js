@@ -237,6 +237,34 @@ seed_column: backlog
       assert.equal(board.projection.cards.find(card => card.id === 'runtime-task-route-orphan').events.length, 1);
       assert.equal(board.projection.cards.some(card => card.id === 'runtime-task-route-chat-only'), false);
 
+      let statusBoardRes = makeRes();
+      await routes['GET /api/workflow-board'](
+        makeReq(
+          'GET',
+          '/api/workflow-board?projectId=project-alpha&view=status&includeCards=false&includeEvents=true&includeRuntime=true&compact=true&eventLimit=1',
+        ),
+        statusBoardRes,
+      );
+      let statusBoard = statusBoardRes.json();
+      assert.equal(statusBoardRes.status, 200);
+      assert.equal(statusBoard.ok, true);
+      assert.equal(statusBoard.projection.schema, 'workflow-board-compact-projection/v1');
+      assert.deepEqual(statusBoard.projection.cards, []);
+      assert.equal(statusBoard.projection.events.length, 1);
+
+      let statusNoEventsRes = makeRes();
+      await routes['GET /api/workflow-board'](
+        makeReq(
+          'GET',
+          '/api/workflow-board?projectId=project-alpha&view=status&includeCards=false&includeEvents=false&compact=true&eventLimit=1',
+        ),
+        statusNoEventsRes,
+      );
+      let statusNoEvents = statusNoEventsRes.json();
+      assert.equal(statusNoEventsRes.status, 200);
+      assert.deepEqual(statusNoEvents.projection.cards, []);
+      assert.deepEqual(statusNoEvents.projection.events, []);
+
       let importingBoardRes = makeRes();
       await routes['GET /api/workflow-board'](
         makeReq('GET', '/api/workflow-board?projectId=project-alpha&importMarkdown=true'),
