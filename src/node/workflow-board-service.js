@@ -2697,6 +2697,10 @@ export function createWorkflowBoardService(opts = {}) {
     let ts = now();
     let metadata = { ...(card.metadata ?? {}) };
     delete metadata.dependencyBlock;
+    // A satisfied dependency releases the card into a fresh runnable occupancy epoch. Without
+    // restamping this clock, the same admission pass can release the card and then immediately treat its
+    // old pre-block column timestamp as stale before the scheduler drains it.
+    metadata.enteredColumnAt = ts;
     if (hasDependencyFailureEscalation) delete metadata.escalation;
     let nextLifecycle = lifecycle === 'blocked' ? 'idle' : lifecycle;
     let next = dependencyLifecycleCard(card, nextLifecycle, principal, ts, metadata);

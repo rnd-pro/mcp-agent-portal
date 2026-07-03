@@ -130,6 +130,49 @@ describe('workflow board task dependencies', () => {
     assert.equal(service.getCard('down').lifecycle, 'queued', 'blocked → queued via the enqueue path');
   });
 
+  it('does not stale-escalate a card in the same pass that dependency release makes it runnable', () => {
+    makeCard('up');
+    makeCard('down', { columnId: 'ready' });
+    service.linkDependency({ cardId: 'down', dependsOn: ['up'] });
+    let blocked = service.getCard('down');
+    sg.commit([{
+      op: 'set',
+      path: 'workflowCards/down',
+      value: {
+        ...blocked,
+        metadata: {
+          ...blocked.metadata,
+          enteredColumnAt: 1000,
+          dependencyBlock: { ...blocked.metadata.dependencyBlock, blockedAt: 1000 },
+        },
+      },
+    }, {
+      op: 'set',
+      path: 'workflowRuns/old-down-run',
+      value: {
+        schema: 'workflow-run/v1',
+        id: 'old-down-run',
+        boardId: DEFAULT_WORKFLOW_BOARD_ID,
+        cardId: 'down',
+        status: 'failed',
+        taskIds: [],
+        startedAt: 1000,
+        completedAt: 1001,
+        updatedAt: 1001,
+      },
+    }], 'test:old-ready-run');
+
+    now += 2 * 60 * 60 * 1000;
+    moveToTerminal('up');
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    let stale = service.escalateStaleCards(DEFAULT_WORKFLOW_BOARD_ID);
+
+    assert.equal(stale.escalated.some(item => item.cardId === 'down'), false);
+    let down = service.getCard('down');
+    assert.equal(down.metadata?.escalation, undefined);
+    assert.ok(down.metadata?.enteredColumnAt > 1000, 'dependency unblock starts a fresh occupancy clock');
+  });
+
   it('releases on run_success and audit_passed for the matching signal', () => {
     makeCard('up-run');
     makeCard('down-run');
