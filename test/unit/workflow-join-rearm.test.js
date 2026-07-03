@@ -58,9 +58,9 @@ describe('workflow board re-armable per-wave join', () => {
     return created.card;
   }
 
-  it('bumps decomposeWaveSeq monotonically and stamps the wave on each child', () => {
+  it('bumps decomposeWaveSeq monotonically and stamps the wave on each child', async () => {
     let parent = makeOwner('rearm-owner');
-    let waveOne = service.decomposeWorkItem({
+    let waveOne = await service.decomposeWorkItem({
       cardId: parent.id, actor: 'test',
       childItems: [{ title: 'W1 child', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
     });
@@ -72,7 +72,7 @@ describe('workflow board re-armable per-wave join', () => {
 
     // The auto-closed parent is re-decomposed (a second wave). The seq survives the close metadata
     // write and strictly increments; closes never reset the counter.
-    let waveTwo = service.decomposeWorkItem({
+    let waveTwo = await service.decomposeWorkItem({
       cardId: parent.id, actor: 'test',
       childItems: [{ title: 'W2 child', owner: 'backend-engineer', acceptanceCriteria: ['z'] }],
     });
@@ -83,12 +83,12 @@ describe('workflow board re-armable per-wave join', () => {
     );
   });
 
-  it('advances the seq even when the parent does not close (decompositionClosesParent off)', () => {
+  it('advances the seq even when the parent does not close (decompositionClosesParent off)', async () => {
     service.updateWorkflowBoard(
       { automation: { decompositionClosesParent: false } }, { gatedBy: 'board.control' },
     );
     let parent = makeOwner('rearm-noclose');
-    let waveOne = service.decomposeWorkItem({
+    let waveOne = await service.decomposeWorkItem({
       cardId: parent.id, actor: 'test',
       childItems: [{ title: 'W1 child', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
     });
@@ -98,7 +98,7 @@ describe('workflow board re-armable per-wave join', () => {
       service.getCard(parent.id).metadata.decomposeWaveSeq, 1,
       'the seq is persisted even on a non-closing decompose so it stays continuous',
     );
-    let waveTwo = service.decomposeWorkItem({
+    let waveTwo = await service.decomposeWorkItem({
       cardId: parent.id, actor: 'test',
       childItems: [{ title: 'W2 child', owner: 'backend-engineer', acceptanceCriteria: ['z'] }],
     });

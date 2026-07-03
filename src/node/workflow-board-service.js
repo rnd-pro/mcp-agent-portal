@@ -6550,7 +6550,7 @@ export function createWorkflowBoardService(opts = {}) {
     });
   }
 
-  function decomposeWorkItem(args = {}, context = {}) {
+  async function decomposeWorkItem(args = {}, context = {}) {
     let principal = resolvePrincipal(context);
     let cardId = normalizeCardId(args);
     let decomposeGate = gate(
@@ -6707,6 +6707,30 @@ export function createWorkflowBoardService(opts = {}) {
       ...parentOps,
       { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
     ], sourceForPrincipal(principal));
+    let drivenChildren = [];
+    let daemon = daemonPrincipal();
+    for (let child of children) {
+      let current = stateGraph.get(`workflowCards/${child.id}`);
+      if (!current) continue;
+      let automation = cardAutomation(board, current);
+      if (automation.trigger !== 'on_enter' || !['orchestrate', 'audit'].includes(automation.action)) continue;
+      let outcome = null;
+      try {
+        outcome = await maybeAutoOrchestrateCard(board, clone(current), {}, { ...context, principal: daemon });
+      } catch (error) {
+        outcome = { ok: false, error: error?.message ?? String(error) };
+      }
+      let result = outcome?.result ?? {};
+      drivenChildren.push({
+        cardId: child.id,
+        ok: Boolean(outcome?.ok),
+        skipped: outcome?.skipped ?? null,
+        admissionId: outcome?.admissionId ?? null,
+        runId: result.run?.id ?? result.runId ?? null,
+        taskIds: uniqueArray(result.run?.taskIds ?? result.taskIds),
+        error: outcome?.error ?? null,
+      });
+    }
     return {
       ok: true,
       board,
@@ -6715,6 +6739,7 @@ export function createWorkflowBoardService(opts = {}) {
       event,
       childCardIds: children.map(child => child.id),
       parentClosed: parentCloses,
+      drivenChildren,
     };
   }
 

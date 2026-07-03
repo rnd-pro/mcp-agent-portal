@@ -157,7 +157,7 @@ export function createWorkflowBoardRoutes(ctx = {}) {
     'POST /api/workflow-board/decompose': async (req, res) => {
       try {
         let body = await parseBody(req);
-        let result = resolveService().decomposeWorkItem(body, mutationContext(req));
+        let result = await resolveService().decomposeWorkItem(body, mutationContext(req));
         json(res, { ok: true, result });
       } catch (error) {
         routeError(res, error);

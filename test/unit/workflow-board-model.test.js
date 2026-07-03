@@ -633,7 +633,7 @@ describe('workflow board model and service', () => {
     assert.equal(service.getCard(created.card.id).columnId, 'done');
   });
 
-  it('decomposes a broad workflow card into linked child cards', () => {
+  it('decomposes a broad workflow card into linked child cards', async () => {
     let parent = service.createOrUpdateCard({
       title: 'Implement broad workflow board work',
       projectId: 'agent-portal',
@@ -645,7 +645,7 @@ describe('workflow board model and service', () => {
       context: ['Parent context'],
       actor: 'test',
     });
-    let result = service.decomposeWorkItem({
+    let result = await service.decomposeWorkItem({
       cardId: parent.card.id,
       expectedVersion: parent.card.version,
       actor: 'test',
@@ -710,18 +710,70 @@ describe('workflow board model and service', () => {
     assert.ok(result.children[1].context.includes('Child-specific context'), 'child-specific context is preserved');
   });
 
-  it('stamps the origin-idea rootCardId transitively through grandchildren', () => {
+  it('drives ready decomposition children through board automation', async () => {
+    let taskId = '44444444-4444-4444-8444-444444444446';
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        if (payload.name === 'list_tasks') return { content: [{ type: 'text', text: '[]' }] };
+        return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    let parent = service.createOrUpdateCard({
+      title: 'Split and start',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'backlog',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Child starts'],
+      actor: 'test',
+    });
+
+    let result = await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      childColumnId: 'ready',
+      actor: 'test',
+      childItems: [{
+        title: 'Runnable child',
+        owner: 'backend-engineer',
+        assignedAgent: 'backend-engineer',
+        acceptanceCriteria: ['Run starts'],
+      }],
+    });
+
+    let child = service.getCard(result.children[0].id);
+    let runs = Object.values(sg.get('workflowRuns') || {}).filter(run => run.cardId === child.id);
+
+    assert.equal(result.drivenChildren.length, 1);
+    assert.equal(result.drivenChildren[0].ok, true);
+    assert.equal(child.columnId, 'in-progress');
+    assert.equal(child.lifecycle, 'running');
+    assert.deepEqual(child.entityRefs.taskIds, [taskId]);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].status, 'running');
+  });
+
+  it('stamps the origin-idea rootCardId transitively through grandchildren', async () => {
     let parent = service.createOrUpdateCard({
       title: 'Origin idea', projectId: 'agent-portal', domain: 'orchestration',
       columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
     });
-    let firstPass = service.decomposeWorkItem({
+    let firstPass = await service.decomposeWorkItem({
       cardId: parent.card.id, actor: 'test',
       childItems: [{ title: 'Intermediate child', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
     });
     let child = firstPass.children[0];
     assert.equal(child.metadata.rootCardId, parent.card.id, 'a direct child points at the origin idea');
-    let secondPass = service.decomposeWorkItem({
+    let secondPass = await service.decomposeWorkItem({
       cardId: child.id, actor: 'test',
       childItems: [{ title: 'Grandchild', owner: 'backend-engineer', acceptanceCriteria: ['z'] }],
     });
@@ -732,14 +784,14 @@ describe('workflow board model and service', () => {
     );
   });
 
-  it('does not flatten an origin-idea proof-marker token into narrow child context', () => {
+  it('does not flatten an origin-idea proof-marker token into narrow child context', async () => {
     let parent = service.createOrUpdateCard({
       title: 'Ship the release',
       body: 'When done, emit COMPLETION_PROOF: PASS and a RELEASE_AUTH_PACKET.',
       projectId: 'agent-portal', domain: 'orchestration',
       columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
     });
-    let result = service.decomposeWorkItem({
+    let result = await service.decomposeWorkItem({
       cardId: parent.card.id, actor: 'test',
       childItems: [{ title: 'Rename a helper', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
     });
@@ -748,7 +800,7 @@ describe('workflow board model and service', () => {
     assert.ok(!childContext.includes('RELEASE_AUTH_PACKET'), 'the idea body marker token is not flattened into the child');
   });
 
-  it('keeps the decomposed parent in place when decompositionClosesParent is disabled', () => {
+  it('keeps the decomposed parent in place when decompositionClosesParent is disabled', async () => {
     service.updateWorkflowBoard(
       { automation: { decompositionClosesParent: false } }, { gatedBy: 'board.control' },
     );
@@ -756,7 +808,7 @@ describe('workflow board model and service', () => {
       title: 'Stay put after decompose', projectId: 'agent-portal', domain: 'orchestration',
       columnId: 'backlog', owner: 'orchestrator', acceptanceCriteria: ['x'], actor: 'test',
     });
-    let result = service.decomposeWorkItem({
+    let result = await service.decomposeWorkItem({
       cardId: parent.card.id, actor: 'test',
       childItems: [{ title: 'Child A', owner: 'backend-engineer', acceptanceCriteria: ['y'] }],
     });
@@ -764,7 +816,7 @@ describe('workflow board model and service', () => {
     assert.equal(service.getCard(parent.card.id).columnId, 'backlog', 'parent stays when the policy is off');
   });
 
-  it('does not partially persist decomposition children when one child is invalid', () => {
+  it('does not partially persist decomposition children when one child is invalid', async () => {
     let parent = service.createOrUpdateCard({
       title: 'Split atomically',
       projectId: 'agent-portal',
@@ -777,8 +829,8 @@ describe('workflow board model and service', () => {
 
     // The unknown column is now rejected by the service's board-driven column check (the iso card
     // normalizer is board-agnostic after S5 carry-over), and the decomposition is still atomic.
-    assert.throws(
-      () => service.decomposeWorkItem({
+    await assert.rejects(
+      service.decomposeWorkItem({
         cardId: parent.card.id,
         actor: 'test',
         childItems: [
