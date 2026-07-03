@@ -2,6 +2,7 @@ import { Symbiote } from '@symbiotejs/symbiote';
 import 'symbiote-ui/display/code-block';
 import { openChat } from '../../common/open-chat.js';
 import { tPortal } from '../../common/localization.js';
+import { agentCatalogSnapshot } from '../../services/agent-catalog.js';
 import template from './WorkflowCardInspector.tpl.js';
 import css from './WorkflowCardInspector.css.js';
 import {
@@ -215,7 +216,13 @@ export class WorkflowCardInspector extends Symbiote {
       this.ref.heldNotice.hidden = true;
     }
 
-    this.ref.agentName.textContent = agentName(card, run) || tPortal('inspector.unassigned');
+    let agent = agentName(card, run);
+    this.ref.agentName.textContent = agent || tPortal('inspector.unassigned');
+    // The diamond carries the agent's declared identity color (team-memory frontmatter via
+    // /api/agents); undeclared agents keep the theme accent through the stylesheet fallback.
+    let agentMeta = agent ? agentCatalogSnapshot().get(agent) : null;
+    this.ref.agentSection.style.setProperty('--wci-agent-accent', agentMeta?.color || '');
+    this.ref.agentSection.title = agentMeta?.description || '';
     this._chatId = text(card.entityRefs?.chatId) || null;
     this.ref.chatBtn.hidden = !this._chatId;
 

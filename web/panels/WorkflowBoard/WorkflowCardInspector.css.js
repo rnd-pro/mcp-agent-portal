@@ -169,7 +169,8 @@ pg-workflow-card-inspector .wci-agent-dot {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--sn-accent, var(--sn-sys-accent));
+  /* Agent identity color from team-memory frontmatter; theme accent for undeclared agents. */
+  background: var(--wci-agent-accent, var(--sn-sys-accent));
   transform: rotate(45deg);
 }
 

@@ -23,6 +23,7 @@ import {
   buildWorkflowBoardGraphModel,
   summarizeWorkflowBoardGraphModel,
 } from '../../services/board-graph.js';
+import { fetchAgentCatalog, agentCatalogSnapshot } from '../../services/agent-catalog.js';
 import template from './WorkflowBoard.tpl.js';
 import cssLocal from './WorkflowBoard.css.js';
 import { setWorkflowBoardSelection } from './workflow-board-selection.js';
@@ -526,9 +527,11 @@ export class WorkflowBoard extends Symbiote {
     if (!options.silent) this.#setBanner('running', tPortal('workflow.banner.loading'));
 
     try {
-      let board = await fetchWorkflowBoard(filters, {
-        signal: this.#abortController.signal,
-      });
+      let [board] = await Promise.all([
+        fetchWorkflowBoard(filters, { signal: this.#abortController.signal }),
+        // Agent identity (declared icon/color) rides along so chips render identity on first paint.
+        fetchAgentCatalog().catch(() => null),
+      ]);
       if (loadKey !== this.#lastLoadKey) return null;
       this.#board = board;
       this.#ensureSelection();
@@ -1224,6 +1227,20 @@ export class WorkflowBoard extends Symbiote {
   // affordance) instead of dumping every available signal onto the card.
   static #FOOTER_CHIP_BUDGET = 4;
 
+  // Agents declare their own identity (icon + color) in team-memory frontmatter; the chip carries
+  // it so a card's executor reads at a glance. Unknown/undeclared agents fall back to the generic
+  // robot marker with the theme accent.
+  static #agentChip(agent) {
+    let meta = agentCatalogSnapshot().get(agent);
+    return {
+      label: agent,
+      icon: meta?.icon || 'smart_toy',
+      kind: 'agent',
+      accent: meta?.color || '',
+      title: meta?.description || agent,
+    };
+  }
+
   #toKanbanCard(card, downstream = new Map()) {
     let nextColumn = getAdjacentColumn(this.#board, card.columnId, 1);
     let runtimeOnly = isRuntimeOnlyCard(card);
@@ -1251,7 +1268,7 @@ export class WorkflowBoard extends Symbiote {
       blockedBy ? { label: String(blockedBy), icon: 'lock', kind: 'dep-blocked', title: tPortal('workflow.card.blockedByTitle', { count: blockedBy }) } : null,
       auditChip,
       unlocks ? { label: String(unlocks), icon: 'lock_open', kind: 'dep-unlocks', title: tPortal('workflow.card.unlocksTitle', { count: unlocks }) } : null,
-      agent ? { label: agent, icon: 'smart_toy', kind: 'status' } : null,
+      agent ? WorkflowBoard.#agentChip(agent) : null,
       duration ? { label: duration, icon: 'schedule', kind: 'status' } : null,
       tokens ? { label: tPortal('workflow.card.tokens', { tokens }), icon: 'toll', kind: 'status' } : null,
       ...flagChips,
