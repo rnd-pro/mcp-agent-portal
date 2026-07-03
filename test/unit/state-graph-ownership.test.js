@@ -133,6 +133,35 @@ describe('state-graph single-writer ownership guard', () => {
     );
   });
 
+  it('async _writeSnapshot re-checks ownership before publishing, not just at entry — a takeover mid-write does not clobber the new owner', async () => {
+    // Closes the async-write-window: _writeSnapshot() is several real fs `await`s deep (WAL flush,
+    // snapshot write+fsync, rename, dir fsync) between its entry ownership check and the point it
+    // actually mutates shared durable state. Start A's async write, then — entirely SYNCHRONOUSLY,
+    // before A's write resumes past its first await — have B take over and publish its own snapshot.
+    // A's write must detect the takeover before it publishes/truncates, not clobber B's durable state.
+    let a = makeSG('A', { pid: 1001 });
+    a.load();
+    a.commit([{ op: 'set', path: 'ui/x', value: 1 }], 'test');
+    a._writeSnapshotSync();
+    assert.equal(readSnapshot().ui.x, 1, 'A persisted its first commit');
+
+    a.commit([{ op: 'set', path: 'ui/x', value: 'A-stale' }], 'test');
+    let aWrite = a._writeSnapshot(); // starts async; suspends at its first await, returning control here
+
+    let b = makeSG('B', { pid: 1002 });
+    b.load(); // synchronous: claims ownership on disk before A's async write resumes
+    b.commit([{ op: 'set', path: 'ui/x', value: 'B-owns-it' }], 'test');
+    b._writeSnapshotSync(); // synchronous: fully publishes B's snapshot + WAL before A's write proceeds
+
+    let aLost = false;
+    a.on('ownership-lost', () => { aLost = true; });
+    await aWrite;
+
+    assert.equal(aLost, true, 'A detected the takeover before publishing and emitted ownership-lost');
+    assert.equal(readSnapshot().ui.x, 'B-owns-it', 'A did not clobber B\'s snapshot with its stale write');
+    assert.ok(!fs.existsSync(path.join(dir, 'state.json.tmp')), 'A cleaned up its abandoned tmp snapshot');
+  });
+
   it('stamps every WAL record with the writer token and a per-writer monotonic fence', async () => {
     let a = makeSG('A', { pid: 1001 });
     a.load();

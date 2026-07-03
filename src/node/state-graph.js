@@ -731,11 +731,30 @@ export class StateGraph extends EventEmitter {
         await sfh.sync();
       } finally { await sfh.close(); }
 
+      // Re-check ownership before the two steps below that actually mutate the SHARED durable state
+      // (the rename that publishes the snapshot, and the WAL truncation). Everything above this point
+      // only wrote to our own private tmp file, so losing ownership up to here is harmless — but the
+      // entry check at the top of this function is stale by now: the WAL flush + snapshot write + fsync
+      // above are several awaits deep, long enough for a NEWER instance to claim ownership and start
+      // writing its own snapshot/WAL from a newer `_state`. Publishing this (now-stale) snapshot or
+      // truncating the WAL after that would silently clobber the new owner's durable state with ours.
+      if (!this._ownsSnapshot()) {
+        this._signalOwnershipLost();
+        await fsp.unlink(tmpPath).catch(() => {});
+        return;
+      }
+
       // 3. Atomically publish, then fsync the directory so the new file's
       //    directory entry is durable. Only after this is the snapshot truly
       //    durable on disk.
       await fsp.rename(tmpPath, this._snapshotPath);
       await this._fsyncDirAsync(dir);
+
+      // Re-check once more: the rename + directory fsync above are themselves awaits a takeover could
+      // land inside. The WAL truncation below is the second and final mutation of shared state — if
+      // ownership was lost even after our rename won the race, we must NOT also truncate the WAL out
+      // from under the new owner's in-flight commits.
+      if (!this._ownsSnapshot()) { this._signalOwnershipLost(); return; }
 
       // 4. Compact the WAL. A durable commit (version > v) can land on the WAL
       //    file during the async writes above — truncating to empty would lose
