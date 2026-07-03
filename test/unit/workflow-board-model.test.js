@@ -861,11 +861,13 @@ describe('workflow board model and service', () => {
     assert.equal(after.columnId, 'done');
     assert.equal(after.lifecycle, 'idle');
     assert.deepEqual(after.recoveryFlags, []);
-    assert.equal(run.status, 'completed');
+    // Settling controls the ROUTING only — the run record keeps the TRUE status. Falsifying an errored
+    // run as `completed` would hide the failure from debugging and satisfy run_success dependents.
+    assert.equal(run.status, 'error');
     assert.equal(after.metadata.escalation, undefined);
   });
 
-  it('repairs a stale needs-decision decomposed parent back to done', async () => {
+  it('repairs a stale (escalation-free) decomposed parent in needs-decision back to done', async () => {
     let parent = service.createOrUpdateCard({
       title: 'Parked parent',
       projectId: 'agent-portal',
@@ -887,11 +889,7 @@ describe('workflow board model and service', () => {
       value: {
         ...closed,
         columnId: 'needs-decision',
-        metadata: {
-          ...closed.metadata,
-          escalation: { kind: 'needs_human', detail: 'stale parent rerun asked for help' },
-          reworkCycles: 1,
-        },
+        metadata: { ...closed.metadata, reworkCycles: 1 },
       },
     }], 'test');
 
@@ -901,8 +899,86 @@ describe('workflow board model and service', () => {
     assert.equal(after.columnId, 'done');
     assert.equal(after.lifecycle, 'idle');
     assert.deepEqual(after.recoveryFlags, []);
-    assert.equal(after.metadata.escalation, undefined);
     assert.equal(after.metadata.reworkCycles, undefined);
+  });
+
+  it('leaves a decomposed parent with a LIVE needs_human escalation parked for the person', async () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Asking parent',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      actor: 'test',
+    });
+    await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      actor: 'test',
+      childItems: [{ title: 'Scoped child', owner: 'backend-engineer', acceptanceCriteria: ['Implement child'] }],
+    });
+    let closed = service.getCard(parent.card.id);
+    // decompose clears the episode it resolves, so an escalation present AFTER the decomposition is a
+    // live post-decompose ask (a join re-run raised needs_human) — never "stale decomposition debris".
+    assert.equal(closed.metadata.escalation, undefined, 'decompose resolved the pre-decompose episode');
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${parent.card.id}`,
+      value: {
+        ...closed,
+        columnId: 'needs-decision',
+        metadata: {
+          ...closed.metadata,
+          escalation: { kind: 'needs_human', detail: 'Join re-run needs a human choice.' },
+        },
+      },
+    }], 'test');
+
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let after = service.getCard(parent.card.id);
+    assert.equal(after.columnId, 'needs-decision', 'the pending human question is not silently closed');
+    assert.equal(after.metadata.escalation?.kind, 'needs_human', 'the live escalation survives the repair pass');
+  });
+
+  it('never resurrects a REJECTED decomposed parent into done', async () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Rejected parent',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      actor: 'test',
+    });
+    await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      actor: 'test',
+      childItems: [{ title: 'Scoped child', owner: 'backend-engineer', acceptanceCriteria: ['Implement child'] }],
+    });
+    let closed = service.getCard(parent.card.id);
+    // The orchestrator (or the convergence-cap/exhaustion backstop) explicitly retired the parent to
+    // the rejected discard terminal. `rejected` is the opposite of shipping — repairing it to the close
+    // column would republish discarded work as done and erase the failure signal.
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${parent.card.id}`,
+      value: {
+        ...closed,
+        columnId: 'rejected',
+        lifecycle: 'idle',
+        metadata: {
+          ...closed.metadata,
+          resolution: { status: 'rejected', reason: 'convergence cap breached', at: 900, by: 'workflow-daemon' },
+        },
+      },
+    }], 'test');
+
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let after = service.getCard(parent.card.id);
+    assert.equal(after.columnId, 'rejected', 'an explicit discard decision stays a discard');
+    assert.equal(after.metadata.resolution?.status, 'rejected');
   });
 
   it('closes a stale ready decomposed parent instead of auto-starting it', async () => {

@@ -2069,22 +2069,34 @@ export function createWorkflowBoardService(opts = {}) {
     return releaseTailColumns(board).closeColumnId;
   }
 
-  function repairDecomposedParentClosures(board, principal, currentNow, filter = {}) {
+  function repairDecomposedParentClosures(board, principal, currentNow, filter = {}, stagedCardIds = new Set()) {
     let ops = [];
+    let classifier = classifyWorkflowGraph(board);
     let projectId = textOrNull(filter.projectId ?? filter.project_id);
     let goalId = textOrNull(filter.goalId ?? filter.goal_id);
     let chatId = textOrNull(filter.chatId ?? filter.chat_id);
     for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
       if (card.boardId !== board.id) continue;
+      // A card the current pass already staged a write for is hot state this function cannot see (it
+      // reads committed records) — repairing it would overwrite that staged write in the same commit.
+      if (stagedCardIds.has(card.id)) continue;
       if (projectId && card.projectId !== projectId) continue;
       if (goalId && card.entityRefs?.goalId !== goalId) continue;
       if (chatId && card.entityRefs?.chatId !== chatId) continue;
       let closeColumnId = decompositionCloseColumnIdForParent(board, card);
       if (!closeColumnId || card.columnId === closeColumnId) continue;
+      // Never resurrect a card out of a terminal column: `rejected` is an explicit discard decision
+      // (orchestrator reject, convergence-cap retirement, exhaustion backstop). Flipping it to the
+      // close column would republish discarded work as shipped and erase the failure signal.
+      if (classifier.isTerminal(card.columnId)) continue;
+      // A live escalation episode is NOT stale decomposition debris. decomposeWorkItem clears the
+      // episode it resolves when it retires the parent, so an escalation still present here was raised
+      // AFTER the decomposition (e.g. the parent's own needs_human question from a join re-run, parked
+      // for a person) — silently deleting it would drop a pending human decision.
+      if (hasActiveEscalation(card)) continue;
       if (activeRunForCard(card.id)) continue;
       if (hasQueuedActionableReturn(card)) continue;
       let metadata = { ...(card.metadata && typeof card.metadata === 'object' ? card.metadata : {}) };
-      delete metadata.escalation;
       delete metadata.reworkCycles;
       metadata.enteredColumn = closeColumnId;
       metadata.enteredColumnAt = currentNow;
@@ -2641,6 +2653,15 @@ export function createWorkflowBoardService(opts = {}) {
     return next;
   }
 
+  // Dependency-failure escalation detail: FORMAT and PARSE live side by side because the upstream id is
+  // recovered from this exact string by the stale-escalation detection — a mint site drifting from the
+  // parser would silently stop stale escalations from ever clearing (the card would stay escalated
+  // forever with no error anywhere). Every dependency-failure escalation must mint through this helper.
+  function dependencyFailureDetail(upstreamId, dependentId, onUpstreamFailure, kind = 'failed') {
+    let detailKind = kind === 'deleted' ? 'was deleted' : 'reached a terminal failure';
+    return `Upstream dependency ${upstreamId} ${detailKind}; resolving edge on ${dependentId} per onUpstreamFailure=${onUpstreamFailure}.`;
+  }
+
   function dependencyFailureEscalationUpstreamId(card) {
     if (!card?.metadata?.escalation) return null;
     let state = normalizeWorkflowEscalationState(card.metadata.escalation);
@@ -2669,6 +2690,16 @@ export function createWorkflowBoardService(opts = {}) {
     let releasedEdges = releasedEdgesFor(card);
     if (allDependenciesSatisfied(card, board, classifier, releasedEdges)) {
       return { ok: false, reason: 'dependencies_satisfied', card };
+    }
+    // Idempotent no-op: a card already waiting exactly as this function would leave it (blocked, with a
+    // dependencyBlock clock, no stray queue entries, nothing stale to clear) needs NO durable write.
+    // Without this, every reconcile tick re-commits an identical card (version churn) for as long as
+    // the dependency stays unsatisfied.
+    if (normalizeWorkflowLifecycle(card.lifecycle) === 'blocked'
+      && Boolean(dependencyBlockState(card))
+      && !dependencyWaitQueueEntries(board.id, card.id).length
+      && !(clearStaleEscalation && dependencyFailureEscalationIsStale(card))) {
+      return { ok: true, unchanged: true, card, droppedQueueEntries: [], clearedEscalation: false };
     }
     let ts = now();
     let metadata = { ...(card.metadata ?? {}) };
@@ -2868,14 +2899,13 @@ export function createWorkflowBoardService(opts = {}) {
   function propagateUpstreamResolution(upstreamCard, board, kind) {
     let principal = daemonPrincipal();
     let resolved = [];
-    let detailKind = kind === 'deleted' ? 'was deleted' : 'reached a terminal failure';
     for (let dependent of boardCardsFor(board.id)) {
       let deps = cardDependsOn(dependent);
       let edge = deps.find(dep => dep.cardId === upstreamCard.id);
       if (!edge) continue;
       let live = clone(stateGraph.get(`workflowCards/${dependent.id}`));
       if (!live) continue;
-      let detail = `Upstream dependency ${upstreamCard.id} ${detailKind}; resolving edge on ${dependent.id} per onUpstreamFailure=${edge.onUpstreamFailure}.`;
+      let detail = dependencyFailureDetail(upstreamCard.id, dependent.id, edge.onUpstreamFailure, kind);
       if (edge.onUpstreamFailure === 'release') {
         commitReleasedEdge(live, upstreamCard.id, principal);
         resolved.push({ cardId: dependent.id, resolution: 'release' });
@@ -2922,7 +2952,7 @@ export function createWorkflowBoardService(opts = {}) {
         if (releasedEdges.has(dep.cardId)) continue;
         let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
         if (!upstreamInTerminalFailure(upstream)) continue;
-        let detail = `Upstream dependency ${dep.cardId} reached a terminal failure; resolving edge on ${card.id} per onUpstreamFailure=${dep.onUpstreamFailure}.`;
+        let detail = dependencyFailureDetail(dep.cardId, card.id, dep.onUpstreamFailure);
         if (dep.onUpstreamFailure === 'release') {
           commitReleasedEdge(live, dep.cardId, principal);
         } else if (dep.onUpstreamFailure === 'cancel_self') {
@@ -6165,10 +6195,13 @@ export function createWorkflowBoardService(opts = {}) {
           failedUpstreamIds.add(card.id);
         }
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
-        let storedRunStatus = settledByDecomposition ? 'completed' : nextStatus;
+        // A decomposition-settled parent keeps its TRUE run status. Settling controls the ROUTING (the
+        // card retires to the close column, no reopen, no escalation churn) — it must not falsify the
+        // run record: an errored runtime task recorded as `completed` hides exactly the failures that
+        // need debugging, and would satisfy `run_success` dependents off a run that never succeeded.
         let nextRun = normalizeWorkflowRunInput({
           ...run,
-          status: storedRunStatus,
+          status: nextStatus,
           completedAt: terminal ? completedAt : run.completedAt,
           tokens: runtimeTaskTokenTotal(run, runtimeTasks) ?? run.tokens ?? null,
           chatId: run.chatId ?? runtimeTaskChatId(run, runtimeTasks),
@@ -6236,7 +6269,11 @@ export function createWorkflowBoardService(opts = {}) {
         // non-terminal status change (e.g. requested→running) carries any intermediate return parsed
         // above. Fold the minted return into the inbox (coalesce drops a late progress after a terminal,
         // so no extra logic) so it lands in the SAME card update / commit as the rest of the reconcile.
-        let mintedReturn = terminal && !resumableInterruption && !settledByDecomposition
+        // A decomposition-settled card mints it too: settling retires the CARD, but this return is the
+        // card's report to ITS OWN parent (routeReturnToParent) — muting it would sever the upward
+        // transport for every mid-tree node and hide a failed branch from the grandparent's join. A
+        // bare self-terminal return never wakes the card itself, so this cannot reopen the settled card.
+        let mintedReturn = terminal && !resumableInterruption
           ? normalizeWorkflowReturnEvent(
             { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
             // A per-run-distinct eventId so routeReturnToParent's derived `routed-<sha(eventId:owner)>` id
@@ -6373,8 +6410,7 @@ export function createWorkflowBoardService(opts = {}) {
             type: 'runtime_reconcile',
             runId: run.id,
             taskIds: uniqueArray(run.taskIds),
-            status: storedRunStatus,
-            runtimeStatus: nextStatus,
+            status: nextStatus,
             ...(settledByDecomposition ? { settledBy: 'decomposition' } : {}),
           }],
         }, { id: eventId, now: completedAt ?? currentNow });
@@ -6409,7 +6445,17 @@ export function createWorkflowBoardService(opts = {}) {
     for (let draft of ownerReturnDrafts.values()) {
       ops.push({ op: 'set', path: `workflowCards/${draft.id}`, value: draft });
     }
-    ops.push(...repairDecomposedParentClosures(board, principal, currentNow, filter));
+    // The closure repair reads COMMITTED cards, so it must not touch any card this pass already staged
+    // a write for — a later `set` on the same path wins inside one commit, and the repair's stale value
+    // would silently erase everything this reconcile just produced. The concrete casualty is the routed
+    // return: a child's return lands on the parent via an ownerReturnDrafts op, and the repair — seeing
+    // the parent's committed (return-free) record — would overwrite it, killing the child→parent wake
+    // channel entirely.
+    let stagedCardIds = new Set(
+      ops.filter(op => op.op === 'set' && op.path.startsWith('workflowCards/'))
+        .map(op => op.path.slice('workflowCards/'.length)),
+    );
+    ops.push(...repairDecomposedParentClosures(board, principal, currentNow, filter, stagedCardIds));
 
     let committed = false;
     if (ops.length) {
@@ -6761,6 +6807,12 @@ export function createWorkflowBoardService(opts = {}) {
     // advances the wave so a later re-orchestrate mints a fresh join rather than reusing a retired one.
     let parentMetadata = { ...asObject(parent.metadata), decomposeWaveSeq: currentWaveSeq };
     if (parentCloses) {
+      // Decomposing RESOLVES the parent's open escalation episode (the orchestrator chose to decompose
+      // instead of the escalated ask) and its rework counter. Clearing them here — at the moment the
+      // episode is actually resolved — is what lets the closure repair below treat any escalation still
+      // present on a retired parent as LIVE (post-decompose) and leave it alone.
+      delete parentMetadata.escalation;
+      delete parentMetadata.reworkCycles;
       resultParent = normalizeWorkflowCardInput({
         ...parent,
         columnId: parentNextColumnId,
@@ -8353,18 +8405,6 @@ export function createWorkflowBoardService(opts = {}) {
       let card = getCard(cardId);
       if (!card || card.boardId !== board.id) continue;
       if (!(hasActiveEscalation(card) || hasQueuedActionableReturn(card))) continue;
-      if (cardDependsOn(card).length) {
-        let dependencyRestored = restoreDependencyWait(board, card, principal, { clearStaleEscalation: true });
-        if (dependencyRestored.ok) {
-          terminated.push({
-            cardId: card.id,
-            kind: 'dependency_wait_restored',
-            droppedQueueEntries: dependencyRestored.droppedQueueEntries,
-            clearedEscalation: dependencyRestored.clearedEscalation,
-          });
-          continue;
-        }
-      }
       // Per-card wake gate (D4 + returnWake), applied PER-CARD not as a board-level early return:
       //   - an unconsumed hard-interrupt (a blocked child) wakes regardless — it cannot self-clear;
       //   - otherwise a queued wake-driving (soft) return is NEW actionable work, gated on `returnWake`
@@ -8378,6 +8418,26 @@ export function createWorkflowBoardService(opts = {}) {
       // A `needs_human` episode is parked for an explicit human decision in the decision lane — the
       // board never auto re-engages it. The parking driver surfaces it; a human answer reactivates it.
       if (state.kind === 'needs_human') continue;
+      // A card with an UNSATISFIED dependency must wait for its release tick, not re-engage — but only
+      // AFTER the guards above: a `needs_human` park stays a human's turn (never silently re-blocked),
+      // and an unconsumed hard-interrupt (a blocked CHILD's question to this card) must wake it
+      // regardless of the card's own upstream edges — deferring the answer until an unrelated upstream
+      // finishes would starve the waiting child. Soft returns stay queued (unconsumed) through the
+      // wait and are delivered when the dependency releases the card.
+      if (cardDependsOn(card).length && !hasUnconsumedHardInterrupt(card)) {
+        let dependencyRestored = restoreDependencyWait(board, card, principal, { clearStaleEscalation: true });
+        if (dependencyRestored.ok) {
+          if (!dependencyRestored.unchanged) {
+            terminated.push({
+              cardId: card.id,
+              kind: 'dependency_wait_restored',
+              droppedQueueEntries: dependencyRestored.droppedQueueEntries,
+              clearedEscalation: dependencyRestored.clearedEscalation,
+            });
+          }
+          continue;
+        }
+      }
       // Rework loop-safety backstop (checked BEFORE the backoff gate — an exhausted loop must not wait
       // out an hours-long backoff window). reworkCycles persists across the completed re-execution runs
       // that reset attemptCount, so an audit that never passes would loop forever and pin the card's

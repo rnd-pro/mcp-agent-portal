@@ -170,6 +170,48 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     } }], 'test:seed-hard-interrupt', { durable: true });
   }
 
+  it('an unconsumed hard-interrupt wakes a dependency-blocked card instead of re-parking it in dependency wait', async () => {
+    // The card's own upstream edge is unsatisfied, but a blocked CHILD is asking this card a question
+    // (hard interrupt). Deferring the answer until the unrelated upstream finishes would starve the
+    // waiting child — the dependency-wait restore must yield to the hard interrupt.
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'enable recovery' });
+    let board = service.ensureBoard();
+
+    let upstream = makeReadyCard(service, { title: 'slow-upstream', resourceGroup: 'impl' });
+    let parent = service.createOrUpdateCard({
+      title: 'blocked-parent',
+      body: 'Waits on upstream, but its child needs an answer.',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      assignedAgent: 'backend-engineer',
+      resourceGroup: 'impl',
+      acceptanceCriteria: ['Answer the child'],
+      dependsOn: [{ cardId: upstream.id, releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' }],
+      actor: 'test',
+    }).card;
+    seedHardInterrupt(
+      parent,
+      [returnEvent({ kind: 'blocked', detail: 'child needs a decision', correlationId: parent.id, hardInterrupt: true })],
+      undefined,
+    );
+
+    let result = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+
+    assert.ok(
+      !result.terminated.some(item => item.cardId === parent.id && item.kind === 'dependency_wait_restored'),
+      'the hard interrupt is not silently re-parked as dependency wait',
+    );
+    assert.ok(
+      result.reengaged.some(item => item.cardId === parent.id),
+      'the card is re-engaged so the orchestrator can answer its child',
+    );
+  });
+
   it('a queued discovered return re-engages once on an auto board and stamps consumedAt (idempotent)', async () => {
     let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
     let service = makeService(ledger.proxy);

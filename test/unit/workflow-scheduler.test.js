@@ -918,6 +918,18 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       'no worker is delegated for an unsatisfied dependency',
     );
     assert.ok(result.dependencyRelease.escalated.some(item => item.cardId === dependent.id && item.resolution === 'dependency_wait_restored'));
+
+    // Idempotency / anti-churn: the dependent is now exactly in dependency wait. Re-running the
+    // reconcile (and the escalation driver) with nothing changed must be a durable NO-OP — the restore
+    // path re-committing an identical card every tick is version churn, not recovery.
+    let settledVersion = service.getCard(dependent.id).version;
+    await service.reconcileWorkflowRecovery({ boardId: board.id });
+    await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(
+      service.getCard(dependent.id).version,
+      settledVersion,
+      'an already-waiting dependent is not re-committed on every reconcile tick',
+    );
   });
 
   it('drive on: fires the quality-audit on_enter automation for the advanced card (a real audit delegation)', async () => {
