@@ -2033,6 +2033,78 @@ export function createWorkflowBoardService(opts = {}) {
     });
   }
 
+  function childCardsForParent(parentId) {
+    let id = textOrNull(parentId);
+    if (!id) return [];
+    return Object.values(getCollection(stateGraph, 'workflowCards'))
+      .filter(card => textOrNull(card.parentCardId ?? card.parent_card_id) === id);
+  }
+
+  function decompositionCloseColumnIdForParent(board, card) {
+    if (!normalizeWorkflowBoardAutomation(board.automation).decompositionClosesParent) return null;
+    if (childCardsForParent(card.id).length === 0) return null;
+    return releaseTailColumns(board).closeColumnId;
+  }
+
+  function repairDecomposedParentClosures(board, principal, currentNow, filter = {}) {
+    let ops = [];
+    let projectId = textOrNull(filter.projectId ?? filter.project_id);
+    let goalId = textOrNull(filter.goalId ?? filter.goal_id);
+    let chatId = textOrNull(filter.chatId ?? filter.chat_id);
+    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (card.boardId !== board.id) continue;
+      if (projectId && card.projectId !== projectId) continue;
+      if (goalId && card.entityRefs?.goalId !== goalId) continue;
+      if (chatId && card.entityRefs?.chatId !== chatId) continue;
+      let closeColumnId = decompositionCloseColumnIdForParent(board, card);
+      if (!closeColumnId || card.columnId === closeColumnId) continue;
+      if (activeRunForCard(card.id)) continue;
+      if (hasQueuedActionableReturn(card)) continue;
+      let metadata = { ...(card.metadata && typeof card.metadata === 'object' ? card.metadata : {}) };
+      delete metadata.escalation;
+      delete metadata.reworkCycles;
+      metadata.enteredColumn = closeColumnId;
+      metadata.enteredColumnAt = currentNow;
+      let nextCard = normalizeWorkflowCardInput({
+        ...card,
+        columnId: closeColumnId,
+        lifecycle: 'idle',
+        recoveryFlags: [],
+        metadata,
+        version: card.version + 1,
+        updatedAt: currentNow,
+        updatedBy: principal.label,
+      }, {
+        id: card.id,
+        actor: principal.label,
+        now: currentNow,
+        version: card.version + 1,
+        createdAt: card.createdAt,
+        updatedAt: currentNow,
+      });
+      let eventId = nextId(makeId, 'runtime');
+      let event = normalizeWorkflowTransitionEvent({
+        id: eventId,
+        eventType: 'runtime',
+        boardId: board.id,
+        cardId: card.id,
+        fromColumnId: card.columnId,
+        toColumnId: closeColumnId,
+        actor: principal.label,
+        mode: 'auto',
+        reason: `Closed decomposed parent ${card.id}; child cards own remaining work.`,
+        status: 'accepted',
+        sideEffects: [{ type: 'parent_closed', repair: 'decomposition', childCount: childCardsForParent(card.id).length }],
+      }, { id: eventId, now: currentNow });
+      ops.push(
+        { op: 'set', path: `workflowCards/${card.id}`, value: nextCard },
+        { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+        { op: 'delete', path: `workflowLeases/${card.id}` },
+      );
+    }
+    return ops;
+  }
+
   function autoOrchestrationCandidate(board, card, args = {}) {
     let automation = cardAutomation(board, card);
     let boardAutomation = normalizeWorkflowBoardAutomation(board.automation);
@@ -2066,6 +2138,14 @@ export function createWorkflowBoardService(opts = {}) {
     // is promoted to the orchestrate column by the autonomous backlog driver, never re-scoped.
     if (automation.action === 'scope' && readyCardHasExecutionContract(card)) {
       return { ok: false, reason: 'card already has an execution contract; promote instead of scope', automation };
+    }
+    if (
+      automation.action === 'orchestrate'
+      && decompositionCloseColumnIdForParent(board, card)
+      && !hasQueuedActionableReturn(card)
+      && !hasActiveEscalation(card)
+    ) {
+      return { ok: false, reason: 'decomposed parent waits for child returns instead of re-running', automation };
     }
     if (board.mode !== 'armed' && board.mode !== 'autonomous') {
       return { ok: false, reason: `board mode ${board.mode} does not allow automatic orchestration`, automation };
@@ -6048,17 +6128,24 @@ export function createWorkflowBoardService(opts = {}) {
 
         if (!nextStatus || nextStatus === run.status) continue;
         let terminal = TERMINAL_RUN_STATUSES.has(nextStatus);
+        let decompositionCloseColumnId = terminal ? decompositionCloseColumnIdForParent(board, latestCard) : null;
+        let settledByDecomposition = Boolean(decompositionCloseColumnId);
         // A run whose task(s) ended lost/stale (heartbeat timeout, or a worker orphaned by a backend
         // restart) is a RESUMABLE interruption surfacing as `error`, not a genuine failure: re-queue it
         // for the orchestrator to resume from prior work rather than push it to audit as failed.
-        let resumableInterruption = nextStatus === 'error' && (watchdogLost || runInterruptionResumable(run, runtimeTasks));
+        let resumableInterruption = !settledByDecomposition
+          && nextStatus === 'error'
+          && (watchdogLost || runInterruptionResumable(run, runtimeTasks));
         // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution — but a
         // resumable interruption has not failed, so it must NOT fan out failure to its dependents.
-        if (['error', 'failed', 'cancelled'].includes(nextStatus) && !resumableInterruption) failedUpstreamIds.add(card.id);
+        if (['error', 'failed', 'cancelled'].includes(nextStatus) && !resumableInterruption && !settledByDecomposition) {
+          failedUpstreamIds.add(card.id);
+        }
         let completedAt = terminal ? workflowRunCompletedAt(run, runtimeTasks, currentNow) : null;
+        let storedRunStatus = settledByDecomposition ? 'completed' : nextStatus;
         let nextRun = normalizeWorkflowRunInput({
           ...run,
-          status: nextStatus,
+          status: storedRunStatus,
           completedAt: terminal ? completedAt : run.completedAt,
           tokens: runtimeTaskTokenTotal(run, runtimeTasks) ?? run.tokens ?? null,
           chatId: run.chatId ?? runtimeTaskChatId(run, runtimeTasks),
@@ -6074,11 +6161,13 @@ export function createWorkflowBoardService(opts = {}) {
         // isResume) so the worker continues from prior on-disk work. A genuine terminal status advances
         // per runtimeColumnForCard.
         let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
-        let nextColumnId = resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(latestCard, nextStatus);
+        let nextColumnId = settledByDecomposition
+          ? decompositionCloseColumnId
+          : resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(latestCard, nextStatus);
         // Per-column autonomy gate: when the source column's autoAdvance is off, a cleanly-completed run
         // does NOT auto-advance to audit — the card stays put for a human, marked awaitingHuman so the UI
         // can surface it. A failure/interruption still routes (for recovery), so the gate is happy-path only.
-        let heldForHuman = terminal && nextStatus === 'completed' && !resumableInterruption
+        let heldForHuman = terminal && nextStatus === 'completed' && !resumableInterruption && !settledByDecomposition
           && nextColumnId !== latestCard.columnId && !columnAutoAdvances(board, latestCard.columnId);
         if (heldForHuman) {
           latestCard = markAwaitingHuman(latestCard, board, latestCard.columnId, currentNow);
@@ -6086,7 +6175,12 @@ export function createWorkflowBoardService(opts = {}) {
         }
         let flags = new Set(normalizeRecoveryFlags(latestCard.recoveryFlags));
         if (terminal) {
-          if (resumableInterruption) {
+          if (settledByDecomposition) {
+            flags.delete('blocked');
+            flags.delete('needs_audit');
+            flags.delete('needs_resume');
+            flags.delete('recovering');
+          } else if (resumableInterruption) {
             // Mark for resume rather than audit; the orchestrate re-pickup owns the next attempt.
             flags.delete('needs_audit');
             flags.add('needs_resume');
@@ -6111,7 +6205,7 @@ export function createWorkflowBoardService(opts = {}) {
         let nextFlags = [...flags].filter(flag => normalizeRecoveryFlags([flag]).length > 0);
         // A resumable interruption is not an escalation episode (no human decision / rework needed) and
         // does not mint a `failed` return — it is simply re-queued for resume.
-        let escalationDelta = terminal && !resumableInterruption
+        let escalationDelta = terminal && !resumableInterruption && !settledByDecomposition
           ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
@@ -6119,7 +6213,7 @@ export function createWorkflowBoardService(opts = {}) {
         // non-terminal status change (e.g. requested→running) carries any intermediate return parsed
         // above. Fold the minted return into the inbox (coalesce drops a late progress after a terminal,
         // so no extra logic) so it lands in the SAME card update / commit as the rest of the reconcile.
-        let mintedReturn = terminal && !resumableInterruption
+        let mintedReturn = terminal && !resumableInterruption && !settledByDecomposition
           ? normalizeWorkflowReturnEvent(
             { kind: nextStatus === 'completed' ? 'completed' : 'failed', detail: escalationDelta?.detail ?? null },
             // A per-run-distinct eventId so routeReturnToParent's derived `routed-<sha(eventId:owner)>` id
@@ -6145,7 +6239,9 @@ export function createWorkflowBoardService(opts = {}) {
         // Orchestrator reject DECISION: a completed run that emitted `WORKFLOW_RESULT: rejected` retires
         // the card to the reject terminal with a resolution status instead of advancing it. The decision
         // is final — clear any escalation episode and the needs_audit flag (nothing left to re-route).
-        let rejectReason = terminal && nextStatus === 'completed' ? runRequestsReject(run, runtimeTasks) : null;
+        let rejectReason = terminal && nextStatus === 'completed' && !settledByDecomposition
+          ? runRequestsReject(run, runtimeTasks)
+          : null;
         if (rejectReason) {
           let rejectColumnId = rejectTerminalColumnId(board);
           if (rejectColumnId) {
@@ -6160,7 +6256,7 @@ export function createWorkflowBoardService(opts = {}) {
         // Orchestrator human-decision ASK: a completed run that emitted `WORKFLOW_RESULT: needs_human`
         // raises a `needs_human` escalation (with its question + button options) and stays put — the
         // parking driver relocates it to the decision lane next pass. Mutually exclusive with reject.
-        let humanAsk = !rejectReason && terminal && nextStatus === 'completed'
+        let humanAsk = !rejectReason && terminal && nextStatus === 'completed' && !settledByDecomposition
           ? runRequestsHumanDecision(run, runtimeTasks)
           : null;
         if (humanAsk) {
@@ -6246,13 +6342,17 @@ export function createWorkflowBoardService(opts = {}) {
           toColumnId: latestCard.columnId,
           actor: principal.label,
           mode: 'auto',
-          reason: `Workflow run ${run.id} reconciled from runtime task status ${nextStatus}.`,
+          reason: settledByDecomposition
+            ? `Workflow run ${run.id} settled by completed decomposition after runtime task status ${nextStatus}.`
+            : `Workflow run ${run.id} reconciled from runtime task status ${nextStatus}.`,
           status: 'accepted',
           sideEffects: [{
             type: 'runtime_reconcile',
             runId: run.id,
             taskIds: uniqueArray(run.taskIds),
-            status: nextStatus,
+            status: storedRunStatus,
+            runtimeStatus: nextStatus,
+            ...(settledByDecomposition ? { settledBy: 'decomposition' } : {}),
           }],
         }, { id: eventId, now: completedAt ?? currentNow });
         ops.push({ op: 'set', path: `workflowTransitions/${event.id}`, value: event });
@@ -6286,6 +6386,7 @@ export function createWorkflowBoardService(opts = {}) {
     for (let draft of ownerReturnDrafts.values()) {
       ops.push({ op: 'set', path: `workflowCards/${draft.id}`, value: draft });
     }
+    ops.push(...repairDecomposedParentClosures(board, principal, currentNow, filter));
 
     let committed = false;
     if (ops.length) {
@@ -6659,6 +6760,18 @@ export function createWorkflowBoardService(opts = {}) {
       // (which can re-engage the closed card into orchestration and thrash on a delegation that never
       // starts a task). Re-decomposition wakes the owner via CHILD returns, not the parent's own lease.
       parentOps.push({ op: 'delete', path: `workflowLeases/${parent.id}` });
+      for (let run of getRunsForCard(parent.id)) {
+        if (!RUNNING_RUN_STATUSES.has(run.status)) continue;
+        parentOps.push({ op: 'set', path: `workflowRuns/${run.id}`, value: normalizeWorkflowRunInput({
+          ...run,
+          status: 'completed',
+          completedAt: run.completedAt ?? ts,
+        }, {
+          id: run.id,
+          now: ts,
+          updatedAt: ts,
+        }) });
+      }
     } else {
       resultParent = normalizeWorkflowCardInput({
         ...parent,

@@ -762,6 +762,198 @@ describe('workflow board model and service', () => {
     assert.equal(runs[0].status, 'running');
   });
 
+  it('retires active parent runs when decomposition closes the parent', async () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Split active parent',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      actor: 'test',
+    });
+    sg.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-parent-active',
+        value: {
+          id: 'run-parent-active',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId: parent.card.id,
+          status: 'running',
+          taskIds: ['task-parent-active'],
+          startedAt: now,
+          updatedAt: now,
+        },
+      },
+      {
+        op: 'set',
+        path: `workflowLeases/${parent.card.id}`,
+        value: { cardId: parent.card.id, runId: 'run-parent-active', leaseOwner: 'orchestrator', leaseExpiresAt: now + 1000 },
+      },
+    ], 'test');
+
+    await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      actor: 'test',
+      childItems: [{ title: 'Owned child', owner: 'backend-engineer', acceptanceCriteria: ['Scoped child runs'] }],
+    });
+
+    let after = service.getCard(parent.card.id);
+    let run = sg.get('workflowRuns/run-parent-active');
+    assert.equal(after.columnId, 'done');
+    assert.equal(run.status, 'completed');
+    assert.equal(sg.get(`workflowLeases/${parent.card.id}`), undefined);
+  });
+
+  it('does not reopen a decomposed parent when a retired runtime task errors', async () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Retired parent',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      actor: 'test',
+    });
+    await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      actor: 'test',
+      childItems: [{ title: 'Scoped child', owner: 'backend-engineer', acceptanceCriteria: ['Implement child'] }],
+    });
+    let closed = service.getCard(parent.card.id);
+    sg.commit([
+      {
+        op: 'set',
+        path: 'workflowRuns/run-retired-parent',
+        value: {
+          id: 'run-retired-parent',
+          boardId: DEFAULT_WORKFLOW_BOARD_ID,
+          cardId: parent.card.id,
+          status: 'running',
+          taskIds: ['task-retired-parent'],
+          startedAt: now,
+          updatedAt: now,
+        },
+      },
+      {
+        op: 'set',
+        path: 'tasks/task-retired-parent',
+        value: {
+          id: 'task-retired-parent',
+          status: 'error',
+          startedAt: now,
+          updatedAt: now,
+          completedAt: now,
+        },
+      },
+      {
+        op: 'set',
+        path: `workflowCards/${parent.card.id}`,
+        value: { ...closed, recoveryFlags: ['needs_resume', 'blocked', 'needs_audit'] },
+      },
+    ], 'test');
+
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let after = service.getCard(parent.card.id);
+    let run = sg.get('workflowRuns/run-retired-parent');
+    assert.equal(after.columnId, 'done');
+    assert.equal(after.lifecycle, 'idle');
+    assert.deepEqual(after.recoveryFlags, []);
+    assert.equal(run.status, 'completed');
+    assert.equal(after.metadata.escalation, undefined);
+  });
+
+  it('repairs a stale needs-decision decomposed parent back to done', async () => {
+    let parent = service.createOrUpdateCard({
+      title: 'Parked parent',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      actor: 'test',
+    });
+    await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      actor: 'test',
+      childItems: [{ title: 'Scoped child', owner: 'backend-engineer', acceptanceCriteria: ['Implement child'] }],
+    });
+    let closed = service.getCard(parent.card.id);
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${parent.card.id}`,
+      value: {
+        ...closed,
+        columnId: 'needs-decision',
+        metadata: {
+          ...closed.metadata,
+          escalation: { kind: 'needs_human', detail: 'stale parent rerun asked for help' },
+          reworkCycles: 1,
+        },
+      },
+    }], 'test');
+
+    service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID });
+
+    let after = service.getCard(parent.card.id);
+    assert.equal(after.columnId, 'done');
+    assert.equal(after.lifecycle, 'idle');
+    assert.deepEqual(after.recoveryFlags, []);
+    assert.equal(after.metadata.escalation, undefined);
+    assert.equal(after.metadata.reworkCycles, undefined);
+  });
+
+  it('closes a stale ready decomposed parent instead of auto-starting it', async () => {
+    let calls = 0;
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager: {
+        projectRoot: tmpDir,
+        requestFromChild: async (_server, _method, payload) => {
+          if (payload.name === 'list_tasks') return { content: [{ type: 'text', text: '[]' }] };
+          if (payload.name === 'delegate_task') calls += 1;
+          return { content: [{ type: 'text', text: 'Started task should-not-run' }] };
+        },
+      },
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    let parent = service.createOrUpdateCard({
+      title: 'Closed parent in ready',
+      projectId: 'agent-portal',
+      domain: 'orchestration',
+      columnId: 'in-progress',
+      owner: 'orchestrator',
+      acceptanceCriteria: ['Children own scoped work'],
+      actor: 'test',
+    });
+    let result = await service.decomposeWorkItem({
+      cardId: parent.card.id,
+      actor: 'test',
+      childItems: [{ title: 'Scoped child', owner: 'backend-engineer', acceptanceCriteria: ['Implement child'] }],
+    });
+    let closed = service.getCard(parent.card.id);
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${parent.card.id}`,
+      value: { ...closed, columnId: 'ready', lifecycle: 'idle', recoveryFlags: [] },
+    }, {
+      op: 'set',
+      path: `workflowCards/${result.children[0].id}`,
+      value: { ...service.getCard(result.children[0].id), columnId: 'done', lifecycle: 'idle', recoveryFlags: [] },
+    }], 'test');
+    calls = 0;
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, undefined, { drive: true });
+
+    assert.equal(calls, 0);
+    assert.equal(service.getCard(parent.card.id).columnId, 'done');
+  });
+
   it('stamps the origin-idea rootCardId transitively through grandchildren', async () => {
     let parent = service.createOrUpdateCard({
       title: 'Origin idea', projectId: 'agent-portal', domain: 'orchestration',
