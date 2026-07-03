@@ -25,7 +25,9 @@ let scriptPath = resolve(__dirname, '../index.js');
 
 let [, , command, ...args] = process.argv;
 
-const LOCAL_GATEWAY_ROOT = resolve(os.homedir() || os.tmpdir(), '.local-gateway');
+const LOCAL_GATEWAY_ROOT = process.env.PORTAL_LOCAL_GATEWAY_DIR
+  ? resolve(process.env.PORTAL_LOCAL_GATEWAY_DIR)
+  : resolve(os.homedir() || os.tmpdir(), '.local-gateway');
 const SERVICES_PATH = resolve(LOCAL_GATEWAY_ROOT, 'services.json');
 const BACKENDS_DIR = resolve(LOCAL_GATEWAY_ROOT, 'backends');
 const GATEWAY_PID_PATH = resolve(LOCAL_GATEWAY_ROOT, 'gateway.pid');

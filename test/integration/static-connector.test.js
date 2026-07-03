@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -96,7 +95,6 @@ function handleSocket(socket, requests) {
 }
 
 async function writeBackendPortFile({ backendsDir, projectRoot, port, pid, version }) {
-  let projectHash = createHash('md5').update(path.resolve(projectRoot)).digest('hex').slice(0, 8);
   let projectName = path.basename(projectRoot);
   let localUrl = `http://127.0.0.1:${port}/`;
   let data = {
@@ -116,8 +114,8 @@ async function writeBackendPortFile({ backendsDir, projectRoot, port, pid, versi
     webDirect: localUrl,
   };
   await mkdir(backendsDir, { recursive: true });
-  await writeFile(path.join(backendsDir, `portal-${projectHash}.json`), JSON.stringify(data, null, 2));
-  return { data, projectHash };
+  await writeFile(path.join(backendsDir, 'portal.json'), JSON.stringify(data, null, 2));
+  return { data, fileName: 'portal.json' };
 }
 
 describe('static MCP connector fresh process', () => {
@@ -154,14 +152,14 @@ describe('static MCP connector fresh process', () => {
     let port = server.address().port;
 
     let packageMeta = JSON.parse(await readFile(path.join(repoRoot, 'package.json'), 'utf8'));
-    let { data: portData, projectHash } = await writeBackendPortFile({
+    let { data: portData, fileName } = await writeBackendPortFile({
       backendsDir,
       projectRoot,
       port,
       pid: sentinel.pid,
       version: packageMeta.version,
     });
-    let portFile = path.join(backendsDir, `portal-${projectHash}.json`);
+    let portFile = path.join(backendsDir, fileName);
     let binPath = path.resolve(repoRoot, packageMeta.bin['mcp-agent-portal']);
 
     assert.equal(JSON.parse(await readFile(portFile, 'utf8')).pid, sentinel.pid);
@@ -252,7 +250,7 @@ describe('static MCP connector fresh process', () => {
       assert.equal(requests.filter((request) => request.method === 'tools/list').length, 1);
       assert.match(stderr, /Connected to singleton backend/);
       assert.doesNotMatch(stderr, /Proxy failed after 5 retries/);
-      assert.deepEqual(await readdir(backendsDir), [`portal-${projectHash}.json`]);
+      assert.deepEqual(await readdir(backendsDir), [fileName]);
 
       child.stdin.end();
       let [code] = await Promise.race([
