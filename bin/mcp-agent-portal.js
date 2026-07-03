@@ -296,7 +296,8 @@ function makeGatewayAuthToken() {
 }
 
 function withoutInlineApiKey(provider = {}) {
-  let { apiKey, ...safeProvider } = provider;
+  let safeProvider = { ...provider };
+  delete safeProvider.apiKey;
   return safeProvider;
 }
 
