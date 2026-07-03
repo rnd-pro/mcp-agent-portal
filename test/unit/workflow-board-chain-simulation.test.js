@@ -253,12 +253,19 @@ describe('workflow board chain simulation (liveness to quiescence)', () => {
       `${label}: card must reach a terminal or a human, got frozen in `
       + `${verdict.card.columnId} (lifecycle=${verdict.card.lifecycle}, `
       + `flags=${JSON.stringify(verdict.card.recoveryFlags)}, `
+      + `waiting=${JSON.stringify(verdict.card.waiting ?? null)}, `
       + `escalation=${JSON.stringify(verdict.card.metadata?.escalation ?? null)})`,
     );
     let runs = Object.values(result.sg.get('workflowRuns') ?? {});
     assert.ok(runs.length <= 128, `${label}: run count ${runs.length} stays under the convergence cap`);
     if (verdict.state === 'terminal') {
       assert.equal(result.sg.get(`workflowLeases/${result.cardId}`), undefined, `${label}: a terminal card holds no lease`);
+      // F2 read model must agree with the liveness verdict: a settled terminal card is not waiting.
+      assert.equal(verdict.card.waiting, null, `${label}: a terminal card carries no waiting record`);
+    }
+    if (verdict.state === 'parked') {
+      // A human-parked card's single derived reason is the person's turn.
+      assert.equal(verdict.card.waiting?.reason, 'human', `${label}: a parked card waits on a human`);
     }
     return verdict;
   }

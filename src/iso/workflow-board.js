@@ -167,6 +167,95 @@ export function hasActiveEscalation(card = {}) {
   return Boolean(state && (state.kind || state.lastEscalation) && !(state.humanEscalated ?? state.human_escalated));
 }
 
+// ── Unified waiting record (F2: one fact for five overlapping "is this card waiting" signals) ────
+// The board historically expressed "waiting" five independent ways — dependency block, recovery
+// flags, the escalation backoff window, the return inbox, and occupancy aging — each with its own
+// clock and driver, which is where the AU stall bugs bred. `deriveWorkflowWaiting` folds the DURABLE
+// on-card state into ONE canonical record for read purposes (display, monitoring, the liveness
+// classifier), so nothing re-derives "why is this card waiting" from each axis by hand. It is a
+// read model: the five axes remain the writers during migration. Returns null when the card is not
+// waiting (running, fresh intake, or terminal-settled).
+export const WORKFLOW_WAITING_SCHEMA = 'workflow-waiting/v1';
+// Precedence encodes whose turn it is: a human's answer outranks a machine backoff outranks a queued
+// orchestrator return outranks a run-error resume. `dependency` sits just under `human` (an upstream
+// edge is nobody's turn until it releases).
+export const WORKFLOW_WAITING_REASONS = ['human', 'dependency', 'backoff', 'return', 'run_error'];
+
+function waitingRecord(reason, since, dueAt, owner, wakeOn) {
+  // Guard against Number(null)===0: a null/absent timestamp must stay null, not coerce to the epoch.
+  let ms = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    let num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  return {
+    schema: WORKFLOW_WAITING_SCHEMA,
+    reason,
+    since: ms(since),
+    dueAt: ms(dueAt),
+    owner,
+    wakeOn,
+  };
+}
+
+/**
+ * Fold a card's durable waiting state into one `{schema, reason, since, dueAt, owner, wakeOn}` record,
+ * or null when the card is not waiting. Pure and defensive — never throws on a partial card.
+ * @param {object} card
+ * @param {{ now?: number, inHumanLane?: boolean, isTerminal?: boolean, hasActiveRun?: boolean, maxBlockedAgeMs?: number }} [opts]
+ *   inHumanLane: the card rests in the board's await_human column (resolved by the caller, which sees
+ *   the board). isTerminal / hasActiveRun: caller-supplied so a settled or actively-running card is
+ *   never reported as waiting. maxBlockedAgeMs: the dependency escalation horizon, for `dueAt`.
+ */
+export function deriveWorkflowWaiting(card = {}, opts = {}) {
+  if (opts.isTerminal === true || opts.hasActiveRun === true) return null;
+  let now = Number(opts.now);
+  let metadata = objectOrEmpty(card.metadata);
+  let escalation = metadata.escalation ? normalizeWorkflowEscalationState(metadata.escalation) : null;
+  let active = Boolean(escalation && (escalation.kind || escalation.lastEscalation) && !escalation.humanEscalated);
+
+  // 1. A person's turn — a live needs_human episode, or any live escalation on a card parked in the
+  //    human-decision lane. Never auto-clears; waits for a reply.
+  if (active && (escalation.kind === 'needs_human' || opts.inHumanLane === true)) {
+    return waitingRecord('human', escalation.lastAt ?? escalation.firstAt, null, 'human', 'human_reply');
+  }
+
+  // 2. Upstream dependency — lifecycle blocked with the durable block clock.
+  if (normalizeWorkflowLifecycle(card.lifecycle) === 'blocked') {
+    let block = objectOrEmpty(metadata.dependencyBlock);
+    let since = Number(block.blockedAt);
+    let horizon = Number(opts.maxBlockedAgeMs);
+    let dueAt = Number.isFinite(since) && Number.isFinite(horizon) ? since + horizon : null;
+    return waitingRecord('dependency', since, dueAt, 'upstream', 'upstream_release');
+  }
+
+  // 3. Machine backoff — a live escalation the daemon re-engages on its retry timer.
+  if (active) {
+    let pendingWindow = Number.isFinite(escalation.nextAttemptAt)
+      && (!Number.isFinite(now) || escalation.nextAttemptAt > now);
+    return waitingRecord(
+      'backoff',
+      escalation.lastAt ?? escalation.firstAt,
+      pendingWindow ? escalation.nextAttemptAt : null,
+      'daemon',
+      'timer',
+    );
+  }
+
+  // 4. A queued, unconsumed wake-driving return waiting to re-engage the orchestrator.
+  let returns = Array.isArray(metadata.returns) ? metadata.returns : [];
+  let pending = returns.find(event => isWakeDrivingReturn(event));
+  if (pending) {
+    return waitingRecord('return', pending.raisedAt ?? null, null, 'orchestrator', 'return');
+  }
+
+  // 5. Run-error resume — recovery flags mark interrupted/failed work the daemon reconcile re-drives.
+  if (normalizeRecoveryFlags(card.recoveryFlags).length) {
+    return waitingRecord('run_error', null, null, 'daemon', 'reconcile');
+  }
+  return null;
+}
+
 // ── Orchestrator return / subscription channel (event-driven control loop) ──────────────────────
 // A child task reports back to the orchestrator via typed "return" events; the orchestrator is a
 // dormant reducer woken by the board substrate only on ACTIONABLE returns. These are pure contracts;

@@ -8,6 +8,7 @@ import {
   classifyWorkflowGraph,
   DEFAULT_WORKFLOW_BOARD_ID,
   createDefaultWorkflowBoard,
+  deriveWorkflowWaiting,
   evaluateWorkflowTransitionGates,
   hasActiveEscalation,
   normalizeRecoveryFlags,
@@ -4834,11 +4835,16 @@ export function createWorkflowBoardService(opts = {}) {
       ...card.runs.flatMap(run => run.taskIds),
     ])));
     let runtimeCards = runtimeTaskProjectionCards(board, projectId, linkedTaskIds, runtimeTasks);
+    let waitingContext = {
+      now: now(),
+      classifier: classifyWorkflowGraph(board),
+      humanLaneId: decisionColumnId(board),
+    };
     let cards = [...persistedBoardCards, ...runtimeCards]
       .filter(card => !goalId || card.entityRefs?.goalId === goalId)
       .filter(card => !chatId || card.entityRefs?.chatId === chatId)
       .sort((a, b) => (a.createdAt - b.createdAt) || a.id.localeCompare(b.id))
-      .map(projectCardV2);
+      .map(card => projectCardV2(card, waitingContext));
     let columns = board.columns.map((column) => ({
       ...column,
       cards: cards.filter(card => card.columnId === column.id),
@@ -4885,12 +4891,26 @@ export function createWorkflowBoardService(opts = {}) {
   // shape. lifecycle and dependsOn are normalized (idle / [] defaults via the iso normalizers). The
   // per-card queue slot is all-null until the scheduler (S8) populates it; existing values on the
   // card are surfaced, never invented.
-  function projectCardV2(card) {
+  function projectCardV2(card, context = {}) {
     let queueSource = card.queue ?? {};
+    let classifier = context.classifier;
+    let hasActiveRun = Array.isArray(card.runs)
+      && card.runs.some(run => RUNNING_RUN_STATUSES.has(String(run?.status ?? '').toLowerCase()));
+    // F2: the single derived "why is this card waiting" fact (dependency / human / backoff / return /
+    // run_error), folded from the durable on-card state. One field for the UI and monitoring to read
+    // instead of re-deriving from five axes; null when the card is running, fresh, or terminal-settled.
+    let waiting = deriveWorkflowWaiting(card, {
+      now: context.now,
+      inHumanLane: Boolean(context.humanLaneId) && card.columnId === context.humanLaneId,
+      isTerminal: classifier ? classifier.isTerminal(card.columnId) : false,
+      hasActiveRun,
+      maxBlockedAgeMs: MAX_BLOCKED_AGE_MS,
+    });
     return {
       ...card,
       lifecycle: normalizeWorkflowLifecycle(card.lifecycle),
       dependsOn: normalizeWorkflowDependsOn(card.dependsOn ?? card.depends_on),
+      waiting,
       queue: {
         enqueuedAt: queueSource.enqueuedAt ?? null,
         queueEpoch: queueSource.queueEpoch ?? null,
