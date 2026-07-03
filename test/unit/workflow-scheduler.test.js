@@ -352,6 +352,31 @@ describe('workflow admission scheduler (WS-B1)', () => {
     assert.ok(drain.skipped.some(s => s.admissionId === entry.admissionId && s.reason === 'not_before'));
   });
 
+  it('AU20: an intake card carrying stale execution recovery flags is cleaned and flows, not frozen', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
+    let board = service.ensureBoard();
+    // A card in the classify column (ideas) carrying execution residue (needs_resume) — meaningless in an
+    // intake column. Before the fix the inbox driver skipped it, recovery ignored it (non-execution
+    // column), and the stale sweep exempted it (zero runs): frozen forever.
+    let created = service.createOrUpdateCard({
+      id: 'intake-residue', title: 'Rerouted idea', body: 'An idea that came back with residue flags.',
+      columnId: 'ideas', projectId: 'agent-portal', owner: 'orchestrator', acceptanceCriteria: ['Done'], actor: 'test',
+    });
+    sg.commit([{ op: 'set', path: `workflowCards/${created.card.id}`, value: {
+      ...service.getCard(created.card.id), recoveryFlags: ['needs_resume', 'recovering'],
+    } }], 'test:seed-intake-residue', { durable: true });
+
+    await service.reconcileWorkflowRuntimeTasks({ boardId: DEFAULT_WORKFLOW_BOARD_ID }, new Map(), { drive: true });
+
+    let after = service.getCard('intake-residue');
+    assert.equal(after.recoveryFlags.includes('needs_resume'), false, 'stale needs_resume is cleared');
+    assert.equal(after.recoveryFlags.includes('recovering'), false, 'stale recovering is cleared');
+    assert.notEqual(after.columnId, 'ideas', 'the card flowed out of the intake column instead of freezing');
+  });
+
   it('rework backstop: past the hard ceiling the board parks an exhausted rework card in the decision lane', async () => {
     let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
     let service = makeService(ledger.proxy);

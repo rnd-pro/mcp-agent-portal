@@ -331,6 +331,24 @@ describe('workflow board task dependencies', () => {
     assert.equal(esc.metadata?.escalation?.kind, 'needs_decision', 'block_and_escalate raises a typed needs_decision');
   });
 
+  // AU12(c): a card retired to the reject terminal with ZERO runs (convergence cascade, exhaustion
+  // backstop, cancel_self) is a terminal FAILURE. Its release-on-failure dependent must proceed — before
+  // the fix, upstreamInTerminalFailure required a FAILED last run, so a run-less rejected upstream left
+  // its run_success/release dependents blocked forever.
+  it('AU12(c): a run-less REJECTED upstream resolves downstream failure edges (no failed run required)', () => {
+    makeCard('rejected-up');
+    let up = service.getCard('rejected-up');
+    sg.commit([{ op: 'set', path: 'workflowCards/rejected-up', value: {
+      ...up, columnId: 'rejected', lifecycle: 'idle',
+      metadata: { ...up.metadata, resolution: { status: 'rejected', reason: 'convergence cap breached', at: 1, by: 'workflow-daemon' } },
+    } }], 'test:retire-rejected');
+    makeCard('down-of-rejected', { dependsOn: [{ cardId: 'rejected-up', onUpstreamFailure: 'release' }] });
+    // The release-on-failure edge resolves against the run-less rejected upstream, so the dependent is
+    // never stuck blocked — before the fix it would block forever waiting for a FAILED run that never was.
+    service.releaseDependencies(DEFAULT_WORKFLOW_BOARD_ID);
+    assert.notEqual(service.getCard('down-of-rejected').lifecycle, 'blocked', 'the run-less rejected upstream frees the dependent');
+  });
+
   it('escalates a card blocked past the max-blocked-age threshold', () => {
     makeCard('stale-up');
     makeCard('stale-down');

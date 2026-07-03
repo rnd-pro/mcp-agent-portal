@@ -2922,8 +2922,20 @@ export function createWorkflowBoardService(opts = {}) {
   // failed when the edge was linked never transitions, so the dependent would otherwise sit blocked
   // until the 24h max-blocked-age tick. A terminal SUCCESS is satisfaction, not failure, and is not
   // reported here.
-  function upstreamInTerminalFailure(upstreamCard) {
+  function upstreamInTerminalFailure(upstreamCard, board = null) {
     if (!upstreamCard) return false;
+    // AU12(c): a card retired to the reject/discard terminal is a terminal FAILURE for downstream
+    // failure edges even with ZERO runs. cascadeBreachedRootDescendants, the re-engagement exhaustion
+    // backstop, and cancel_self all retire run-less cards to `rejected` with a rejected/cancelled
+    // resolution; without this, their `run_success`/`audit_passed` dependents (which require a FAILED
+    // last run to resolve) would block forever. Resolution status needs no board; the reject-column
+    // check is a secondary signal used where the board is in scope.
+    let resolution = textOrNull(upstreamCard.metadata?.resolution?.status);
+    if (resolution === 'rejected' || resolution === 'cancelled') return true;
+    if (board) {
+      let rejectId = rejectTerminalColumnId(board);
+      if (rejectId && upstreamCard.columnId === rejectId) return true;
+    }
     let runs = getRunsForCard(upstreamCard.id);
     if (!runs.length) return false;
     if (runs.some(run => RUNNING_RUN_STATUSES.has(run.status))) return false;
@@ -2990,7 +3002,7 @@ export function createWorkflowBoardService(opts = {}) {
       for (let dep of cardDependsOn(live)) {
         if (releasedEdges.has(dep.cardId)) continue;
         let upstream = stateGraph.get(`workflowCards/${dep.cardId}`);
-        if (!upstreamInTerminalFailure(upstream)) continue;
+        if (!upstreamInTerminalFailure(upstream, board)) continue;
         let detail = dependencyFailureDetail(dep.cardId, card.id, dep.onUpstreamFailure);
         if (dep.onUpstreamFailure === 'release') {
           commitReleasedEdge(live, dep.cardId, principal);
@@ -3036,13 +3048,21 @@ export function createWorkflowBoardService(opts = {}) {
       let block = dependencyBlockState(live);
       let blockedAt = Number(block?.blockedAt);
       if (Number.isFinite(blockedAt) && (currentNow - blockedAt) >= MAX_BLOCKED_AGE_MS && !hasActiveEscalation(live)) {
-        raiseDependencyEscalation(
+        // Raise the in-place needs_decision escalation (the card stays blocked, human-visible), AND emit
+        // a human_escalated notification (AU12(b)): without it the escalation was buried in card metadata
+        // — driveNeedsDecisionParking only surfaces needs_human, so a max-blocked-age escalation reached
+        // no watcher. The notification makes the 24h-stuck card genuinely visible to a human.
+        let raised = raiseDependencyEscalation(
           board,
           live,
           principal,
           `Card ${card.id} has been blocked on an unsatisfied dependency for over ${Math.floor(MAX_BLOCKED_AGE_MS / 3600000)}h.`,
           'Decide whether to release, reroute, or cancel the blocked card.',
         );
+        let notifyState = raised.metadata?.escalation ? normalizeWorkflowEscalationState(raised.metadata.escalation) : null;
+        if (notifyState) {
+          stateGraph.commit([humanEscalationNotificationOp(board, raised, notifyState, principal, currentNow)], sourceForPrincipal(principal));
+        }
         escalated.push({ cardId: card.id });
       }
     }
@@ -4076,9 +4096,20 @@ export function createWorkflowBoardService(opts = {}) {
       let depReleased = releasedEdgesFor(card);
       if (!allDependenciesSatisfied(card, board, depClassifier, depReleased)) {
         let epoch = readQueueEpoch(board.id);
+        // AU12(a): stamp the dependency-block clock. Without metadata.dependencyBlock.blockedAt the
+        // max-blocked-age escalation (releaseDependencies, MAX_BLOCKED_AGE_MS) never fires, so a card
+        // re-blocked here on an unsatisfiable dependency would sit blocked forever with no signal.
+        // Preserve an existing clock (this may be a re-block of an already-blocked card).
+        let priorBlock = dependencyBlockState(card) ?? {};
+        let reblockMetadata = { ...asObject(card.metadata) };
+        reblockMetadata.dependencyBlock = {
+          blockedAt: Number(priorBlock.blockedAt) || now(),
+          releasedEdges: Array.isArray(priorBlock.releasedEdges) ? priorBlock.releasedEdges : depReleased,
+        };
         let reblocked = normalizeWorkflowCardInput({
           ...clone(card),
           lifecycle: 'blocked',
+          metadata: reblockMetadata,
           version: card.version + 1,
           updatedAt: now(),
           updatedBy: daemonPrincipal().label,
@@ -5535,6 +5566,30 @@ export function createWorkflowBoardService(opts = {}) {
   // all; in armed/manual mode the classify column stays a human triage inbox. Same guards as the backlog
   // driver: a card with a live run, a recovery flag, a blocker, or unsatisfied dependencies is held.
   // Columns resolved by automation.action, never by hardcoded id.
+  // AU20: return the card with stale execution recovery flags (needs_resume/recovering/blocked) removed,
+  // pushing a durable clean op when anything changed. Used by the intake drivers so a card that landed in
+  // an intake column carrying execution residue is not frozen. `blockers[]` (an intentional hold) and the
+  // card's dependency state are untouched. If the card then advances, the advance op supersedes the clean
+  // op in the same commit; if it stays (blocker / unsatisfied dependency), the clean op still lands.
+  const STALE_INTAKE_RECOVERY_FLAGS = ['needs_resume', 'recovering', 'blocked'];
+  function clearStaleIntakeRecoveryFlags(card, flags, principal, ops) {
+    let stale = STALE_INTAKE_RECOVERY_FLAGS.filter(flag => flags.has(flag));
+    if (!stale.length) return card;
+    let ts = now();
+    let cleaned = normalizeWorkflowCardInput({
+      ...clone(card),
+      recoveryFlags: normalizeRecoveryFlags([...flags].filter(flag => !stale.includes(flag))),
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id, actor: principal.label, now: ts,
+      version: card.version + 1, createdAt: card.createdAt, updatedAt: ts,
+    });
+    ops.push({ op: 'set', path: `workflowCards/${card.id}`, value: cleaned });
+    return cleaned;
+  }
+
   function driveAutonomousInbox(board, principal, runtimeNow) {
     let columns = board.columns ?? [];
     let byAction = (action) => columns.find(column => textOrNull(column?.automation?.action) === action)?.id ?? null;
@@ -5555,7 +5610,14 @@ export function createWorkflowBoardService(opts = {}) {
       if (card.boardId !== board.id || card.columnId !== classifyColumnId) continue;
       if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
       let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
-      if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      // AU20: strip stale EXECUTION recovery flags (needs_resume/recovering/blocked) from an intake card.
+      // They are meaningless here — there is no run to resume and nothing is executing — but they froze
+      // the card: this driver skipped flagged cards, reconcileWorkflowRecovery recomputes only execution
+      // columns, and the stale sweep exempts zero-run cards. A card that landed here with residue (a
+      // reroute-back, or an import) would sit forever. Clear the residue so it flows this pass.
+      card = clearStaleIntakeRecoveryFlags(card, flags, principal, ops);
+      flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+      if (card.blockers?.length) continue;
       if (!allDependenciesSatisfied(card, board, classifier, releasedEdgesFor(card))) {
         blockedByDependency.push(card.id);
         continue;
@@ -5604,7 +5666,11 @@ export function createWorkflowBoardService(opts = {}) {
       let cardRuns = getRunsForCard(card.id);
       if (cardRuns.some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
       let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
-      if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      // AU20: strip stale execution recovery residue so a card that landed in the scope column with
+      // needs_resume/recovering/blocked flags is not frozen (see clearStaleIntakeRecoveryFlags).
+      card = clearStaleIntakeRecoveryFlags(card, flags, principal, ops);
+      flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
+      if (card.blockers?.length) continue;
       // Dependency ordering: hold a card until its dependsOn upstreams are satisfied, so a dependent
       // never jumps ahead of its prerequisites (the deps gate admission only once `blocked`, which the
       // direct promote would otherwise bypass). It promotes on a later tick once the upstream is done.
