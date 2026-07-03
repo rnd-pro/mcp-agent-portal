@@ -8,9 +8,10 @@ function board() {
     id: 'agent-workflow-default',
     boardId: 'agent-workflow-default',
     projectId: 'agent-portal',
+    version: 7,
     cards: [
-      { id: 'visible-card', projectId: 'agent-portal', entityRefs: { goalId: 'goal-1', chatId: 'chat-1' } },
-      { id: 'other-chat-card', projectId: 'agent-portal', entityRefs: { goalId: 'goal-1', chatId: 'chat-2' } },
+      { id: 'visible-card', boardId: 'agent-workflow-default', projectId: 'agent-portal', version: 4, entityRefs: { goalId: 'goal-1', chatId: 'chat-1' } },
+      { id: 'other-chat-card', boardId: 'agent-workflow-default', projectId: 'agent-portal', version: 2, entityRefs: { goalId: 'goal-1', chatId: 'chat-2' } },
     ],
   };
 }
@@ -116,6 +117,104 @@ describe('workflow board realtime refresh decisions', () => {
             projectId: 'agent-portal',
             entityRefs: { goalId: 'goal-1', chatId: 'chat-2' },
           },
+        },
+        board: board(),
+        scope,
+      }),
+      'full',
+    );
+  });
+
+  it('uses card versions to skip stale workflowCards patches already represented locally', () => {
+    assert.equal(
+      decideWorkflowBoardRealtimeRefresh({
+        key: 'workflowCards',
+        value: {
+          'visible-card': {
+            id: 'visible-card',
+            boardId: 'agent-workflow-default',
+            projectId: 'agent-portal',
+            version: 4,
+            entityRefs: { goalId: 'goal-1', chatId: 'chat-1' },
+          },
+        },
+        board: board(),
+        scope,
+      }),
+      'skip',
+    );
+  });
+
+  it('full-reloads workflowCards patches when the visible card version is newer or absent', () => {
+    assert.equal(
+      decideWorkflowBoardRealtimeRefresh({
+        key: 'workflowCards',
+        value: {
+          'visible-card': {
+            id: 'visible-card',
+            boardId: 'agent-workflow-default',
+            projectId: 'agent-portal',
+            version: 5,
+            entityRefs: { goalId: 'goal-1', chatId: 'chat-1' },
+          },
+        },
+        board: board(),
+        scope,
+      }),
+      'full',
+    );
+
+    assert.equal(
+      decideWorkflowBoardRealtimeRefresh({
+        key: 'workflowCards',
+        value: {
+          'visible-card': {
+            id: 'visible-card',
+            boardId: 'agent-workflow-default',
+            projectId: 'agent-portal',
+            entityRefs: { goalId: 'goal-1', chatId: 'chat-1' },
+          },
+        },
+        board: board(),
+        scope,
+      }),
+      'full',
+    );
+  });
+
+  it('uses board versions to skip stale workflowBoards patches and reload newer board definitions', () => {
+    assert.equal(
+      decideWorkflowBoardRealtimeRefresh({
+        key: 'workflowBoards',
+        value: {
+          'agent-workflow-default': { id: 'agent-workflow-default', projectId: 'agent-portal', version: 7 },
+          'other-board': { id: 'other-board', projectId: 'agent-portal', version: 12 },
+        },
+        board: board(),
+        scope,
+      }),
+      'skip',
+    );
+
+    assert.equal(
+      decideWorkflowBoardRealtimeRefresh({
+        key: 'workflowBoards',
+        value: {
+          'agent-workflow-default': { id: 'agent-workflow-default', projectId: 'agent-portal', version: 8 },
+        },
+        board: board(),
+        scope,
+      }),
+      'full',
+    );
+  });
+
+  it('full-reloads when the current board disappears from workflowBoards', () => {
+    assert.equal(
+      decideWorkflowBoardRealtimeRefresh({
+        key: 'workflowBoards',
+        value: {
+          'other-board': { id: 'other-board', projectId: 'agent-portal', version: 12 },
         },
         board: board(),
         scope,

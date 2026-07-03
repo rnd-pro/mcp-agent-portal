@@ -17,6 +17,8 @@
     "xr:production-smoke": "node scripts/diagnostics/xr-production-spatial-smoke.js",
     "xr:headset-summary": "node scripts/diagnostics/xr-headset-summary-smoke.js",
     "xr:headset-wait": "node scripts/diagnostics/xr-headset-summary-smoke.js --wait-ms 120000 --interval-ms 2000",
+    "workflow:perf-harness": "node scripts/diagnostics/workflow-board-performance-harness.js",
+    "workflow:browser-smoke": "node scripts/diagnostics/workflow-board-browser-smoke.js",
     "test:audit": "node scripts/test-hygiene-audit.js",
     "test:unit": "node --test --test-concurrency 4 --test-timeout 30000 test/unit/*.test.js",
     "test:integration": "node --test --test-timeout 20000 test/integration/*.test.js",

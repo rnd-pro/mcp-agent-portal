@@ -1,4 +1,5 @@
 const FULL_RELOAD_KEYS = new Set([
+  'workflowBoards',
   'workflowCards',
   'workflowRuns',
   'workflowLeases',
@@ -43,6 +44,10 @@ function entityCardId(value = {}) {
   return normalizeText(value.cardId || value.card_id || value.workflowCardId || value.workflow_card_id);
 }
 
+function entityId(value = {}) {
+  return normalizeText(value.id || value.key);
+}
+
 function boardIds(board = {}) {
   return new Set([
     normalizeText(board.boardId),
@@ -52,6 +57,12 @@ function boardIds(board = {}) {
 
 function boardCardIds(board = {}) {
   return new Set(asArray(board.cards).map(card => normalizeText(card?.id)).filter(Boolean));
+}
+
+function boardCardsById(board = {}) {
+  return new Map(asArray(board.cards)
+    .map(card => [normalizeText(card?.id), card])
+    .filter(([id]) => Boolean(id)));
 }
 
 function boardVisibleCardIds(board = {}, scope = {}) {
@@ -100,6 +111,15 @@ function boardCardMissingFromCollection(value, board = {}, scope = {}) {
   return false;
 }
 
+function boardMissingFromCollection(value, board = {}) {
+  let ids = boardIds(board);
+  if (!ids.size) return false;
+  let collectionIds = new Set(collectionValues(value)
+    .map(item => normalizeText(item?.id || item?.boardId || item?.board_id))
+    .filter(Boolean));
+  return collectionIds.size > 0 && ![...ids].some(id => collectionIds.has(id));
+}
+
 function boardLeaseMissingFromCollection(value, board = {}, scope = {}) {
   let leases = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   for (let card of asArray(board.cards)) {
@@ -138,8 +158,42 @@ function taskDecision(value, board = {}, scope = {}) {
   return sawStatusTask ? 'status' : 'skip';
 }
 
+function versionOf(value = {}) {
+  let version = Number(value.version ?? value.boardVersion ?? value.board_version ?? value.cardVersion ?? value.card_version);
+  return Number.isFinite(version) ? version : null;
+}
+
+function versionIsCurrentOrStale(remote = {}, local = {}) {
+  let remoteVersion = versionOf(remote);
+  let localVersion = versionOf(local);
+  return remoteVersion !== null && localVersion !== null && remoteVersion <= localVersion;
+}
+
+function boardCollectionDecision(value, board = {}) {
+  if (boardMissingFromCollection(value, board)) return 'full';
+  for (let item of collectionValues(value)) {
+    let id = normalizeText(item?.id || item?.boardId || item?.board_id);
+    if (!id || !boardIds(board).has(id)) continue;
+    if (!versionIsCurrentOrStale(item, board)) return 'full';
+  }
+  return 'skip';
+}
+
+function cardCollectionDecision(value, board = {}, scope = {}) {
+  if (boardCardMissingFromCollection(value, board, scope)) return 'full';
+  let cardsById = boardCardsById(board);
+  for (let item of collectionValues(value)) {
+    if (!entityMatchesBoard(item, board, scope)) continue;
+    let id = entityCardId(item) || entityId(item);
+    let local = cardsById.get(id);
+    if (!local || !versionIsCurrentOrStale(item, local)) return 'full';
+  }
+  return 'skip';
+}
+
 function fullReloadCollectionDecision(key, value, board = {}, scope = {}) {
-  if (key === 'workflowCards' && boardCardMissingFromCollection(value, board, scope)) return 'full';
+  if (key === 'workflowBoards') return boardCollectionDecision(value, board);
+  if (key === 'workflowCards') return cardCollectionDecision(value, board, scope);
   if (key === 'workflowLeases' && boardLeaseMissingFromCollection(value, board, scope)) return 'full';
   return collectionValues(value).some(item => entityMatchesBoard(item, board, scope)) ? 'full' : 'skip';
 }

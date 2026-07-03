@@ -24,13 +24,11 @@ import {
   createInspectorHistoryModel,
   createInspectorRunsModel,
 } from './workflow-card-inspector-model.js';
+import { createInspectorDecisionModel } from './workflow-card-inspector-decision.js';
 import { replyToCard } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
 
 const AUDIT_COLUMN_ID = 'quality-audit';
-// The human-decision lane: a card parked here (or carrying a needs_human escalation) shows the decision
-// panel — the orchestrator's question, its button options, and a free-text answer that routes back.
-const DECISION_COLUMN_ID = 'needs-decision';
 // The escalation kinds the auditor uses to bounce a card back to the orchestrator.
 const AUDIT_ESCALATION_KINDS = new Set(['insufficient_permission', 'insufficient_context', 'needs_decision', 'rework']);
 
@@ -71,15 +69,6 @@ function escalationState(card) {
 function resolutionState(card) {
   let res = card?.metadata?.resolution ?? card?.raw?.metadata?.resolution;
   return res && typeof res === 'object' ? res : null;
-}
-
-// The active needs_human escalation (the orchestrator's parked question), or null.
-function needsHumanEscalation(card) {
-  let state = escalationState(card);
-  if (!state) return null;
-  let kind = state.kind || state.lastEscalation?.kind;
-  if (String(kind) !== 'needs_human' || state.humanEscalated) return null;
-  return state;
 }
 
 // Does this card's escalation belong to the audit kickback flow (auditor rejected → re-orchestrate)?
@@ -358,39 +347,30 @@ export class WorkflowCardInspector extends Symbiote {
   // options or types a free-text reply. The answer is minted as a routed return into the orchestrator's
   // inbox; the orchestrator decides how to route the card. The human never routes or rejects directly.
   #renderDecision(card, sameCard = false) {
-    let state = needsHumanEscalation(card);
-    let inLane = (card.columnId || card.raw?.columnId) === DECISION_COLUMN_ID;
-    if (!state && !inLane) {
+    let model = createInspectorDecisionModel(card);
+    if (!model.visible) {
       this.ref.decisionSection.hidden = true;
       if (this._sig) this._sig.decision = '';
       return;
     }
     // A silent refresh of the same unchanged question must not wipe the human's draft answer,
     // the option buttons' disabled state, or an in-flight "submitting" status.
-    let signature = JSON.stringify({
-      inLane,
-      detail: text(state?.detail || state?.lastEscalation?.detail),
-      options: (Array.isArray(state?.lastEscalation?.options) ? state.lastEscalation.options : [])
-        .map(opt => [text(opt?.id), text(opt?.label)]),
-    });
-    if (sameCard && this._sig?.decision === signature && !this.ref.decisionSection.hidden) return;
-    if (this._sig) this._sig.decision = signature;
+    if (sameCard && this._sig?.decision === model.signature && !this.ref.decisionSection.hidden) return;
+    if (this._sig) this._sig.decision = model.signature;
     this.ref.decisionSection.hidden = false;
     this.ref.decisionQuestion.textContent = text(
-      state?.detail || state?.lastEscalation?.detail,
+      model.question,
       tPortal('inspector.decisionQuestion'),
     );
 
-    let options = Array.isArray(state?.lastEscalation?.options) ? state.lastEscalation.options : [];
     let host = this.ref.decisionOptions;
     host.replaceChildren();
-    for (let opt of options) {
-      let id = text(opt?.id);
-      if (!id) continue;
+    for (let opt of model.options) {
+      let id = opt.id;
       let btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'wci-decision-option';
-      btn.textContent = text(opt?.label, id);
+      btn.textContent = text(opt.label, id);
       btn.addEventListener('click', () => this.#submitReply({ optionId: id }));
       host.append(btn);
     }
