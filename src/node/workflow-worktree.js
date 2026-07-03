@@ -80,6 +80,27 @@ async function branchExists(repoRoot, branch) {
   return ref.ok;
 }
 
+async function refreshReusableWorktree({ repoRoot, worktreePath, branch, baseRef, baseSha }) {
+  if (!baseRef || !baseSha) return false;
+  let currentBranch = await git(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath, { timeout: 5000 });
+  if (!currentBranch.ok || currentBranch.stdout.trim() !== branch) return false;
+  let head = await git(['rev-parse', 'HEAD'], worktreePath, { timeout: 5000 });
+  if (head.ok && head.stdout.trim() === baseSha) return false;
+
+  await excludeInWorktree(worktreePath, 'node_modules');
+  let status = await git(['status', '--porcelain'], worktreePath, { timeout: 10_000 });
+  if (!status.ok || status.stdout.trim()) return false;
+
+  let relation = await git(['rev-list', '--left-right', '--count', `${baseRef}...HEAD`], worktreePath, { timeout: 10_000 });
+  if (!relation.ok) return false;
+  let [, aheadRaw] = relation.stdout.trim().split(/\s+/);
+  let ahead = Number(aheadRaw);
+  if (!Number.isFinite(ahead) || ahead > 0) return false;
+
+  let reset = await git(['reset', '--hard', baseRef], worktreePath, { timeout: 30_000 });
+  return reset.ok;
+}
+
 // Parse `git worktree list --porcelain` into [{ path, branch, head }].
 export async function listWorktrees(repoRoot) {
   let res = await git(['worktree', 'list', '--porcelain'], repoRoot, { timeout: 10_000 });
@@ -185,10 +206,12 @@ export async function provisionWorktree({
   if (existing) {
     let onDisk = await fs.stat(existing.path).catch(() => null);
     if (onDisk?.isDirectory()) {
-      await linkNodeModules(repoRoot, existing.path);
-      await initSubmodules(existing.path);
       let baseRef = await resolveBaseRef(repoRoot);
       let baseSha = (await git(['rev-parse', 'HEAD'], repoRoot, { timeout: 5000 })).stdout.trim() || null;
+      await linkNodeModules(repoRoot, existing.path);
+      await refreshReusableWorktree({ repoRoot, worktreePath: existing.path, branch, baseRef, baseSha });
+      await linkNodeModules(repoRoot, existing.path);
+      await initSubmodules(existing.path);
       return { ok: true, path: await realpathOrResolve(existing.path), branch, baseRef, baseSha, reused: true };
     }
     // Registered but the directory is gone — prune the stale admin record before recreating.

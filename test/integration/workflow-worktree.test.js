@@ -84,6 +84,58 @@ describe('workflow worktree isolation (real git)', () => {
     assert.equal(path.resolve(again.path), path.resolve(prov.path));
   });
 
+  it('refreshes a clean reused worktree when the base advances before rerun', async () => {
+    let c = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-rerun' });
+    let oldHead = git(['rev-parse', 'HEAD'], c.path);
+
+    writeFile('base-added.txt', 'from-main\n');
+    git(['add', '-A']);
+    git(['commit', '-qm', 'advance base']);
+    let newHead = git(['rev-parse', 'HEAD']);
+
+    assert.notEqual(oldHead, newHead);
+    assert.equal(fs.existsSync(path.join(c.path, 'base-added.txt')), false, 'the reused tree starts behind');
+
+    let again = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-rerun' });
+    assert.equal(again.reused, true);
+    assert.equal(git(['rev-parse', 'HEAD'], c.path), newHead, 'clean reused worktree follows the base');
+    assert.equal(fs.readFileSync(path.join(c.path, 'base-added.txt'), 'utf-8'), 'from-main\n');
+  });
+
+  it('does not reset a dirty reused worktree when the base advances', async () => {
+    let c = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-dirty' });
+    let oldHead = git(['rev-parse', 'HEAD'], c.path);
+    writeFile('scratch.txt', 'worker-draft\n', c.path);
+
+    writeFile('base-added.txt', 'from-main\n');
+    git(['add', '-A']);
+    git(['commit', '-qm', 'advance base']);
+
+    let again = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-dirty' });
+    assert.equal(again.reused, true);
+    assert.equal(git(['rev-parse', 'HEAD'], c.path), oldHead, 'dirty worktree keeps its original branch head');
+    assert.equal(fs.readFileSync(path.join(c.path, 'scratch.txt'), 'utf-8'), 'worker-draft\n');
+    assert.equal(fs.existsSync(path.join(c.path, 'base-added.txt')), false, 'dirty worktree is not reset under the worker');
+  });
+
+  it('does not reset a reused branch that already contains card commits', async () => {
+    let c = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-ahead' });
+    writeFile('a.txt', 'card-change\n', c.path);
+    let commit = await commitWorktree({ worktreePath: c.path, message: 'card work' });
+    assert.equal(commit.committed, true);
+    let cardHead = git(['rev-parse', 'HEAD'], c.path);
+
+    writeFile('base-added.txt', 'from-main\n');
+    git(['add', '-A']);
+    git(['commit', '-qm', 'advance base']);
+
+    let again = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-ahead' });
+    assert.equal(again.reused, true);
+    assert.equal(git(['rev-parse', 'HEAD'], c.path), cardHead, 'ahead branch keeps the card commit');
+    assert.equal(fs.readFileSync(path.join(c.path, 'a.txt'), 'utf-8'), 'card-change\n');
+    assert.equal(fs.existsSync(path.join(c.path, 'base-added.txt')), false, 'ahead branch is preserved for merge conflict handling');
+  });
+
   it('isolates concurrent edits, merges clean, no-ops an empty commit, and reaps orphans', async () => {
     let c1 = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-1' });
     let c2 = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-2' });
