@@ -14,6 +14,7 @@ const ACTION_METHODS = {
   create_item: 'createWorkItem',
   decompose: 'decomposeWorkItem',
   update_item: 'updateWorkItem',
+  reply: 'replyToCard',
   update_board: 'updateWorkflowBoard',
   control_board: 'controlWorkflowBoard',
   update_column: 'updateWorkflowColumn',
@@ -119,6 +120,7 @@ describe('workflow board MCP tool', () => {
     assert.deepEqual(schema.properties.view.enum, ['status', 'queue']);
     assert.equal(schema.properties.action.enum.includes('enqueue'), true);
     assert.equal(schema.properties.action.enum.includes('queue'), true);
+    assert.equal(schema.properties.action.enum.includes('reply'), true);
     assert.equal(schema.properties.action.enum.includes('link_dependency'), true);
     assert.equal(schema.properties.action.enum.includes('define_column'), true);
     assert.equal(schema.properties.action.enum.includes('define_transition'), true);
@@ -154,6 +156,7 @@ describe('workflow board MCP tool', () => {
       'rejected',
     ]);
     assert.equal(payload.actions.transition.required.includes('toColumnId'), true);
+    assert.deepEqual(payload.actions.reply.required, ['cardId']);
     assert.deepEqual(payload.actions.control_board.required, ['control']);
     assert.match(payload.rule, /Legacy per-action workflow MCP tool names are not public/);
   });
@@ -203,6 +206,13 @@ describe('workflow board MCP tool', () => {
         cardId: 'card-1',
         patch: { owner: 'agent' },
         checks: { audit: { status: 'pass' } },
+      },
+      reply: {
+        action: 'reply',
+        cardId: 'card-1',
+        body: 'Accept scoped result.',
+        optionId: 'accept',
+        resolve: true,
       },
       update_board: { action: 'update_board', patch: { mode: 'manual', automation: { pickup: 'manual' } } },
       control_board: { action: 'control_board', control: 'pause', projectId: 'project-1' },
@@ -258,14 +268,17 @@ describe('workflow board MCP tool', () => {
     assert.equal(calls[3].args.cwd, '/workspace/agent-portal');
     assert.deepEqual(calls[3].args.childItems, [{ title: 'Child task', owner: 'agent', acceptanceCriteria: ['Done'] }]);
     assert.deepEqual(calls[4].args.checks, { audit: { status: 'pass' } });
-    assert.equal(calls[5].args.patch.mode, 'manual');
-    assert.equal(calls[6].args.action, 'pause');
-    assert.equal(calls[7].args.columnId, 'ready');
-    assert.equal(calls[9].args.expectedVersion, 7);
-    assert.equal(calls[10].args.resource_group, 'codex');
-    assert.equal(calls[10].args.cwd, '/workspace/agent-portal');
-    assert.deepEqual(calls[10].args.files, ['src/node/workflow-board-service.js']);
-    assert.equal(calls[11].args.action, 'pause');
+    assert.equal(calls[5].args.body, 'Accept scoped result.');
+    assert.equal(calls[5].args.optionId, 'accept');
+    assert.equal(calls[5].args.resolve, true);
+    assert.equal(calls[6].args.patch.mode, 'manual');
+    assert.equal(calls[7].args.action, 'pause');
+    assert.equal(calls[8].args.columnId, 'ready');
+    assert.equal(calls[10].args.expectedVersion, 7);
+    assert.equal(calls[11].args.resource_group, 'codex');
+    assert.equal(calls[11].args.cwd, '/workspace/agent-portal');
+    assert.deepEqual(calls[11].args.files, ['src/node/workflow-board-service.js']);
+    assert.equal(calls[12].args.action, 'pause');
   });
 
   it('forwards read-only workflow_board calls to the live project backend but never a mutation (F-SEC)', async () => {

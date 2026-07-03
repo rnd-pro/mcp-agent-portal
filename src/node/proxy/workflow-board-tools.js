@@ -50,6 +50,12 @@ const ACTIONS = {
     required: ['cardId'],
     mutates: true,
   },
+  reply: {
+    method: 'replyToCard',
+    description: 'Answer a parked workflow card decision or add a human reply that wakes the orchestrator through the return inbox. `resolve` defaults to true when a live needs_decision/needs_human episode exists.',
+    required: ['cardId'],
+    mutates: true,
+  },
   update_board: {
     method: 'updateWorkflowBoard',
     description: 'Patch board-level automation mode and defaults such as pickup, recovery, stop policy, fallback agents, and global parallel limit. Optional automation.rootConvergence ({depth,fanout,runCount}) overrides the per-root re-decomposition convergence cap; UNLIKE the optional cost budget it is always-on (the DEFAULT_ROOT_MAX_* limits apply even unconfigured) and independent of automation.budget, so a runaway re-decompose loop always converges. The cap is enforced at candidate admission: when any dimension is breached the root is routed to a terminal through the existing path — parked in the needs-decision lane (reject-terminal fallback when no decision lane exists) with a reason naming the breached dimension(s) and rootCardId — never silently stalled or looped. Pass autonomyLevel (1..5 or "manual") to instead cascade that level\'s preset to columns (per-stage autoAdvance/mode + board publishMode) via the autonomy slider; routing to applyAutonomyLevel, which still requires DEFINE/CONTROL.',
@@ -195,6 +201,14 @@ const ACTION_EXAMPLES = {
         acceptanceCriteria: ['Audit result is recorded'],
       },
     ],
+  },
+  reply: {
+    action: 'reply',
+    boardId: DEFAULT_WORKFLOW_BOARD_ID,
+    cardId: 'card-id',
+    optionId: 'accept',
+    body: 'Accept the scoped result and continue.',
+    resolve: true,
   },
   transition: {
     action: 'transition',
@@ -454,7 +468,9 @@ export const WORKFLOW_BOARD_TOOLS = [
         cardId: { type: 'string', description: 'Workflow card/work-item ID.' },
         parentCardId: { type: 'string', description: 'Parent workflow card ID for child cards.' },
         title: { type: 'string', description: 'Work-item title for create_item.' },
-        body: { type: 'string', description: 'Optional work-item body for create_item.' },
+        body: { type: 'string', description: 'Optional work-item body for create_item, or reply text for action=reply.' },
+        optionId: { type: 'string', description: 'Optional selected decision option for action=reply.' },
+        resolve: { type: 'boolean', description: 'For action=reply, clear the live decision/escalation episode. Defaults to true when one is live.' },
         childItems: {
           type: 'array',
           items: { type: 'object' },
@@ -756,6 +772,14 @@ function serviceArgsForAction(action, args = {}) {
       checks: args.checks,
     });
   }
+  if (action === 'reply') {
+    return cleanUndefined({
+      ...common,
+      body: args.body,
+      optionId: args.optionId,
+      resolve: args.resolve,
+    });
+  }
   if (action === 'decompose') {
     return cleanUndefined({
       ...common,
@@ -969,7 +993,7 @@ function nextForAction(action, args = {}, result = {}) {
       call: statusRefreshCall(),
     };
   }
-  if (action === 'orchestrate' || action === 'control' || action === 'control_board' || action === 'update_item' || action === 'update_board' || action === 'update_column' || action === 'delete_item' || action === 'link_dependency' || action === 'unlink_dependency') {
+  if (action === 'orchestrate' || action === 'control' || action === 'control_board' || action === 'update_item' || action === 'reply' || action === 'update_board' || action === 'update_column' || action === 'delete_item' || action === 'link_dependency' || action === 'unlink_dependency') {
     return {
       recommendedAction: 'get_board',
       reason: 'Refresh board state after runtime or card mutation.',
