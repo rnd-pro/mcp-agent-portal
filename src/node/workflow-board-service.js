@@ -4431,6 +4431,121 @@ export function createWorkflowBoardService(opts = {}) {
     return Boolean(filter.compact) || ['compact', 'status', 'summary'].includes(view);
   }
 
+  function wantsCardlessCompactProjection(filter = {}) {
+    return wantsCompactProjection(filter) && (filter.includeCards ?? filter.include_cards) === false;
+  }
+
+  function projectionScope(filter = {}) {
+    return {
+      projectId: textOrNull(filter.projectId ?? filter.project_id),
+      goalId: textOrNull(filter.goalId ?? filter.goal_id),
+      chatId: textOrNull(filter.chatId ?? filter.chat_id),
+    };
+  }
+
+  function scopedWorkflowCards(board, scope = {}) {
+    return Object.values(getCollection(stateGraph, 'workflowCards'))
+      .filter(card => card.boardId === board.id)
+      .filter(card => !scope.projectId || card.projectId === scope.projectId)
+      .filter(card => !scope.goalId || card.entityRefs?.goalId === scope.goalId)
+      .filter(card => !scope.chatId || card.entityRefs?.chatId === scope.chatId)
+      .sort((a, b) => (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  function compactCardlessLoadSummary(board, cards, runs, runtime = null) {
+    let activeColumnIds = new Set(activeRecoveryColumnIds(board));
+    let activeCards = cards.filter(card => activeColumnIds.has(card.columnId));
+    let activeCardIds = new Set(activeCards.map(card => card.id));
+    let leases = getCollection(stateGraph, 'workflowLeases');
+    let activeRuns = runs.filter(run => (
+      activeCardIds.has(run.cardId)
+      && RUNNING_RUN_STATUSES.has(String(run?.status || '').toLowerCase())
+    ));
+    return {
+      boardMode: board.mode,
+      globalParallelLimit: finiteNumber(board.automation?.globalParallelLimit),
+      activeCardCount: activeCards.length,
+      blockedCardCount: cards.filter(card => (card.blockers || []).length > 0).length,
+      activeRunCount: activeRuns.length,
+      activeLeaseCount: activeCards.filter(card => Boolean(leases[card.id])).length,
+      runningTaskCount: finiteNumber(runtime?.runningTaskCount) ?? 0,
+      queue: {
+        depth: 0,
+        blockedOnDependencyCount: cards
+          .filter(card => normalizeWorkflowLifecycle(card.lifecycle) === 'blocked')
+          .length,
+        admissions: 0,
+        admissionFailures: 0,
+      },
+    };
+  }
+
+  function compactCardlessBoardProjection(filter = {}, runtimeState = {}) {
+    ensureWorkflowSchemaMigrated();
+    let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let scope = projectionScope(filter);
+    let cards = scopedWorkflowCards(board, scope);
+    let cardIds = new Set(cards.map(card => card.id));
+    let runs = Object.values(getCollection(stateGraph, 'workflowRuns'))
+      .filter(run => cardIds.has(run.cardId))
+      .filter(run => !run.boardId || run.boardId === board.id);
+    let includeEvents = filter.includeEvents ?? filter.include_events;
+    let latestEvents = includeEvents === false
+      ? []
+      : listEvents({ boardId: board.id, limit: filter.eventLimit ?? filter.event_limit ?? 20 })
+        .slice(-COMPACT_EVENT_LIMIT)
+        .map(compactEvent);
+    let successColumnIds = successTerminalColumnIds(board);
+    let runtime = runtimeState.runtime ?? compactRuntimeSummary(runtimeState.tasks);
+    let columns = board.columns.map((column) => {
+      let columnCards = cards.filter(card => card.columnId === column.id);
+      return {
+        id: column.id,
+        title: column.title,
+        automation: column.automation,
+        count: columnCards.length,
+        activeCount: successColumnIds.has(column.id) ? 0 : columnCards.length,
+        blockedCount: columnCards.filter(card => (card.blockers || []).length > 0).length,
+        recoveryCount: columnCards.filter(card => (card.recoveryFlags || []).length > 0).length,
+      };
+    });
+    let latestWorkflowEventAt = latestTimestamp(latestEvents.map(event => event.createdAt));
+    let latestEventAt = latestTimestamp([
+      ...cards.map(card => card.updatedAt),
+      ...runs.flatMap(run => [run.updatedAt, run.completedAt, run.startedAt]),
+      latestWorkflowEventAt,
+      runtime?.latestTaskAt,
+    ]);
+
+    return {
+      schema: 'workflow-board-compact-projection/v1',
+      view: 'status',
+      board: {
+        id: board.id,
+        title: board.title,
+        mode: board.mode,
+        version: board.version,
+        automation: board.automation,
+      },
+      boardId: board.id,
+      scope,
+      columns,
+      counts: Object.fromEntries(columns.map(column => [column.id, column.count])),
+      cards: [],
+      activeCards: [],
+      blockedCards: [],
+      events: latestEvents,
+      runtime,
+      load: compactCardlessLoadSummary(board, cards, runs, runtime),
+      systemLoad: compactSystemLoad(runtimeState.systemLoad, runtimeState.tasks),
+      activity: {
+        latestEventAt,
+        latestWorkflowEventAt,
+      },
+      version: stateGraph.version,
+    };
+  }
+
   function checkStatusSummary(checks = {}) {
     return Object.fromEntries(
       Object.entries(checks)
@@ -4701,11 +4816,12 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function getBoardProjection(filter = {}, runtimeTasks = null) {
+    if (wantsCardlessCompactProjection(filter)) {
+      return compactCardlessBoardProjection(filter, { tasks: runtimeTasks });
+    }
     ensureWorkflowSchemaMigrated();
     let board = ensureBoard(filter.boardId ?? filter.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
-    let projectId = textOrNull(filter.projectId ?? filter.project_id);
-    let goalId = textOrNull(filter.goalId ?? filter.goal_id);
-    let chatId = textOrNull(filter.chatId ?? filter.chat_id);
+    let { projectId, goalId, chatId } = projectionScope(filter);
     let persistedBoardCards = Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(card => card.boardId === board.id)
       .filter(card => !projectId || card.projectId === projectId)
@@ -4873,6 +4989,13 @@ export function createWorkflowBoardService(opts = {}) {
       // Read-side reconcile is side-effect-light: drive defaults off so a projection read never
       // spawns an agent. Autonomous on_enter drive belongs to the reconcile loop (drive: true).
       await reconcileWorkflowRuntimeTasks(filter, runtimeState.tasks);
+    }
+    if (wantsCardlessCompactProjection(filter)) {
+      return compactCardlessBoardProjection(filter, {
+        tasks: runtimeState.tasks,
+        systemLoad: runtimeState.systemLoad,
+        runtime: compactRuntimeSummary(runtimeState.tasks),
+      });
     }
     let projection = getBoardProjection({
       ...filter,
