@@ -524,13 +524,6 @@ export function isFloorGateMonotonic(baseGateIds, customGateIds) {
     .every(gate => custom.has(gate));
 }
 
-export const ACTIVE_RECOVERY_COLUMN_IDS = [
-  'ready',
-  'in-progress',
-  'quality-audit',
-  'commit-publish',
-];
-
 /**
  * Column-automation action dispatch table — the closed vocabulary of column `automation.action` ids
  * and the runtime behavior class each one drives. `execution` actions spawn or require a run (so a card

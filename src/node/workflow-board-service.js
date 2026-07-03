@@ -76,12 +76,6 @@ const DEFAULT_EVENT_LIMIT = 50;
 const MAX_EVENT_LIMIT = 200;
 const COMPACT_CARD_LIMIT = 20;
 const COMPACT_EVENT_LIMIT = 8;
-const COMPACT_ACTIVE_COLUMN_IDS = new Set([
-  'ready',
-  'in-progress',
-  'quality-audit',
-  'commit-publish',
-]);
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RUNTIME_HEARTBEAT_FRESHNESS_MS = 10 * 60 * 1000;
 // Liveness watchdog: an active run with no runtime-task activity within this window is treated as a
@@ -688,17 +682,6 @@ function runtimeTaskHasError(task = {}) {
     || task.result?.isError === true
     || task.error != null
     || task.errorKind != null;
-}
-
-function runtimeTaskColumnId(status) {
-  if (RUNTIME_DONE_STATUSES.has(status)) return 'done';
-  if (RUNTIME_READY_STATUSES.has(status)) return 'ready';
-  // A terminal-failed / lost ORPHAN runtime task (no linked workflow card) is runtime debris — a dead
-  // task left over from a crashed or externally-killed worker. Project it into the reject terminal
-  // (discarded) so it is visibly resolved instead of piling up forever in the active quality-audit lane.
-  if (TASK_ERROR_STATUSES.has(status)) return 'rejected';
-  if (RUNTIME_RUNNING_STATUSES.has(status)) return 'in-progress';
-  return 'in-progress';
 }
 
 function runtimeTaskRecoveryFlags(status) {
@@ -2093,12 +2076,15 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function readyOrchestrationGate(board, card, actor = 'workflow-board') {
-    if (card.columnId !== 'ready') return { ok: true, checks: [], failures: [] };
+    let stageId = columnIdByAction(board, 'orchestrate');
+    if (!stageId || card.columnId !== stageId) return { ok: true, checks: [], failures: [] };
+    let toColumnId = executionTargetColumnId(board, stageId);
+    if (!toColumnId) return { ok: true, checks: [], failures: [] };
     return evaluateRequest(board, card, getChecks(card.id), {
       boardId: board.id,
       cardId: card.id,
-      fromColumnId: 'ready',
-      toColumnId: 'in-progress',
+      fromColumnId: stageId,
+      toColumnId,
       actor,
       mode: 'auto',
       reason: 'Evaluate ready card orchestration gates.',
@@ -2236,7 +2222,7 @@ export function createWorkflowBoardService(opts = {}) {
     if (board.mode !== 'armed' && board.mode !== 'autonomous') {
       return { ok: false, reason: `board mode ${board.mode} does not allow automatic orchestration`, automation };
     }
-    if (card.columnId === 'ready' && !readyCardHasExecutionContract(card)) {
+    if (automation.action === 'orchestrate' && !readyCardHasExecutionContract(card)) {
       return { ok: false, reason: 'ready cards require owner and acceptance criteria before orchestration', automation };
     }
     let gateResult = readyOrchestrationGate(board, card);
@@ -3284,7 +3270,7 @@ export function createWorkflowBoardService(opts = {}) {
     let created = createOrUpdateCard({
       id: joinId,
       boardId: ensuredBoard.id,
-      columnId: 'backlog',
+      columnId: columnIdByAction(ensuredBoard, 'scope') ?? entryPointColumnId(ensuredBoard) ?? 'backlog',
       kind: 'join',
       title: `Join: ${ownerCardId ?? joinId}`,
       priority: priorityLabel(liftedOrdinal),
@@ -3357,9 +3343,7 @@ export function createWorkflowBoardService(opts = {}) {
     }
     let ownerId = textOrNull(joinCard.parentCardId);
     let members = cardDependsOn(joinCard).map(dep => dep.cardId);
-    let terminalColumnId = (board.columns ?? []).find(col => col?.automation?.action === 'close')?.id
-      ?? (board.columns ?? []).find(col => col?.id === 'done')?.id
-      ?? joinCard.columnId;
+    let terminalColumnId = releaseTailColumns(board).closeColumnId ?? joinCard.columnId;
     let retiredMetadata = { ...(joinCard.metadata ?? {}), ownerNotifiedAt: ts };
     delete retiredMetadata.dependencyBlock;
     let retired = normalizeWorkflowCardInput({
@@ -4552,8 +4536,8 @@ export function createWorkflowBoardService(opts = {}) {
       .some(check => String(check?.status || '').toLowerCase() === 'fail');
   }
 
-  function isCompactRelevantCard(card = {}) {
-    if (card.columnId !== 'done') return true;
+  function isCompactRelevantCard(card = {}, successColumnIds = new Set()) {
+    if (!successColumnIds.has(card.columnId)) return true;
     if ((card.blockers || []).length > 0) return true;
     if ((card.recoveryFlags || []).length > 0) return true;
     return hasFailedCheck(card);
@@ -4607,7 +4591,8 @@ export function createWorkflowBoardService(opts = {}) {
 
   function compactLoadSummary(projection, runtimeState = {}) {
     let cards = Array.isArray(projection.cards) ? projection.cards : [];
-    let activeCards = cards.filter(card => COMPACT_ACTIVE_COLUMN_IDS.has(card.columnId));
+    let activeColumnIds = new Set(activeRecoveryColumnIds(projection.board));
+    let activeCards = cards.filter(card => activeColumnIds.has(card.columnId));
     let activeRuns = activeCards.flatMap(card => Array.isArray(card.runs) ? card.runs : [])
       .filter(run => RUNNING_RUN_STATUSES.has(String(run?.status || '').toLowerCase()));
     let activeLeases = activeCards.filter(card => Boolean(card.lease));
@@ -4715,11 +4700,13 @@ export function createWorkflowBoardService(opts = {}) {
   }
 
   function compactBoardProjection(projection, runtimeState = {}) {
+    let successColumnIds = successTerminalColumnIds(projection.board);
     let cards = projection.cards
-      .filter(isCompactRelevantCard)
+      .filter(card => isCompactRelevantCard(card, successColumnIds))
       .slice(-COMPACT_CARD_LIMIT)
       .map(compactWorkflowCard);
-    let activeCards = cards.filter(card => COMPACT_ACTIVE_COLUMN_IDS.has(card.columnId));
+    let activeColumnIds = new Set(activeRecoveryColumnIds(projection.board));
+    let activeCards = cards.filter(card => activeColumnIds.has(card.columnId));
     let blockedCards = cards.filter(card => card.blockers.length > 0 || card.recoveryFlags.length > 0);
     let latestEvents = projection.events
       .slice(-COMPACT_EVENT_LIMIT)
@@ -4754,7 +4741,7 @@ export function createWorkflowBoardService(opts = {}) {
         title: column.title,
         automation: column.automation,
         count: column.cards.length,
-        activeCount: column.cards.filter(card => card.columnId !== 'done').length,
+        activeCount: successColumnIds.has(column.id) ? 0 : column.cards.length,
         blockedCount: column.cards.filter(card => (card.blockers || []).length > 0).length,
         recoveryCount: column.cards.filter(card => (card.recoveryFlags || []).length > 0).length,
       })),
@@ -4949,7 +4936,7 @@ export function createWorkflowBoardService(opts = {}) {
         boardId: board.id,
         title: runtimeTaskTitle(id, task),
         body: runtimeTaskSummary(task),
-        columnId: runtimeTaskColumnId(status),
+        columnId: runtimeTaskColumnId(board, status),
         projectId: chatProjectId,
         domain: textOrNull(task.domain) ?? 'runtime',
         kind: 'runtime-task',
@@ -5100,7 +5087,7 @@ export function createWorkflowBoardService(opts = {}) {
   // records/continues the episode (parser owns WHAT, never the attempt counter); a completed run
   // resolves and clears it. Returns the next `metadata` plus an event descriptor, or null when
   // there is nothing to write (dedup by run id, or no escalation at all).
-  function computeTerminalEscalation(card, run, nextStatus, runtimeTasks, currentNow) {
+  function computeTerminalEscalation(board, card, run, nextStatus, runtimeTasks, currentNow) {
     let metadata = card.metadata && typeof card.metadata === 'object' ? { ...card.metadata } : {};
     let existing = metadata.escalation
       ? normalizeWorkflowEscalationState(metadata.escalation)
@@ -5114,7 +5101,7 @@ export function createWorkflowBoardService(opts = {}) {
 
     let escalation = parseRunEscalation(run, runtimeTasks, {
       terminalBlocked: true,
-      fromAuditColumn: card.columnId === 'quality-audit',
+      fromAuditColumn: cardColumnAction(board, card) === 'audit',
       now: currentNow,
     });
     if (!escalation) return null;
@@ -5284,13 +5271,20 @@ export function createWorkflowBoardService(opts = {}) {
     return null;
   }
 
-  function runtimeColumnForCard(card, runStatus) {
-    if (runStatus === 'running' && card.columnId === 'ready') return 'in-progress';
-    if (TERMINAL_RUN_STATUSES.has(runStatus) && ['ready', 'in-progress'].includes(card.columnId)) {
-      return 'quality-audit';
+  function runtimeColumnForCard(board, card, runStatus) {
+    let action = cardColumnAction(board, card);
+    let auditColumnId = columnIdByAction(board, 'audit');
+    if (runStatus === 'running' && action === 'orchestrate') {
+      return executionTargetColumnId(board, card.columnId) ?? card.columnId;
     }
-    if (['error', 'failed', 'cancelled'].includes(runStatus) && card.columnId !== 'done') {
-      return 'quality-audit';
+    if (!auditColumnId) return card.columnId;
+    if (TERMINAL_RUN_STATUSES.has(runStatus) && ['orchestrate', 'execute'].includes(action)) {
+      return auditColumnId;
+    }
+    // A failed run routes to the audit stage from any non-terminal column (a terminal card is a
+    // settled decision — done or rejected — the reconcile must not resurrect into the active lanes).
+    if (['error', 'failed', 'cancelled'].includes(runStatus) && action !== 'close') {
+      return auditColumnId;
     }
     return card.columnId;
   }
@@ -5305,6 +5299,51 @@ export function createWorkflowBoardService(opts = {}) {
       let status = runtimeStatusForTaskId(runtimeTasks, taskId);
       return status === 'lost' || status === 'stale';
     });
+  }
+
+  // A stage column resolved by archetype: the first column whose automation.action matches. The
+  // service never branches on a literal column id — a renamed or reshaped board resolves identically.
+  function columnIdByAction(board, action) {
+    return (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === action)?.id ?? null;
+  }
+
+  // The orchestrate hand-off target: the declared transition from `fromColumnId` into an
+  // execute-archetype column, else the first execute column (a board may omit the edge and rely on
+  // daemon-bypass moves). Null when the board defines no execute stage.
+  function executionTargetColumnId(board, fromColumnId) {
+    let executeIds = new Set((board.columns ?? [])
+      .filter(column => textOrNull(column?.automation?.action) === 'execute')
+      .map(column => column.id));
+    if (!executeIds.size) return null;
+    return (board.transitions ?? []).find(t => t.from === fromColumnId && executeIds.has(t.to))?.to
+      ?? executeIds.values().next().value;
+  }
+
+  // SUCCESS terminals (close columns not flavored `rejected`) — where finished, shipped work rests;
+  // display paths treat occupancy there as inactive while the reject terminal stays visible.
+  function successTerminalColumnIds(board) {
+    return new Set((board.columns ?? [])
+      .filter(column => textOrNull(column?.automation?.action) === 'close'
+        && textOrNull(column?.automation?.closeKind) !== 'rejected')
+      .map(column => column.id));
+  }
+
+  // The human intake column new or imported work lands in when no explicit column is given.
+  function entryPointColumnId(board) {
+    let columns = board.columns ?? [];
+    return columns.find(column => column.entryPoint === true)?.id ?? columns[0]?.id ?? null;
+  }
+
+  // Project an UNLINKED runtime task (no workflow card) into the board's stage roles by its status.
+  // Default-board ids remain only as fallbacks for a degenerate board that lacks the archetype.
+  function runtimeTaskColumnId(board, status) {
+    if (RUNTIME_DONE_STATUSES.has(status)) return releaseTailColumns(board).closeColumnId ?? 'done';
+    if (RUNTIME_READY_STATUSES.has(status)) return columnIdByAction(board, 'orchestrate') ?? 'ready';
+    // A terminal-failed / lost ORPHAN runtime task (no linked workflow card) is runtime debris — a dead
+    // task left over from a crashed or externally-killed worker. Project it into the reject terminal
+    // (discarded) so it is visibly resolved instead of piling up forever in the active audit lane.
+    if (TASK_ERROR_STATUSES.has(status)) return rejectTerminalColumnId(board) ?? 'rejected';
+    return columnIdByAction(board, 'execute') ?? 'in-progress';
   }
 
   // Resolve the release-tail columns by automation action (never by hardcoded id) so a board that
@@ -6484,10 +6523,10 @@ export function createWorkflowBoardService(opts = {}) {
         // re-picks it under pickup=auto; the re-pickup carries the resume preamble (buildWorkItemPrompt
         // isResume) so the worker continues from prior on-disk work. A genuine terminal status advances
         // per runtimeColumnForCard.
-        let orchestrateColumnId = (board.columns ?? []).find(column => textOrNull(column?.automation?.action) === 'orchestrate')?.id ?? 'ready';
+        let orchestrateColumnId = columnIdByAction(board, 'orchestrate') ?? 'ready';
         let nextColumnId = settledByDecomposition
           ? decompositionCloseColumnId
-          : resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(latestCard, nextStatus);
+          : resumableInterruption ? orchestrateColumnId : runtimeColumnForCard(board, latestCard, nextStatus);
         // Per-column autonomy gate: when the source column's autoAdvance is off, a cleanly-completed run
         // does NOT auto-advance to audit — the card stays put for a human, marked awaitingHuman so the UI
         // can surface it. A failure/interruption still routes (for recovery), so the gate is happy-path only.
@@ -6530,7 +6569,7 @@ export function createWorkflowBoardService(opts = {}) {
         // A resumable interruption is not an escalation episode (no human decision / rework needed) and
         // does not mint a `failed` return — it is simply re-queued for resume.
         let escalationDelta = terminal && !resumableInterruption && !settledByDecomposition
-          ? computeTerminalEscalation(latestCard, run, nextStatus, runtimeTasks, currentNow)
+          ? computeTerminalEscalation(board, latestCard, run, nextStatus, runtimeTasks, currentNow)
           : null;
         let nextMetadata = escalationDelta ? escalationDelta.metadata : latestCard.metadata;
         // Terminal-return mint (S7): a run reaching a final status mints a completed|failed return. A
@@ -7015,8 +7054,9 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     let actor = principal.label;
-    let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id) ?? 'backlog';
     let board = ensureBoard(parent.boardId);
+    let childColumnId = textOrNull(args.childColumnId ?? args.child_column_id ?? args.columnId ?? args.column_id)
+      ?? columnIdByAction(board, 'scope') ?? entryPointColumnId(board) ?? 'backlog';
     let ts = now();
     let rootCardId = parent.metadata?.rootCardId ?? parent.id;
     // Re-armable per-wave join (S6): each decompose strictly increments the parent's monotonic
@@ -7712,7 +7752,7 @@ export function createWorkflowBoardService(opts = {}) {
       ? `\n\nFile ownership scope:\n${fileScope.map(file => `- ${file}`).join('\n')}`
       : '';
     let preferredAgent = textOrNull(args.agent ?? args.agent_slug ?? card.assignedAgent);
-    let isAudit = card.columnId === 'quality-audit' || textOrNull(args.action) === 'audit';
+    let isAudit = cardColumnAction(ensureBoard(card.boardId), card) === 'audit' || textOrNull(args.action) === 'audit';
     let auditBlock = isAudit
       ? [
         '',
@@ -8071,10 +8111,11 @@ export function createWorkflowBoardService(opts = {}) {
     if (mode === 'auto' && board.mode !== 'autonomous' && board.mode !== 'armed') {
       throw new Error(`Workflow board ${board.id} mode ${board.mode} does not allow automatic orchestration.`);
     }
-    if (!['ready', 'in-progress', 'quality-audit', 'commit-publish'].includes(card.columnId)) {
+    let stageAction = cardColumnAction(board, card);
+    if (!activeRecoveryColumnIds(board).includes(card.columnId)) {
       throw new Error(`Workflow card ${card.id} in column ${card.columnId} is not eligible for orchestration.`);
     }
-    if (card.columnId === 'ready' && !readyCardHasExecutionContract(card) && !args.force) {
+    if (stageAction === 'orchestrate' && !readyCardHasExecutionContract(card) && !args.force) {
       throw new Error(`Workflow card ${card.id} requires owner and acceptance criteria before orchestration.`);
     }
     let gateResult = readyOrchestrationGate(board, card, actor);
@@ -8172,7 +8213,9 @@ export function createWorkflowBoardService(opts = {}) {
       status: delegated.ok ? 'running' : delegationFailed ? 'failed' : run.status,
       taskIds,
     }, { id: run.id, now: ts, updatedAt: now() });
-    let nextColumnId = delegated.ok && card.columnId === 'ready' ? 'in-progress' : card.columnId;
+    let nextColumnId = delegated.ok && stageAction === 'orchestrate'
+      ? (executionTargetColumnId(board, card.columnId) ?? card.columnId)
+      : card.columnId;
     // Execution attribution (inv 47): the principal that drove this run is recorded durably on
     // card.metadata.executedBy (dedup). A floor-check write later checks this list — an executor
     // cannot sign the audit/hygiene of a card it executed (separated duty).
@@ -8182,7 +8225,6 @@ export function createWorkflowBoardService(opts = {}) {
     // the work. `executedBy` above is the daemon PRINCIPAL in autonomous mode (all runs delegated by the
     // daemon), which cannot distinguish agents; leaseOwner is the stage agent slug (effectiveArgs sets it
     // to chooseStageAgent). Audit/publish stages are excluded so a legitimate reviewer is never recorded.
-    let stageAction = cardColumnAction(board, card);
     let executingAgent = WORK_PRODUCING_ACTIONS.has(stageAction) ? textOrNull(lease.leaseOwner) : null;
     let nextExecutedByAgents = executingAgent
       ? uniqueArray([...textArray(card.metadata?.executedByAgents), executingAgent])
@@ -8496,7 +8538,7 @@ export function createWorkflowBoardService(opts = {}) {
     return runtimeState.tasks;
   }
 
-  function derivePersistentRecoveryFlags(card, runtimeTasks, currentNow) {
+  function derivePersistentRecoveryFlags(board, card, runtimeTasks, currentNow) {
     let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
     let lease = clone(stateGraph.get(`workflowLeases/${card.id}`) ?? null);
     let runs = getRunsForCard(card.id);
@@ -8508,7 +8550,7 @@ export function createWorkflowBoardService(opts = {}) {
     if (card.blockers.length > 0) flags.add('blocked');
     if (lease?.leaseExpiresAt && Number(lease.leaseExpiresAt) < currentNow) flags.add('needs_resume');
     if (
-      ['in-progress', 'quality-audit', 'commit-publish'].includes(card.columnId)
+      PENDING_CHANGE_COLUMN_ACTIONS.has(cardColumnAction(board, card))
       && !runs.some(run => RUNNING_RUN_STATUSES.has(run.status))
       && taskIds.length === 0
     ) {
@@ -8551,7 +8593,7 @@ export function createWorkflowBoardService(opts = {}) {
 
     for (let card of projection.cards.filter(item => activeColumnIds.has(item.columnId))) {
       let current = getCard(card.id);
-      let flags = derivePersistentRecoveryFlags(current, runtimeTasks, currentNow);
+      let flags = derivePersistentRecoveryFlags(projection.board, current, runtimeTasks, currentNow);
       let runs = getRunsForCard(current.id);
       let latestRun = runs[runs.length - 1] ?? null;
       if (latestRun && TERMINAL_RUN_STATUSES.has(latestRun.status) && current.blockers.length === 0) {
@@ -8925,11 +8967,12 @@ export function createWorkflowBoardService(opts = {}) {
         reworkAuthorized: true,
       };
       let outcome = null;
+      let orchestrateStageId = columnIdByAction(board, 'orchestrate') ?? 'ready';
       try {
-        if (accruedCard.columnId === 'ready') {
+        if (accruedCard.columnId === orchestrateStageId) {
           outcome = await maybeAutoOrchestrateCard(board, accruedCard, reengageArgs, daemonContext);
         } else {
-          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: 'ready' }, daemonContext);
+          outcome = await requestWorkflowTransition({ ...reengageArgs, toColumnId: orchestrateStageId }, daemonContext);
         }
       } catch (error) {
         outcome = { ok: false, error: error.message };
@@ -9193,7 +9236,7 @@ export function createWorkflowBoardService(opts = {}) {
           ?? meta.workflow_column
           ?? workflow.column_snapshot
           ?? seedColumnId,
-      ) ?? 'ideas',
+      ),
       projectId: textOrNull(meta.project_id ?? meta.projectId) ?? fallbackProjectId,
       domain: meta.domain,
       kind: meta.kind,
@@ -9259,6 +9302,8 @@ export function createWorkflowBoardService(opts = {}) {
         ?? rel.split(path.sep)[0]
         ?? null;
       let cardInput = cardInputFromMarkdown(file, parsed, projectId);
+      // A seed with no declared column lands in the target board's human intake column.
+      cardInput.columnId ??= entryPointColumnId(ensureBoard(cardInput.boardId)) ?? 'ideas';
       let existing = stateGraph.get(`workflowCards/${cardInput.id}`);
       if (existing) {
         skipped.push({
