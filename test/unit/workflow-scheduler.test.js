@@ -1218,6 +1218,42 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
   });
 
+  it('release gate: audited expected-red contract advances despite a full-suite failure', async () => {
+    service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-expected-red', 'completed', {
+      cwd: makeGitRepo('expected-red', { dirtyPaths: ['src/feature.js'] }),
+      executedBy: ['daemon'],
+      leaseOwner: 'qa-engineer',
+    });
+    let card = service.getCard(cardId);
+    sg.commit([{
+      op: 'set',
+      path: `workflowCards/${cardId}`,
+      value: {
+        ...card,
+        body: 'Full npm test is allowed to be red after this repair when the audit records the expected-red ledger.',
+        acceptanceCriteria: [...card.acceptanceCriteria, 'Full-suite red, if any, is recorded as expected downstream regeneration.'],
+        version: card.version + 1,
+      },
+    }], 'test:expected-red-contract');
+    releaseTestVerdict = { available: true, passed: false, failing: 43, passing: 83, reason: 'unit tests failed (43 failing)' };
+
+    let result = await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      verdictTasks(cardId, 'Expected-red full-suite ledger: npm test has 43 failures from downstream regeneration debt. COMPLETION_PROOF: PASS'),
+      { drive: true },
+    );
+
+    let advanced = service.getCard(cardId);
+    assert.equal(advanced.columnId, 'commit-publish', 'the explicit expected-red contract lets audit advance');
+    let audit = sg.get(`workflowChecks/${cardId}`)?.checks?.audit;
+    assert.equal(checkPassed(audit), true, 'the audit floor is still signed');
+    assert.equal(audit.signedBy, 'qa-engineer');
+    assert.equal(audit.releaseTests.expectedRed, true);
+    assert.equal(audit.releaseTests.failing, 43);
+    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+  });
+
   it('release gate: a docs-only changeset skips the unit suite (nothing to verify) and advances', async () => {
     // Intent is the Stage-1 audit gate skip; pin publishMode 'manual' so the card halts at commit-publish
     // (the L5 default would otherwise auto-merge it straight to done).

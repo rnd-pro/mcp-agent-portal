@@ -5397,6 +5397,29 @@ export function createWorkflowBoardService(opts = {}) {
     return null;
   }
 
+  function expectedRedReleaseTestAllowance(card, auditText, testProbe) {
+    if (!testProbe?.available || testProbe.passed) return null;
+    let contractText = [
+      card?.body,
+      ...(Array.isArray(card?.acceptanceCriteria) ? card.acceptanceCriteria : []),
+      ...(Array.isArray(card?.context) ? card.context : []),
+    ].filter(Boolean).join('\n').toLowerCase();
+    let auditLower = String(auditText || '').toLowerCase();
+    let cardAllowsExpectedRed = /\bfull\s+npm\s+test\b[\s\S]{0,160}\ballowed\s+to\s+be\s+red\b/.test(contractText)
+      || /\bfull[-\s]?suite\s+red\b/.test(contractText)
+      || /\bexpected[-\s]?red\b/.test(contractText);
+    let auditRecordsLedger = /\bexpected[-\s]?red\b/.test(auditLower)
+      && (/\bfull[-\s]?suite\b/.test(auditLower) || /\bnpm\s+test\b/.test(auditLower))
+      && /\b(red|fail(?:ed|ures|ing)?)\b/.test(auditLower);
+    if (!cardAllowsExpectedRed || !auditRecordsLedger) return null;
+    return {
+      expectedRed: true,
+      reason: `release gate accepted audited expected-red result: ${testProbe.reason}`,
+      failing: testProbe.failing ?? null,
+      passing: testProbe.passing ?? null,
+    };
+  }
+
   // A worker — typically the orchestrator — may decide a card is not worth completing and emit
   // `WORKFLOW_RESULT: rejected` (optionally with `ESCALATION_DETAIL:` as the reason). This is a terminal
   // DECISION: the card retires to the reject terminal, distinct from `blocked` (which escalates back) and
@@ -5615,6 +5638,7 @@ export function createWorkflowBoardService(opts = {}) {
         if (latestFinished?.status === 'completed') {
           let executedBy = textArray(latestCard.metadata?.executedBy);
           let independentlySigned = auditSignedIndependently(checks, executedBy);
+          let auditText = independentlySigned ? '' : (workerFinalAnswerText(latestFinished, runtimeTasks) || '');
           let verdict = independentlySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
           // When the floor is not yet independently signed, the daemon would have to sign it itself —
           // allowed only when the daemon is not an executor of this card, or under an explicit waiver.
@@ -5642,7 +5666,8 @@ export function createWorkflowBoardService(opts = {}) {
             let testProbe = changesetTouchesCode(cardWorkingDir(latestCard))
               ? await runReleaseTests(cardWorkingDir(latestCard))
               : { available: false, reason: 'changeset touches no code; unit gate not applicable' };
-            if (testProbe.available && !testProbe.passed) {
+            let expectedRedAllowance = expectedRedReleaseTestAllowance(latestCard, auditText, testProbe);
+            if (testProbe.available && !testProbe.passed && !expectedRedAllowance) {
               let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
               let held = normalizeWorkflowCardInput({
                 ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
@@ -5664,9 +5689,12 @@ export function createWorkflowBoardService(opts = {}) {
               let signed = {
                 status: 'passed',
                 signedBy: auditor,
-                reason: `autonomous mode: independent reviewer ${auditor} reported PASS`,
+                reason: expectedRedAllowance
+                  ? `autonomous mode: independent reviewer ${auditor} reported PASS; ${expectedRedAllowance.reason}`
+                  : `autonomous mode: independent reviewer ${auditor} reported PASS`,
                 at: runtimeNow,
               };
+              if (expectedRedAllowance) signed.releaseTests = expectedRedAllowance;
               checks = { ...checks, audit: signed };
               cardOps.push(checksSetOp(card.id, checks, runtimeNow, principal));
             } else {
@@ -5676,12 +5704,17 @@ export function createWorkflowBoardService(opts = {}) {
               let signed = separation.waiver
                 ? {
                   ...daemonSignedCheck(
-                    `autonomous mode: audit run reported PASS (daemon self-sign waived by ${separation.waiver.approver})`,
+                    expectedRedAllowance
+                      ? `autonomous mode: audit run reported PASS (daemon self-sign waived by ${separation.waiver.approver}); ${expectedRedAllowance.reason}`
+                      : `autonomous mode: audit run reported PASS (daemon self-sign waived by ${separation.waiver.approver})`,
                     runtimeNow,
                   ),
                   waiver: { approver: separation.waiver.approver },
                 }
-                : daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow);
+                : daemonSignedCheck(expectedRedAllowance
+                  ? `autonomous mode: audit run reported PASS; ${expectedRedAllowance.reason}`
+                  : 'autonomous mode: audit run reported PASS', runtimeNow);
+              if (expectedRedAllowance) signed.releaseTests = expectedRedAllowance;
               checks = { ...checks, audit: signed };
               cardOps.push(checksSetOp(card.id, checks, runtimeNow, principal));
             }
