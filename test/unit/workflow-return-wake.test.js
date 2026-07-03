@@ -338,14 +338,15 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     assert.ok(service.getCard(hard.id).metadata.returns[0].consumedAt, 'the delivered hard-interrupt return is consumed');
   });
 
-  it('a soft return wakes the orchestrator on the DEFAULT board (returnWake auto, recovery manual)', async () => {
+  it('a soft return wakes the orchestrator with recovery held manual (returnWake is independent)', async () => {
     let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
     let service = makeService(ledger.proxy);
     relaxBoardPreChecks(service);
+    // Operator-held recovery (explicit manual on the autonomous board): the return loop must STILL
+    // wake a dormant orchestrator out of the box — returnWake is independent of recovery.
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'manual' } }, actor: 'test', reason: 'hold recovery' });
     let board = service.ensureBoard();
-    // Board defaults: recovery manual, returnWake auto. The return loop must wake a dormant orchestrator
-    // out of the box, WITHOUT the operator enabling recovery.
-    assert.equal(board.automation?.recovery, 'manual', 'precondition: default recovery is manual');
+    assert.equal(board.automation?.recovery, 'manual', 'precondition: recovery held manual');
     assert.equal(board.automation?.returnWake, 'auto', 'precondition: default returnWake is auto');
 
     let owner = makeReadyCard(service, { title: 'returnwake-owner', resourceGroup: 'impl' });

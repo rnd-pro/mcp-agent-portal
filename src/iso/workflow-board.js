@@ -1257,15 +1257,29 @@ export function applyAutonomyLevel(board = {}, level) {
   };
 }
 
+// An AUTONOMOUS board must be able to re-engage its own escalations: the escalation driver is the
+// only owner of audit-fail rework and typed blocks, and it is gated on `recovery`. Absent an
+// explicit choice, an autonomous board therefore defaults `recovery` to 'auto' — otherwise the
+// factory board freezes every escalated card while the stale sweep exempts it (escalation carried).
+// An explicit value always wins, so a semi-autonomous board (self-driving pipeline, human-owned
+// recovery) stays expressible. Every other mode keeps the human-owned 'manual' default.
+function automationDefaultsForMode(mode, automation) {
+  let source = objectOrEmpty(automation);
+  let explicitRecovery = source.recovery ?? source.recoveryMode ?? source.recovery_mode;
+  if (mode !== 'autonomous' || explicitRecovery !== undefined) return source;
+  return { ...source, recovery: 'auto' };
+}
+
 export function createDefaultWorkflowBoard(opts = {}) {
   let now = opts.now ?? Date.now();
   let id = textOrNull(opts.id) ?? DEFAULT_WORKFLOW_BOARD_ID;
+  let mode = normalizeWorkflowBoardMode(opts.mode, 'autonomous');
   let board = {
     schema: WORKFLOW_BOARD_SCHEMA,
     id,
     title: textOrNull(opts.title) ?? 'Agent Workflow',
-    mode: normalizeWorkflowBoardMode(opts.mode, 'autonomous'),
-    automation: normalizeWorkflowBoardAutomation(opts.automation),
+    mode,
+    automation: normalizeWorkflowBoardAutomation(automationDefaultsForMode(mode, opts.automation)),
     columns: DEFAULT_WORKFLOW_COLUMNS.map(column => ({
       ...column,
       entryPoint: normalizeColumnEntryPoint(column.entryPoint),
@@ -1309,12 +1323,13 @@ export function createWorkflowBoard(spec = {}) {
       updatedAt: spec.updatedAt,
     });
   }
+  let mode = normalizeWorkflowBoardMode(spec.mode, 'armed');
   return {
     schema: WORKFLOW_BOARD_SCHEMA,
     id,
     title: textOrNull(spec.title) ?? id,
-    mode: normalizeWorkflowBoardMode(spec.mode, 'armed'),
-    automation: normalizeWorkflowBoardAutomation(spec.automation),
+    mode,
+    automation: normalizeWorkflowBoardAutomation(automationDefaultsForMode(mode, spec.automation)),
     columns: columns.map((column) => {
       let columnId = textOrNull(column?.id);
       if (!columnId) throw new Error('createWorkflowBoard column requires an id.');

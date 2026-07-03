@@ -123,7 +123,9 @@ describe('workflow board model and service', () => {
     assert.equal(board.automation.publishMode, 'after_audit');
     assert.equal(board.columns.every(column => column.automation.autoAdvance !== false), true);
     assert.equal(board.automation.pickup, 'auto');
-    assert.equal(board.automation.recovery, 'manual');
+    // The factory board is AUTONOMOUS: recovery defaults to auto so the escalation driver can
+    // re-engage audit-fail rework and typed blocks out of the box (an explicit operator value wins).
+    assert.equal(board.automation.recovery, 'auto');
     assert.equal(board.automation.globalParallelLimit, 8);
     assert.deepEqual(board.automation.fallbackAgents, ['orchestrator']);
     assert.equal(

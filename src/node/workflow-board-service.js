@@ -2219,6 +2219,20 @@ export function createWorkflowBoardService(opts = {}) {
     ) {
       return { ok: false, reason: 'decomposed parent waits for child returns instead of re-running', automation };
     }
+    // A live needs_human episode is a HUMAN's turn: no stage may auto-start on the card. Without this
+    // guard, a failed run carrying a needs_human block routes to the audit column, the audit's on_enter
+    // fires BEFORE the parking driver moves the card to the decision lane, and a passing audit then
+    // erases the unanswered question via the completed-run escalation clear — half-done work ships and
+    // the human is never asked. The escalation driver already refuses to re-engage needs_human (AU05);
+    // this closes the same door for on_enter/scope auto-starts. Carve-out (AU06): an unconsumed human
+    // reply is the person speaking — that wake must start the orchestrator; a resolving reply deletes
+    // the episode and every auto path resumes.
+    if (hasActiveEscalation(card)
+      && normalizeWorkflowEscalationState(card.metadata.escalation).kind === 'needs_human'
+      && !hasUnconsumedHumanReply(card)
+      && args.humanReplyWake !== true) {
+      return { ok: false, reason: 'card awaits a human answer (needs_human); no stage auto-starts', automation };
+    }
     if (board.mode !== 'armed' && board.mode !== 'autonomous') {
       return { ok: false, reason: `board mode ${board.mode} does not allow automatic orchestration`, automation };
     }
@@ -8965,6 +8979,10 @@ export function createWorkflowBoardService(opts = {}) {
         // (a dormant orchestrator finished its run in quality-audit). Honored only because this driver
         // runs as the daemon; a card carrying an active escalation already passes the gate without it.
         reworkAuthorized: true,
+        // AU06 hand-off: the returns were already stamped consumedAt in the accrual commit above, so
+        // the dispatch target cannot re-derive "a human just replied" from the card. Carry the wake
+        // context so the needs_human auto-start guard lets THIS dispatch through (and only this one).
+        humanReplyWake,
       };
       let outcome = null;
       let orchestrateStageId = columnIdByAction(board, 'orchestrate') ?? 'ready';
