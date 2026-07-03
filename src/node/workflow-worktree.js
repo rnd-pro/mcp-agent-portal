@@ -128,6 +128,24 @@ async function linkNodeModules(repoRoot, worktreePath) {
   }
 }
 
+// A fresh worktree checks out gitlinks as empty directories: without their submodules a card whose
+// tests import a submodule path fails ERR_MODULE_NOT_FOUND, pushing workers into copy-in workarounds
+// that then leak into the auto-commit. Populate them from the shared object store ($GIT_COMMON_DIR/
+// modules — already cloned for the main checkout, so no network). Best-effort like linkNodeModules:
+// a repo without submodules is a fast no-op, a failure degrades to the old behavior.
+async function initSubmodules(worktreePath) {
+  let hasModules = await fs.access(path.join(worktreePath, '.gitmodules')).then(() => true, () => false);
+  if (!hasModules) return false;
+  // A linked worktree gets its own submodule gitdirs, so this clones from the recorded URLs. file://
+  // must be re-allowed for locally-pathed submodules: the same .gitmodules is already trusted and
+  // initialized in the main checkout this worktree was cut from.
+  let res = await git(
+    ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--recursive'],
+    worktreePath, { timeout: 300_000 },
+  );
+  return res.ok;
+}
+
 // Append an entry to a worktree's local git exclude file (idempotent, best-effort).
 async function excludeInWorktree(worktreePath, entry) {
   let res = await git(['rev-parse', '--git-path', 'info/exclude'], worktreePath, { timeout: 5000 });
@@ -168,6 +186,7 @@ export async function provisionWorktree({
     let onDisk = await fs.stat(existing.path).catch(() => null);
     if (onDisk?.isDirectory()) {
       await linkNodeModules(repoRoot, existing.path);
+      await initSubmodules(existing.path);
       let baseRef = await resolveBaseRef(repoRoot);
       let baseSha = (await git(['rev-parse', 'HEAD'], repoRoot, { timeout: 5000 })).stdout.trim() || null;
       return { ok: true, path: await realpathOrResolve(existing.path), branch, baseRef, baseSha, reused: true };
@@ -193,6 +212,7 @@ export async function provisionWorktree({
     return { ok: false, error: `git worktree add failed: ${(add.stderr || add.stdout || '').trim()}` };
   }
   await linkNodeModules(repoRoot, worktreePath);
+  await initSubmodules(worktreePath);
   return { ok: true, path: await realpathOrResolve(worktreePath), branch, baseRef, baseSha, reused: false };
 }
 
@@ -234,19 +254,34 @@ export async function commitWorktree({ worktreePath, message, committer = DEFAUL
 }
 
 // Count commits on the card branch ahead of the base ref — whether there is anything to merge.
+// A failed count is NOT "nothing to merge": conflating them lets the publish tail delete a branch
+// that still holds unmerged commits. Resolves { ok:true, count } or { ok:false, detail }.
 export async function branchAheadOfBase({ repoRoot, branch, baseRef }) {
-  if (!baseRef) return 0;
+  if (!baseRef) return { ok: false, count: null, detail: 'no base ref to count against' };
   let res = await git(['rev-list', '--count', `${baseRef}..${branch}`], repoRoot, { timeout: 10_000 });
-  return res.ok ? Number(res.stdout.trim()) || 0 : 0;
+  if (!res.ok) {
+    return { ok: false, count: null, detail: `git rev-list ${baseRef}..${branch} failed: ${(res.stderr || res.stdout || '').trim() || 'unknown error'}` };
+  }
+  return { ok: true, count: Number(res.stdout.trim()) || 0 };
 }
 
 // Merge the card branch into the base ref in the main repo. A clean merge resolves
 // { ok:true, merged }. A conflict aborts the merge (restoring the base tree) and resolves
 // { ok:false, conflict:true, detail } so the caller can escalate to a human with the worktree intact.
+// Any failure to even COUNT what needs merging (renamed/deleted base ref, rev-list timeout) also
+// resolves { ok:false } — never "nothing to merge" — so the caller parks the card with the branch
+// intact instead of publishing a false success and deleting committed work.
 export async function mergeWorktree({ repoRoot, branch, baseRef, message, committer = DEFAULT_COMMITTER }) {
   if (!repoRoot || !branch) return { ok: false, conflict: false, detail: 'merge requires repoRoot and branch' };
+  // Crash-retry: a prior pass already merged and deleted the branch, then died before closing the card.
+  // A missing branch is the ONLY case where "nothing to merge" may be inferred from an unanswerable
+  // ahead-count.
+  if (!(await branchExists(repoRoot, branch))) {
+    return { ok: true, merged: false, detail: 'card branch no longer exists (already merged and removed)' };
+  }
   let ahead = await branchAheadOfBase({ repoRoot, branch, baseRef });
-  if (ahead === 0) return { ok: true, merged: false, detail: 'branch has no commits ahead of base' };
+  if (!ahead.ok) return { ok: false, conflict: false, detail: `cannot determine commits ahead of base: ${ahead.detail}` };
+  if (ahead.count === 0) return { ok: true, merged: false, detail: 'branch has no commits ahead of base' };
   let merge = await git([
     '-c', `user.name=${committer.name}`,
     '-c', `user.email=${committer.email}`,

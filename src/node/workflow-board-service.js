@@ -64,6 +64,14 @@ import { getStateGraph } from './state-graph.js';
 import { getTeamMemoryRoot } from '../../packages/agent-pool-mcp/src/runtime/paths.js';
 
 const WORKFLOW_SOURCE = 'workflow-board';
+// Card metadata the worktree lifecycle alone writes (provision/commit/merge/cleanup). createOrUpdateCard
+// carries these from the committed record so a caller's `metadata` patch can neither wipe them (a
+// dropped worktree pointer makes the publish tail skip commit/merge, then the reaper deletes uncommitted
+// work) nor plant a fake one; `executedBy` gets the same treatment inline (inv 47). Scoped to worktree
+// fields only — other operational fields (escalation, dependencyBlock, returns…) have their own
+// legitimate seams for a caller to set them directly (e.g. a human reply, `link_dependency`) and are not
+// touched here; forgeable-escalation-as-gate-evidence is tracked separately.
+const SERVICE_OWNED_CARD_METADATA = ['worktree', 'worktreeError'];
 const DEFAULT_EVENT_LIMIT = 50;
 const MAX_EVENT_LIMIT = 200;
 const COMPACT_CARD_LIMIT = 20;
@@ -1245,6 +1253,20 @@ export function createWorkflowBoardService(opts = {}) {
       ...asObject(merged.metadata),
       executedBy: textArray(current?.metadata?.executedBy),
     };
+    // The worktree pointer is service-owned too, written only via ensureCardWorktree/the publish tail
+    // (persistCardMetadata). Carrying it from the committed record here means a caller replacing
+    // `metadata` wholesale can neither WIPE it (a dropped pointer makes the publish tail skip
+    // commit/merge and the reaper then destroys uncommitted work) nor forge one. On create, only the
+    // daemon (seed/import) may stamp it.
+    for (let field of SERVICE_OWNED_CARD_METADATA) {
+      if (current) {
+        let cur = current.metadata?.[field];
+        if (cur === undefined) delete merged.metadata[field];
+        else merged.metadata[field] = clone(cur);
+      } else if (!daemonWrite) {
+        delete merged.metadata[field];
+      }
+    }
     // Orchestrator return subscription (S5): persist it on the card at create/update so the JOIN
     // materializes whenever the card is first orchestrated — including by the auto-pickup daemon —
     // not only when a subscription is threaded through one explicit orchestrate() call (which races
@@ -1896,7 +1918,7 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, board: nextBoard, event, tripped: true };
   }
 
-  function activeFileScopeConflicts(board, card, args = {}) {
+  function activeFileScopeConflicts(board, card, args = {}, { assumeSharedTree = false } = {}) {
     let files = cardFileScope(card, args);
     if (!files.length) return [];
     // Worktree isolation removes the shared-tree clobber the blocker exists to prevent. A card that runs
@@ -1906,7 +1928,14 @@ export function createWorkflowBoardService(opts = {}) {
     // when it will run isolated, and any candidate already running isolated reserves nothing. Only
     // genuinely shared-tree cards (isolation off, non-git project, or a degraded provision) still
     // serialize on file overlap — exactly the activity-only semantics the blocker was meant to have.
-    let cardWillIsolate = worktreeIsolationEnabled(board)
+    // The "will isolate" prediction must therefore be falsified by KNOWN degradation: a recorded
+    // provision failure means this card runs in the shared tree, so it must serialize like one.
+    // `assumeSharedTree` is the async caller's authoritative override once it has verified (repoIsGit)
+    // that isolation cannot hold at all.
+    let knownDegraded = Boolean(card?.metadata?.worktreeError) && !cardIsIsolated(card);
+    let cardWillIsolate = !assumeSharedTree
+      && !knownDegraded
+      && worktreeIsolationEnabled(board)
       && (cardIsIsolated(card) || EXECUTION_COLUMN_ACTIONS.has(cardColumnAction(board, card)));
     if (cardWillIsolate) return [];
     let activeColumnIds = new Set(activeRecoveryColumnIds(board));
@@ -5369,19 +5398,45 @@ export function createWorkflowBoardService(opts = {}) {
   async function driveAutonomousReleaseTail(board, principal, runtimeNow, runtimeTasks) {
     let { auditColumnId, publishColumnId, closeColumnId } = releaseTailColumns(board);
     let publishMode = normalizeWorkflowBoardAutomation(board.automation).publishMode;
-    let ops = [];
     let advanced = [];
     let closed = [];
     let merged = [];
     let conflicted = [];
     let awaitingHuman = [];
-    for (let card of Object.values(getCollection(stateGraph, 'workflowCards'))) {
-      if (card.boardId !== board.id) continue;
+    let skippedStale = [];
+    // Gate once up-front: if the daemon may not record bookkeeping there is nothing this pass may do —
+    // including the worktree commit/merge side effects, which must never outrun their card records.
+    if (!gate('daemon.bookkeeping', principal, { boardId: board.id }).ok) {
+      return { advanced, closed, merged, conflicted, awaitingHuman, skippedStale };
+    }
+    // Fenced per-card commit. Every await in this pass (release-test probe, worktree commit/merge)
+    // yields the event loop, so a card may have been rewritten since this pass read it (a human reply,
+    // an MCP update, the escalation reconciler). Commit the derived ops only while the committed record
+    // is still the version they were derived from — otherwise drop them: the concurrent write wins and
+    // the next tick re-derives (the worktree side effects are idempotent under re-entry). The version
+    // check + commit pair is synchronous, so no other write can interleave with it.
+    let commitCardOps = (cardId, baseVersion, cardOps) => {
+      if (!cardOps.length) return true;
+      let live = stateGraph.get(`workflowCards/${cardId}`);
+      if ((live?.version ?? null) !== baseVersion) {
+        skippedStale.push(cardId);
+        return false;
+      }
+      stateGraph.commit(cardOps, sourceForPrincipal(principal));
+      return true;
+    };
+    for (let cardRef of Object.values(getCollection(stateGraph, 'workflowCards'))) {
+      if (cardRef.boardId !== board.id) continue;
+      // Re-read fresh: earlier iterations' awaits may have let this card move since the loop snapshot.
+      let card = getCard(cardRef.id);
+      if (!card || card.boardId !== board.id) continue;
       let cardRuns = getRunsForCard(card.id);
       if (cardRuns.some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
       // Active recovery (blocked / lost lease / mid-recovery) means the card is not cleanly finished.
       let flags = new Set(normalizeRecoveryFlags(card.recoveryFlags));
       if (flags.has('blocked') || flags.has('needs_resume') || flags.has('recovering') || (card.blockers?.length)) continue;
+      let baseVersion = card.version;
+      let cardOps = [];
       let latestCard = clone(card);
       let checks = getChecks(card.id);
 
@@ -5404,9 +5459,10 @@ export function createWorkflowBoardService(opts = {}) {
             id: latestCard.id, actor: principal.label, now: runtimeNow,
             version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
           });
-          ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+          cardOps.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
           awaitingHuman.push(latestCard.id);
         }
+        commitCardOps(card.id, baseVersion, cardOps);
         continue;
       }
       if (latestCard.columnId === auditColumnId && publishColumnId) {
@@ -5453,8 +5509,9 @@ export function createWorkflowBoardService(opts = {}) {
                 id: latestCard.id, actor: principal.label, now: runtimeNow,
                 version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
               });
-              ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+              cardOps.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
               latestCard = held;
+              commitCardOps(card.id, baseVersion, cardOps);
               continue;
             }
             if (independentlySigned) {
@@ -5469,7 +5526,7 @@ export function createWorkflowBoardService(opts = {}) {
                 at: runtimeNow,
               };
               checks = { ...checks, audit: signed };
-              ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+              cardOps.push(checksSetOp(card.id, checks, runtimeNow, principal));
             } else {
               // Daemon self-sign. Under a waiver, record the approver who accepted the separated-duty
               // bypass so it stays attributable; without one (no recorded executor) it is an ordinary
@@ -5484,7 +5541,7 @@ export function createWorkflowBoardService(opts = {}) {
                 }
                 : daemonSignedCheck('autonomous mode: audit run reported PASS', runtimeNow);
               checks = { ...checks, audit: signed };
-              ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+              cardOps.push(checksSetOp(card.id, checks, runtimeNow, principal));
             }
             // The audit passed: clear the consecutive-rework counter (so a later, unrelated stall starts
             // its own count) and drop a lingering needs_audit flag (the pass is authoritative) so the
@@ -5502,7 +5559,7 @@ export function createWorkflowBoardService(opts = {}) {
               `Autonomous release tail: audit verdict PASS, advancing ${card.id} to ${publishColumnId}.`,
               'autonomous_release',
             );
-            ops.push(...advance.ops);
+            cardOps.push(...advance.ops);
             latestCard = advance.card;
             advanced.push({ cardId: card.id, toColumnId: publishColumnId });
           } else if (!hasActiveEscalation(latestCard)) {
@@ -5543,7 +5600,7 @@ export function createWorkflowBoardService(opts = {}) {
               id: latestCard.id, actor: principal.label, now: runtimeNow,
               version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
             });
-            ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+            cardOps.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
             latestCard = held;
           }
         }
@@ -5562,7 +5619,7 @@ export function createWorkflowBoardService(opts = {}) {
             id: latestCard.id, actor: principal.label, now: runtimeNow,
             version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
           });
-          ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+          cardOps.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
           latestCard = held;
           awaitingHuman.push(card.id);
         }
@@ -5585,8 +5642,9 @@ export function createWorkflowBoardService(opts = {}) {
               id: latestCard.id, actor: principal.label, now: runtimeNow,
               version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
             });
-            ops.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
+            cardOps.push({ op: 'set', path: `workflowCards/${latestCard.id}`, value: held });
             latestCard = held;
+            commitCardOps(card.id, baseVersion, cardOps);
             continue;
           }
           let evidence = { changedFiles: probe.changedFiles, offenders: probe.offenders };
@@ -5596,7 +5654,7 @@ export function createWorkflowBoardService(opts = {}) {
             ...(needCleanDiff ? { cleanDiff: probeSignedCheck(reason, runtimeNow, evidence) } : {}),
             ...(needHygiene ? { hygiene: probeSignedCheck(reason, runtimeNow, evidence) } : {}),
           };
-          ops.push(checksSetOp(card.id, checks, runtimeNow, principal));
+          cardOps.push(checksSetOp(card.id, checks, runtimeNow, principal));
         }
         // Autonomous publish = commit the card's isolated worktree to its branch and merge it back to
         // base, then close. This is where the autonomous mode "publishes" the work without a human — the
@@ -5627,12 +5685,15 @@ export function createWorkflowBoardService(opts = {}) {
               mergeConflict: { at: runtimeNow, branch: wt.branch, baseRef: wt.baseRef, detail: mergeRes.detail, files: mergeRes.conflictFiles ?? [] },
             });
             if (park) {
-              ops.push(...park.ops);
+              cardOps.push(...park.ops);
               latestCard = park.card;
               conflicted.push({ cardId: card.id, branch: wt.branch, files: mergeRes.conflictFiles ?? [] });
+              commitCardOps(card.id, baseVersion, cardOps);
               continue;
             }
-            // No decision lane configured — fall through and leave the card in publish (fail-closed).
+            // No decision lane configured — leave the card in publish (fail-closed), keeping any checks
+            // the probe signed above.
+            commitCardOps(card.id, baseVersion, cardOps);
             continue;
           }
           // Merged (or already-merged on a crash-retry). Remove the worktree + branch best-effort (the
@@ -5648,16 +5709,13 @@ export function createWorkflowBoardService(opts = {}) {
           `Autonomous release tail: published, closing ${card.id} to ${closeColumnId}.`,
           'autonomous_release',
         );
-        ops.push(...advance.ops);
+        cardOps.push(...advance.ops);
         latestCard = advance.card;
         closed.push(card.id);
       }
+      commitCardOps(card.id, baseVersion, cardOps);
     }
-    if (ops.length) {
-      let result = gate('daemon.bookkeeping', principal, { boardId: board.id });
-      if (result.ok) stateGraph.commit(ops, sourceForPrincipal(principal));
-    }
-    return { advanced, closed, merged, conflicted, awaitingHuman };
+    return { advanced, closed, merged, conflicted, awaitingHuman, skippedStale };
   }
 
   // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
@@ -7527,6 +7585,14 @@ export function createWorkflowBoardService(opts = {}) {
       throw new Error(boardBudget.reason);
     }
     let fileConflicts = activeFileScopeConflicts(board, card, effectiveArgs);
+    // The sync blocker above trusts the "will isolate" prediction. Falsify it here (the one pre-run
+    // async seam): a non-git repo can never isolate, so such a card runs in the SHARED tree and must
+    // serialize on file overlap like any shared-tree card — otherwise two "predicted isolated" cards
+    // clobber each other's uncommitted edits in the same directory.
+    if (!fileConflicts.length && worktreeIsolationEnabled(board) && !cardIsIsolated(card)
+      && !(await repoIsGit(cardBaseRepo(card)))) {
+      fileConflicts = activeFileScopeConflicts(board, card, effectiveArgs, { assumeSharedTree: true });
+    }
     if (fileConflicts.length && !args.force) {
       throw new Error(fileScopeConflictReason(fileConflicts));
     }
@@ -8674,25 +8740,32 @@ export function createWorkflowBoardService(opts = {}) {
     await fs.mkdir(path.dirname(absPath), { recursive: true });
     await fs.writeFile(absPath, buildMarkdown(frontmatter, card.body || ''), 'utf8');
     let relPath = safeRelativePath(absPath, root);
+    // Re-read fresh: the two awaits above (mkdir, writeFile) yield the event loop long enough for a
+    // concurrent card write (a human edit, a reconcile tick) to land. Deriving the commit from the
+    // pre-await `card` would silently clobber that write with a whole-card 'set'. `card.body`/frontmatter
+    // above were already captured from the export request's own read, which is correct (that is the
+    // content that was actually exported) — only the WRITE-BACK below must be based on current state.
+    let fresh = getCard(cardId);
+    if (!fresh) return { ok: false, error: 'card_not_found', markdownPath: relPath };
     let nextCard = normalizeWorkflowCardInput({
-      ...card,
+      ...fresh,
       metadata: {
-        ...card.metadata,
+        ...fresh.metadata,
         markdownPath: relPath,
         markdownExportedAt: now(),
       },
-      version: card.version + 1,
+      version: fresh.version + 1,
       updatedAt: now(),
       updatedBy: actor,
     }, {
-      id: card.id,
+      id: fresh.id,
       actor,
       now: now(),
-      version: card.version + 1,
-      createdAt: card.createdAt,
+      version: fresh.version + 1,
+      createdAt: fresh.createdAt,
       updatedAt: now(),
     });
-    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: nextCard }], sourceForPrincipal(principal));
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${fresh.id}`, value: nextCard }], sourceForPrincipal(principal));
     return { ok: true, card: nextCard, markdownPath: relPath };
   }
 

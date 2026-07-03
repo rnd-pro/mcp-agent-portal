@@ -308,6 +308,81 @@ describe('per-card worktree isolation (service wiring)', () => {
     );
   });
 
+  it('blocks a same-file card whose provision already failed (known degraded — shared tree)', async () => {
+    autonomous();
+    let a = createCard('deg-a', 'in-progress', { files: ['src/shared.js'] });
+    let b = createCard('deg-b', 'in-progress', { files: ['src/shared.js'] });
+    sg.commit([
+      { op: 'set', path: `workflowCards/deg-a`, value: { ...a, columnId: 'in-progress', lifecycle: 'running' } },
+      { op: 'set', path: `workflowRuns/run-deg-a`, value: {
+        schema: 'workflow-run/v1', id: 'run-deg-a', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'deg-a',
+        status: 'running', taskIds: ['task-deg-a'], startedAt: 900, updatedAt: 950,
+      } },
+      // Card B's provision failed earlier: it is KNOWN to run in the shared tree, so "will isolate"
+      // must not skip the blocker for it.
+      { op: 'set', path: `workflowCards/deg-b`, value: {
+        ...b, metadata: { ...b.metadata, worktreeError: { reason: 'git worktree add failed', at: 900 } },
+      } },
+    ], 'test:plant-degraded');
+
+    await assert.rejects(
+      () => service.orchestrateWorkItem({ cardId: 'deg-b' }),
+      /file scope/i,
+      'a degraded-isolation card serializes on file overlap with a running shared-tree peer',
+    );
+  });
+
+  it('blocks a same-file card in a non-git repo even with isolation enabled (cannot isolate)', async () => {
+    stub.isGitRepo = async () => false;
+    autonomous();
+    let a = createCard('ngit-a', 'in-progress', { files: ['src/shared.js'] });
+    sg.commit([
+      { op: 'set', path: `workflowCards/ngit-a`, value: { ...a, columnId: 'in-progress', lifecycle: 'running' } },
+      { op: 'set', path: `workflowRuns/run-ngit-a`, value: {
+        schema: 'workflow-run/v1', id: 'run-ngit-a', boardId: DEFAULT_WORKFLOW_BOARD_ID, cardId: 'ngit-a',
+        status: 'running', taskIds: ['task-ngit-a'], startedAt: 900, updatedAt: 950,
+      } },
+    ], 'test:plant-running-ngit-a');
+
+    createCard('ngit-b', 'in-progress', { files: ['src/shared.js'] });
+    await assert.rejects(
+      () => service.orchestrateWorkItem({ cardId: 'ngit-b' }),
+      /file scope/i,
+      'a non-git project can never isolate, so same-file cards serialize',
+    );
+  });
+
+  // Operational metadata (worktree pointer, escalation, dependency block…) is service-owned: it is
+  // written only by the worktree/escalation/dependency paths. A caller's card write must neither wipe
+  // it (a dropped worktree pointer makes the publish tail skip commit/merge, then the reaper deletes
+  // uncommitted work).
+  describe('service-owned worktree metadata survives caller writes', () => {
+    it('a metadata patch does not wipe the worktree pointer', () => {
+      plantPublishCard('card-keep', { worktree: true });
+      let updated = service.createOrUpdateCard({
+        cardId: 'card-keep', metadata: { note: 'caller annotation' },
+      }).card;
+      assert.equal(updated.metadata.note, 'caller annotation', 'caller metadata still lands');
+      assert.equal(updated.metadata.worktree?.branch, 'agent-portal/card-keep', 'worktree pointer survives');
+    });
+
+    it('a caller cannot set the worktree pointer through metadata input', () => {
+      createCard('card-forge', 'backlog');
+      let forged = service.createOrUpdateCard({
+        cardId: 'card-forge',
+        metadata: { worktree: { path: '/evil', branch: 'x', baseRef: 'main' } },
+      }).card;
+      assert.equal(forged.metadata.worktree, undefined, 'worktree pointer cannot be forged by a card write');
+
+      // And on CREATE a non-daemon caller cannot seed it either.
+      let seeded = service.createOrUpdateCard({
+        id: 'card-seeded', title: 'Seeded', columnId: 'backlog', actor: 'test',
+        metadata: { worktree: { path: '/evil', branch: 'x', baseRef: 'main' } },
+      }).card;
+      assert.equal(seeded.metadata.worktree, undefined, 'worktree pointer cannot be seeded by a caller');
+    });
+  });
+
   // The per-project working directory is captured onto the card at intake (createWorkItem →
   // createOrUpdateCard → normalizeWorkflowCardInput) so a card carrying a `cwd` reaches its own repo.
   describe('cwd capture at intake', () => {

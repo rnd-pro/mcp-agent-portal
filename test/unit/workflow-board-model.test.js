@@ -2183,6 +2183,35 @@ links:
     }
   });
 
+  it('a concurrent card edit during export survives the export write-back', async () => {
+    let created = service.createOrUpdateCard({
+      id: 'work-item-race',
+      title: 'Original title',
+      body: 'Body.',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      owner: 'orchestrator',
+      actor: 'test',
+    });
+
+    // exportWorkflowWorkItem reads the card synchronously, then awaits real fs.mkdir/fs.writeFile before
+    // writing back markdownPath/markdownExportedAt. Starting a second, SYNCHRONOUS card edit right after
+    // (before awaiting the export) is guaranteed to complete before those fs awaits resolve — exercising
+    // exactly the race the write-back must survive (A33: it must not clobber the edit with a stale
+    // whole-card 'set' derived from its own pre-await read).
+    let exportPromise = service.exportWorkflowWorkItem({ cardId: created.card.id, actor: 'test' });
+    let concurrentEdit = service.createOrUpdateCard({ cardId: created.card.id, title: 'Edited mid-export' });
+    assert.equal(concurrentEdit.ok, true);
+
+    let exported = await exportPromise;
+    assert.equal(exported.ok, true);
+
+    let card = service.getCard(created.card.id);
+    assert.equal(card.title, 'Edited mid-export', 'the concurrent edit was not clobbered by the export write-back');
+    assert.equal(card.metadata.markdownPath, exported.markdownPath, 'the export write-back still landed');
+    assert.ok(card.metadata.markdownExportedAt, 'markdownExportedAt still landed');
+  });
+
   it('refreshes the lease while the linked runtime task is still running (heartbeat)', async () => {
     let created = service.createOrUpdateCard({
       title: 'Long running task',

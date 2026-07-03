@@ -393,4 +393,55 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     assert.ok(!service.getCard(busy.id).metadata.returns[0].consumedAt, 'the active-run card return stays unconsumed');
     assert.ok(!service.getCard(backoff.id).metadata.returns[0].consumedAt, 'the backoff card return stays unconsumed');
   });
+
+  it('a concurrent human reply on a later card survives a still-in-flight earlier re-engagement', async () => {
+    // The driver `await`s a re-engagement dispatch per candidate card, one at a time. While card A's
+    // dispatch is in flight, a human can reply to card B (independently changing B's escalation/comments).
+    // The driver must pick up B fresh when its turn comes — not the pre-loop snapshot — or it would
+    // silently clobber the human's reply with stale data (A11).
+    let gateReleased = null;
+    let gate = new Promise((resolve) => { gateReleased = resolve; });
+    let sawFirstDelegate = false;
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let baseProxy = ledger.proxy;
+    let proxy = {
+      ...baseProxy,
+      requestFromChild: async (server, method, payload) => {
+        if (server === 'agent-pool' && payload?.name === 'delegate_task' && !sawFirstDelegate) {
+          sawFirstDelegate = true;
+          await gate; // pause the FIRST card's dispatch until the test resolves it below
+        }
+        return baseProxy.requestFromChild(server, method, payload);
+      },
+    };
+    let service = makeService(proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'enable recovery' });
+    let board = service.ensureBoard();
+
+    let cardA = makeReadyCard(service, { title: 'card-a', resourceGroup: 'impl' });
+    seedReturns(cardA, [returnEvent({ kind: 'discovered', detail: 'a', correlationId: cardA.id })]);
+    let cardB = makeReadyCard(service, { title: 'card-b', resourceGroup: 'impl' });
+    seedReturns(cardB, [returnEvent({ kind: 'discovered', detail: 'b', correlationId: cardB.id })]);
+
+    let driven = service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: proxy });
+
+    // Card A's dispatch is now parked on the gate. While it is in flight, a human comments on card B —
+    // simulating a concurrent write landing on a card still waiting in this pass's candidate list.
+    while (!sawFirstDelegate) await new Promise((resolve) => setImmediate(resolve));
+    let humanComment = service.addCardComment({ cardId: cardB.id, body: 'Please hold off, I am checking this.' });
+    assert.equal(humanComment.ok, true);
+    let bVersionAfterComment = service.getCard(cardB.id).version;
+
+    gateReleased();
+    let result = await driven;
+    assert.equal(result.ok, true);
+    assert.equal(result.reengaged.length, 2, 'both cards were re-engaged');
+
+    // Card B's re-engagement commit must have been derived from the POST-comment version, not the
+    // pre-loop snapshot — so the human's comment is still on the card afterward.
+    let finalB = service.getCard(cardB.id);
+    assert.ok(finalB.version > bVersionAfterComment, 'card B advanced past the comment (accrual commit landed after it)');
+    assert.equal(finalB.metadata.comments?.at(-1)?.body, 'Please hold off, I am checking this.', 'the concurrent human comment was not clobbered');
+  });
 });

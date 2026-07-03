@@ -92,14 +92,14 @@ describe('workflow worktree isolation (real git)', () => {
     let noop = await commitWorktree({ worktreePath: c1.path, message: 'noop' });
     assert.equal(noop.ok, true);
     assert.equal(noop.committed, false);
-    assert.equal(await branchAheadOfBase({ repoRoot, branch: c1.branch, baseRef: 'main' }), 0);
+    assert.deepEqual(await branchAheadOfBase({ repoRoot, branch: c1.branch, baseRef: 'main' }), { ok: true, count: 0 });
 
     // Two cards edit DIFFERENT files — fully independent, both merge clean.
     writeFile('a.txt', 'line1-c1\nline2\n', c1.path);
     writeFile('b.txt', 'beta-c2\n', c2.path);
     let commit1 = await commitWorktree({ worktreePath: c1.path, message: 'card-1 work' });
     assert.equal(commit1.committed, true);
-    assert.equal(await branchAheadOfBase({ repoRoot, branch: c1.branch, baseRef: 'main' }), 1);
+    assert.deepEqual(await branchAheadOfBase({ repoRoot, branch: c1.branch, baseRef: 'main' }), { ok: true, count: 1 });
     await commitWorktree({ worktreePath: c2.path, message: 'card-2 work' });
 
     let merge1 = await mergeWorktree({ repoRoot, branch: c1.branch, baseRef: 'main', message: 'merge card-1' });
@@ -155,5 +155,58 @@ describe('workflow worktree isolation (real git)', () => {
     assert.equal(fs.readFileSync(path.join(repoRoot, 'a.txt'), 'utf-8'), 'line1-c1\nline2\n');
     // card-2's worktree is untouched, ready for a human to resolve.
     assert.equal(fs.readFileSync(path.join(c2.path, 'a.txt'), 'utf-8'), 'line1-c2\nline2\n');
+  });
+
+  it('never reports "nothing to merge" when the ahead-count itself fails — committed work survives', async () => {
+    let c = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-1' });
+    writeFile('a.txt', 'line1-c1\nline2\n', c.path);
+    let commit = await commitWorktree({ worktreePath: c.path, message: 'card-1 work' });
+    assert.equal(commit.committed, true);
+
+    // The base ref recorded at provision time no longer resolves (renamed mid-flight). The merge must
+    // FAIL — an ok:true here would send the publish tail straight to branch -D on unmerged commits.
+    let count = await branchAheadOfBase({ repoRoot, branch: c.branch, baseRef: 'gone-base' });
+    assert.equal(count.ok, false);
+    let merge = await mergeWorktree({ repoRoot, branch: c.branch, baseRef: 'gone-base', message: 'merge c1' });
+    assert.equal(merge.ok, false);
+    assert.equal(merge.conflict, false);
+    assert.match(merge.detail, /cannot determine commits ahead of base/);
+    assert.equal(git(['rev-parse', '--verify', c.branch]).length > 0, true, 'card branch is intact');
+
+    // A missing base ref is the same failure, not a silent zero.
+    let noBase = await mergeWorktree({ repoRoot, branch: c.branch, baseRef: null, message: 'merge c1' });
+    assert.equal(noBase.ok, false);
+
+    // Crash-retry is the one benign case: the branch itself is gone because a prior pass already merged
+    // and removed it — re-entry is a no-op success so the card can still close.
+    await mergeWorktree({ repoRoot, branch: c.branch, baseRef: 'main', message: 'merge c1' });
+    git(['worktree', 'remove', c.path, '--force']);
+    git(['branch', '-D', c.branch]);
+    let retry = await mergeWorktree({ repoRoot, branch: c.branch, baseRef: 'main', message: 'merge c1' });
+    assert.equal(retry.ok, true);
+    assert.equal(retry.merged, false);
+    assert.match(retry.detail, /no longer exists/);
+  });
+
+  it('populates submodules in a fresh worktree so card tests can import them', async () => {
+    let subRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-sub-'));
+    try {
+      git(['init', '-q', '-b', 'main'], subRepo);
+      writeFile('lib.js', 'export default 1;\n', subRepo);
+      git(['add', '-A'], subRepo);
+      git(['commit', '-qm', 'sub base'], subRepo);
+      git(['-c', 'protocol.file.allow=always', 'submodule', 'add', subRepo, 'vendor/sub']);
+      git(['commit', '-qm', 'add submodule']);
+
+      let c = await provisionWorktree({ repoRoot, worktreeRoot, cardId: 'card-sub' });
+      assert.equal(c.ok, true);
+      // Without submodule init the gitlink checks out as an EMPTY directory and any card whose build or
+      // tests import through it fails ERR_MODULE_NOT_FOUND.
+      assert.ok(fs.existsSync(path.join(c.path, 'vendor/sub/lib.js')), 'submodule content is checked out');
+      // The populated submodule is not a change: a no-op card must still produce an empty diff.
+      assert.equal(git(['status', '--porcelain'], c.path), '', 'worktree stays clean after submodule init');
+    } finally {
+      fs.rmSync(subRepo, { recursive: true, force: true });
+    }
   });
 });
