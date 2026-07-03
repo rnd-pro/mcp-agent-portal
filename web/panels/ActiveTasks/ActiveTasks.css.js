@@ -18,8 +18,8 @@ pg-active-tasks {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--sn-node-border);
-  background: var(--sn-panel-bg);
+  border-bottom: 1px solid var(--sn-sys-outline);
+  background: var(--sn-sys-surface-panel);
 }
 
 .at-title {
@@ -27,13 +27,13 @@ pg-active-tasks {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 16px;
   font-weight: 600;
 }
 
 .at-title .material-symbols-outlined {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
 }
 
 .at-main {

@@ -8,8 +8,8 @@ pg-group-manager {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
 }
 
 .gm-toolbar {
@@ -18,14 +18,14 @@ pg-group-manager {
   align-items: center;
   gap: 8px;
   padding: 0 14px;
-  border-bottom: 1px solid var(--sn-node-border);
-  background: var(--sn-bg);
+  border-bottom: 1px solid var(--sn-sys-outline);
+  background: var(--sn-sys-surface);
   flex-shrink: 0;
 }
 
 .gm-status {
   font-size: 12px;
-  color: var(--sn-success-color);
+  color: var(--sn-sys-success);
   margin-left: auto;
 }
 
@@ -33,13 +33,13 @@ pg-group-manager {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 14px;
   font-weight: 600;
 }
 
 .gm-title .material-symbols-outlined {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
 }
 
 .gm-board {
@@ -54,7 +54,7 @@ pg-group-manager {
   --sn-kanban-padding: 12px;
   --sn-kanban-header-padding: 0;
   --sn-kanban-header-min-height: 0;
-  --sn-kanban-column-bg: var(--sn-bg);
+  --sn-kanban-column-bg: var(--sn-sys-surface);
 }
 
 .gm-unassigned {
@@ -63,8 +63,8 @@ pg-group-manager {
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--sn-node-border);
-  background: var(--sn-bg);
+  border-bottom: 1px solid var(--sn-sys-outline);
+  background: var(--sn-sys-surface);
 }
 
 .gm-board .sn-kanban-column-header {
@@ -81,15 +81,15 @@ pg-group-manager {
   align-items: flex-start;
   gap: 8px;
   padding: 12px;
-  border-bottom: 1px solid var(--sn-node-border);
-  background: var(--sn-node-bg);
+  border-bottom: 1px solid var(--sn-sys-outline);
+  background: var(--sn-sys-surface-raised);
 }
 
 .gm-column-head h2 {
   margin: 0 0 4px 0;
   font-size: 13px;
   font-weight: 650;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -97,7 +97,7 @@ pg-group-manager {
 
 .gm-description {
   margin: 0 0 8px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -111,8 +111,8 @@ pg-group-manager {
 .gm-meta span {
   font-size: 10px;
   line-height: 16px;
-  color: var(--sn-text-dim);
-  border: 1px solid var(--sn-node-border);
+  color: var(--sn-sys-on-surface-dim);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 999px;
   padding: 0 6px;
 }
@@ -122,9 +122,9 @@ pg-group-manager {
 }
 
 .gm-column-delete[data-delete-armed="true"] {
-  color: var(--sn-danger-color);
-  background: color-mix(in srgb, var(--sn-danger-color) 10%, transparent);
-  border-color: color-mix(in srgb, var(--sn-danger-color) 42%, var(--sn-node-border));
+  color: var(--sn-sys-danger);
+  background: color-mix(in srgb, var(--sn-sys-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--sn-sys-danger) 42%, var(--sn-sys-outline));
 }
 
 .gm-column-config {
@@ -132,18 +132,18 @@ pg-group-manager {
   grid-template-columns: minmax(0, 1fr) 72px;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--sn-node-border);
+  border-bottom: 1px solid var(--sn-sys-outline);
 }
 
 .gm-agent-section {
   padding: 10px;
-  border-bottom: 1px solid var(--sn-node-border);
-  background: color-mix(in srgb, var(--sn-node-bg) 72%, transparent);
+  border-bottom: 1px solid var(--sn-sys-outline);
+  background: color-mix(in srgb, var(--sn-sys-surface-raised) 72%, transparent);
 }
 
 .gm-section-label {
   margin-bottom: 8px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0;
@@ -166,8 +166,8 @@ pg-group-manager {
 }
 
 .gm-agent-list.drag-over {
-  background: color-mix(in srgb, var(--sn-node-selected) 14%, transparent);
-  outline: 1px dashed color-mix(in srgb, var(--sn-node-selected) 64%, transparent);
+  background: color-mix(in srgb, var(--sn-sys-accent) 14%, transparent);
+  outline: 1px dashed color-mix(in srgb, var(--sn-sys-accent) 64%, transparent);
   outline-offset: 4px;
 }
 
@@ -181,10 +181,10 @@ pg-group-manager {
   gap: 8px;
   align-items: center;
   padding: 8px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 8px;
-  color: var(--sn-text-dim);
-  background: var(--sn-node-bg);
+  color: var(--sn-sys-on-surface-dim);
+  background: var(--sn-sys-surface-raised);
   cursor: grab;
 }
 
@@ -197,7 +197,7 @@ pg-group-manager {
 }
 
 .gm-agent-card[data-default-chat="true"] {
-  border-color: color-mix(in srgb, var(--sn-node-selected) 52%, var(--sn-node-border));
+  border-color: color-mix(in srgb, var(--sn-sys-accent) 52%, var(--sn-sys-outline));
 }
 
 .gm-agent-icon {
@@ -206,8 +206,8 @@ pg-group-manager {
   display: grid;
   place-items: center;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--gm-agent-color, var(--sn-node-selected)) 14%, var(--sn-panel-bg));
-  color: var(--gm-agent-color, var(--sn-node-selected));
+  background: color-mix(in srgb, var(--gm-agent-color, var(--sn-sys-accent)) 14%, var(--sn-sys-surface-panel));
+  color: var(--gm-agent-color, var(--sn-sys-accent));
 }
 
 .gm-agent-icon .material-symbols-outlined {
@@ -222,7 +222,7 @@ pg-group-manager {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 12px;
   line-height: 1.25;
   font-weight: 600;
@@ -236,7 +236,7 @@ pg-group-manager {
 }
 
 .gm-agent-meta span {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 10px;
   line-height: 14px;
 }
@@ -244,8 +244,8 @@ pg-group-manager {
 .gm-agent-default {
   padding: 0 5px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--sn-node-selected) 18%, transparent);
-  color: var(--sn-node-selected) !important;
+  background: color-mix(in srgb, var(--sn-sys-accent) 18%, transparent);
+  color: var(--sn-sys-accent) !important;
 }
 
 .gm-agent-edit {
@@ -255,9 +255,9 @@ pg-group-manager {
 .gm-agent-empty {
   width: 100%;
   padding: 8px;
-  border: 1px dashed var(--sn-node-border);
+  border: 1px dashed var(--sn-sys-outline);
   border-radius: 7px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   text-align: center;
 }
@@ -270,7 +270,7 @@ pg-group-manager {
 .gm-column-config span {
   display: block;
   margin-bottom: 4px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 10px;
   text-transform: uppercase;
 }
@@ -280,9 +280,9 @@ pg-group-manager {
 .gm-add-profile select {
   width: 100%;
   min-width: 0;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
-  border: 1px solid var(--sn-node-border);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
   font: inherit;
   font-size: 12px;
@@ -300,7 +300,7 @@ pg-group-manager {
 }
 
 .gm-profile-list.drag-over {
-  background: color-mix(in srgb, var(--sn-node-selected) 14%, transparent);
+  background: color-mix(in srgb, var(--sn-sys-accent) 14%, transparent);
 }
 
 .gm-profile {
@@ -309,8 +309,8 @@ pg-group-manager {
   gap: 8px;
   align-items: center;
   padding: 8px;
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
+  background: var(--sn-sys-surface-raised);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 8px;
   cursor: grab;
 }
@@ -326,11 +326,11 @@ pg-group-manager {
 }
 
 .gm-profile.drop-before {
-  box-shadow: 0 -2px 0 var(--sn-node-selected);
+  box-shadow: 0 -2px 0 var(--sn-sys-accent);
 }
 
 .gm-profile.drop-after {
-  box-shadow: 0 2px 0 var(--sn-node-selected);
+  box-shadow: 0 2px 0 var(--sn-sys-accent);
 }
 
 .gm-profile-icon {
@@ -339,8 +339,8 @@ pg-group-manager {
   display: grid;
   place-items: center;
   border-radius: 6px;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text-dim);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 .gm-profile-icon .material-symbols-outlined {
@@ -356,7 +356,7 @@ pg-group-manager {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   text-transform: uppercase;
 }
 
@@ -365,7 +365,7 @@ pg-group-manager {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 .gm-profile-meta-line {
@@ -373,7 +373,7 @@ pg-group-manager {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 10px;
   line-height: 14px;
 }
@@ -383,8 +383,8 @@ pg-group-manager {
   grid-template-columns: 78px minmax(0, 1fr) 28px;
   gap: 6px;
   padding: 10px;
-  border-top: 1px solid var(--sn-node-border);
-  background: var(--sn-node-bg);
+  border-top: 1px solid var(--sn-sys-outline);
+  background: var(--sn-sys-surface-raised);
 }
 
 .gm-add-profile[data-provider="codex"] [data-add-reasoning],

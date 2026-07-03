@@ -17,8 +17,8 @@ pg-workflow-card-inspector .wci-shell {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font);
 }
 
@@ -28,9 +28,9 @@ pg-workflow-card-inspector .wci-header {
   gap: 8px;
   min-height: 38px;
   padding: 8px 12px;
-  border-block-end: 1px solid var(--sn-node-border);
+  border-block-end: 1px solid var(--sn-sys-outline);
   background: var(--sn-node-header-bg);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 pg-workflow-card-inspector .wci-title {
@@ -52,7 +52,7 @@ pg-workflow-card-inspector .wci-badge {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   background: var(--sn-chip-bg, color-mix(in oklch, var(--sn-sys-accent) 18%, transparent));
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 pg-workflow-card-inspector .wci-badge[data-kind="error"] { background: color-mix(in oklch, var(--sn-sys-danger) 18%, transparent); color: var(--sn-sys-danger); }
 pg-workflow-card-inspector .wci-badge[data-kind="warning"] { background: color-mix(in oklch, var(--sn-sys-warning) 18%, transparent); color: var(--sn-sys-warning); }
@@ -64,7 +64,7 @@ pg-workflow-card-inspector .wci-spinner {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--sn-node-border);
+  border: 2px solid var(--sn-sys-outline);
   border-top-color: var(--sn-accent, var(--sn-sys-accent));
   border-radius: 50%;
   animation: wci-spin 0.8s linear infinite;
@@ -89,7 +89,7 @@ pg-workflow-card-inspector .wci-audit-verdict {
 
 pg-workflow-card-inspector .wci-audit-by {
   min-width: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   font-family: var(--sn-font-mono);
   overflow: hidden;
@@ -101,21 +101,21 @@ pg-workflow-card-inspector .wci-audit-reason {
   margin-block-start: 6px;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 pg-workflow-card-inspector .wci-audit-returned {
   margin-block-start: 8px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--sn-danger-color, var(--sn-sys-danger));
+  color: var(--sn-sys-danger);
 }
 
 pg-workflow-card-inspector .wci-audit-detail {
   margin-block-start: 4px;
   font-size: 11px;
   line-height: 1.4;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 pg-workflow-card-inspector .wci-audit-next {
@@ -123,12 +123,12 @@ pg-workflow-card-inspector .wci-audit-next {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 pg-workflow-card-inspector .wci-history-actor {
   flex: 0 0 auto;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
   max-width: 38%;
@@ -144,7 +144,7 @@ pg-workflow-card-inspector .wci-empty {
   justify-content: center;
   padding: 24px;
   text-align: center;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 12px;
 }
 
@@ -161,7 +161,7 @@ pg-workflow-card-inspector .wci-agent {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-block-end: 1px solid var(--sn-node-border);
+  border-block-end: 1px solid var(--sn-sys-outline);
 }
 
 pg-workflow-card-inspector .wci-agent-dot {
@@ -186,16 +186,16 @@ pg-workflow-card-inspector .wci-agent-name {
 pg-workflow-card-inspector .wci-chat-btn {
   flex: 0 0 auto;
   padding: 4px 10px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
   background: transparent;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-chat-btn:hover {
-  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
+  background: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-sys-surface-panel));
 }
 /* U15: title-attribute tooltip is not reachable by keyboard alone; a visible focus ring gives
    keyboard/AT users the same "this is interactive, here's what it does" affordance sighted
@@ -209,8 +209,8 @@ pg-workflow-card-inspector .wci-metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1px;
-  background: var(--sn-node-border);
-  border-block-end: 1px solid var(--sn-node-border);
+  background: var(--sn-sys-outline);
+  border-block-end: 1px solid var(--sn-sys-outline);
 }
 
 pg-workflow-card-inspector .wci-metric {
@@ -218,14 +218,14 @@ pg-workflow-card-inspector .wci-metric {
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  background: var(--sn-panel-bg);
+  background: var(--sn-sys-surface-panel);
 }
 
 pg-workflow-card-inspector .wci-metric-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 pg-workflow-card-inspector .wci-metric-value {
@@ -236,7 +236,7 @@ pg-workflow-card-inspector .wci-metric-value {
 
 pg-workflow-card-inspector .wci-section {
   padding: 10px 12px;
-  border-block-end: 1px solid var(--sn-node-border);
+  border-block-end: 1px solid var(--sn-sys-outline);
 }
 
 pg-workflow-card-inspector .wci-section-label {
@@ -244,7 +244,7 @@ pg-workflow-card-inspector .wci-section-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 pg-workflow-card-inspector .wci-history-list {
@@ -268,7 +268,7 @@ pg-workflow-card-inspector .wci-history-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--sn-text-dim);
+  background: var(--sn-sys-on-surface-dim);
   align-self: center;
 }
 pg-workflow-card-inspector .wci-history-item[data-kind="error"] .wci-history-dot { background: var(--sn-sys-danger); }
@@ -285,7 +285,7 @@ pg-workflow-card-inspector .wci-history-label {
 
 pg-workflow-card-inspector .wci-history-time {
   flex: 0 0 auto;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
 }
@@ -311,7 +311,7 @@ pg-workflow-card-inspector .wci-run-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--sn-text-dim);
+  background: var(--sn-sys-on-surface-dim);
 }
 pg-workflow-card-inspector .wci-run-item[data-kind="error"] .wci-run-dot { background: var(--sn-sys-danger); }
 pg-workflow-card-inspector .wci-run-item[data-kind="warning"] .wci-run-dot { background: var(--sn-sys-warning); }
@@ -330,7 +330,7 @@ pg-workflow-card-inspector .wci-run-meta {
   flex: 1 1 auto;
   min-width: 0;
   text-align: end;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
   overflow: hidden;
@@ -343,17 +343,17 @@ pg-workflow-card-inspector .wci-run-chat {
   width: 20px;
   height: 20px;
   padding: 0;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 5px;
   background: transparent;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-run-chat:hover {
-  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
+  background: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-sys-surface-panel));
 }
 /* U15: icon-only button, label carried solely by [title]; keyboard users get no hover tooltip,
    so a visible focus ring is the equivalent affordance (see .wci-chat-btn note above). */
@@ -383,7 +383,7 @@ pg-workflow-card-inspector .wci-decision-section {
 pg-workflow-card-inspector .wci-decision-question {
   font-size: 12px;
   line-height: 1.4;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   margin-block-end: 8px;
 }
 pg-workflow-card-inspector .wci-decision-options {
@@ -397,16 +397,16 @@ pg-workflow-card-inspector .wci-decision-options:empty {
 }
 pg-workflow-card-inspector .wci-decision-option {
   padding: 5px 10px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
 }
 pg-workflow-card-inspector .wci-decision-option:hover:not(:disabled) {
-  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
+  background: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-sys-surface-panel));
 }
 pg-workflow-card-inspector .wci-decision-option-reject {
   border-color: color-mix(in oklch, var(--sn-sys-danger) 40%, transparent);
@@ -417,10 +417,10 @@ pg-workflow-card-inspector .wci-decision-text {
   box-sizing: border-box;
   resize: vertical;
   padding: 6px 8px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   font-size: 11px;
   margin-block-end: 8px;
@@ -432,10 +432,10 @@ pg-workflow-card-inspector .wci-decision-actions {
 pg-workflow-card-inspector .wci-decision-btn {
   flex: 1 1 auto;
   padding: 6px 10px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
   background: transparent;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -445,7 +445,7 @@ pg-workflow-card-inspector .wci-decision-send {
   color: var(--sn-accent, var(--sn-sys-accent));
 }
 pg-workflow-card-inspector .wci-decision-btn:hover:not(:disabled) {
-  background: var(--sn-node-hover, color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), transparent));
+  background: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-sys-surface-panel));
 }
 pg-workflow-card-inspector .wci-decision-btn:disabled,
 pg-workflow-card-inspector .wci-decision-option:disabled {
@@ -455,7 +455,7 @@ pg-workflow-card-inspector .wci-decision-option:disabled {
 pg-workflow-card-inspector .wci-decision-status {
   margin-block-start: 8px;
   font-size: 11px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 pg-workflow-card-inspector .wci-decision-status[data-kind="error"] { color: var(--sn-sys-danger); }
 pg-workflow-card-inspector .wci-decision-status[data-kind="ok"] { color: var(--sn-sys-success); }

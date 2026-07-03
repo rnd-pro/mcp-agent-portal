@@ -38,13 +38,13 @@ WorkflowStep.rootStyles = `
 :host,
 we-workflow-step {
   display: block;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font);
 }
 .step-card {
   margin-bottom: 12px;
-  background: var(--sn-node-bg);
-  border: 1px solid var(--sn-node-border);
+  background: var(--sn-sys-surface-raised);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -59,7 +59,7 @@ we-workflow-step {
   font-weight: 500;
 }
 .step-header:hover {
-  background: var(--sn-node-hover);
+  background: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-accent-bg-subtle));
 }
 .step-title {
   display: flex;
@@ -73,7 +73,7 @@ we-workflow-step {
 }
 .step-content {
   padding: 16px;
-  border-top: 1px solid var(--sn-node-border);
+  border-top: 1px solid var(--sn-sys-outline);
   display: none;
 }
 :host([expanded]) .step-content,
@@ -82,23 +82,23 @@ we-workflow-step[expanded] .step-content  {
 }
 :host([expanded]) .step-header,
 we-workflow-step[expanded] .step-header  {
-  background: var(--sn-node-hover);
+  background: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-selected-mix), var(--sn-accent-bg-subtle));
 }
 .step-description {
   margin-bottom: 12px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 .step-tools {
   margin-bottom: 12px;
   font-size: 11px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
 }
 .node-id {
   flex-shrink: 0;
   font-size: 11px;
   font-family: var(--sn-font-mono);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   background: var(--sn-accent-bg-subtle);
   padding: 2px 6px;
   border-radius: 4px;

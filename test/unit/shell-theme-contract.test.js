@@ -28,11 +28,11 @@ describe('portal shell theme contract', () => {
       '--sn-theme-chroma',
       '--sn-theme-bg-lightness',
       '--sn-theme-density',
-      '--sn-bg',
-      '--sn-panel-bg',
+      '--sn-sys-surface',
+      '--sn-sys-surface-panel',
       '--sn-layout-gap-bg',
-      '--sn-node-selected',
-      '--sn-text',
+      '--sn-sys-accent',
+      '--sn-sys-on-surface',
     ]) {
       assert.ok(theme.includes(token), `default symbiote-ui theme must provide ${token}`);
     }
@@ -76,11 +76,11 @@ describe('portal shell theme contract', () => {
     assert.match(widgetStyles, /border: 1px solid transparent;/);
     assert.match(widgetStyles, /border-radius: var\(--sn-layout-header-button-radius/);
     assert.match(widgetStyles, /background: transparent;/);
-    assert.match(widgetStyles, /color: var\(--sn-text-dim\);/);
+    assert.match(widgetStyles, /color: var\(--sn-sys-on-surface-dim\);/);
     assert.match(widgetStyles, /font: inherit;/);
     assert.match(widgetStyles, /font-size: var\(--sn-shell-menu-action-size/);
     assert.match(widgetStyles, /cascade-theme-widget \.ctw-trigger:hover/);
-    assert.match(widgetStyles, /background: var\(--sn-node-hover\);/);
+    assert.match(widgetStyles, /background: color-mix\(in oklch, var\(--sn-sys-accent\) var\(--sn-sys-state-hover-mix\), transparent\);/);
   });
 
   it('uses the provider chat workspace cell background without a portal duplicate', () => {
@@ -169,9 +169,9 @@ describe('portal shell theme contract', () => {
     assert.equal(icons.includes('style='), false, 'markdown icon rendering must use theme classes');
     assert.equal(icons.includes('hsl('), false, 'markdown icon rendering must not hard-code colors');
     for (let token of [
-      '--sn-node-selected',
-      '--sn-success-color',
-      '--sn-danger-color',
+      '--sn-sys-accent',
+      '--sn-sys-success',
+      '--sn-sys-danger',
       '--sn-accent-bg',
       '--sn-scrollbar-thumb',
       '--sn-layout-resizer-hover-bg',
@@ -247,16 +247,16 @@ describe('portal shell theme contract', () => {
       assert.equal(source.includes(literal), false, `GraphFlows must not copy provider styling with ${literal}`);
     }
     for (let token of [
-      '--sn-panel-bg',
-      '--sn-node-border',
+      '--sn-sys-surface-panel',
+      '--sn-sys-outline',
       '--sn-list-item-bg',
       '--sn-list-item-border',
       '--sn-list-item-active-bg',
       '--sn-list-item-active-border',
       '--sn-bg-overlay',
-      '--sn-danger-color',
-      '--sn-text',
-      '--sn-text-dim',
+      '--sn-sys-danger',
+      '--sn-sys-on-surface',
+      '--sn-sys-on-surface-dim',
       '--sn-font',
     ]) {
       assert.ok(source.includes(token), `GraphFlows must consume ${token}`);
@@ -282,7 +282,7 @@ describe('portal shell theme contract', () => {
     assert.equal(logic.includes('html:'), false, 'TopologyPanel must not pass rendered HTML into the data table');
     assert.equal(template.includes('<table'), false, 'TopologyPanel must not own raw table markup');
     assert.equal(styles.includes('.node-table'), false, 'TopologyPanel must not keep local table shell styling');
-    for (let token of ['--sn-panel-bg', '--sn-text', '--sn-text-dim', '--sn-node-selected']) {
+    for (let token of ['--sn-sys-surface-panel', '--sn-sys-on-surface', '--sn-sys-on-surface-dim', '--sn-sys-accent']) {
       assert.ok(styles.includes(token), `TopologyPanel must consume ${token}`);
     }
   });
@@ -301,12 +301,12 @@ describe('portal shell theme contract', () => {
       'var(--sn-border-subtle,',
       'var(--sn-bg-overlay,',
       'var(--sn-shadow-lg,',
-      'var(--sn-text,',
+      'var(--sn-sys-on-surface,',
       'var(--sn-font,',
-      'var(--sn-node-selected,',
-      'var(--sn-node-hover,',
-      'var(--sn-danger-color,',
-      'var(--sn-success-color,',
+      'var(--sn-sys-accent,',
+      'var(--sn-node-hover',
+      'var(--sn-sys-danger,',
+      'var(--sn-sys-success,',
       'var(--sn-conn-color,',
       'var(--sn-cat-control,',
       'var(--sn-accent-glow,',
@@ -317,7 +317,7 @@ describe('portal shell theme contract', () => {
       assert.equal(source.includes(literal), false, `dep-graph chrome must not copy provider styling with ${literal}`);
     }
     for (let token of [
-      '--sn-node-border',
+      '--sn-sys-outline',
       '--sn-bg-overlay',
       '--sn-shadow-lg',
       '--sn-accent-bg-subtle',
@@ -354,7 +354,7 @@ describe('portal shell theme contract', () => {
     }
 
     let followRibbon = fs.readFileSync(path.join(ROOT, 'web/components/FollowRibbon/FollowRibbon.css.js'), 'utf8');
-    for (let token of ['--sn-bg-overlay', '--sn-shadow-lg', '--sn-accent-glow', '--sn-font-ui', '--sn-text-dim']) {
+    for (let token of ['--sn-bg-overlay', '--sn-shadow-lg', '--sn-accent-glow', '--sn-font-ui', '--sn-sys-on-surface-dim']) {
       assert.ok(followRibbon.includes(token), `FollowRibbon must consume ${token}`);
     }
   });
@@ -563,7 +563,7 @@ describe('portal shell theme contract', () => {
     for (let literal of ['#9ca3af', '#404040', 'style="']) {
       assert.equal(source.includes(literal), false, `TaskCard must not copy provider styling with ${literal}`);
     }
-    for (let token of ['--sn-font-mono', '--sn-text-dim']) {
+    for (let token of ['--sn-font-mono', '--sn-sys-on-surface-dim']) {
       assert.ok(source.includes(token), `TaskCard must consume ${token}`);
     }
   });
@@ -636,9 +636,9 @@ describe('portal shell theme contract', () => {
         'hsl(30, 80%, 60%)',
         "var(--sn-font,",
         "var(--sn-font-mono,",
-        "var(--sn-node-bg,",
-        "var(--sn-node-border,",
-        "var(--sn-warning-color,",
+        "var(--sn-sys-surface-raised,",
+        "var(--sn-sys-outline,",
+        "var(--sn-sys-warning,",
         'font-family: monospace',
       ]) {
         assert.equal(source.includes(literal), false, `${relative} must not copy provider styling with ${literal}`);
@@ -672,7 +672,10 @@ describe('portal shell theme contract', () => {
     assert.ok(source.includes('renderBoardHistory'), 'WorkflowBoard must render board-level automation history from the board projection');
     assert.ok(source.includes('data-column-settings'), 'WorkflowBoard column headers must expose column settings controls');
     assert.ok(source.includes('wb-column-settings-summary'), 'WorkflowBoard column settings must live in the column header affordance');
-    assert.ok(source.includes("aria-label', 'Column settings'"), 'WorkflowBoard column settings icon must keep an accessible name');
+    assert.ok(
+      source.includes("tPortal('workflow.column.settings')") && source.includes("setAttribute('aria-label', settingsLabel)"),
+      'WorkflowBoard column settings icon must keep a localized accessible name',
+    );
     assert.equal(source.includes("makeElement('span', '', 'Settings')"), false, 'WorkflowBoard column settings trigger must not render a visible text label');
     assert.ok(styles.includes('.wb-column-settings'), 'WorkflowBoard must style inline column settings in the board layout');
     assert.ok(styles.includes('.wb-board-history'), 'WorkflowBoard must style compact board automation history without card shells');
@@ -687,7 +690,7 @@ describe('portal shell theme contract', () => {
       'WorkflowBoard column settings trigger must sit as a compact icon in the header corner',
     );
     assert.ok(styles.includes('var(--sn-field-control-bg'), 'WorkflowBoard column settings must consume provider field tokens');
-    assert.ok(styles.includes('var(--sn-node-selected'), 'WorkflowBoard column settings must consume provider interaction tokens');
+    assert.ok(styles.includes('var(--sn-sys-accent'), 'WorkflowBoard column settings must consume provider interaction tokens');
     assert.ok(source.includes("id: 'control:pause'"), 'WorkflowBoard cards must expose pause as a card-level action');
     assert.ok(source.includes("id: 'control:stop'"), 'WorkflowBoard cards must expose stop as a card-level action');
     assert.ok(source.includes("id: 'delete'"), 'WorkflowBoard cards must expose delete as a card-level action');
@@ -738,7 +741,7 @@ describe('portal shell theme contract', () => {
     assert.equal(source.includes('hsl(0'), false, 'ChatSidebar status icons must consume danger tokens');
 
     let itemCss = fs.readFileSync(path.join(ROOT, 'node_modules/symbiote-ui/chat/ChatSidebarItem/ChatSidebarItem.css.js'), 'utf8');
-    for (let token of ['--sn-success-color', '--sn-danger-color', '--sn-node-selected']) {
+    for (let token of ['--sn-sys-success', '--sn-sys-danger', '--sn-sys-accent']) {
       assert.ok(itemCss.includes(token), `ChatSidebarItem must expose status styling through ${token}`);
     }
   });
@@ -771,7 +774,7 @@ describe('portal shell theme contract', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/RuntimeControl/RuntimeControl.css.js'), 'utf8');
     assert.equal(source.includes('#4caf50'), false, 'RuntimeControl must not hardcode success green');
     assert.equal(source.includes('rgba(76, 175, 80'), false, 'RuntimeControl must not hardcode success rgba');
-    assert.ok(source.includes('--sn-success-color'), 'RuntimeControl must consume --sn-success-color');
+    assert.ok(source.includes('--sn-sys-success'), 'RuntimeControl must consume --sn-sys-success');
   });
 
   it('keeps operational panels on symbiote theme tokens without local fallbacks', () => {
@@ -797,11 +800,11 @@ describe('portal shell theme contract', () => {
         'hsl(4, 55%, 48%)',
         "var(--sn-font,",
         "var(--sn-font-mono,",
-        "var(--sn-text,",
-        "var(--sn-text-dim,",
-        "var(--sn-success-color,",
-        "var(--sn-warning-color,",
-        "var(--sn-danger-color,",
+        "var(--sn-sys-on-surface,",
+        "var(--sn-sys-on-surface-dim,",
+        "var(--sn-sys-success,",
+        "var(--sn-sys-warning,",
+        "var(--sn-sys-danger,",
         "var(--sn-bg-overlay,",
         "var(--sn-cat-server,",
         "var(--sn-cat-data,",
@@ -1123,15 +1126,15 @@ describe('portal shell theme contract', () => {
     assert.equal(workspaceCss.includes(':host'), false, 'PgWorkspace Light DOM shell styles must not rely on Shadow DOM :host selectors');
 
     for (let token of [
-      '--sn-bg',
-      '--sn-panel-bg',
-      '--sn-node-border',
-      '--sn-node-selected',
+      '--sn-sys-surface',
+      '--sn-sys-surface-panel',
+      '--sn-sys-outline',
+      '--sn-sys-accent',
       '--sn-xr-panel-bg',
       '--sn-xr-panel-border',
       '--sn-xr-pointer-color',
-      '--sn-text',
-      '--sn-text-dim',
+      '--sn-sys-on-surface',
+      '--sn-sys-on-surface-dim',
     ]) {
       assert.ok(css.includes(token), `SpatialLayout CSS must consume ${token}`);
     }

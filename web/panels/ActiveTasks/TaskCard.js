@@ -55,7 +55,7 @@ TaskCard.rootStyles = cssShared + `
 
 .task-card-id {
   font-family: var(--sn-font-mono);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 .task-card-description {
@@ -67,7 +67,7 @@ TaskCard.rootStyles = cssShared + `
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   flex-wrap: wrap;
 }
 

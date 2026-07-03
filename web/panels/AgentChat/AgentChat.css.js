@@ -14,8 +14,8 @@ pg-agent-chat {
   position: relative;
   display: flex;
   height: 100%;
-  background: var(--sn-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface);
+  color: var(--sn-sys-on-surface);
   font-size: 13px;
 }
 
@@ -65,7 +65,7 @@ pg-agent-chat {
   block-size: var(--composer-action-menu-caret-size);
   border-inline-end: var(--sn-panel-menu-border-width, 1px) solid var(--sn-border);
   border-block-end: var(--sn-panel-menu-border-width, 1px) solid var(--sn-border);
-  background: var(--sn-panel-bg);
+  background: var(--sn-sys-surface-panel);
   transform: translateX(-50%) rotate(45deg);
 }
 
@@ -84,7 +84,7 @@ pg-agent-chat {
     --sn-composer-action-menu-radius,
     calc(var(--sn-panel-radius, var(--sn-node-radius, 6px)) + var(--sn-layout-menu-gap, 4px))
   );
-  background: var(--sn-panel-bg);
+  background: var(--sn-sys-surface-panel);
   box-shadow: var(--sn-panel-shadow, var(--sn-shadow-md));
 }
 
@@ -118,7 +118,7 @@ pg-agent-chat {
   border: 0;
   border-block-end: 1px solid var(--sn-border);
   background: transparent;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   text-align: start;
   cursor: pointer;
@@ -152,7 +152,7 @@ pg-agent-chat {
   inline-size: var(--composer-action-switch-inline-size);
   block-size: var(--composer-action-switch-block-size);
   border-radius: 999px;
-  background: color-mix(in oklab, var(--sn-text-dim) 28%, var(--sn-panel-bg));
+  background: color-mix(in oklab, var(--sn-sys-on-surface-dim) 28%, var(--sn-sys-surface-panel));
   transition: background var(--sn-transition-fast) var(--sn-transition-easing);
 }
 
@@ -163,13 +163,13 @@ pg-agent-chat {
   inline-size: var(--composer-action-switch-thumb-size);
   block-size: var(--composer-action-switch-thumb-size);
   border-radius: 50%;
-  background: var(--sn-text);
+  background: var(--sn-sys-on-surface);
   box-shadow: var(--sn-shadow-sm);
   transition: transform var(--sn-transition-fast) var(--sn-transition-easing);
 }
 
 .composer-action-switch[data-active="true"] {
-  background: var(--sn-node-selected);
+  background: var(--sn-sys-accent);
 }
 
 .composer-action-switch[data-active="true"] span {
@@ -198,8 +198,8 @@ pg-agent-chat {
   padding: calc(var(--sn-layout-menu-gap, 4px) * 1.25) calc(var(--sn-layout-menu-gap, 4px) * 2);
   border: var(--sn-panel-menu-border-width, 1px) solid var(--sn-border);
   border-radius: var(--sn-panel-radius, var(--sn-node-radius, 8px));
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   box-shadow: var(--sn-panel-shadow, var(--sn-shadow-md));
 }
 
@@ -234,7 +234,7 @@ pg-agent-chat {
 
 .goal-status-workflow {
   font-size: calc(var(--sn-layout-menu-action-size, 12px) - 1px);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 .goal-status-actions {
@@ -283,11 +283,11 @@ pg-agent-chat {
 
 .goal-status-action:hover {
   background: var(--sn-surface-hover);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 .goal-status-action.mode[data-active="true"] {
-  background: color-mix(in oklab, var(--sn-node-selected) 18%, transparent);
+  background: color-mix(in oklab, var(--sn-sys-accent) 18%, transparent);
   color: var(--sn-accent);
 }
 

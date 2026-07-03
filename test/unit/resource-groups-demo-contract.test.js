@@ -131,12 +131,12 @@ describe('resource groups demo contract', () => {
     assert.match(cssSource, /\.gm-board \.sn-kanban-column-body\s*\{[\s\S]*grid-template-rows: auto auto minmax\(0, 1fr\) auto;/, 'GroupManager must size product-specific column content inside the shared Kanban column body');
     assert.match(cssSource, /\.gm-profile\s*\{[\s\S]*grid-template-columns: 32px minmax\(0, 1fr\) 28px;/, 'GroupManager profile cards must keep stable icon, content, and action slots inside shared Kanban columns');
     assert.match(cssSource, /\.gm-column-delete\s*\{[\s\S]*margin-left: auto;/, 'Group delete must occupy the former header action slot');
-    assert.match(cssSource, /\.gm-column-delete\[data-delete-armed="true"\]\s*\{[\s\S]*var\(--sn-danger-color\)/, 'Armed group delete must be styled in-app through theme danger tokens');
+    assert.match(cssSource, /\.gm-column-delete\[data-delete-armed="true"\]\s*\{[\s\S]*var\(--sn-sys-danger\)/, 'Armed group delete must be styled in-app through theme danger tokens');
     assert.match(cssSource, /\.gm-agent-card\s*\{[\s\S]*width: 100%;[\s\S]*grid-template-columns: 32px minmax\(0, 1fr\) 28px;/, 'Agent cards must match provider card width and control slot sizing');
     assert.match(cssSource, /\.gm-agent-list\s*\{[\s\S]*flex-direction: column;/, 'Agent lists inside groups must stack full-width cards');
-    assert.match(cssSource, /\.gm-agent-icon\s*\{[\s\S]*color: var\(--gm-agent-color, var\(--sn-node-selected\)\);/, 'Agent icons must use the color declared in agent markdown metadata');
-    assert.match(cssSource, /\.gm-profile\.drop-before\s*\{[\s\S]*box-shadow: 0 -2px 0 var\(--sn-node-selected\);/, 'Profile reorder must show a themed before-drop marker');
-    assert.match(cssSource, /\.gm-profile\.drop-after\s*\{[\s\S]*box-shadow: 0 2px 0 var\(--sn-node-selected\);/, 'Profile reorder must show a themed after-drop marker');
+    assert.match(cssSource, /\.gm-agent-icon\s*\{[\s\S]*color: var\(--gm-agent-color, var\(--sn-sys-accent\)\);/, 'Agent icons must use the color declared in agent markdown metadata');
+    assert.match(cssSource, /\.gm-profile\.drop-before\s*\{[\s\S]*box-shadow: 0 -2px 0 var\(--sn-sys-accent\);/, 'Profile reorder must show a themed before-drop marker');
+    assert.match(cssSource, /\.gm-profile\.drop-after\s*\{[\s\S]*box-shadow: 0 2px 0 var\(--sn-sys-accent\);/, 'Profile reorder must show a themed after-drop marker');
     assert.ok(skillManagerSource.includes('function routeFileRequest()'), 'SkillManager must support route-addressed markdown files');
     assert.ok(skillManagerSource.includes("panel !== 'skills'"), 'SkillManager must only honor path query values on the Skills route');
     assert.ok(skillManagerSource.includes('normalizeRoutePath(params.path)'), 'SkillManager must normalize route file paths');

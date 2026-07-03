@@ -33,7 +33,7 @@ export default `
     font-family: var(--sn-font-ui);
     font-size: 12px;
     font-weight: 500;
-    color: var(--sn-text);
+    color: var(--sn-sys-on-surface);
     white-space: nowrap;
     max-width: 500px;
   }
@@ -56,7 +56,7 @@ export default `
     display: inline-block;
     width: 16px;
     text-align: left;
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
   }
 
   @keyframes fr-pulse {

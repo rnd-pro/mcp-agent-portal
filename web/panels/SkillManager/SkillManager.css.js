@@ -16,8 +16,8 @@ export default `
     padding: 6px 12px;
     font-family: var(--sn-font-mono);
     font-size: 11px;
-    color: var(--sn-text-dim);
-    border-bottom: 1px solid var(--sn-node-border);
+    color: var(--sn-sys-on-surface-dim);
+    border-bottom: 1px solid var(--sn-sys-outline);
     background: var(--sn-node-header-bg);
     gap: 8px;
   }

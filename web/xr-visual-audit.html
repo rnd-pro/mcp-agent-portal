@@ -19,8 +19,8 @@
 <style>
   html,
   body {
-    background: var(--sn-bg);
-    color: var(--sn-text);
+    background: var(--sn-sys-surface);
+    color: var(--sn-sys-on-surface);
     font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     height: 100%;
     margin: 0;
@@ -33,8 +33,8 @@
 
   header {
     align-items: center;
-    background: var(--sn-panel-bg);
-    border-bottom: 1px solid var(--sn-node-border);
+    background: var(--sn-sys-surface-panel);
+    border-bottom: 1px solid var(--sn-sys-outline);
     display: flex;
     gap: var(--sn-space-md);
     justify-content: space-between;
@@ -48,7 +48,7 @@
   }
 
   h2 {
-    border-bottom: 1px solid var(--sn-node-border);
+    border-bottom: 1px solid var(--sn-sys-outline);
     font-size: 12px;
     padding: var(--sn-space-sm) var(--sn-space-md);
     text-transform: uppercase;
@@ -65,9 +65,9 @@
   button,
   select {
     background: var(--sn-field-control-bg);
-    border: 1px solid var(--sn-node-border);
+    border: 1px solid var(--sn-sys-outline);
     border-radius: var(--sn-card-radius);
-    color: var(--sn-text);
+    color: var(--sn-sys-on-surface);
     font: inherit;
     min-height: 34px;
     padding: 0 var(--sn-space-sm);
@@ -82,13 +82,13 @@
 
   button:disabled {
     background: var(--sn-field-control-bg);
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
     cursor: default;
   }
 
   section {
-    background: var(--sn-panel-bg);
-    border: 1px solid var(--sn-node-border);
+    background: var(--sn-sys-surface-panel);
+    border: 1px solid var(--sn-sys-outline);
     border-radius: var(--sn-card-radius);
     min-height: 0;
     overflow: hidden;
@@ -116,14 +116,14 @@
 
   dt,
   dd {
-    border-bottom: 1px solid var(--sn-node-border);
+    border-bottom: 1px solid var(--sn-sys-outline);
     margin: 0;
     min-width: 0;
     padding: var(--sn-space-sm) var(--sn-space-md);
   }
 
   dt {
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
     font-size: 12px;
     font-weight: 650;
   }
@@ -133,7 +133,7 @@
   }
 
   pre {
-    color: var(--sn-text);
+    color: var(--sn-sys-on-surface);
     font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     margin: 0;
     overflow: auto;
@@ -150,9 +150,9 @@
 
   svg {
     background:
-      linear-gradient(var(--sn-node-border) 1px, transparent 1px),
-      linear-gradient(90deg, var(--sn-node-border) 1px, transparent 1px),
-      var(--sn-bg);
+      linear-gradient(var(--sn-sys-outline) 1px, transparent 1px),
+      linear-gradient(90deg, var(--sn-sys-outline) 1px, transparent 1px),
+      var(--sn-sys-surface);
     background-size: 36px 36px;
     display: block;
     height: 100%;
@@ -161,29 +161,29 @@
   }
 
   .panel-shape {
-    fill: color-mix(in oklch, var(--sn-xr-panel-bg, var(--sn-panel-bg)) 84%, transparent);
-    stroke: var(--sn-node-border);
+    fill: color-mix(in oklch, var(--sn-xr-panel-bg, var(--sn-sys-surface-panel)) 84%, transparent);
+    stroke: var(--sn-sys-outline);
     stroke-width: 2;
   }
 
   .panel-shape.issue {
-    stroke: var(--sn-node-selected);
+    stroke: var(--sn-sys-accent);
     stroke-width: 3;
   }
 
   .label {
-    fill: var(--sn-text);
+    fill: var(--sn-sys-on-surface);
     font: 12px Inter, system-ui, sans-serif;
   }
 
   .axis {
-    stroke: var(--sn-text-dim);
+    stroke: var(--sn-sys-on-surface-dim);
     stroke-dasharray: 4 5;
     stroke-width: 1;
   }
 
   .eye {
-    fill: var(--sn-node-selected);
+    fill: var(--sn-sys-accent);
   }
 
   @media (max-width: 960px) {

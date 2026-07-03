@@ -41,11 +41,11 @@ describe('global shell theme contract', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/style.css'), 'utf8');
 
     assert.ok(
-      source.includes('color: var(--project-accent, var(--sn-text));'),
+      source.includes('color: var(--project-accent, var(--sn-sys-on-surface));'),
       'project name must keep project accent with provider token fallback',
     );
     assert.equal(
-      source.includes('var(--project-accent, var(--sn-text,'),
+      source.includes('var(--project-accent, var(--sn-sys-on-surface,'),
       false,
       'project accent fallback chain must not include copied provider literals',
     );

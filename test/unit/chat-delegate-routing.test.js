@@ -248,7 +248,7 @@ describe('chat delegate routing', () => {
                   dispatches: ['route-ready'],
                   subscriptions: ['route/items'],
                   bindings: ['onclick:onRouteClick'],
-                  tokens: ['--sn-text'],
+                  tokens: ['--sn-sys-on-surface'],
                 },
               },
             }),
@@ -304,7 +304,7 @@ describe('chat delegate routing', () => {
       dispatches: ['route-ready'],
       subscriptions: ['route/items'],
       bindings: ['onclick:onRouteClick'],
-      tokens: ['--sn-text'],
+      tokens: ['--sn-sys-on-surface'],
     }]);
     assert.deepEqual(prepared.args.focus_graph.dependencies.map(dep => dep.symbol), ['DR', 'HF']);
     assert.deepEqual(prepared.args.focus_graph.dependencies[0].files, ['src/demo.tpl.js', 'src/demo.css.js']);

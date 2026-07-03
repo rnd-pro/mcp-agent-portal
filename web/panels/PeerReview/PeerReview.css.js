@@ -32,12 +32,12 @@ sn-list-detail-shell {
 
 .pr-feedback-body {
   flex: 1;
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
   padding: 16px;
   border-radius: 6px;
   font-size: 14px;
   line-height: 1.6;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   white-space: pre-wrap;
   overflow-y: auto;
 }

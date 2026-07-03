@@ -7,7 +7,7 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: var(--sn-bg, #1a1a1a);
+    background: var(--sn-sys-surface);
     color: #ccc;
     font-family: 'Inter', system-ui, sans-serif;
     height: 100vh;
@@ -221,7 +221,7 @@ let STEP_MS = 200;
 let MAX_RADIUS = 4;
 let BASE_RADIUS = 1;
 let FADE_RATE = 0.15;
-let DOT_COLOR = [255, 255, 255]; // grey on --sn-bg, matches --sn-grid-dot
+let DOT_COLOR = [255, 255, 255]; // grey on --sn-sys-surface, matches --sn-grid-dot
 let BASE_ALPHA = 0.06;
 
 // ─── Life-like Rule System ──────────────────────
@@ -298,8 +298,8 @@ function init() {
   canvas = document.getElementById('bg');
   ctx = canvas.getContext('2d');
 
-  // Read --sn-bg from CSS for canvas fill
-  BG_COLOR = getComputedStyle(document.body).getPropertyValue('--sn-bg').trim() || '#1a1a1a';
+  // Read --sn-sys-surface from CSS for canvas fill
+  BG_COLOR = getComputedStyle(document.body).getPropertyValue('--sn-sys-surface').trim() || '#1a1a1a';
 
   resize();
   window.addEventListener('resize', resize);

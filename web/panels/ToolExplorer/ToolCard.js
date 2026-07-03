@@ -28,7 +28,7 @@ te-tool-card {
 .te-tool-name {
   font-weight: 600;
   font-size: 14px;
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
   font-family: var(--sn-font-mono);
 }
 .te-tool-desc {
@@ -39,20 +39,20 @@ te-tool-card {
   margin-bottom: 12px;
 }
 .te-schema-block {
-  background: var(--sn-bg);
+  background: var(--sn-sys-surface);
   padding: 10px;
   border-radius: 6px;
   font-family: var(--sn-font-mono);
   font-size: 11px;
   overflow-x: auto;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   white-space: pre-wrap;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
 }
 .te-schema-title {
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   margin-bottom: 6px;
 }
 `;

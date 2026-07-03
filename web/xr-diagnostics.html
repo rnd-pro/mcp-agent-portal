@@ -19,8 +19,8 @@
 <style>
   html,
   body {
-    background: var(--sn-bg);
-    color: var(--sn-text);
+    background: var(--sn-sys-surface);
+    color: var(--sn-sys-on-surface);
     font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     height: 100%;
     margin: 0;
@@ -33,8 +33,8 @@
 
   header {
     align-items: center;
-    background: var(--sn-panel-bg);
-    border-bottom: 1px solid var(--sn-node-border);
+    background: var(--sn-sys-surface-panel);
+    border-bottom: 1px solid var(--sn-sys-outline);
     display: flex;
     gap: var(--sn-space-md);
     justify-content: space-between;
@@ -69,14 +69,14 @@
 
   button:disabled {
     background: var(--sn-field-control-bg);
-    border-color: var(--sn-node-border);
-    color: var(--sn-text-dim);
+    border-color: var(--sn-sys-outline);
+    color: var(--sn-sys-on-surface-dim);
     cursor: default;
   }
 
   section {
-    background: var(--sn-panel-bg);
-    border: 1px solid var(--sn-node-border);
+    background: var(--sn-sys-surface-panel);
+    border: 1px solid var(--sn-sys-outline);
     border-radius: var(--sn-card-radius);
     min-height: 0;
     overflow: hidden;
@@ -89,7 +89,7 @@
 
   .status h2,
   .preview h2 {
-    border-bottom: 1px solid var(--sn-node-border);
+    border-bottom: 1px solid var(--sn-sys-outline);
     font-size: 12px;
     letter-spacing: 0;
     margin: 0;
@@ -106,14 +106,14 @@
 
   dt,
   dd {
-    border-bottom: 1px solid var(--sn-node-border);
+    border-bottom: 1px solid var(--sn-sys-outline);
     margin: 0;
     min-width: 0;
     padding: var(--sn-space-sm) var(--sn-space-md);
   }
 
   dt {
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
     font-size: 12px;
     font-weight: 650;
   }
@@ -134,8 +134,8 @@
 
   .stage {
     background:
-      radial-gradient(circle at 50% 34%, color-mix(in oklch, var(--sn-node-selected) 16%, transparent), transparent 36%),
-      var(--sn-bg);
+      radial-gradient(circle at 50% 34%, color-mix(in oklch, var(--sn-sys-accent) 16%, transparent), transparent 36%),
+      var(--sn-sys-surface);
     display: grid;
     gap: var(--sn-space-md);
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -144,10 +144,10 @@
   }
 
   .panel {
-    background: var(--sn-xr-panel-bg, var(--sn-panel-bg));
-    border: 1px solid var(--sn-xr-panel-border, var(--sn-node-border));
+    background: var(--sn-xr-panel-bg, var(--sn-sys-surface-panel));
+    border: 1px solid var(--sn-xr-panel-border, var(--sn-sys-outline));
     border-radius: var(--sn-xr-panel-radius, var(--sn-card-radius));
-    box-shadow: var(--sn-xr-panel-shadow, var(--sn-node-shadow));
+    box-shadow: var(--sn-xr-panel-shadow);
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-height: 160px;
@@ -155,19 +155,19 @@
   }
 
   .panel strong {
-    border-bottom: 1px solid var(--sn-node-border);
+    border-bottom: 1px solid var(--sn-sys-outline);
     padding: var(--sn-space-sm) var(--sn-space-md);
   }
 
   .panel p {
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
     margin: 0;
     padding: var(--sn-space-md);
   }
 
   canvas {
-    background: var(--sn-bg);
-    border-top: 1px solid var(--sn-node-border);
+    background: var(--sn-sys-surface);
+    border-top: 1px solid var(--sn-sys-outline);
     display: block;
     height: 180px;
     width: 100%;

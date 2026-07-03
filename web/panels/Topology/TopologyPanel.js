@@ -14,7 +14,7 @@ const TOPOLOGY_COLUMNS = [
 
 function normalizeMarkerToken(value) {
   let token = String(value ?? '').trim();
-  return /^var\(--sn-[a-z0-9-]+\)$/i.test(token) ? token : 'var(--sn-node-selected)';
+  return /^var\(--sn-[a-z0-9-]+\)$/i.test(token) ? token : 'var(--sn-sys-accent)';
 }
 
 export class TopologyPanel extends Symbiote {
@@ -48,7 +48,7 @@ export class TopologyPanel extends Symbiote {
   renderTable(instances) {
     let rows = [this.createTopologyRow({
       name: 'portal-master',
-      color: 'var(--sn-node-selected)',
+      color: 'var(--sn-sys-accent)',
       typeText: 'Master',
       typeClass: 'info',
       location: 'localhost',

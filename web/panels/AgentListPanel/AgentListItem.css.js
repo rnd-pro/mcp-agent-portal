@@ -22,11 +22,11 @@ sn-list-item {
 :host([active]) sn-list-item,
 pg-agent-list-item[active] sn-list-item  {
   --sn-list-item-padding: 8px 10px 8px 7px;
-  --sn-list-item-active-border: var(--sn-node-selected);
+  --sn-list-item-active-border: var(--sn-sys-accent);
 }
 
 :host([active]),
 pg-agent-list-item[active]  {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
 }
 `;

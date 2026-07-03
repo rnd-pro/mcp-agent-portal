@@ -196,7 +196,7 @@ SkillMetadata.rootStyles = `
     display: block;
     height: 100%;
     overflow: hidden;
-    background: var(--sn-bg);
+    background: var(--sn-sys-surface);
   }
   pg-skill-metadata .sm-content {
     height: 100%;

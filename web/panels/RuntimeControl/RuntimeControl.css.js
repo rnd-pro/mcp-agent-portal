@@ -10,8 +10,8 @@ rc-instance-item {
 
 .rtc-header {
   align-items: center;
-  background: var(--sn-panel-bg);
-  border-bottom: 1px solid var(--sn-node-border);
+  background: var(--sn-sys-surface-panel);
+  border-bottom: 1px solid var(--sn-sys-outline);
   display: flex;
   flex-shrink: 0;
   gap: 12px;
@@ -21,7 +21,7 @@ rc-instance-item {
 
 .rtc-title {
   align-items: center;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   display: flex;
   font-size: 16px;
   font-weight: 600;
@@ -29,7 +29,7 @@ rc-instance-item {
 }
 
 .rtc-title .material-symbols-outlined {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
 }
 
 .rtc-main {
@@ -62,7 +62,7 @@ rc-instance-item {
 }
 
 .rtc-summary-note {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   margin-top: 8px;
 }
@@ -84,7 +84,7 @@ rc-instance-item {
 }
 
 .rtc-updated {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 12px;
 }
 
@@ -107,7 +107,7 @@ rc-instance-item {
 }
 
 .rtc-instance-name {
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 13px;
   font-weight: 600;
   min-width: 0;
@@ -118,7 +118,7 @@ rc-instance-item {
 
 .rtc-status {
   align-items: center;
-  color: var(--sn-success-color);
+  color: var(--sn-sys-success);
   display: inline-flex;
   flex-shrink: 0;
   font-size: 12px;

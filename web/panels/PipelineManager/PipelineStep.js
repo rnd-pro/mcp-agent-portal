@@ -42,7 +42,7 @@ pm-pipeline-step {
 
 .pm-step-prompt {
   margin-block-end: 12px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font-mono);
   white-space: pre-wrap;
 }

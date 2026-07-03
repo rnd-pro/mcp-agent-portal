@@ -15,7 +15,7 @@ mp-catalog-section {
   align-items: center;
   gap: 8px;
   padding: 16px 0 8px;
-  border-bottom: 1px solid var(--sn-node-hover);
+  border-bottom: 1px solid var(--sn-sys-outline-subtle);
   margin-bottom: 12px;
 }
 

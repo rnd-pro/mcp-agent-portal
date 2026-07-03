@@ -9,8 +9,8 @@ topology-panel {
   height: 100%;
   overflow: auto;
   padding: 20px;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
 }
 
 .topo-header {
@@ -23,17 +23,17 @@ topology-panel {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 16px;
   font-weight: 600;
 }
 
 .topo-title .material-symbols-outlined {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
 }
 
 .topo-desc {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 12px;
   line-height: 1.5;
 }

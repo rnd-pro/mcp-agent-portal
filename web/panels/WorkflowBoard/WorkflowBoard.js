@@ -27,6 +27,7 @@ import template from './WorkflowBoard.tpl.js';
 import cssLocal from './WorkflowBoard.css.js';
 import { setWorkflowBoardSelection } from './workflow-board-selection.js';
 import { openChat } from '../../common/open-chat.js';
+import { tPortal } from '../../common/localization.js';
 import {
   latestRun,
   agentName,
@@ -92,8 +93,29 @@ function formatLabel(value) {
     .join(' ');
 }
 
+// UI-chrome vocabulary (board modes, automation enums, control verbs) is localized through
+// portal.workflow.enum.* keys; unknown tokens fall back to the prettified identifier so user-defined
+// values (board DATA) pass through untranslated.
+function tEnum(value, fallbackValue = value) {
+  let token = normalizeText(value).toLowerCase();
+  if (!token) return '';
+  let key = `workflow.enum.${token}`;
+  let translated = tPortal(key);
+  return translated === `portal.${key}` ? formatLabel(fallbackValue) : translated;
+}
+
+// Recovery/blocking flags carry curated labels under portal.workflow.flag.*; unknown flags fall back
+// to the prettified flag token.
+function flagLabel(flag) {
+  let token = normalizeText(flag).toLowerCase();
+  if (!token) return '';
+  let key = `workflow.flag.${token}`;
+  let translated = tPortal(key);
+  return translated === `portal.${key}` ? formatLabel(token) : translated;
+}
+
 function formatMode(value) {
-  return formatLabel(value || 'passive');
+  return tEnum(value || 'passive');
 }
 
 function formatDateTime(value) {
@@ -145,27 +167,32 @@ function automationSummary(automation = {}) {
   let agents = asArray(automation.agents).map(item => normalizeText(item)).filter(Boolean);
   if (automation.agent) agents.unshift(automation.agent);
   let agentCount = new Set(agents).size;
+  let agentsPart = agentCount ? tPortal('workflow.automation.agents', { count: agentCount }) : '';
   if (mode === 'auto') {
     return {
-      label: 'Auto',
+      label: tPortal('workflow.automation.auto'),
       kind: 'warning',
       icon: 'bolt',
-      title: `Fully automated${agentCount ? ` · ${agentCount} agent${agentCount === 1 ? '' : 's'}` : ''}${automation.parallelLimit ? ` · parallel limit ${automation.parallelLimit}` : ''}`,
+      title: [
+        tPortal('workflow.automation.autoTitle'),
+        agentsPart,
+        automation.parallelLimit ? tPortal('workflow.automation.parallelLimit', { limit: automation.parallelLimit }) : '',
+      ].filter(Boolean).join(' · '),
     };
   }
   if (mode === 'gated') {
     return {
-      label: 'Gated',
+      label: tPortal('workflow.automation.gated'),
       kind: 'status',
       icon: 'checklist',
-      title: `Requires approval before proceeding${agentCount ? ` · ${agentCount} agent${agentCount === 1 ? '' : 's'}` : ''}`,
+      title: [tPortal('workflow.automation.gatedTitle'), agentsPart].filter(Boolean).join(' · '),
     };
   }
   return {
-    label: 'Manual',
+    label: tPortal('workflow.automation.manual'),
     kind: '',
     icon: 'pan_tool',
-    title: 'No automation — moved by hand',
+    title: tPortal('workflow.automation.manualTitle'),
   };
 }
 
@@ -228,7 +255,12 @@ function auditVerdictChip(card = {}) {
   let waiver = rawCardCheck(card, 'auditWaiver');
   if (checkPassed(audit) || checkPassed(waiver)) {
     let signedBy = audit && typeof audit === 'object' ? normalizeText(audit.signedBy) : '';
-    return { label: '✓ audit', kind: 'audit-pass', title: signedBy ? `Audit passed · ${signedBy}` : 'Audit passed' };
+    let passTitle = tPortal('workflow.card.auditPassTitle');
+    return {
+      label: tPortal('workflow.card.auditPass'),
+      kind: 'audit-pass',
+      title: signedBy ? `${passTitle} · ${signedBy}` : passTitle,
+    };
   }
   let needsAudit = asArray(card.flags).includes('needs_audit');
   if (auditRejected(audit) || (needsAudit && cardHasAuditEscalation(card))) {
@@ -236,7 +268,12 @@ function auditVerdictChip(card = {}) {
     let reason = (audit && typeof audit === 'object' ? normalizeText(audit.reason) : '')
       || normalizeText(state?.detail || state?.lastEscalation?.detail)
       || normalizeText(state?.kind || state?.lastEscalation?.kind);
-    return { label: '✗ rework', kind: 'audit-reject', title: reason ? `Audit rejected · ${reason}` : 'Audit rejected' };
+    let rejectTitle = tPortal('workflow.card.auditRejectTitle');
+    return {
+      label: tPortal('workflow.card.auditRework'),
+      kind: 'audit-reject',
+      title: reason ? `${rejectTitle} · ${reason}` : rejectTitle,
+    };
   }
   return null;
 }
@@ -274,7 +311,7 @@ function createField(label, control) {
 function createSelect(value, options, dataset = {}) {
   let select = makeElement('select', 'wb-setting-control');
   for (let option of options) {
-    select.append(new Option(option ? formatLabel(option) : 'Default', option));
+    select.append(new Option(tEnum(option || 'default'), option));
   }
   select.value = options.includes(value) ? value : '';
   for (let [key, item] of Object.entries(dataset)) select.dataset[key] = item;
@@ -359,7 +396,7 @@ export class WorkflowBoard extends Symbiote {
 
   init$ = {
     modeLabel: formatMode('passive'),
-    scopeLabel: 'Home board',
+    scopeLabel: tPortal('workflow.scope.home'),
   };
 
   #board = null;
@@ -376,6 +413,7 @@ export class WorkflowBoard extends Symbiote {
   #realtimeRefreshTimer = null;
 
   initCallback() {
+    this.#localizeChrome();
     this.ref.pauseBoardBtn.onclick = () => this.controlBoard('pause');
     this.ref.resumeBoardBtn.onclick = () => this.controlBoard('resume');
     this.ref.drainBoardBtn.onclick = () => this.controlBoard('drain');
@@ -485,7 +523,7 @@ export class WorkflowBoard extends Symbiote {
     this.#lastLoadKey = loadKey;
     this.#abortController?.abort();
     this.#abortController = new AbortController();
-    if (!options.silent) this.#setBanner('running', 'Loading workflow board...');
+    if (!options.silent) this.#setBanner('running', tPortal('workflow.banner.loading'));
 
     try {
       let board = await fetchWorkflowBoard(filters, {
@@ -570,7 +608,9 @@ export class WorkflowBoard extends Symbiote {
     });
     if (event.defaultPrevented) return null;
 
-    this.#setBanner('running', `Requesting transition to ${this.#columnTitle(toColumnId)}...`);
+    this.#setBanner('running', tPortal('workflow.banner.requestingTransition', {
+      column: this.#columnTitle(toColumnId),
+    }));
     try {
       let result = await requestWorkflowTransition(detail);
       this.#dispatch('workflow-board-transition-result', {
@@ -578,7 +618,7 @@ export class WorkflowBoard extends Symbiote {
         result,
       });
       await this.loadBoard({ silent: true, reason: 'transition-result' });
-      this.#setBanner('success', `Transition requested for ${card.title}.`);
+      this.#setBanner('success', tPortal('workflow.banner.transitionRequested', { title: card.title }));
       return result;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -594,7 +634,7 @@ export class WorkflowBoard extends Symbiote {
   async orchestrateCard(options = {}) {
     let card = this.#cardById(options.cardId || this.#selectedCardId);
     if (!this.#board || !card) return null;
-    this.#setBanner('running', `Requesting orchestration for ${card.title}...`);
+    this.#setBanner('running', tPortal('workflow.banner.requestingOrchestration', { title: card.title }));
     try {
       let payload = await orchestrateWorkflowCard({
         boardId: this.#board.boardId,
@@ -606,8 +646,8 @@ export class WorkflowBoard extends Symbiote {
       });
       await this.loadBoard({ silent: true, reason: 'orchestrate-result' });
       this.#setBanner('success', payload?.result?.sideEffects?.length
-        ? `Orchestration requested for ${card.title}.`
-        : `Workflow run recorded for ${card.title}.`);
+        ? tPortal('workflow.banner.orchestrationRequested', { title: card.title })
+        : tPortal('workflow.banner.runRecorded', { title: card.title }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -618,7 +658,10 @@ export class WorkflowBoard extends Symbiote {
   async controlCard(action, options = {}) {
     let card = this.#cardById(options.cardId || this.#selectedCardId);
     if (!this.#board || !card || !action) return null;
-    this.#setBanner('running', `${formatLabel(action)} requested for ${card.title}...`);
+    this.#setBanner('running', tPortal('workflow.banner.controlRequested', {
+      action: tEnum(action),
+      title: card.title,
+    }));
     try {
       let payload = await controlWorkflowCard({
         boardId: this.#board.boardId,
@@ -629,7 +672,10 @@ export class WorkflowBoard extends Symbiote {
         expectedVersion: card.version,
       });
       await this.loadBoard({ silent: true, reason: 'control-result' });
-      this.#setBanner('success', `${formatLabel(action)} applied to ${card.title}.`);
+      this.#setBanner('success', tPortal('workflow.banner.controlApplied', {
+        action: tEnum(action),
+        title: card.title,
+      }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -640,9 +686,9 @@ export class WorkflowBoard extends Symbiote {
   async deleteCard(options = {}) {
     let card = this.#cardById(options.cardId || this.#selectedCardId);
     if (!this.#board || !card) return null;
-    let confirmed = globalThis.confirm?.(`Delete workflow card "${card.title}" from this board?`) ?? true;
+    let confirmed = globalThis.confirm?.(tPortal('workflow.confirm.delete', { title: card.title })) ?? true;
     if (!confirmed) return null;
-    this.#setBanner('running', `Deleting ${card.title}...`);
+    this.#setBanner('running', tPortal('workflow.banner.deleting', { title: card.title }));
     try {
       let payload = await deleteWorkflowCard({
         boardId: this.#board.boardId,
@@ -653,7 +699,7 @@ export class WorkflowBoard extends Symbiote {
       });
       if (this.#selectedCardId === card.id) this.#selectedCardId = '';
       await this.loadBoard({ silent: true, reason: 'delete-result' });
-      this.#setBanner('success', `${card.title} deleted from the board.`);
+      this.#setBanner('success', tPortal('workflow.banner.deleted', { title: card.title }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -680,7 +726,7 @@ export class WorkflowBoard extends Symbiote {
       agents,
       ...(Number.isFinite(parallelValue) && parallelValue > 0 ? { parallelLimit: Math.floor(parallelValue) } : {}),
     };
-    this.#setBanner('running', `Saving ${column.title} settings...`);
+    this.#setBanner('running', tPortal('workflow.banner.savingColumn', { column: column.title }));
     try {
       let payload = await updateWorkflowColumn({
         boardId: this.#board.boardId,
@@ -691,7 +737,7 @@ export class WorkflowBoard extends Symbiote {
         expectedVersion: this.#board.version,
       });
       await this.loadBoard({ silent: true, reason: 'column-settings-save' });
-      this.#setBanner('success', `${column.title} settings saved.`);
+      this.#setBanner('success', tPortal('workflow.banner.columnSaved', { column: column.title }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -713,7 +759,7 @@ export class WorkflowBoard extends Symbiote {
       fallbackAgents: agents,
       ...(Number.isFinite(parallelValue) && parallelValue > 0 ? { globalParallelLimit: Math.floor(parallelValue) } : {}),
     };
-    this.#setBanner('running', 'Saving board automation...');
+    this.#setBanner('running', tPortal('workflow.banner.savingBoard'));
     try {
       let payload = await updateWorkflowBoardAutomation({
         boardId: this.#board.boardId,
@@ -725,7 +771,7 @@ export class WorkflowBoard extends Symbiote {
       });
       this.ref.boardSettings.open = false;
       await this.loadBoard({ silent: true, reason: 'board-settings-save' });
-      this.#setBanner('success', 'Board automation saved.');
+      this.#setBanner('success', tPortal('workflow.banner.boardSaved'));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -736,11 +782,11 @@ export class WorkflowBoard extends Symbiote {
   async controlBoard(action = '') {
     if (!this.#board || !action) return null;
     if (action === 'stop') {
-      let confirmed = globalThis.confirm?.('Stop all active workflow runs in this board scope?') ?? true;
+      let confirmed = globalThis.confirm?.(tPortal('workflow.confirm.stopBoard')) ?? true;
       if (!confirmed) return null;
     }
     let filters = this.#scopeState();
-    this.#setBanner('running', `${formatLabel(action)} board automation...`);
+    this.#setBanner('running', tPortal('workflow.banner.boardControl', { action: tEnum(action) }));
     try {
       let payload = await controlWorkflowBoard({
         boardId: this.#board.boardId,
@@ -750,7 +796,7 @@ export class WorkflowBoard extends Symbiote {
         reason: `${formatLabel(action)} from workflow board automation panel.`,
       });
       await this.loadBoard({ silent: true, reason: 'board-control' });
-      this.#setBanner('success', `${formatLabel(action)} applied to board automation.`);
+      this.#setBanner('success', tPortal('workflow.banner.boardControlApplied', { action: tEnum(action) }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -760,7 +806,7 @@ export class WorkflowBoard extends Symbiote {
 
   async reconcileRecovery() {
     let filters = this.#scopeState();
-    this.#setBanner('running', 'Reconciling workflow recovery...');
+    this.#setBanner('running', tPortal('workflow.banner.reconciling'));
     try {
       let payload = await reconcileWorkflowRecovery({
         boardId: filters.boardId || this.#board?.boardId,
@@ -769,7 +815,7 @@ export class WorkflowBoard extends Symbiote {
       });
       await this.loadBoard({ silent: true, reason: 'recovery-reconcile' });
       let count = payload?.reconciled?.length ?? 0;
-      this.#setBanner('success', `Recovery reconciliation updated ${count} card${count === 1 ? '' : 's'}.`);
+      this.#setBanner('success', tPortal('workflow.banner.reconciled', { count }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -779,7 +825,7 @@ export class WorkflowBoard extends Symbiote {
 
   async importWorkItems() {
     let filters = this.#scopeState();
-    this.#setBanner('running', 'Importing workflow work items...');
+    this.#setBanner('running', tPortal('workflow.banner.importing'));
     try {
       let payload = await importWorkflowWorkItems({
         boardId: filters.boardId || this.#board?.boardId,
@@ -788,7 +834,7 @@ export class WorkflowBoard extends Symbiote {
       });
       await this.loadBoard({ silent: true, reason: 'markdown-import' });
       let count = payload?.count ?? payload?.imported?.length ?? 0;
-      this.#setBanner('success', `Imported ${count} workflow work item${count === 1 ? '' : 's'}.`);
+      this.#setBanner('success', tPortal('workflow.banner.imported', { count }));
       return payload;
     } catch (error) {
       this.#setBanner('error', error?.message || String(error));
@@ -868,7 +914,9 @@ export class WorkflowBoard extends Symbiote {
     }
     this.#ensureSelection();
     this.$.modeLabel = formatMode(board.mode);
-    this.$.scopeLabel = board.projectId ? `Project: ${board.projectId}` : `${formatLabel(board.scope)} scope`;
+    this.$.scopeLabel = board.projectId
+      ? tPortal('workflow.scope.project', { projectId: board.projectId })
+      : tPortal('workflow.scope.generic', { scope: formatLabel(board.scope) });
     this.ref.modeBadge.setAttribute('variant', BOARD_MODE_VARIANTS[board.mode] || 'info');
     this.#syncBoardAutomationControls();
     this.#renderBoardHistory();
@@ -914,11 +962,11 @@ export class WorkflowBoard extends Symbiote {
     let summary = summarizeWorkflowBoardGraphModel(model);
     let metadata = summary.metadata || {};
     this.ref.graphStats.textContent = [
-      `${metadata.columnCount ?? 0} columns`,
-      `${metadata.cardCount ?? 0} cards`,
-      `${metadata.transitionCount ?? 0} transitions`,
-      metadata.dependencyCount ? `${metadata.dependencyCount} deps` : '',
-      metadata.blockedOnDependencyCount ? `${metadata.blockedOnDependencyCount} blocked` : '',
+      tPortal('workflow.graph.columns', { count: metadata.columnCount ?? 0 }),
+      tPortal('workflow.graph.cards', { count: metadata.cardCount ?? 0 }),
+      tPortal('workflow.graph.transitions', { count: metadata.transitionCount ?? 0 }),
+      metadata.dependencyCount ? tPortal('workflow.graph.deps', { count: metadata.dependencyCount }) : '',
+      metadata.blockedOnDependencyCount ? tPortal('workflow.graph.blocked', { count: metadata.blockedOnDependencyCount }) : '',
     ].filter(Boolean).join(' · ');
   }
 
@@ -932,7 +980,7 @@ export class WorkflowBoard extends Symbiote {
 
   #renderEmptyShell() {
     this.$.modeLabel = formatMode('passive');
-    this.$.scopeLabel = 'No board data';
+    this.$.scopeLabel = tPortal('workflow.scope.none');
     this.ref.boardView.setBoard({ columns: [] });
     this.ref.boardReadout.textContent = '';
     this.#syncBoardAutomationControls();
@@ -942,6 +990,52 @@ export class WorkflowBoard extends Symbiote {
     this.ref.graphStats.textContent = '';
     this.ref.graphEmpty.hidden = false;
     this.#publishSelection('empty-shell');
+  }
+
+  // U10: the panel's static chrome (icon tooltips, group/region aria-labels, select option labels,
+  // empty states) is localized once at init from portal.workflow.* keys. Board DATA — column titles,
+  // card titles/summaries, agent names, resource-group names — is never translated.
+  #localizeChrome() {
+    let labelControl = (element, key) => {
+      if (!element) return;
+      let value = tPortal(key);
+      element.setAttribute('title', value);
+      element.setAttribute('aria-label', value);
+    };
+    labelControl(this.ref.kanbanViewBtn, 'workflow.view.kanban');
+    labelControl(this.ref.graphViewBtn, 'workflow.view.graph');
+    labelControl(this.ref.pauseBoardBtn, 'workflow.toolbar.pause');
+    labelControl(this.ref.resumeBoardBtn, 'workflow.toolbar.resume');
+    labelControl(this.ref.drainBoardBtn, 'workflow.toolbar.drain');
+    labelControl(this.ref.stopBoardBtn, 'workflow.toolbar.stop');
+    labelControl(this.ref.importBtn, 'workflow.toolbar.import');
+    labelControl(this.ref.reconcileBtn, 'workflow.toolbar.reconcile');
+    labelControl(this.ref.graphFitBtn, 'workflow.graph.fit');
+    labelControl(this.ref.boardSettings.querySelector('summary'), 'workflow.toolbar.settings');
+    this.querySelector('.wb-controls')?.setAttribute('aria-label', tPortal('workflow.controls.label'));
+    this.querySelector('.wb-view-toggle')?.setAttribute('aria-label', tPortal('workflow.view.group'));
+    this.ref.kanbanRegion.setAttribute('aria-label', tPortal('workflow.kanban.region'));
+    this.ref.graphRegion.setAttribute('aria-label', tPortal('workflow.graph.region'));
+    this.ref.boardView.setAttribute('label', tPortal('workflow.kanban.region'));
+    this.ref.boardView.setAttribute('empty-text', tPortal('workflow.empty.columns'));
+    this.ref.emptyState.textContent = tPortal('workflow.empty.cards');
+    this.ref.graphEmpty.textContent = tPortal('workflow.empty.graph');
+    this.ref.lblBoardMode.textContent = tPortal('workflow.settings.mode');
+    this.ref.lblBoardPickup.textContent = tPortal('workflow.settings.pickup');
+    this.ref.lblBoardRecovery.textContent = tPortal('workflow.settings.recovery');
+    this.ref.lblBoardParallel.textContent = tPortal('workflow.settings.parallelLimit');
+    this.ref.lblBoardApproval.textContent = tPortal('workflow.settings.approval');
+    this.ref.lblBoardAgents.textContent = tPortal('workflow.settings.fallbackAgents');
+    this.ref.saveBoardLabel.textContent = tPortal('workflow.settings.saveBoard');
+    let optionSelects = [
+      this.ref.boardModeSelect,
+      this.ref.boardPickupSelect,
+      this.ref.boardRecoverySelect,
+      this.ref.boardApprovalSelect,
+    ];
+    for (let select of optionSelects) {
+      for (let option of select.options) option.textContent = tEnum(option.value || 'default');
+    }
   }
 
   // U12: the toolbar was 7 icon-only buttons in one flat row with no grouping and no active-state
@@ -964,17 +1058,17 @@ export class WorkflowBoard extends Symbiote {
 
     let modeGroup = makeElement('div', 'wb-toolbar-group');
     modeGroup.setAttribute('role', 'group');
-    modeGroup.setAttribute('aria-label', 'Board automation mode');
+    modeGroup.setAttribute('aria-label', tPortal('workflow.toolbar.modeGroup'));
     modeGroup.append(this.ref.pauseBoardBtn, this.ref.resumeBoardBtn);
 
     let destructiveGroup = makeElement('div', 'wb-toolbar-group wb-toolbar-group-danger');
     destructiveGroup.setAttribute('role', 'group');
-    destructiveGroup.setAttribute('aria-label', 'Stop or drain workflow runs');
+    destructiveGroup.setAttribute('aria-label', tPortal('workflow.toolbar.dangerGroup'));
     destructiveGroup.append(this.ref.drainBoardBtn, this.ref.stopBoardBtn);
 
     let maintenanceGroup = makeElement('div', 'wb-toolbar-group');
     maintenanceGroup.setAttribute('role', 'group');
-    maintenanceGroup.setAttribute('aria-label', 'Import and recovery tools');
+    maintenanceGroup.setAttribute('aria-label', tPortal('workflow.toolbar.maintenanceGroup'));
     maintenanceGroup.append(this.ref.importBtn, this.ref.reconcileBtn);
 
     let viewToggle = actions.querySelector('.wb-view-toggle');
@@ -1020,7 +1114,7 @@ export class WorkflowBoard extends Symbiote {
   #renderError(error) {
     this.#setBanner('error', error?.message || String(error));
     this.#renderEmptyShell();
-    this.ref.emptyState.textContent = 'Workflow board data is unavailable.';
+    this.ref.emptyState.textContent = tPortal('workflow.error.unavailable');
   }
 
   // U12: the readout previously buried the one alarming signal (recovery count) among routine facts
@@ -1040,8 +1134,8 @@ export class WorkflowBoard extends Symbiote {
     if (this.ref.boardRecoveryFlag) {
       this.ref.boardRecoveryFlag.hidden = recoveryCount <= 0;
       if (recoveryCount > 0) {
-        let detail = `${recoveryCount} card${recoveryCount === 1 ? '' : 's'} in recovery — check the board history and reconcile if needed.`;
-        this.ref.boardRecoveryFlag.textContent = `${recoveryCount} in recovery`;
+        let detail = tPortal('workflow.recovery.detail', { count: recoveryCount });
+        this.ref.boardRecoveryFlag.textContent = tPortal('workflow.recovery.flag', { count: recoveryCount });
         // U15: the detail is exposed both visibly (title) and to assistive tech (aria-label), not
         // as a title-attribute-only tooltip.
         this.ref.boardRecoveryFlag.title = detail;
@@ -1050,14 +1144,14 @@ export class WorkflowBoard extends Symbiote {
     }
 
     let readoutText = [
-      `${count} visible`,
-      scope.goalId ? `goal ${scope.goalId.slice(0, 8)}` : '',
-      scope.chatId ? `chat ${scope.chatId.slice(0, 8)}` : '',
-      counters.active ? `${counters.active} active` : '',
-      automation.pickup ? `pickup ${automation.pickup}` : '',
-      automation.globalParallelLimit ? `limit ${automation.globalParallelLimit}` : '',
-      lastEvent ? `last ${formatLabel(lastEvent.eventType)}` : '',
-      updated ? `updated ${updated}` : '',
+      tPortal('workflow.readout.visible', { count }),
+      scope.goalId ? tPortal('workflow.readout.goal', { id: scope.goalId.slice(0, 8) }) : '',
+      scope.chatId ? tPortal('workflow.readout.chat', { id: scope.chatId.slice(0, 8) }) : '',
+      counters.active ? tPortal('workflow.readout.active', { count: counters.active }) : '',
+      automation.pickup ? tPortal('workflow.readout.pickup', { pickup: tEnum(automation.pickup) }) : '',
+      automation.globalParallelLimit ? tPortal('workflow.readout.limit', { limit: automation.globalParallelLimit }) : '',
+      lastEvent ? tPortal('workflow.readout.lastEvent', { event: formatLabel(lastEvent.eventType) }) : '',
+      updated ? tPortal('workflow.readout.updated', { time: updated }) : '',
     ].filter(Boolean).join(' · ');
     this.ref.boardReadout.textContent = readoutText;
     this.ref.boardReadout.title = readoutText;
@@ -1071,7 +1165,7 @@ export class WorkflowBoard extends Symbiote {
       .slice(-3)
       .reverse();
     if (!events.length) {
-      this.ref.boardHistory.replaceChildren(makeElement('div', 'wb-board-history-row', 'No board automation events yet.'));
+      this.ref.boardHistory.replaceChildren(makeElement('div', 'wb-board-history-row', tPortal('workflow.history.empty')));
       return;
     }
     this.ref.boardHistory.replaceChildren(...events.map((event) => {
@@ -1092,16 +1186,11 @@ export class WorkflowBoard extends Symbiote {
     let columns = this.#columnsWithVisibleCards();
     let hasCards = columns.some(column => column.cards.length);
     this.ref.emptyState.hidden = hasCards;
-    this.ref.emptyState.textContent = hasCards
-      ? ''
-      : [
-        'No workflow cards in this scope.',
-        'Import markdown work items or reconcile recovery from the board controls.',
-      ].join(' ');
+    this.ref.emptyState.textContent = hasCards ? '' : tPortal('workflow.empty.cards');
     let downstream = this.#downstreamDependencyCounts(columns);
     this.ref.boardView.setBoard({
       id: this.#board?.boardId || this.#board?.id || '',
-      title: this.#board?.title || 'Workflow Board',
+      title: this.#board?.title || tPortal('text.workflowBoard'),
       columns: columns.map(column => ({
         id: column.id,
         title: column.title,
@@ -1153,18 +1242,18 @@ export class WorkflowBoard extends Symbiote {
     let flagChips = asArray(card.flags)
       .filter(flag => !(auditChip && flag === 'needs_audit'))
       .slice(0, 2)
-      .map(flag => ({ label: formatLabel(flag), kind: flagKind(flag) }));
+      .map(flag => ({ label: flagLabel(flag), kind: flagKind(flag) }));
 
     // Priority-ordered candidates: state first (what's happening now), then lock/unlock, then audit
     // verdict, then supporting telemetry, then flags — the front of this list is what a glance needs.
     let footerCandidates = [
       liveStatus ? { label: formatStatusLabel(liveStatus), kind: busy ? 'warning' : statusKind(liveStatus) } : null,
-      blockedBy ? { label: String(blockedBy), icon: 'lock', kind: 'dep-blocked', title: `Blocked by ${blockedBy} upstream card(s)` } : null,
+      blockedBy ? { label: String(blockedBy), icon: 'lock', kind: 'dep-blocked', title: tPortal('workflow.card.blockedByTitle', { count: blockedBy }) } : null,
       auditChip,
-      unlocks ? { label: String(unlocks), icon: 'lock_open', kind: 'dep-unlocks', title: `Unlocks ${unlocks} downstream card(s)` } : null,
+      unlocks ? { label: String(unlocks), icon: 'lock_open', kind: 'dep-unlocks', title: tPortal('workflow.card.unlocksTitle', { count: unlocks }) } : null,
       agent ? { label: agent, icon: 'smart_toy', kind: 'status' } : null,
       duration ? { label: duration, icon: 'schedule', kind: 'status' } : null,
-      tokens ? { label: `${tokens} tok`, icon: 'toll', kind: 'status' } : null,
+      tokens ? { label: tPortal('workflow.card.tokens', { tokens }), icon: 'toll', kind: 'status' } : null,
       ...flagChips,
     ].filter(Boolean);
     let footer = footerCandidates.slice(0, WorkflowBoard.#FOOTER_CHIP_BUDGET);
@@ -1173,7 +1262,7 @@ export class WorkflowBoard extends Symbiote {
       footer.push({
         label: `+${overflowCount}`,
         kind: 'overflow',
-        title: `${overflowCount} more signal${overflowCount === 1 ? '' : 's'} — open the card for details`,
+        title: tPortal('workflow.card.overflowTitle', { count: overflowCount }),
       });
     }
 
@@ -1181,13 +1270,13 @@ export class WorkflowBoard extends Symbiote {
       id: card.id,
       columnId: card.columnId,
       title: card.title,
-      summary: card.summary || 'No summary provided.',
+      summary: card.summary || tPortal('workflow.card.noSummary'),
       busy,
       meta: [
-        group ? { label: group, icon: GROUP_ICON[group] ?? GROUP_ICON_FALLBACK, kind: `group-${group}`, title: `Resource group: ${group}` } : null,
+        group ? { label: group, icon: GROUP_ICON[group] ?? GROUP_ICON_FALLBACK, kind: `group-${group}`, title: tPortal('workflow.card.groupTitle', { group }) } : null,
         card.projectId ? { label: card.projectId } : null,
         card.kind ? { label: card.kind } : null,
-        card.priority ? { label: card.priority, kind: priorityKind(card.priority), title: `Priority: ${card.priority}` } : null,
+        card.priority ? { label: card.priority, kind: priorityKind(card.priority), title: tPortal('workflow.card.priorityTitle', { priority: card.priority }) } : null,
       ].filter(Boolean),
       footer,
       actions: this.#cardActions(card, nextColumn, runtimeOnly),
@@ -1201,7 +1290,7 @@ export class WorkflowBoard extends Symbiote {
       return card.entityRefs?.chatId ? [{
         id: 'open:chat',
         icon: 'forum',
-        title: 'Open workflow chat',
+        title: tPortal('workflow.cardAction.openChat'),
       }] : [];
     }
 
@@ -1210,34 +1299,34 @@ export class WorkflowBoard extends Symbiote {
       actions.push({
         id: `transition:${nextColumn.id}`,
         icon: 'play_arrow',
-        title: `Launch to ${nextColumn.title}`,
+        title: tPortal('workflow.cardAction.launchTo', { column: nextColumn.title }),
       });
     } else if (card.columnId === 'ready') {
       actions.push({
         id: 'orchestrate',
         icon: 'play_arrow',
-        title: 'Start orchestration',
+        title: tPortal('workflow.cardAction.orchestrate'),
       });
     } else if (nextColumn) {
       actions.push({
         id: `transition:${nextColumn.id}`,
         icon: 'arrow_forward',
-        title: `Move to ${nextColumn.title}`,
+        title: tPortal('workflow.cardAction.moveTo', { column: nextColumn.title }),
       });
     }
 
     if (ACTIVE_CONTROL_COLUMNS.has(card.columnId)) {
       actions.push(
-        { id: 'control:pause', icon: 'pause', title: 'Pause workflow card' },
-        { id: 'control:stop', icon: 'stop', title: 'Stop workflow card' },
-        { id: 'control:cancel', icon: 'cancel', title: 'Cancel workflow card' },
+        { id: 'control:pause', icon: 'pause', title: tPortal('workflow.cardAction.pause') },
+        { id: 'control:stop', icon: 'stop', title: tPortal('workflow.cardAction.stop') },
+        { id: 'control:cancel', icon: 'cancel', title: tPortal('workflow.cardAction.cancel') },
       );
     }
     let activeRun = cardHasActiveRun(card);
     actions.push({
       id: 'delete',
       icon: 'delete',
-      title: activeRun ? 'Stop or cancel before deleting this workflow card' : 'Delete workflow card',
+      title: activeRun ? tPortal('workflow.cardAction.deleteBlocked') : tPortal('workflow.cardAction.delete'),
       kind: 'danger',
       disabled: activeRun,
     });
@@ -1268,21 +1357,22 @@ export class WorkflowBoard extends Symbiote {
     let details = makeElement('details', 'wb-column-settings');
     details.dataset.columnSettingsPanel = column.id;
     let summary = makeElement('summary', 'wb-column-settings-summary');
-    summary.title = 'Column settings';
-    summary.setAttribute('aria-label', 'Column settings');
+    let settingsLabel = tPortal('workflow.column.settings');
+    summary.title = settingsLabel;
+    summary.setAttribute('aria-label', settingsLabel);
     summary.append(makeIcon('settings'));
     let form = makeElement('div', 'wb-settings-form');
     form.dataset.columnSettingsForm = column.id;
     form.append(
-      createField('Trigger', createSelect(automation.trigger || 'manual', COLUMN_TRIGGERS, { columnField: 'trigger' })),
-      createField('Action', createSelect(automation.action || '', COLUMN_ACTIONS, { columnField: 'action' })),
-      createField('Mode', createSelect(automation.mode || 'manual', COLUMN_MODES, { columnField: 'mode' })),
-      createField('Approval', createSelect(automation.approvalMode || '', COLUMN_APPROVAL_MODES, { columnField: 'approvalMode' })),
-      createField('Agent pool', createTextInput(asArray(automation.agents).join(', '), { columnField: 'agents' }, { placeholder: 'orchestrator, reviewer' })),
-      createField('Parallel limit', createTextInput(automation.parallelLimit || '', { columnField: 'parallelLimit' }, { type: 'number', min: 1 })),
+      createField(tPortal('workflow.column.trigger'), createSelect(automation.trigger || 'manual', COLUMN_TRIGGERS, { columnField: 'trigger' })),
+      createField(tPortal('workflow.column.action'), createSelect(automation.action || '', COLUMN_ACTIONS, { columnField: 'action' })),
+      createField(tPortal('workflow.column.mode'), createSelect(automation.mode || 'manual', COLUMN_MODES, { columnField: 'mode' })),
+      createField(tPortal('workflow.column.approval'), createSelect(automation.approvalMode || '', COLUMN_APPROVAL_MODES, { columnField: 'approvalMode' })),
+      createField(tPortal('workflow.column.agentPool'), createTextInput(asArray(automation.agents).join(', '), { columnField: 'agents' }, { placeholder: 'orchestrator, reviewer' })),
+      createField(tPortal('workflow.column.parallelLimit'), createTextInput(automation.parallelLimit || '', { columnField: 'parallelLimit' }, { type: 'number', min: 1 })),
     );
     let actionRow = makeElement('div', 'wb-action-row');
-    actionRow.append(createButton('Save column', {
+    actionRow.append(createButton(tPortal('workflow.column.save'), {
       variant: 'primary',
       icon: 'save',
       dataset: { columnSettingsSave: column.id },

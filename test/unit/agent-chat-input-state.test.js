@@ -255,7 +255,7 @@ describe('agent chat input state', () => {
     assert.match(styles, /\.goal-status-action\.mode\[data-active="true"\]/);
     assert.doesNotMatch(styles, /--composer-action-menu-left/);
     assert.doesNotMatch(styles, /--composer-action-menu-top/);
-    assert.match(styles, /var\(--sn-panel-bg\)/);
+    assert.match(styles, /var\(--sn-sys-surface-panel\)/);
     assert.match(styles, /--composer-action-menu-inline-size[\s\S]*--sn-layout-menu-row-label-width/);
     assert.match(styles, /--composer-action-menu-inline-size[\s\S]*--sn-layout-menu-action-height/);
     assert.match(styles, /calc\(\(var\(--sn-layout-menu-row-label-width, 66px\) \* 3\) \+ \(var\(--sn-layout-menu-action-height, 28px\) \* 2\)\)/);
@@ -275,7 +275,7 @@ describe('agent chat input state', () => {
     assert.doesNotMatch(styles, /\* 1\.615/);
     assert.doesNotMatch(styles, /\* 1\.375/);
     assert.doesNotMatch(agentChat, /labelWidth \* 2\) \+ \(actionHeight \* 8/);
-    assert.doesNotMatch(styles, /background: color-mix\(in srgb, var\(--sn-bg\) 94%, black\)/);
+    assert.doesNotMatch(styles, /background: color-mix\(in srgb, var\(--sn-sys-surface\) 94%, black\)/);
     assert.match(chatContext, /const GOAL_TYPE_HANDLER/);
     assert.match(chatContext, /'goal': GOAL_TYPE_HANDLER/);
 

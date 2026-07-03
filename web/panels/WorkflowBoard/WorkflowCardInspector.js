@@ -30,12 +30,15 @@ const DECISION_COLUMN_ID = 'needs-decision';
 // The escalation kinds the auditor uses to bounce a card back to the orchestrator.
 const AUDIT_ESCALATION_KINDS = new Set(['insufficient_permission', 'insufficient_context', 'needs_decision', 'rework']);
 
-// A terminal card's resolution status (cancelled / rejected / discarded) → a short badge label.
-const RESOLUTION_LABELS = {
-  rejected: '✗ Rejected',
-  cancelled: '⊘ Cancelled',
-  discarded: '🗑 Discarded',
-};
+// A terminal card's resolution status (cancelled / rejected / discarded) → a short localized badge
+// label; unknown statuses fall back to the prettified token.
+const RESOLUTION_STATUSES = new Set(['rejected', 'cancelled', 'discarded']);
+
+function resolutionLabel(status) {
+  return RESOLUTION_STATUSES.has(status)
+    ? tPortal(`workflow.resolution.${status}`)
+    : formatColumnId(status);
+}
 
 // Read a check value off the raw projection card. The web normalizer flattens `card.checks` into a
 // display array, but keeps the original object form on `card.raw.checks`, which is what the gate
@@ -120,21 +123,15 @@ function eventTitle(event = {}) {
   return [event.status, event.actor, event.note].map((p) => text(p)).filter(Boolean).join(' · ');
 }
 
-const HELD_FLAG_LABELS = {
-  needs_audit: 'Needs audit',
-  blocked: 'Blocked',
-  needs_resume: 'Needs resume',
-  stale: 'Stale',
-  recovering: 'Recovering',
-  lost: 'Lost',
-};
+const HELD_FLAGS = new Set(['needs_audit', 'blocked', 'needs_resume', 'stale', 'recovering', 'lost']);
 
 // Why a card is sitting still: surface the recovery/blocking flags (and any blocker text) so a card
-// parked in e.g. quality-audit reads as "Needs audit" instead of looking frozen.
+// parked in e.g. quality-audit reads as "Needs audit" instead of looking frozen. Flag labels come
+// from portal.workflow.flag.* (shared with the board card chips).
 function heldReason(card = {}) {
   let labels = (Array.isArray(card.flags) ? card.flags : [])
-    .map((f) => HELD_FLAG_LABELS[f])
-    .filter(Boolean);
+    .filter((f) => HELD_FLAGS.has(f))
+    .map((f) => tPortal(`workflow.flag.${f}`));
   let blocker = text(card.blocker);
   if (!labels.length && !blocker) return '';
   return [[...new Set(labels)].join(', '), blocker].filter(Boolean).join(' — ');
@@ -333,7 +330,7 @@ export class WorkflowCardInspector extends Symbiote {
       return;
     }
     let key = text(res.status).toLowerCase();
-    badge.textContent = RESOLUTION_LABELS[key] || formatColumnId(key);
+    badge.textContent = resolutionLabel(key);
     badge.dataset.kind = key === 'discarded' ? 'warning' : 'error';
     let reason = text(res.reason);
     if (reason) badge.title = reason;
@@ -453,7 +450,7 @@ export class WorkflowCardInspector extends Symbiote {
       let meta = document.createElement('span');
       meta.className = 'wci-run-meta';
       let tokens = formatTokens(run.tokens);
-      meta.textContent = [text(run.status), formatDuration(run), tokens ? `${tokens} tok` : '']
+      meta.textContent = [text(run.status), formatDuration(run), tokens ? tPortal('workflow.card.tokens', { tokens }) : '']
         .filter(Boolean)
         .join(' · ');
 

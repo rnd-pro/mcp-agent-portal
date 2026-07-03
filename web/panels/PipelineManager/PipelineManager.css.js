@@ -25,13 +25,13 @@ sn-list-detail-shell {
 
 .pm-detail-title {
   margin: 0 0 8px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 16px;
   font-weight: 600;
 }
 
 .pm-detail-desc {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 12px;
   line-height: 1.5;
 }

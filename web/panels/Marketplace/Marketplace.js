@@ -174,7 +174,7 @@ class Marketplace extends Symbiote {
     let icon = ICON_MAP[key] || 'bolt';
     let desc = server.description || `${server.command} ${(server.args || []).join(' ')}`;
     let accent = CATEGORY_META[server.category]?.accent || 'var(--sn-provider-default-color)';
-    let gradient = `linear-gradient(135deg, ${accent}, color-mix(in srgb, ${accent} 70%, var(--sn-bg)))`;
+    let gradient = `linear-gradient(135deg, ${accent}, color-mix(in srgb, ${accent} 70%, var(--sn-sys-surface)))`;
 
     return {
       name: key,

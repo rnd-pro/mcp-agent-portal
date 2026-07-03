@@ -3,8 +3,8 @@ pg-theme-editor-panel {
   display: block;
   min-width: 0;
   height: 100%;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font);
 }
 

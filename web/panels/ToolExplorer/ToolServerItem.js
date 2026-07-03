@@ -54,7 +54,7 @@ sn-list-item {
 }
 :host([active]) sn-list-item,
 te-server-item[active] sn-list-item {
-  --sn-list-item-label-color: var(--sn-node-selected);
+  --sn-list-item-label-color: var(--sn-sys-accent);
   --sn-list-item-padding: 10px 14px 10px 11px;
 }
 `;

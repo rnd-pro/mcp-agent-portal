@@ -11,8 +11,8 @@ pg-workflow-board .wb-shell {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font);
 }
 
@@ -36,7 +36,7 @@ pg-workflow-board .wb-control-meta {
   justify-content: flex-start;
   gap: 6px 8px;
   min-width: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
 }
 
@@ -116,9 +116,9 @@ pg-workflow-board .wb-board-settings-summary {
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-button-radius, 6px);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   cursor: pointer;
   list-style: none;
 }
@@ -129,8 +129,8 @@ pg-workflow-board .wb-board-settings-summary::-webkit-details-marker {
 
 pg-workflow-board .wb-board-settings-summary:hover,
 pg-workflow-board .wb-board-settings-summary:focus-visible {
-  color: var(--sn-node-selected);
-  border-color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
+  border-color: var(--sn-sys-accent);
   outline: none;
 }
 
@@ -141,9 +141,9 @@ pg-workflow-board .wb-board-settings-panel {
   z-index: 5;
   width: min(520px, calc(100vw - 96px));
   padding: 10px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  background: var(--sn-panel-bg);
+  background: var(--sn-sys-surface-panel);
   box-shadow: var(--sn-elevation-2, var(--sn-sys-shadow-overlay));
 }
 
@@ -155,7 +155,7 @@ pg-workflow-board .wb-status {
 pg-workflow-board .wb-board-readout {
   min-width: 0;
   flex: 1 1 130px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -188,7 +188,7 @@ pg-workflow-board .wb-board {
   min-width: 0;
   min-height: 0;
   --sn-kanban-padding: 0 0 4px;
-  --sn-kanban-card-hover-border: var(--sn-node-selected);
+  --sn-kanban-card-hover-border: var(--sn-sys-accent);
   --sn-kanban-header-min-height: 88px;
 }
 
@@ -197,9 +197,9 @@ pg-workflow-board .wb-view-toggle {
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-button-radius, 8px);
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
 }
 
 pg-workflow-board .wb-view-toggle-btn {
@@ -209,8 +209,8 @@ pg-workflow-board .wb-view-toggle-btn {
 
 pg-workflow-board .wb-view-toggle-btn[aria-pressed="true"],
 pg-workflow-board .wb-view-toggle-btn.is-active {
-  --sn-button-bg: color-mix(in srgb, var(--sn-node-selected) 22%, transparent);
-  color: var(--sn-node-selected);
+  --sn-button-bg: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-selected-mix), transparent);
+  color: var(--sn-sys-accent);
 }
 
 pg-workflow-board .wb-graph-region {
@@ -220,9 +220,9 @@ pg-workflow-board .wb-graph-region {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
 }
 
 pg-workflow-board .wb-graph-toolbar {
@@ -241,7 +241,7 @@ pg-workflow-board .wb-graph-btn {
 
 pg-workflow-board .wb-graph-stats {
   min-width: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -269,9 +269,9 @@ pg-workflow-board .wb-chip {
   max-width: 100%;
   min-height: 19px;
   padding: 2px 6px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 999px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.2;
@@ -288,28 +288,28 @@ pg-workflow-board .wb-chip .material-symbols-outlined {
    gated, warning = auto) so its meaning does not rely on color alone — it already pairs an icon
    (bolt/checklist/pan_tool) and label text from automationSummary(). */
 pg-workflow-board .wb-chip[data-kind="status"] {
-  border-color: color-mix(in oklch, var(--sn-sys-info) 46%, var(--sn-node-border));
+  border-color: color-mix(in oklch, var(--sn-sys-info) 46%, var(--sn-sys-outline));
   background: var(--sn-sys-info-container);
   color: var(--sn-sys-on-info-container);
 }
 
 pg-workflow-board .wb-chip[data-kind="warning"] {
-  border-color: color-mix(in oklch, var(--sn-sys-warning) 50%, var(--sn-node-border));
+  border-color: color-mix(in oklch, var(--sn-sys-warning) 50%, var(--sn-sys-outline));
   background: var(--sn-sys-warning-container);
   color: var(--sn-sys-on-warning-container);
 }
 
 pg-workflow-board .wb-chip[data-kind="error"] {
-  border-color: color-mix(in oklch, var(--sn-sys-danger) 50%, var(--sn-node-border));
+  border-color: color-mix(in oklch, var(--sn-sys-danger) 50%, var(--sn-sys-outline));
   background: var(--sn-sys-danger-container);
   color: var(--sn-sys-on-danger-container);
 }
 
 pg-workflow-board .wb-empty {
   min-height: 180px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
 }
 
 pg-workflow-board .wb-column-head {
@@ -359,7 +359,7 @@ pg-workflow-board .wb-setting-field {
   display: grid;
   gap: 4px;
   min-width: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
 }
 
@@ -367,10 +367,10 @@ pg-workflow-board .wb-setting-control {
   min-width: 0;
   min-height: 28px;
   padding: 4px 8px;
-  border: 1px solid var(--sn-field-control-border, var(--sn-node-border));
+  border: 1px solid var(--sn-field-control-border, var(--sn-sys-outline));
   border-radius: var(--sn-field-control-radius, 6px);
-  background: var(--sn-field-control-bg, var(--sn-panel-bg));
-  color: var(--sn-text);
+  background: var(--sn-field-control-bg, var(--sn-sys-surface-panel));
+  color: var(--sn-sys-on-surface);
   font: inherit;
   font-size: 12px;
 }
@@ -379,7 +379,7 @@ pg-workflow-board .wb-board-history {
   display: grid;
   gap: 5px;
   margin-block: 8px 10px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -393,7 +393,7 @@ pg-workflow-board .wb-board-history-row {
 
 pg-workflow-board .wb-board-history-row strong {
   min-width: max-content;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-weight: 650;
 }
 
@@ -427,9 +427,9 @@ pg-workflow-board .wb-column-settings-summary {
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 999px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   cursor: pointer;
   list-style: none;
 }
@@ -440,8 +440,8 @@ pg-workflow-board .wb-column-settings-summary::-webkit-details-marker {
 
 pg-workflow-board .wb-column-settings-summary:hover,
 pg-workflow-board .wb-column-settings-summary:focus-visible {
-  color: var(--sn-node-selected);
-  border-color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
+  border-color: var(--sn-sys-accent);
   outline: none;
 }
 

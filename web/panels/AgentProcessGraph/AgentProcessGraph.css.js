@@ -19,7 +19,7 @@ canvas-graph {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
   text-transform: uppercase;
@@ -30,7 +30,7 @@ canvas-graph {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
   text-transform: uppercase;
@@ -47,16 +47,16 @@ canvas-graph {
   max-width: 32vw;
   min-height: var(--sn-graph-explorer-button-min-height, 28px);
   padding: 3px 24px 3px 8px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-graph-explorer-button-radius, 3px);
-  background: var(--sn-node-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-raised);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font);
   font-size: var(--sn-graph-explorer-button-size, 10px);
 }
 
 .apg-layout-picker select:focus-visible {
-  outline: 2px solid var(--sn-node-selected);
+  outline: 2px solid var(--sn-sys-accent);
   outline-offset: 2px;
 }
 
@@ -66,7 +66,7 @@ canvas-graph {
   display: grid;
   place-content: center;
   gap: 8px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 11px;
   text-align: center;
@@ -92,11 +92,11 @@ canvas-graph {
   max-block-size: calc(100% - 112px);
   overflow: auto;
   padding: 10px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-node-radius, 6px);
-  background: color-mix(in oklab, var(--sn-panel-bg) 94%, transparent);
+  background: color-mix(in oklab, var(--sn-sys-surface-panel) 94%, transparent);
   box-shadow: var(--sn-shadow-sm);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 11px;
 }
 
@@ -117,7 +117,7 @@ canvas-graph {
   padding: 6px;
   border: 1px solid var(--sn-border);
   border-radius: 4px;
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
 }
 
 .apg-map-summary-metric strong,
@@ -133,7 +133,7 @@ canvas-graph {
 }
 
 .apg-map-summary-metric span {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 9px;
   text-transform: uppercase;
@@ -143,8 +143,8 @@ canvas-graph {
   padding: 6px 8px;
   border: 1px solid color-mix(in oklab, #d64545 56%, var(--sn-border));
   border-radius: 4px;
-  background: color-mix(in oklab, #d64545 12%, var(--sn-panel-bg));
-  color: var(--sn-text);
+  background: color-mix(in oklab, #d64545 12%, var(--sn-sys-surface-panel));
+  color: var(--sn-sys-on-surface);
 }
 
 .apg-map-summary-list {
@@ -162,7 +162,7 @@ canvas-graph {
   padding: 5px 6px;
   border-radius: 4px;
   background: var(--sn-surface-hover);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -186,12 +186,12 @@ canvas-graph {
 }
 
 .apg-map-summary-subagent-title {
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font-mono);
 }
 
 .apg-map-summary-subagent-tool {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
 }
@@ -209,8 +209,8 @@ canvas-graph {
   padding: 4px 6px;
   border: 1px solid var(--sn-border);
   border-radius: 4px;
-  background: var(--sn-node-bg);
-  color: var(--sn-text-dim);
+  background: var(--sn-sys-surface-raised);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 .apg-map-summary-hint-title,
@@ -221,12 +221,12 @@ canvas-graph {
 }
 
 .apg-map-summary-hint-title {
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font-mono);
 }
 
 .apg-map-summary-hint-prompt {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 .apg-stats {

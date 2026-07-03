@@ -1,3 +1,5 @@
+import { tPortal } from '../../common/localization.js';
+
 function asText(value, fallback = '') {
   let out = String(value ?? '').trim();
   return out || fallback;
@@ -55,9 +57,15 @@ export function effectiveStatus(card = null) {
   return cardLifecycle(card) === 'queued' ? 'queued' : '';
 }
 
+// Status tokens the UI itself produces (effectiveStatus: running/queued) carry curated translations
+// under portal.workflow.status.*; any other token falls back to the prettified identifier so raw
+// run-status vocabulary (data) is surfaced verbatim.
 export function formatStatusLabel(value) {
   let key = asText(value);
   if (!key) return '';
+  let localeKey = `workflow.status.${key.toLowerCase()}`;
+  let translated = tPortal(localeKey);
+  if (translated !== `portal.${localeKey}`) return translated;
   return key
     .split(/[-_:/]+/)
     .filter(Boolean)

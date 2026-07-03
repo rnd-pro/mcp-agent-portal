@@ -11,8 +11,8 @@ pg-action-board {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--sn-panel-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface-panel);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font);
 }
 
@@ -28,7 +28,7 @@ pg-action-board {
 }
 
 .ab-eyebrow {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
@@ -44,7 +44,7 @@ pg-action-board {
 
 .ab-header p {
   margin: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -55,7 +55,7 @@ pg-action-board {
   align-items: flex-end;
   gap: 6px;
   min-width: max-content;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
 }
 
@@ -91,9 +91,9 @@ pg-action-board {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
   padding: 10px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
   flex-shrink: 0;
   --sn-metric-border: transparent;
   --sn-metric-label-size: 11px;
@@ -105,7 +105,7 @@ pg-action-board {
 .ab-stat-unit {
   margin-inline-start: 3px;
   font-size: 12px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
 }
 
 .ab-feed-panel,
@@ -113,9 +113,9 @@ pg-action-board {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  background: var(--sn-node-bg);
+  background: var(--sn-sys-surface-raised);
   overflow: hidden;
 }
 
@@ -131,16 +131,16 @@ pg-action-board {
   gap: 12px;
   min-height: 34px;
   padding: 8px 10px;
-  border-block-end: 1px solid var(--sn-node-border);
+  border-block-end: 1px solid var(--sn-sys-outline);
   background: var(--sn-node-header-bg);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 12px;
   font-weight: 650;
 }
 
 .ab-section-head span:last-child {
   min-width: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   font-weight: 500;
   overflow: hidden;
@@ -159,7 +159,7 @@ sn-event-feed {
 }
 
 .ab-empty-note {
-  border-block-end: 1px solid var(--sn-node-border);
+  border-block-end: 1px solid var(--sn-sys-outline);
 }
 
 .ab-action-list {
@@ -177,7 +177,7 @@ sn-event-feed {
   grid-template-columns: 24px minmax(0, 1fr);
   gap: 10px;
   padding: 12px;
-  border-block-end: 1px solid var(--sn-node-border);
+  border-block-end: 1px solid var(--sn-sys-outline);
 }
 
 .ab-action-list li:last-child {
@@ -185,7 +185,7 @@ sn-event-feed {
 }
 
 .ab-action-list .material-symbols-outlined {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
   font-size: 18px;
   line-height: 1.2;
 }
@@ -197,7 +197,7 @@ sn-event-feed {
 }
 
 .ab-action-list strong {
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 12px;
   font-weight: 650;
   line-height: 1.25;
@@ -205,7 +205,7 @@ sn-event-feed {
 
 .ab-action-list div > span {
   margin-block-start: 3px;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: 11px;
   line-height: 1.35;
 }

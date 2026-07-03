@@ -52,7 +52,7 @@ mp-context-card {
 }
 
 .mp-form-status {
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   margin-top: 8px;
   font-size: 11px;
   min-height: 14px;
@@ -60,7 +60,7 @@ mp-context-card {
 
 :host([status-error]) .mp-form-status,
 mp-context-card[status-error] .mp-form-status  {
-  color: var(--sn-danger-color);
+  color: var(--sn-sys-danger);
 }
 
 .material-symbols-outlined {

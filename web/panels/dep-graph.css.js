@@ -20,7 +20,7 @@ pg-dep-graph {
   max-height: calc(100% - 112px);
   overflow: hidden auto;
   padding: 6px;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   min-width: 240px;
   background: var(--sn-bg-overlay);
   box-shadow: var(--sn-shadow-lg);
@@ -37,7 +37,7 @@ pg-dep-graph {
   align-items: center;
   gap: 7px;
   padding: 3px 4px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font-mono);
   font-size: 10px;
 }
@@ -52,17 +52,17 @@ pg-dep-graph {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
 }
 
 .pcb-metadata-dialog {
   width: min(760px, calc(100vw - 32px));
   height: min(640px, calc(100vh - 32px));
   padding: 0;
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: 6px;
-  background: var(--sn-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface);
+  color: var(--sn-sys-on-surface);
   z-index: 500;
   box-sizing: border-box;
 }
@@ -90,14 +90,14 @@ pg-dep-graph {
 
 .pcb-metadata-dialog header {
   justify-content: space-between;
-  border-bottom: 1px solid var(--sn-node-border);
+  border-bottom: 1px solid var(--sn-sys-outline);
   min-width: 0;
 }
 
 .pcb-metadata-dialog footer {
   justify-content: flex-end;
   flex-wrap: wrap;
-  border-top: 1px solid var(--sn-node-border);
+  border-top: 1px solid var(--sn-sys-outline);
   min-width: 0;
 }
 
@@ -121,7 +121,7 @@ pg-dep-graph {
   padding: 12px;
   box-sizing: border-box;
   background: var(--sn-bg-overlay);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-family: var(--sn-font-mono);
   font-size: 11px;
   line-height: 1.55;
@@ -131,19 +131,19 @@ pg-dep-graph {
 .pcb-icon-btn {
   --sn-button-icon-size: 28px;
   --sn-button-icon-font-size: 16px;
-  --sn-button-border: var(--sn-node-border);
+  --sn-button-border: var(--sn-sys-outline);
   --sn-button-radius: 3px;
   --sn-button-bg: var(--sn-accent-bg-subtle);
-  --sn-button-bg-hover: var(--sn-node-hover);
-  --sn-button-color: var(--sn-text);
-  --sn-button-focus: var(--sn-node-selected);
-  color: var(--sn-text);
+  --sn-button-bg-hover: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-accent-bg-subtle));
+  --sn-button-color: var(--sn-sys-on-surface);
+  --sn-button-focus: var(--sn-sys-accent);
+  color: var(--sn-sys-on-surface);
 }
 
 .pcb-metadata-status {
   flex: 1 1 180px;
   min-width: 0;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-family: var(--sn-font-mono);
   font-size: 10px;
   line-height: 1.35;
@@ -151,11 +151,11 @@ pg-dep-graph {
 }
 
 .pcb-metadata-status[data-error] {
-  color: var(--sn-danger-color);
+  color: var(--sn-sys-danger);
 }
 
 .pcb-metadata-status[data-success] {
-  color: var(--sn-success-color);
+  color: var(--sn-sys-success);
 }
 
 .pcb-metadata-dialog[data-saving] .graph-explorer-btn,
@@ -186,7 +186,7 @@ pg-dep-graph {
   font-size: 8px;
   line-height: 1;
   white-space: nowrap;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   pointer-events: auto;
   cursor: default;
 }
@@ -230,11 +230,11 @@ pg-dep-graph {
 }
 
 .pcb-pin[data-kind="fn"] {
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 .pcb-pin:hover {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
   text-shadow: var(--sn-accent-glow);
 }
 

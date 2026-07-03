@@ -1,5 +1,5 @@
 export default `
-  :host { display: block; height: 100%; background: var(--sn-panel-bg); }
+  :host { display: block; height: 100%; background: var(--sn-sys-surface-panel); }
 
   pg-active-context {
     & .ctx-shell {
@@ -10,7 +10,7 @@ export default `
 
     & .ctx-header {
       padding: 10px 12px;
-      border-bottom: 1px solid var(--sn-node-border);
+      border-bottom: 1px solid var(--sn-sys-outline);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -20,7 +20,7 @@ export default `
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
-      color: var(--sn-text-dim);
+      color: var(--sn-sys-on-surface-dim);
     }
 
     & .ctx-file-list {
@@ -39,13 +39,13 @@ export default `
     & .ctx-file-item {
       flex: 1 1 auto;
       min-width: 0;
-      --sn-list-item-bg: var(--sn-node-bg);
-      --sn-list-item-active-bg: var(--sn-node-bg);
+      --sn-list-item-bg: var(--sn-sys-surface-raised);
+      --sn-list-item-active-bg: var(--sn-sys-surface-raised);
       --sn-list-item-padding: 6px 8px;
       --sn-list-item-icon-color: var(--sn-cat-server);
       --sn-list-item-icon-font-size: 14px;
       --sn-list-item-description-size: 10px;
-      --sn-list-item-description-color: var(--sn-text-dim);
+      --sn-list-item-description-color: var(--sn-sys-on-surface-dim);
     }
 
     & .ctx-empty-loading {
@@ -54,14 +54,14 @@ export default `
 
     & .ctx-empty-muted {
       padding: 20px;
-      color: var(--sn-text-dim);
+      color: var(--sn-sys-on-surface-dim);
       font-size: 12px;
       text-align: center;
     }
 
     & .ctx-empty-error {
       padding: 10px;
-      color: var(--sn-danger-color);
+      color: var(--sn-sys-danger);
       font-size: 12px;
     }
   }

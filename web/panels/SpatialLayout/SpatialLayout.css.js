@@ -7,8 +7,8 @@ pg-spatial-layout {
 }
 
 .psl-shell {
-  background: var(--sn-bg);
-  color: var(--sn-text);
+  background: var(--sn-sys-surface);
+  color: var(--sn-sys-on-surface);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   height: 100%;
@@ -17,8 +17,8 @@ pg-spatial-layout {
 
 .psl-header {
   align-items: center;
-  background: var(--sn-panel-bg);
-  border-bottom: 1px solid var(--sn-node-border);
+  background: var(--sn-sys-surface-panel);
+  border-bottom: 1px solid var(--sn-sys-outline);
   display: flex;
   gap: 16px;
   justify-content: space-between;
@@ -27,7 +27,7 @@ pg-spatial-layout {
 
 .psl-title {
   align-items: center;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   display: flex;
   font-size: 15px;
   font-weight: 650;
@@ -36,7 +36,7 @@ pg-spatial-layout {
 }
 
 .psl-title .material-symbols-outlined {
-  color: var(--sn-node-selected);
+  color: var(--sn-sys-accent);
   font-size: 20px;
 }
 
@@ -50,7 +50,7 @@ pg-spatial-layout {
 
 .psl-control {
   align-items: center;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   display: inline-flex;
   font-size: 11px;
   font-weight: 600;
@@ -60,14 +60,14 @@ pg-spatial-layout {
 
 .psl-control select,
 .psl-control input {
-  accent-color: var(--sn-node-selected);
+  accent-color: var(--sn-sys-accent);
 }
 
 .psl-control select {
   background: var(--sn-field-control-bg);
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font: inherit;
   min-width: 132px;
   padding: 6px 8px;
@@ -100,8 +100,8 @@ pg-spatial-layout {
 
 .psl-enter:disabled {
   background: var(--sn-field-control-bg);
-  border-color: var(--sn-node-border);
-  color: var(--sn-text-dim);
+  border-color: var(--sn-sys-outline);
+  color: var(--sn-sys-on-surface-dim);
   cursor: default;
 }
 
@@ -111,8 +111,8 @@ pg-spatial-layout {
 
 .psl-stage {
   background:
-    radial-gradient(circle at 50% 38%, color-mix(in oklch, var(--sn-node-selected) 15%, transparent), transparent 34%),
-    linear-gradient(135deg, color-mix(in oklch, var(--sn-bg) 86%, black), var(--sn-bg));
+    radial-gradient(circle at 50% 38%, color-mix(in oklch, var(--sn-sys-accent) 15%, transparent), transparent 34%),
+    linear-gradient(135deg, color-mix(in oklch, var(--sn-sys-surface) 86%, black), var(--sn-sys-surface));
   min-height: 0;
   overflow: hidden;
   perspective: 980px;
@@ -122,8 +122,8 @@ pg-spatial-layout {
 
 .psl-floor {
   background:
-    linear-gradient(color-mix(in oklch, var(--sn-node-selected) 14%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklch, var(--sn-node-selected) 14%, transparent) 1px, transparent 1px);
+    linear-gradient(color-mix(in oklch, var(--sn-sys-accent) 14%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--sn-sys-accent) 14%, transparent) 1px, transparent 1px);
   background-size: 54px 54px;
   bottom: -28%;
   height: 64%;
@@ -159,18 +159,18 @@ pg-spatial-layout {
 }
 
 .psl-panel[data-hit="true"] {
-  border-color: var(--sn-node-selected);
+  border-color: var(--sn-sys-accent);
   box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--sn-node-selected) 72%, transparent),
-    0 0 38px color-mix(in oklch, var(--sn-node-selected) 30%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sn-sys-accent) 72%, transparent),
+    0 0 38px color-mix(in oklch, var(--sn-sys-accent) 30%, transparent),
     var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
 }
 
 .psl-panel[data-gesture="dragging"] {
-  border-color: var(--sn-node-selected);
+  border-color: var(--sn-sys-accent);
   box-shadow:
-    0 0 0 2px color-mix(in oklch, var(--sn-node-selected) 80%, transparent),
-    0 0 46px color-mix(in oklch, var(--sn-node-selected) 36%, transparent),
+    0 0 0 2px color-mix(in oklch, var(--sn-sys-accent) 80%, transparent),
+    0 0 46px color-mix(in oklch, var(--sn-sys-accent) 36%, transparent),
     var(--psl-panel-shadow, var(--sn-xr-panel-shadow));
 }
 
@@ -274,7 +274,7 @@ pg-spatial-layout {
 }
 
 .psl-deep-edge {
-  background: color-mix(in oklch, var(--sn-node-border) 62%, var(--sn-node-selected));
+  background: color-mix(in oklch, var(--sn-sys-outline) 62%, var(--sn-sys-accent));
   display: block;
   height: 1px;
   left: 50%;
@@ -290,10 +290,10 @@ pg-spatial-layout {
 
 .psl-deep-node {
   align-items: center;
-  background: color-mix(in oklch, var(--sn-xr-panel-bg) 84%, var(--sn-node-selected) 16%);
-  border: 1px solid color-mix(in oklch, var(--sn-node-border) 72%, var(--sn-node-selected));
+  background: color-mix(in oklch, var(--sn-xr-panel-bg) 84%, var(--sn-sys-accent) 16%);
+  border: 1px solid color-mix(in oklch, var(--sn-sys-outline) 72%, var(--sn-sys-accent));
   border-radius: 999px;
-  box-shadow: 0 0 18px color-mix(in oklch, var(--sn-node-selected) 22%, transparent);
+  box-shadow: 0 0 18px color-mix(in oklch, var(--sn-sys-accent) 22%, transparent);
   color: transparent;
   display: inline-flex;
   height: var(--psl-node-size);
@@ -310,14 +310,14 @@ pg-spatial-layout {
 }
 
 .psl-deep-node[data-depth="0"] {
-  background: var(--sn-node-selected);
-  border-color: var(--sn-node-selected);
+  background: var(--sn-sys-accent);
+  border-color: var(--sn-sys-accent);
 }
 
 .psl-deep-node[data-focus="true"] {
   box-shadow:
-    0 0 0 2px color-mix(in oklch, var(--sn-node-selected) 86%, transparent),
-    0 0 34px color-mix(in oklch, var(--sn-node-selected) 44%, transparent);
+    0 0 0 2px color-mix(in oklch, var(--sn-sys-accent) 86%, transparent),
+    0 0 34px color-mix(in oklch, var(--sn-sys-accent) 44%, transparent);
 }
 
 .psl-xr-canvas-source {
@@ -329,7 +329,7 @@ pg-spatial-layout {
 
 .sn-xr-panel-fallback {
   align-items: center;
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   display: flex;
   font-size: 12px;
   height: 100%;
@@ -353,9 +353,9 @@ pg-spatial-layout {
 
 .psl-status {
   align-items: center;
-  background: var(--sn-panel-bg);
-  border-top: 1px solid var(--sn-node-border);
-  color: var(--sn-text-dim);
+  background: var(--sn-sys-surface-panel);
+  border-top: 1px solid var(--sn-sys-outline);
+  color: var(--sn-sys-on-surface-dim);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -365,9 +365,9 @@ pg-spatial-layout {
 }
 
 .psl-geometry {
-  background: var(--sn-panel-bg);
-  border-top: 1px solid var(--sn-node-border);
-  color: var(--sn-text-dim);
+  background: var(--sn-sys-surface-panel);
+  border-top: 1px solid var(--sn-sys-outline);
+  color: var(--sn-sys-on-surface-dim);
   display: grid;
   gap: 6px;
   grid-template-columns: minmax(0, 1fr);
@@ -381,7 +381,7 @@ pg-spatial-layout {
 }
 
 .psl-geometry-header {
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -389,8 +389,8 @@ pg-spatial-layout {
 
 .psl-html-canvas {
   align-items: center;
-  background: color-mix(in oklch, var(--sn-panel-bg) 82%, var(--sn-node-border));
-  border: 1px solid var(--sn-node-border);
+  background: color-mix(in oklch, var(--sn-sys-surface-panel) 82%, var(--sn-sys-outline));
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
   display: flex;
   flex-wrap: wrap;
@@ -400,24 +400,24 @@ pg-spatial-layout {
 }
 
 .psl-html-canvas span {
-  border: 1px solid var(--sn-node-border);
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   font-size: var(--sn-font-size);
   padding: var(--sn-space-xs) var(--sn-space-sm);
 }
 
 .psl-html-canvas span[data-active="true"] {
-  border-color: var(--sn-node-selected);
-  color: var(--sn-text);
+  border-color: var(--sn-sys-accent);
+  color: var(--sn-sys-on-surface);
 }
 
 .psl-geometry-row {
   align-items: center;
-  background: color-mix(in oklch, var(--sn-panel-bg) 82%, var(--sn-node-border));
-  border: 1px solid var(--sn-node-border);
+  background: color-mix(in oklch, var(--sn-sys-surface-panel) 82%, var(--sn-sys-outline));
+  border: 1px solid var(--sn-sys-outline);
   border-radius: var(--sn-card-radius);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   cursor: pointer;
   display: grid;
   font: inherit;
@@ -436,13 +436,13 @@ pg-spatial-layout {
 .psl-geometry-row:focus-visible,
 .psl-geometry-row[data-active="true"],
 .psl-geometry-row[data-gesture="dragging"] {
-  background: color-mix(in oklch, var(--sn-panel-bg) 78%, var(--sn-node-selected));
-  border-color: var(--sn-node-selected);
-  color: var(--sn-text);
+  background: color-mix(in oklch, var(--sn-sys-surface-panel) 78%, var(--sn-sys-accent));
+  border-color: var(--sn-sys-accent);
+  color: var(--sn-sys-on-surface);
 }
 
 .psl-geometry-row:focus-visible {
-  outline: 2px solid var(--sn-node-selected);
+  outline: 2px solid var(--sn-sys-accent);
   outline-offset: 2px;
 }
 

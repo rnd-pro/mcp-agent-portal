@@ -29,12 +29,12 @@ sn-card {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 .mp-card-icon .material-symbols-outlined {
   font-size: 20px;
-  color: var(--sn-text);
+  color: var(--sn-sys-on-surface);
 }
 
 .mp-card-source {
@@ -80,12 +80,12 @@ sn-card {
 }
 
 .mp-status-dot[data-active="true"] {
-  background: var(--sn-success-color);
-  box-shadow: 0 0 6px var(--sn-success-color);
+  background: var(--sn-sys-success);
+  box-shadow: 0 0 6px var(--sn-sys-success);
 }
 
 .mp-status-dot[data-active="false"] {
-  background: var(--sn-node-hover);
+  background: var(--sn-sys-on-surface-faint);
 }
 
 sn-button.mp-card-toggle {
@@ -97,13 +97,13 @@ sn-button.mp-card-toggle {
 }
 
 sn-button.mp-card-toggle:hover {
-  --sn-button-hover-bg: color-mix(in srgb, var(--sn-node-selected) 12%, transparent);
-  --sn-button-hover-border: var(--sn-node-selected);
+  --sn-button-hover-bg: color-mix(in srgb, var(--sn-sys-accent) 12%, transparent);
+  --sn-button-hover-border: var(--sn-sys-accent);
 }
 
 sn-button.mp-card-toggle[data-action="remove"]:hover {
-  --sn-button-hover-bg: color-mix(in srgb, var(--sn-danger-color) 12%, transparent);
-  --sn-button-hover-border: var(--sn-danger-color);
+  --sn-button-hover-bg: color-mix(in srgb, var(--sn-sys-danger) 12%, transparent);
+  --sn-button-hover-border: var(--sn-sys-danger);
 }
 
 sn-button.mp-card-toggle[disabled] {
@@ -116,7 +116,7 @@ export class McpServerCard extends Symbiote {
     name: '',
     description: '',
     icon: 'bolt',
-    gradient: 'linear-gradient(135deg, var(--sn-node-selected), var(--sn-node-hover))',
+    gradient: 'linear-gradient(135deg, var(--sn-sys-accent), var(--sn-sys-accent-container))',
     sourceHost: '',
     envHint: '',
     status: 'Available',

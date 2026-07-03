@@ -19,7 +19,7 @@ export default `
     font-style: italic;
   }
   .pg-outline-section {
-    border-bottom: 1px solid var(--sn-node-border);
+    border-bottom: 1px solid var(--sn-sys-outline);
     padding: 8px;
   }
   .pg-outline-title {
@@ -28,7 +28,7 @@ export default `
     gap: 6px;
     font-size: 11px;
     font-weight: 600;
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
     padding: 4px 4px 6px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -52,12 +52,12 @@ export default `
     font-size: 11px;
     padding: 6px 8px;
     margin: 4px 0;
-    background: var(--sn-bg);
+    background: var(--sn-sys-surface);
     border-radius: 4px;
     border-left: 3px solid var(--sn-cat-server);
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
   }
-  .pg-ctx-desc { padding: 4px 0; color: var(--sn-text); }
+  .pg-ctx-desc { padding: 4px 0; color: var(--sn-sys-on-surface); }
   .pg-ctx-test {
     display: flex;
     align-items: center;
@@ -70,7 +70,7 @@ export default `
   }
   .pg-ctx-raw {
     font-size: 11px;
-    color: var(--sn-text-dim);
+    color: var(--sn-sys-on-surface-dim);
   }
   .pg-pulse { animation: pulse 1.5s ease infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }

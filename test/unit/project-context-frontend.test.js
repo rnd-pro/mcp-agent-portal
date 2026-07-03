@@ -175,7 +175,7 @@ describe('project scoped frontend data loading', () => {
     assert.match(cssSource, /\.pm-auth-action\s*\{\s*margin-left: auto;\s*\}/);
     assert.ok(buttonCssSource.includes('sn-button[variant="primary"]'));
     assert.ok(buttonCssSource.includes('background: var(--sn-button-primary-bg);'));
-    assert.ok(themeSource.includes("'--sn-button-primary-bg': 'var(--sn-node-selected)'"));
+    assert.ok(themeSource.includes("'--sn-button-primary-bg': 'var(--sn-sys-accent)'"));
     assert.doesNotMatch(cssSource, /\.pm-auth-action\s*\{[^}]*\b(background|color|border-color)\s*:/s);
     assert.equal(templateSource.includes('Anthropic Gateway'), false);
     assert.equal(templateSource.includes('gateway'), false);

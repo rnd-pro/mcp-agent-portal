@@ -9,7 +9,7 @@ sn-card {
   transition: border-color 0.2s;
 }
 sn-card:hover {
-  border-color: var(--project-accent, var(--sn-node-selected));
+  border-color: var(--project-accent, var(--sn-sys-accent));
 }
 .project-title {
   font-size: 14px;
@@ -38,7 +38,7 @@ sn-card:hover {
   --sn-button-padding: 0;
   --sn-button-bg: transparent;
   --sn-button-border: transparent;
-  --sn-button-color: var(--sn-text-dim);
+  --sn-button-color: var(--sn-sys-on-surface-dim);
   margin-left: auto;
   opacity: 0;
   transition: opacity 0.2s;
@@ -50,19 +50,19 @@ sn-card:hover .project-remove[variant="icon"] {
   opacity: 1;
 }
 .project-remove[variant="icon"]:hover {
-  --sn-button-color: var(--sn-danger-color);
+  --sn-button-color: var(--sn-sys-danger);
 }
 .path {
   font-size: 11px;
   font-family: var(--sn-font-mono);
-  color: var(--sn-text-dim);
+  color: var(--sn-sys-on-surface-dim);
   word-break: break-all;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 a {
-  color: var(--project-accent, var(--sn-node-selected));
+  color: var(--project-accent, var(--sn-sys-accent));
   text-decoration: none;
 }
 a:hover {
