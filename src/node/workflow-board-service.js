@@ -5408,7 +5408,10 @@ export function createWorkflowBoardService(opts = {}) {
     let cardAllowsExpectedRed = /\bfull\s+npm\s+test\b[\s\S]{0,160}\ballowed\s+to\s+be\s+red\b/.test(contractText)
       || /\bfull[-\s]?suite\s+red\b/.test(contractText)
       || /\bexpected[-\s]?red\b/.test(contractText);
-    let auditRecordsLedger = /\bexpected[-\s]?red\b/.test(auditLower)
+    let auditRecordsExpectedRed = /\bexpected[-\s]?red\b/.test(auditLower)
+      || /\bexpected\s+downstream\s+red\b/.test(auditLower)
+      || /\b(?:expected|anticipated)\s+downstream\s+(?:slice\s+)?breakage\b/.test(auditLower);
+    let auditRecordsLedger = auditRecordsExpectedRed
       && (/\bfull[-\s]?suite\b/.test(auditLower) || /\bnpm\s+test\b/.test(auditLower))
       && /\b(red|fail(?:ed|ures|ing)?)\b/.test(auditLower);
     if (!cardAllowsExpectedRed || !auditRecordsLedger) return null;
