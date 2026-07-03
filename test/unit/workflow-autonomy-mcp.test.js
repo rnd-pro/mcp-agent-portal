@@ -173,6 +173,43 @@ describe('autonomy level over MCP + default-board materialization', () => {
     }
   });
 
+  it('AU08: the policy refresh preserves an operator publishMode kill-switch (manual) on an L5 board', async () => {
+    // A human kept L5 auto-execution but set publishMode 'manual' so a person owns the merge. A
+    // policy-version bump must NOT revert that kill-switch back to the L5 preset's 'after_audit', which
+    // would silently re-arm unattended self-merge.
+    let seed = createDefaultWorkflowBoard({ id: DEFAULT_WORKFLOW_BOARD_ID });
+    let stale = {
+      ...seed,
+      automation: { ...seed.automation, autonomyLevel: 5, publishMode: 'manual' },
+      version: 40,
+      metadata: { defaultPolicyVersion: 7 },
+    };
+    sg.commit([{ op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: stale }], 'test-seed');
+
+    let service = makeService();
+    let board = await readBoard(service);
+    assert.equal(board.automation.autonomyLevel, 5, 'still L5');
+    assert.equal(board.automation.publishMode, 'manual', 'the publish kill-switch survives the refresh');
+    // The rest of the L5 preset still materializes — only the restrictive publishMode is preserved.
+    let byAction = columnsByAction(board);
+    for (let action of ['classify', 'scope', 'orchestrate', 'execute', 'audit', 'publish']) {
+      assert.equal(byAction[action].autoAdvance, true, `${action} still materializes its L5 preset`);
+    }
+  });
+
+  it('AU08: the policy refresh also preserves a publishMode disabled kill-switch', async () => {
+    let seed = createDefaultWorkflowBoard({ id: DEFAULT_WORKFLOW_BOARD_ID });
+    let stale = {
+      ...seed,
+      automation: { ...seed.automation, autonomyLevel: 5, publishMode: 'disabled' },
+      version: 40,
+      metadata: { defaultPolicyVersion: 7 },
+    };
+    sg.commit([{ op: 'set', path: `workflowBoards/${DEFAULT_WORKFLOW_BOARD_ID}`, value: stale }], 'test-seed');
+    let board = await readBoard(makeService());
+    assert.equal(board.automation.publishMode, 'disabled', 'disabled is preserved, not reverted to after_audit');
+  });
+
   it('applyAutonomyLevel cascades a level-2 preset: intake auto-advances, later stages hold manual', () => {
     let service = makeService();
     let result = service.applyAutonomyLevel(

@@ -471,6 +471,24 @@ describe('workflow gate engine (S6)', () => {
     assert.ok(!('manualGateOverride' in board.automation));
   });
 
+  // ── AU07: enabling full autonomy is DEFINE, not operational CONTROL ──────────────────────────
+  it('an agent cannot flip the board into autonomous via control resume mode=autonomous', async () => {
+    let service = makeService();
+    // arm is operational CONTROL, which every agent holds — allowed.
+    let armed = await service.controlWorkflowBoard({ action: 'arm' }, agentCtx());
+    assert.equal(armed.ok, true);
+    assert.equal(service.ensureBoard().mode, 'armed');
+    // resume accepts an arbitrary target mode, but flipping TO autonomous (unattended self-merge) is
+    // policy authorship → requires DEFINE, which an agent lacks. The control lane must not launder it.
+    let escalate = await service.controlWorkflowBoard({ action: 'resume', mode: 'autonomous' }, agentCtx());
+    assert.equal(escalate.ok, false, 'the CONTROL lane cannot enable full autonomy');
+    assert.notEqual(service.ensureBoard().mode, 'autonomous', 'the board was not escalated to autonomous');
+    // a human (DEFINE) still can.
+    let byHuman = await service.controlWorkflowBoard({ action: 'resume', mode: 'autonomous' }, humanCtx());
+    assert.equal(byHuman.ok, true);
+    assert.equal(service.ensureBoard().mode, 'autonomous');
+  });
+
   // ── NARROW-ONLY AUTOMATION (inv 12) ──────────────────────────────────────────────────────────
   it('rejects a card automation that drops a column floor gate', async () => {
     let service = makeService();

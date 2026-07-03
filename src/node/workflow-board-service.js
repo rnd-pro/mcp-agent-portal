@@ -71,7 +71,7 @@ const WORKFLOW_SOURCE = 'workflow-board';
 // fields only — other operational fields (escalation, dependencyBlock, returns…) have their own
 // legitimate seams for a caller to set them directly (e.g. a human reply, `link_dependency`) and are not
 // touched here; forgeable-escalation-as-gate-evidence is tracked separately.
-const SERVICE_OWNED_CARD_METADATA = ['worktree', 'worktreeError'];
+const SERVICE_OWNED_CARD_METADATA = ['worktree', 'worktreeError', 'executedByAgents'];
 const DEFAULT_EVENT_LIMIT = 50;
 const MAX_EVENT_LIMIT = 200;
 const COMPACT_CARD_LIMIT = 20;
@@ -135,6 +135,11 @@ const RUNNING_RUN_STATUSES = new Set(['requested', 'running', 'recovering']);
 // in-flight run that needs recovery (orchestrate/execute/audit/publish each spawn or require a
 // run). The passive intake/close actions (classify/scope/close) never strand a run.
 const EXECUTION_COLUMN_ACTIONS = new Set(WORKFLOW_COLUMN_ACTIONS.filter(workflowActionIsExecution));
+// Stages whose agent SHAPES the deliverable (plans or implements it). A card's auditor must not be one
+// of these agents — separated duty (inv 47) at the AGENT level, the property `auditorIndependent` must
+// verify. `audit` and `publish` are deliberately excluded: the auditor reviewing its own audit run, or a
+// release-manager publishing, is not "producing the work." Recorded per card in metadata.executedByAgents.
+const WORK_PRODUCING_ACTIONS = new Set(['orchestrate', 'execute']);
 // Columns whose action implies a card may hold UNCOMMITTED working-tree changes still pending
 // advance/audit/commit — there a TERMINAL run legitimately reserves file scope so a peer cannot clobber
 // the produced changes. `orchestrate` (pre-execution / `ready`) is intentionally absent: a card sitting
@@ -533,12 +538,25 @@ async function probeReleaseTests(cwd) {
       let passMatch = out.match(/^# pass (\d+)/m);
       let failing = failMatch ? Number(failMatch[1]) : null;
       let timedOut = Boolean(err && err.killed);
+      // Enumerate the failing TAP subtests by name (`not ok <n> - <name>`) so the expected-red gate can
+      // verify that ONLY the specifically-declared tests are red — a blanket red-count is not enough to
+      // ship, since a real regression must not ride along with an expected failure.
+      let failingNames = [];
+      for (let line of out.split('\n')) {
+        let m = line.match(/^\s*not ok \d+\s*-\s*(.+?)\s*$/);
+        if (m) failingNames.push(m[1]);
+      }
       // Fail-closed: a non-zero exit (incl. timeout) OR a parsed failing-count > 0 fails the gate.
       let passed = !err && (failing === null || failing === 0);
       done({
         available: true,
         passed,
         failing,
+        failingNames,
+        // A timeout (or any non-zero exit with no parseable fail-count) leaves the red set UNKNOWN —
+        // the expected-red gate must treat this as un-scopeable and never allow it through.
+        enumerable: !timedOut && failing !== null,
+        timedOut,
         passing: passMatch ? Number(passMatch[1]) : null,
         reason: passed
           ? `unit tests passed${passMatch ? ` (${passMatch[1]})` : ''}`
@@ -1141,6 +1159,16 @@ export function createWorkflowBoardService(opts = {}) {
       return leveledById.get(columnId) ?? column;
     });
     let automationLeveled = normalizeWorkflowBoardAutomation(leveled.automation);
+    // AU08: never silently re-arm an operator's publish kill-switch. applyAutonomyLevelToBoard sets
+    // publishMode from the level preset (L5 → 'after_audit'); a human who restricted publishing to
+    // 'manual'/'disabled' (a person owns the merge) must not have it reverted on a policy-version bump.
+    // Check the RAW stored value (not the normalized one, which defaults an ABSENT field to 'manual'):
+    // an explicitly-authored 'manual'/'disabled' is preserved, while a board that never carried a
+    // publishMode still materializes the preset's value (fill-only, matching the autoAdvance guard).
+    let rawPublishMode = asObject(board.automation).publishMode;
+    if (rawPublishMode === 'manual' || rawPublishMode === 'disabled') {
+      automationLeveled = { ...automationLeveled, publishMode: rawPublishMode };
+    }
     let changed = JSON.stringify(currentColumns) !== JSON.stringify(nextColumnsLeveled)
       || JSON.stringify(currentTransitions) !== JSON.stringify(nextTransitions)
       || JSON.stringify(asObject(board.automation)) !== JSON.stringify(automationLeveled);
@@ -5397,27 +5425,34 @@ export function createWorkflowBoardService(opts = {}) {
     return null;
   }
 
-  function expectedRedReleaseTestAllowance(card, auditText, testProbe) {
+  // Structured expected-red release-gate allowance (AU21). A card that legitimately expects specific
+  // tests to be red (a TDD red-phase card, or one whose change breaks a downstream slice repaired in a
+  // sibling card) may advance past a FAILING release suite — but ONLY under a typed, scoped contract, not
+  // free-text. The prior prose-matching bypass was agent-controllable on both sides (the card body and
+  // the audit worker's own report), scoped nothing, and let timeouts through. Hardened rules:
+  //   1. The allow-list is a STRUCTURED card field `metadata.expectedRedTests` (string[] of TAP test-name
+  //      substrings) — a deliberate, machine-checkable declaration, not magic words in prose.
+  //   2. The red set must be ENUMERABLE (no timeout / unparseable exit): an un-scopeable red never ships.
+  //   3. EVERY failing test must match a declared entry — a real regression cannot ride along with an
+  //      expected failure.
+  //   4. Only an INDEPENDENT auditor may ledger it (`allowLedger`): a bare daemon self-sign cannot invoke
+  //      expected-red, so it composes with the separated-duty audit gate (AU01) rather than bypassing it.
+  function expectedRedReleaseTestAllowance(card, testProbe, { allowLedger = false } = {}) {
+    if (!allowLedger) return null;
     if (!testProbe?.available || testProbe.passed) return null;
-    let contractText = [
-      card?.body,
-      ...(Array.isArray(card?.acceptanceCriteria) ? card.acceptanceCriteria : []),
-      ...(Array.isArray(card?.context) ? card.context : []),
-    ].filter(Boolean).join('\n').toLowerCase();
-    let auditLower = String(auditText || '').toLowerCase();
-    let cardAllowsExpectedRed = /\bfull\s+npm\s+test\b[\s\S]{0,160}\ballowed\s+to\s+be\s+red\b/.test(contractText)
-      || /\bfull[-\s]?suite\s+red\b/.test(contractText)
-      || /\bexpected[-\s]?red\b/.test(contractText);
-    let auditRecordsExpectedRed = /\bexpected[-\s]?red\b/.test(auditLower)
-      || /\bexpected\s+downstream\s+red\b/.test(auditLower)
-      || /\b(?:expected|anticipated)\s+downstream\s+(?:slice\s+)?breakage\b/.test(auditLower);
-    let auditRecordsLedger = auditRecordsExpectedRed
-      && (/\bfull[-\s]?suite\b/.test(auditLower) || /\bnpm\s+test\b/.test(auditLower))
-      && /\b(red|fail(?:ed|ures|ing)?)\b/.test(auditLower);
-    if (!cardAllowsExpectedRed || !auditRecordsLedger) return null;
+    if (!testProbe.enumerable || !Array.isArray(testProbe.failingNames)) return null;
+    let declared = textArray(card?.metadata?.expectedRedTests)
+      .map(entry => String(entry).trim().toLowerCase())
+      .filter(Boolean);
+    if (!declared.length) return null;
+    let failingNames = testProbe.failingNames.map(name => String(name).toLowerCase());
+    if (!failingNames.length) return null;
+    let unexpected = failingNames.filter(name => !declared.some(pattern => name.includes(pattern)));
+    if (unexpected.length) return null;
     return {
       expectedRed: true,
-      reason: `release gate accepted audited expected-red result: ${testProbe.reason}`,
+      reason: `release gate accepted a scoped expected-red result (${failingNames.length} declared-red test(s))`,
+      declared,
       failing: testProbe.failing ?? null,
       passing: testProbe.passing ?? null,
     };
@@ -5642,7 +5677,6 @@ export function createWorkflowBoardService(opts = {}) {
         if (latestFinished?.status === 'completed') {
           let executedBy = textArray(latestCard.metadata?.executedBy);
           let independentlySigned = auditSignedIndependently(checks, executedBy);
-          let auditText = independentlySigned ? '' : (workerFinalAnswerText(latestFinished, runtimeTasks) || '');
           let verdict = independentlySigned ? 'pass' : auditRunVerdict(latestFinished, runtimeTasks);
           // When the floor is not yet independently signed, the daemon would have to sign it itself —
           // allowed only when the daemon is not an executor of this card, or under an explicit waiver.
@@ -5656,7 +5690,14 @@ export function createWorkflowBoardService(opts = {}) {
           // executor); only the rare extreme reaches a human via the orchestrator / needs_decision lane.
           let auditAgents = textArray((board.columns ?? []).find(col => col.id === auditColumnId)?.automation?.agents);
           let auditor = textOrNull(latestFinished.leaseOwner);
-          let auditorIndependent = verdict === 'pass' && !independentlySigned && !!auditor && auditAgents.includes(auditor);
+          // Separated duty at the AGENT level (AU01): a configured reviewer agent's PASS counts as an
+          // INDEPENDENT sign-off ONLY if that agent did not also produce the work. Without the
+          // executedByAgents check, a board whose in-progress and quality-audit pools share an agent slug
+          // (or an agent that ran both stages) would self-audit its own work and stamp it "independent" —
+          // the one gate before an unsupervised merge would not verify the property it claims.
+          let executedByAgents = textArray(latestCard.metadata?.executedByAgents);
+          let auditorIndependent = verdict === 'pass' && !independentlySigned && !!auditor
+            && auditAgents.includes(auditor) && !executedByAgents.includes(auditor);
           // An INDEPENDENT audit pass (a recorded independent signer, or a configured reviewer agent's PASS
           // run) supersedes a lingering needs_audit flag — the fresh pass is authoritative. A bare daemon
           // self-sign still respects needs_audit (it may not self-pass a card flagged for rework).
@@ -5670,7 +5711,11 @@ export function createWorkflowBoardService(opts = {}) {
             let testProbe = changesetTouchesCode(cardWorkingDir(latestCard))
               ? await runReleaseTests(cardWorkingDir(latestCard))
               : { available: false, reason: 'changeset touches no code; unit gate not applicable' };
-            let expectedRedAllowance = expectedRedReleaseTestAllowance(latestCard, auditText, testProbe);
+            // Expected-red may be ledgered ONLY by an independent auditor (AU21 composes with AU01): a
+            // bare daemon self-sign cannot wave a red suite through.
+            let expectedRedAllowance = expectedRedReleaseTestAllowance(latestCard, testProbe, {
+              allowLedger: independentlySigned || auditorIndependent,
+            });
             if (testProbe.available && !testProbe.passed && !expectedRedAllowance) {
               let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
               let nextMetadata = latestCard.metadata;
@@ -7262,6 +7307,16 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     let mode = modeForBoardControl(action, board, args);
+    // Enabling full autonomy is policy authorship, not operational control (AU07). A CONTROL-only
+    // principal (every agent holds CAP.CONTROL) may pause/arm/drain/stop/resume, but flipping the board
+    // TO `autonomous` — which unlocks unattended self-merge to base — additionally requires DEFINE, the
+    // same gate a direct automation edit passes through. `resume` accepts an arbitrary `args.mode`, so
+    // without this a verified worker could escalate the board it runs under to full autonomy through the
+    // control lane, laundering around the DEFINE/pendingApproval gate.
+    if (mode === 'autonomous' && board.mode !== 'autonomous' && !isDaemonPrincipal(principal)) {
+      let defineGate = gate('policy.define', principal, { boardId: board.id });
+      if (!defineGate.ok) return defineGate;
+    }
     let result = updateWorkflowBoard({
       boardId: board.id,
       mode,
@@ -7947,6 +8002,16 @@ export function createWorkflowBoardService(opts = {}) {
     // card.metadata.executedBy (dedup). A floor-check write later checks this list — an executor
     // cannot sign the audit/hygiene of a card it executed (separated duty).
     let nextExecutedBy = uniqueArray([...textArray(card.metadata?.executedBy), principal.id]);
+    // Agent-level separated duty (inv 47, AU01): record the AGENT SLUG that ran a work-producing stage
+    // (orchestrate/execute), so the autonomous release gate can verify the auditor did not also produce
+    // the work. `executedBy` above is the daemon PRINCIPAL in autonomous mode (all runs delegated by the
+    // daemon), which cannot distinguish agents; leaseOwner is the stage agent slug (effectiveArgs sets it
+    // to chooseStageAgent). Audit/publish stages are excluded so a legitimate reviewer is never recorded.
+    let stageAction = cardColumnAction(board, card);
+    let executingAgent = WORK_PRODUCING_ACTIONS.has(stageAction) ? textOrNull(lease.leaseOwner) : null;
+    let nextExecutedByAgents = executingAgent
+      ? uniqueArray([...textArray(card.metadata?.executedByAgents), executingAgent])
+      : textArray(card.metadata?.executedByAgents);
     // A delegated card may carry an orchestrator-return subscription (S5). Persist the NORMALIZED
     // record on metadata.subscription beside the entityRefs merge; this only records the subscription
     // (a memberless join normalizes to null and is dropped) — join materialization is an explicit
@@ -7963,6 +8028,7 @@ export function createWorkflowBoardService(opts = {}) {
       metadata: {
         ...asObject(card.metadata),
         executedBy: nextExecutedBy,
+        ...(nextExecutedByAgents.length ? { executedByAgents: nextExecutedByAgents } : {}),
         ...(normalizedSubscription ? { subscription: normalizedSubscription } : {}),
       },
       entityRefs: {

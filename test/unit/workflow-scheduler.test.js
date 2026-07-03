@@ -1221,12 +1221,15 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
   });
 
-  it('release gate: audited expected-red contract advances despite a full-suite failure', async () => {
+  // AU21: expected-red is a STRUCTURED, SCOPED contract — a typed `metadata.expectedRedTests` allow-list,
+  // every failing test must match it, the red set must be enumerable (no timeouts), and only an
+  // INDEPENDENT auditor may ledger it. Helper plants the declaration + a scoped failing probe.
+  function plantExpectedRed(id, { declared, failingNames, enumerable = true, leaseOwner = 'qa-engineer', executedByAgents = null }) {
     service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
-    let cardId = plantAuditedCard('aud-expected-red', 'completed', {
-      cwd: makeGitRepo('expected-red', { dirtyPaths: ['src/feature.js'] }),
+    let cardId = plantAuditedCard(id, 'completed', {
+      cwd: makeGitRepo(id, { dirtyPaths: ['src/feature.js'] }),
       executedBy: ['daemon'],
-      leaseOwner: 'qa-engineer',
+      leaseOwner,
     });
     let card = service.getCard(cardId);
     sg.commit([{
@@ -1234,58 +1237,145 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
       path: `workflowCards/${cardId}`,
       value: {
         ...card,
-        body: 'Full npm test is allowed to be red after this repair when the audit records the expected-red ledger.',
-        acceptanceCriteria: [...card.acceptanceCriteria, 'Full-suite red, if any, is recorded as expected downstream regeneration.'],
+        metadata: {
+          ...card.metadata,
+          expectedRedTests: declared,
+          ...(executedByAgents ? { executedByAgents } : {}),
+        },
         version: card.version + 1,
       },
     }], 'test:expected-red-contract');
-    releaseTestVerdict = { available: true, passed: false, failing: 43, passing: 83, reason: 'unit tests failed (43 failing)' };
+    releaseTestVerdict = {
+      available: true, passed: false, failing: failingNames.length, passing: 83,
+      failingNames, enumerable, timedOut: !enumerable,
+      reason: `unit tests failed (${failingNames.length} failing)`,
+    };
+    return cardId;
+  }
+
+  it('release gate: a structured expected-red contract advances when EVERY failing test is declared', async () => {
+    let cardId = plantExpectedRed('aud-expected-red', {
+      declared: ['downstream slice'],
+      failingNames: ['downstream slice A regenerates', 'downstream slice B regenerates'],
+    });
 
     let result = await service.reconcileWorkflowRuntimeTasks(
       { boardId: DEFAULT_WORKFLOW_BOARD_ID },
-      verdictTasks(cardId, 'Expected-red full-suite ledger: npm test has 43 failures from downstream regeneration debt. COMPLETION_PROOF: PASS'),
+      verdictTasks(cardId, 'Reviewed; the two downstream-slice reds are the declared expected-red set. COMPLETION_PROOF: PASS'),
       { drive: true },
     );
 
     let advanced = service.getCard(cardId);
-    assert.equal(advanced.columnId, 'commit-publish', 'the explicit expected-red contract lets audit advance');
+    assert.equal(advanced.columnId, 'commit-publish', 'a fully-declared expected-red set lets audit advance');
     let audit = sg.get(`workflowChecks/${cardId}`)?.checks?.audit;
     assert.equal(checkPassed(audit), true, 'the audit floor is still signed');
     assert.equal(audit.signedBy, 'qa-engineer');
     assert.equal(audit.releaseTests.expectedRed, true);
-    assert.equal(audit.releaseTests.failing, 43);
+    assert.deepEqual(audit.releaseTests.declared, ['downstream slice']);
     assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
   });
 
-  it('release gate: expected downstream red audit wording counts as the expected-red ledger', async () => {
+  it('release gate: an UNDECLARED failing test (a real regression riding along) HOLDS, does not advance', async () => {
+    let cardId = plantExpectedRed('aud-unexpected-red', {
+      declared: ['downstream slice'],
+      failingNames: ['downstream slice A regenerates', 'auth login flow'], // second is a real regression
+    });
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      verdictTasks(cardId, 'COMPLETION_PROOF: PASS'),
+      { drive: true },
+    );
+
+    let held = service.getCard(cardId);
+    assert.equal(held.columnId, 'quality-audit', 'a red outside the declared set is not waved through');
+    assert.equal(held.recoveryFlags.includes('needs_audit'), true);
+  });
+
+  it('release gate: an un-enumerable red (timeout) is never accepted as expected-red', async () => {
+    let cardId = plantExpectedRed('aud-timeout-red', {
+      declared: ['downstream slice'],
+      failingNames: [],
+      enumerable: false,
+    });
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      verdictTasks(cardId, 'COMPLETION_PROOF: PASS'),
+      { drive: true },
+    );
+
+    assert.equal(service.getCard(cardId).columnId, 'quality-audit', 'a timed-out suite is un-scopeable and holds');
+  });
+
+  it('release gate: a daemon self-sign cannot ledger expected-red (only an independent auditor may)', async () => {
+    // Same agent slug ran the work AND the audit → auditorIndependent is false (AU01), so there is no
+    // independent ledger authority; the expected-red declaration must NOT wave the red suite through.
+    let cardId = plantExpectedRed('aud-selfsign-red', {
+      declared: ['downstream slice'],
+      failingNames: ['downstream slice A regenerates'],
+      leaseOwner: 'backend-engineer',
+      executedByAgents: ['backend-engineer'],
+    });
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      verdictTasks(cardId, 'COMPLETION_PROOF: PASS'),
+      { drive: true },
+    );
+
+    assert.equal(service.getCard(cardId).columnId, 'quality-audit', 'no independent auditor → expected-red is not honoured');
+  });
+
+  it('AU01: an auditor that also produced the work (overlapping pool) is NOT treated as independent', async () => {
+    // A board whose in-progress and quality-audit pools share `qa-engineer`: qa-engineer executed the
+    // work AND ran the audit. The audit run's PASS must NOT be laundered as an "independent reviewer
+    // PASS" — that is a self-audit, and it is the only gate before an unsupervised merge.
     service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
-    let cardId = plantAuditedCard('aud-expected-downstream-red', 'completed', {
-      cwd: makeGitRepo('expected-downstream-red', { dirtyPaths: ['src/feature.js'] }),
+    let cardId = plantAuditedCard('aud-selfpool', 'completed', {
+      cwd: makeGitRepo('selfpool', { dirtyPaths: ['src/feature.js'] }),
       executedBy: ['daemon'],
       leaseOwner: 'qa-engineer',
     });
     let card = service.getCard(cardId);
     sg.commit([{
-      op: 'set',
-      path: `workflowCards/${cardId}`,
-      value: {
-        ...card,
-        body: 'Full npm test is allowed to be red after this repair when the audit records the expected-red ledger.',
-        version: card.version + 1,
-      },
-    }], 'test:expected-downstream-red-contract');
-    releaseTestVerdict = { available: true, passed: false, failing: 43, passing: 83, reason: 'unit tests failed (43 failing)' };
+      op: 'set', path: `workflowCards/${cardId}`,
+      value: { ...card, metadata: { ...card.metadata, executedByAgents: ['qa-engineer'] }, version: card.version + 1 },
+    }], 'test:overlap-pool');
+    releaseTestVerdict = { available: true, passed: true, passing: 900, reason: 'unit tests passed (900)' };
 
-    let result = await service.reconcileWorkflowRuntimeTasks(
+    await service.reconcileWorkflowRuntimeTasks(
       { boardId: DEFAULT_WORKFLOW_BOARD_ID },
-      verdictTasks(cardId, 'Expected downstream red: full-suite red recorded as anticipated downstream slice breakage. COMPLETION_PROOF: PASS'),
+      verdictTasks(cardId, 'Reviewed, all good. COMPLETION_PROOF: PASS'),
       { drive: true },
     );
 
-    let advanced = service.getCard(cardId);
-    assert.equal(advanced.columnId, 'commit-publish', 'the real QA wording lets audit advance');
-    assert.equal(sg.get(`workflowChecks/${cardId}`)?.checks?.audit?.releaseTests?.expectedRed, true);
-    assert.ok(result.releaseTail.advanced.some(i => i.cardId === cardId && i.toColumnId === 'commit-publish'));
+    assert.equal(service.getCard(cardId).columnId, 'quality-audit', 'a self-auditing agent does not advance its own card');
+  });
+
+  it('AU01: a disjoint-pool reviewer PASS still advances (independence preserved for the default board)', async () => {
+    // Contrast: the executor agent (backend-engineer) differs from the auditor (qa-engineer), so the
+    // reviewer PASS is a genuine independent sign-off and the card advances as before.
+    service.updateWorkflowBoard({ mode: 'autonomous', automation: { publishMode: 'manual' } }, { gatedBy: 'board.control' });
+    let cardId = plantAuditedCard('aud-disjoint', 'completed', {
+      cwd: makeGitRepo('disjoint', { dirtyPaths: ['src/feature.js'] }),
+      executedBy: ['daemon'],
+      leaseOwner: 'qa-engineer',
+    });
+    let card = service.getCard(cardId);
+    sg.commit([{
+      op: 'set', path: `workflowCards/${cardId}`,
+      value: { ...card, metadata: { ...card.metadata, executedByAgents: ['backend-engineer'] }, version: card.version + 1 },
+    }], 'test:disjoint-pool');
+    releaseTestVerdict = { available: true, passed: true, passing: 900, reason: 'unit tests passed (900)' };
+
+    await service.reconcileWorkflowRuntimeTasks(
+      { boardId: DEFAULT_WORKFLOW_BOARD_ID },
+      verdictTasks(cardId, 'Reviewed, all good. COMPLETION_PROOF: PASS'),
+      { drive: true },
+    );
+
+    assert.equal(service.getCard(cardId).columnId, 'commit-publish', 'an independent reviewer PASS advances the card');
   });
 
   it('release gate: a docs-only changeset skips the unit suite (nothing to verify) and advances', async () => {
