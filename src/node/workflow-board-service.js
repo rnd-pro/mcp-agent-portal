@@ -648,6 +648,14 @@ function runtimeTaskStatus(task = {}) {
   return String(task.status ?? task.state ?? task.type ?? 'unknown').trim().toLowerCase() || 'unknown';
 }
 
+function runtimeTaskHasError(task = {}) {
+  return task.hasError === true
+    || task.isError === true
+    || task.result?.isError === true
+    || task.error != null
+    || task.errorKind != null;
+}
+
 function runtimeTaskColumnId(status) {
   if (RUNTIME_DONE_STATUSES.has(status)) return 'done';
   if (RUNTIME_READY_STATUSES.has(status)) return 'ready';
@@ -4766,7 +4774,8 @@ export function createWorkflowBoardService(opts = {}) {
   function runtimeStatusForTaskId(runtimeTasks, taskId) {
     let task = runtimeTasks.get(taskId);
     if (!task) return null;
-    return runtimeTaskStatus(task);
+    let status = runtimeTaskStatus(task);
+    return RUNTIME_DONE_STATUSES.has(status) && runtimeTaskHasError(task) ? 'error' : status;
   }
 
   // The worker's final answer is persisted as a `role:'agent'` chat message keyed by taskId

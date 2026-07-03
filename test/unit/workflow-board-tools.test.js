@@ -171,6 +171,7 @@ describe('workflow board MCP tool', () => {
         goalId: 'goal-1',
         chatId: 'chat-1',
         includeRuntime: true,
+        reconcileRuntime: true,
         compact: true,
         view: 'status',
       },
@@ -230,6 +231,7 @@ describe('workflow board MCP tool', () => {
     }
 
     assert.deepEqual(calls.map(call => call.methodName), Object.values(ACTION_METHODS));
+    assert.equal(calls.find(call => call.action === 'get_board').args.reconcileRuntime, true);
     assert.equal(calls[0].source, 'test-source');
     assert.equal(calls[0].contextToolName, 'workflow_board');
     assert.equal(calls[0].contextAction, 'list_boards');

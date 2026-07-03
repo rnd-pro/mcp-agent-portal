@@ -447,6 +447,7 @@ export const WORKFLOW_BOARD_TOOLS = [
         includeCards: { type: 'boolean', description: 'Include cards for get_board. Defaults to true.' },
         includeEvents: { type: 'boolean', description: 'Include recent events for get_board.' },
         includeRuntime: { type: 'boolean', description: 'Include linked runtime projection for get_board.' },
+        reconcileRuntime: { type: 'boolean', description: 'Reconcile linked runtime task status before returning get_board.' },
         compact: { type: 'boolean', description: 'Return a bounded status projection for L1 monitoring instead of full card history.' },
         view: { type: 'string', enum: ['status', 'queue'], description: 'Projection view for get_board/queue. Use status for compact monitoring, queue for scheduler depth.' },
         includeResolved: { type: 'boolean', description: 'Include resolved recovery records for recovery.' },
@@ -709,6 +710,7 @@ function serviceArgsForAction(action, args = {}) {
       includeCards: args.includeCards,
       includeEvents: args.includeEvents,
       includeRuntime: args.includeRuntime,
+      reconcileRuntime: args.reconcileRuntime ?? args.reconcile_runtime,
       compact: args.compact,
       view: args.view,
     });

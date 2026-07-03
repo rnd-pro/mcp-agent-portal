@@ -1874,6 +1874,64 @@ links:
     assert.equal(service.listEvents({ cardId: created.card.id }).some(event => event.eventType === 'runtime'), true);
   });
 
+  it('reconciles errored done runtime tasks and backfills run chat id', async () => {
+    let taskId = '44444444-4444-4444-8444-444444444445';
+    let chatId = 'chat-runtime-error';
+    let proxyManager = {
+      projectRoot: tmpDir,
+      requestFromChild: async (_server, _method, payload) => {
+        if (payload.name === 'list_tasks') return { content: [{ type: 'text', text: '[]' }] };
+        return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
+      },
+      chatWsServer: { taskChatMap: new Map() },
+    };
+    service = createWorkflowBoardService({
+      stateGraph: sg,
+      now: () => now++,
+      makeId: (prefix) => `${prefix}-${++idSeq}`,
+      projectRoot: tmpDir,
+      proxyManager,
+      defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'local-human' }),
+    });
+    let created = service.createOrUpdateCard({
+      title: 'Runtime error sync',
+      body: 'Errored task should release workflow state.',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      assignedAgent: 'orchestrator',
+      acceptanceCriteria: ['Runtime error updates the board'],
+      actor: 'test',
+    });
+    let started = await service.orchestrateWorkItem({
+      cardId: created.card.id,
+      actor: 'orchestrator',
+    });
+
+    assert.equal(started.run.chatId, null);
+    sg.merge(`tasks/${taskId}`, {
+      status: 'done',
+      hasError: true,
+      chatId,
+      updatedAt: 9000,
+      completedAt: 9000,
+    }, 'test');
+
+    let projection = await service.getBoardProjectionWithRuntime({
+      projectId: 'agent-portal',
+      reconcileRuntime: true,
+    });
+    let card = projection.cards.find(item => item.id === created.card.id);
+    let run = card.runs.find(item => item.id === started.run.id);
+
+    assert.equal(card.columnId, 'quality-audit');
+    assert.equal(card.recoveryFlags.includes('needs_audit'), true);
+    assert.equal(run.status, 'error');
+    assert.equal(run.chatId, chatId);
+    assert.equal(card.lease, null);
+  });
+
   it('creates a stage child chat when column routing chooses a different agent', async () => {
     let taskId = '55555555-5555-4555-8555-555555555555';
     let calls = [];
