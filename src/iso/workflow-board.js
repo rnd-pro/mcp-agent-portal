@@ -272,24 +272,38 @@ export function returnEventSupersedes(incoming, prior) {
 }
 
 /** Fold `incoming` into the bounded per-card return inbox, dropping superseded/stale entries. */
+// Cap the return inbox to `limit` WITHOUT evicting an unanswered question (AU18). A blind slice(-limit)
+// aged out an unconsumed needsResponse / hard-interrupt return when enough newer sibling returns arrived
+// (fan-in of up to 64 children), silently dropping a question that must be answered. Keep every unconsumed
+// two-way return, then fill the remaining budget with the most recent others, preserving order. If the
+// unanswered questions alone exceed the limit they are all kept — a question never auto-vanishes.
+function capReturnInbox(list, limit) {
+  if (!Array.isArray(list) || list.length <= limit) return Array.isArray(list) ? list.slice(-limit) : [];
+  let isProtected = (r) => Boolean(r && !r.consumedAt && (r.needsResponse || r.hardInterrupt));
+  let protectedCount = list.reduce((n, r) => (isProtected(r) ? n + 1 : n), 0);
+  let budget = Math.max(0, limit - protectedCount);
+  let keptOthers = new Set(list.filter(r => !isProtected(r)).slice(-budget));
+  return list.filter(r => isProtected(r) || keptOthers.has(r));
+}
+
 export function coalesceReturnEvents(events, incoming, limit = 12) {
   let list = Array.isArray(events) ? events : [];
-  if (!incoming) return list.slice(-limit);
+  if (!incoming) return capReturnInbox(list, limit);
   // Idempotent re-mint: an incoming whose eventId already sits in the inbox (e.g. the reconcile
   // re-parsed a stable WORKFLOW_RETURN marker on a still-running run) is a no-op — the orchestrator
   // wakes once per DISTINCT return, not once per reconcile pass.
   if (incoming.eventId
     && list.some(prior => prior.eventId === incoming.eventId && prior.correlationId === incoming.correlationId)) {
-    return list.slice(-limit);
+    return capReturnInbox(list, limit);
   }
   // A coalesce-only incoming is dropped when a terminal for its correlationId already landed.
   if (!incoming.actionable && !incoming.terminal
     && list.some(prior => prior.correlationId === incoming.correlationId && prior.terminal)) {
-    return list.slice(-limit);
+    return capReturnInbox(list, limit);
   }
   let kept = list.filter(prior => !returnEventSupersedes(incoming, prior));
   kept.push(incoming);
-  return kept.slice(-limit);
+  return capReturnInbox(kept, limit);
 }
 
 // ── Per-card comment / note stream (Axis C: human-agent collaboration surface) ───────────────────

@@ -566,6 +566,29 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     assert.ok(!after.metadata.returns[0].consumedAt, 'the routed return is not consumed-and-dropped — it survives in history');
   });
 
+  it('AU10: a paused board neither accrues escalation attempts nor auto-rejects', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    let board = service.ensureBoard();
+    let card = makeReadyCard(service, { title: 'paused-escalated', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${card.id}`);
+    // An escalated card one accrual short of the reject ceiling.
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+      ...base, metadata: { ...base.metadata, escalation: {
+        schema: 'workflow-escalation-state/v1', kind: 'rework', detail: 'needs rework', attemptCount: 5, nextAttemptAt: 0,
+      } },
+    } }], 'seed-escalated', { durable: true });
+    // Pause the board (e.g. a budget-breaker trip).
+    service.updateWorkflowBoard({ patch: { mode: 'paused' }, actor: 'test', reason: 'breaker' });
+
+    let res = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(res.skipped, true, 'the driver is a no-op on a paused board');
+    let after = service.getCard(card.id);
+    assert.equal(after.metadata.escalation.attemptCount, 5, 'no attempt accrued while paused');
+    assert.notEqual(after.columnId, 'rejected', 'the escalated card is NOT auto-rejected while paused');
+  });
+
   it('AU04: a return-only wake whose dispatch is blocked keeps its return unconsumed (retries, not lost)', async () => {
     let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
     let service = makeService(ledger.proxy);

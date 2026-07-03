@@ -99,6 +99,11 @@ const DEFAULT_RECONCILE_TRIGGER_GAP_MS = 1000;
 const ESCALATION_ACTOR = 'escalation-channel';
 const DEFAULT_ESCALATION_MAX_ATTEMPTS = 3;
 const DEFAULT_ESCALATION_BACKOFF_MS = 5 * 60 * 1000;
+// AU19: cap the exponential escalation backoff. Without it, a board that has no reject terminal (so the
+// attempt-cap reject backstop can never fire) grows the backoff window as 5min·2^(n-1) — by ~attempt 15
+// the next retry is years out, so the card is effectively frozen while nominally "active". Capping the
+// window keeps an exhausted-but-unterminable card visibly retrying at a bounded cadence.
+const MAX_ESCALATION_BACKOFF_MS = 60 * 60 * 1000;
 // Audit return-loop backstop: after this many CONSECUTIVE verdict-less / failed audits — each one
 // returning the card to the orchestrator to re-route — the card is parked for an explicit human
 // decision (a `needs_human` escalation → the needs-decision column) instead of being re-routed again.
@@ -992,11 +997,18 @@ export function createWorkflowBoardService(opts = {}) {
     let cards = Object.values(getCollection(stateGraph, 'workflowCards')).filter(c => c.boardId === board.id);
     let isRunning = (id) => getRunsForCard(id).some(run => RUNNING_RUN_STATUSES.has(run.status));
     let removed = [];
+    let rejectColumnId = rejectTerminalColumnId(board);
     for (let card of cards) {
       let wt = cardWorktree(card);
       if (!wt || !classifier.isTerminal(card.columnId) || isRunning(card.id)) continue;
+      // AU14: a card retired to the reject/discard terminal holds committed-but-UNMERGED work on its
+      // branch — force-deleting it (git branch -D) permanently drops commits a human may want to inspect.
+      // Remove the worktree but KEEP the branch for a discarded card; only a merged `done` card's branch
+      // is safe to delete (its commits already landed on base).
+      let isDiscard = Boolean(rejectColumnId) && card.columnId === rejectColumnId;
       await worktreeOps.removeWorktree({
         repoRoot: wt.repoRoot ?? cardBaseRepo(card), worktreePath: wt.path, branch: wt.branch,
+        deleteBranch: !isDiscard,
       });
       persistCardMetadata(card, (m) => { delete m.worktree; });
       removed.push({ cardId: card.id, branch: wt.branch });
@@ -6016,6 +6028,15 @@ export function createWorkflowBoardService(opts = {}) {
         // one case the board cannot self-resolve: the card parks in the decision lane with the conflict
         // detail and its worktree intact, so a human resolves it instead of the board force-merging.
         let wt = cardWorktree(latestCard);
+        // AU13: re-read the board mode immediately before the irreversible merge. The release tail
+        // captured `board` (autonomous) at pass start; an operator hitting pause/stop/manual mid-pass
+        // changes the persisted mode, but this in-flight pass held the stale object and would still merge
+        // to base. A fresh read here honours the brake — a card mid-publish stops before the merge (its
+        // committed worktree stays intact for the next autonomous pass or a human).
+        if (wt && ensureBoard(board.id).mode !== 'autonomous') {
+          commitCardOps(card.id, baseVersion, cardOps);
+          continue;
+        }
         if (wt) {
           let repoRoot = wt.repoRoot ?? cardBaseRepo(latestCard);
           let label = `${latestCard.title} (${latestCard.id})`;
@@ -6400,9 +6421,17 @@ export function createWorkflowBoardService(opts = {}) {
         // A run whose task(s) ended lost/stale (heartbeat timeout, or a worker orphaned by a backend
         // restart) is a RESUMABLE interruption surfacing as `error`, not a genuine failure: re-queue it
         // for the orchestrator to resume from prior work rather than push it to audit as failed.
+        // AU17(b): bound the lost-task resume cycle. A resumable interruption (heartbeat timeout / orphaned
+        // worker) re-queues the card to resume from prior work — but with NO per-card counter, a
+        // persistently-orphaning environment would resume up to the 128-run convergence cap (days of
+        // churn). Past a ceiling, stop resuming: treat the error as a genuine failure (needs_audit →
+        // escalation → bounded rework/reject) so the loop surfaces instead of grinding.
+        let resumeCount = Number(latestCard.metadata?.resumeCount ?? 0);
+        let resumeExhausted = resumeCount >= DEFAULT_AUDIT_REWORK_LIMIT;
         let resumableInterruption = !settledByDecomposition
           && nextStatus === 'error'
-          && (watchdogLost || runInterruptionResumable(run, runtimeTasks));
+          && (watchdogLost || runInterruptionResumable(run, runtimeTasks))
+          && !resumeExhausted;
         // A terminal-FAILURE upstream (error|failed|cancelled) triggers downstream edge resolution — but a
         // resumable interruption has not failed, so it must NOT fan out failure to its dependents.
         if (['error', 'failed', 'cancelled'].includes(nextStatus) && !resumableInterruption && !settledByDecomposition) {
@@ -6549,6 +6578,15 @@ export function createWorkflowBoardService(opts = {}) {
           || escalationDelta !== null
           || mintedReturn !== null
           || (terminal && latestCard.lifecycle === 'running');
+
+        // AU17(b): track the resume counter on terminal transitions — bump it while resuming, clear it on
+        // a genuine terminal (success or a non-resumable failure), so the ceiling above is meaningful.
+        if (terminal) {
+          let resumeMeta = nextMetadata && typeof nextMetadata === 'object' ? { ...nextMetadata } : {};
+          if (resumableInterruption) resumeMeta.resumeCount = resumeCount + 1;
+          else delete resumeMeta.resumeCount;
+          nextMetadata = resumeMeta;
+        }
 
         if (needsCardUpdate) {
           // Record an auto-advance so on_enter automation can be driven post-commit (inv: drive).
@@ -8631,6 +8669,14 @@ export function createWorkflowBoardService(opts = {}) {
     // the loop-safety backstop now retires a terminally-stuck card to the reject terminal instead.
     let escalatedToHuman = [];
     let terminated = [];
+    // AU10: a board that does not accept orchestration (paused — including a budget-breaker trip —
+    // draining, stopped, maintenance, recovery_only) must NOT accrue escalation attempts or auto-reject.
+    // Re-engagement dispatch would fail the mode check anyway, but the accrual ran first, so ~6 backoff
+    // expiries on a paused board silently retired escalated cards to the reject terminal (work discarded
+    // overnight while the board looked safely paused). Hold everything until the board resumes.
+    if (!args.force && ['paused', 'draining', 'stopped', 'maintenance', 'recovery_only'].includes(board.mode)) {
+      return { ok: true, skipped: true, reason: `board mode is ${board.mode}`, reengaged, escalatedToHuman, terminated };
+    }
 
     // S9a: a queued actionable return is a driver candidate alongside an active escalation, so a
     // return drives the orchestrator through this SAME re-engagement driver.
@@ -8802,7 +8848,7 @@ export function createWorkflowBoardService(opts = {}) {
       let escalated = hasActiveEscalation(card) && !humanReplyWake;
       let attemptCount = escalated ? state.attemptCount + 1 : 0;
       let nextAttemptAt = escalated
-        ? currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1)
+        ? currentNow + Math.min(DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1), MAX_ESCALATION_BACKOFF_MS)
         : null;
       let accrued = escalated
         ? normalizeWorkflowEscalationState({ ...state, attemptCount, nextAttemptAt })

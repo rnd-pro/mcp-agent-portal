@@ -158,6 +158,26 @@ describe('return classifiers + supersede/coalesce (S2)', () => {
     assert.equal(big.length, 12);
   });
 
+  it('AU18: an unanswered question (hard interrupt) is never evicted by newer sibling returns', () => {
+    // A blocked child's question lands first, then 20 sibling non-question returns arrive (fan-in of 64).
+    let inbox = coalesceReturnEvents([], normalizeWorkflowReturnEvent({ kind: 'blocked', correlationId: 'child-q', eventId: 'q1' }));
+    assert.equal(inbox.length, 1);
+    assert.equal(inbox[0].needsResponse || inbox[0].hardInterrupt, true, 'the question is a two-way return');
+    for (let i = 0; i < 20; i += 1) {
+      inbox = coalesceReturnEvents(inbox, normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: `sib${i}`, eventId: `s${i}` }));
+    }
+    // The inbox is still capped, but the unanswered question survives (it must be answered, not aged out).
+    assert.equal(inbox.length, 12, 'inbox stays capped');
+    assert.ok(inbox.some(e => e.eventId === 'q1'), 'the unanswered hard-interrupt question is NOT evicted');
+
+    // Once consumed, the question is no longer protected and ages out normally.
+    let consumed = inbox.map(e => (e.eventId === 'q1' ? { ...e, consumedAt: 1 } : e));
+    for (let i = 20; i < 40; i += 1) {
+      consumed = coalesceReturnEvents(consumed, normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: `sib${i}`, eventId: `s${i}` }));
+    }
+    assert.ok(!consumed.some(e => e.eventId === 'q1'), 'a CONSUMED question is no longer protected and ages out');
+  });
+
   it('coalesce is idempotent by eventId (re-minting a stable marker is a no-op)', () => {
     let inbox = coalesceReturnEvents([], normalizeWorkflowReturnEvent({ kind: 'discovered', correlationId: 'c', eventId: 'ret-abc' }));
     assert.equal(inbox.length, 1);

@@ -68,6 +68,7 @@ export class MCPProxyManager {
   #initializedServers = new Set();
   #healthInterval = null;
   #healthFailures = new Map();
+  #reconcileTickRetry = null;
 
   constructor(projectRoot = process.cwd()) {
     this.projectRoot = projectRoot;
@@ -257,18 +258,36 @@ export class MCPProxyManager {
     return errors;
   }
 
+  // AU09: bring up the workflow reconcile tick, resiliently. A single throw here (e.g. a transient
+  // state-graph read at boot) previously left the periodic tick unstarted for the whole process
+  // lifetime — the board never reconciled or recovered again. This is idempotent (reconcileTick.start()
+  // no-ops when already active) and self-healing: it is also called from the task-event edge trigger, so
+  // the first tool event after a failed boot re-attempts the start, and a bounded timer retries meanwhile.
+  ensureWorkflowReconcileTick() {
+    if (this.workflowBoardService?.reconcileTick?.active) return;
+    try {
+      if (!this.workflowBoardService) this.workflowBoardService = getWorkflowBoardService(this);
+      this.workflowBoardService.reconcileTick.start();
+      if (this.#reconcileTickRetry) { clearTimeout(this.#reconcileTickRetry); this.#reconcileTickRetry = null; }
+    } catch (err) {
+      console.error('[MCPProxy] workflow reconcile tick start error (will retry):', err);
+      if (!this.#reconcileTickRetry) {
+        this.#reconcileTickRetry = setTimeout(() => {
+          this.#reconcileTickRetry = null;
+          this.ensureWorkflowReconcileTick();
+        }, 30_000);
+        if (typeof this.#reconcileTickRetry.unref === 'function') this.#reconcileTickRetry.unref();
+      }
+    }
+  }
+
   startAllServers() {
     for (let serverName of this.servers.keys()) {
       this.spawnServer(serverName);
     }
     this.pluginLoader.initAll().catch(err => console.error('[MCPProxy] Plugin init error:', err));
     this.startHealthCheck();
-    try {
-      this.workflowBoardService = getWorkflowBoardService(this);
-      this.workflowBoardService.reconcileTick.start();
-    } catch (err) {
-      console.error('[MCPProxy] workflow reconcile tick start error:', err);
-    }
+    this.ensureWorkflowReconcileTick();
 
     // Set up persistent roots/list handler for all child servers
     this.#installRootsHandler();
@@ -535,6 +554,8 @@ export class MCPProxyManager {
               if (this.taskRouter) this.taskRouter.route(msg);
               // Edge-trigger the workflow reconcile: a task status change / WORKFLOW_RETURN marker wakes
               // the orchestrator without waiting for the periodic tick (debounced; the tick is the backstop).
+              // Also self-heal a failed boot (AU09): re-attempt the tick start if it never came up.
+              this.ensureWorkflowReconcileTick();
               this.workflowBoardService?.reconcileTick?.requestTick?.();
             }
 
