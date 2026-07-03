@@ -1860,6 +1860,77 @@ export function validateWorkflowTransitionGraph(board) {
 }
 
 /**
+ * F3 — board liveness contract (ADVISORY, never blocks). `validateWorkflowTransitionGraph` proves the
+ * graph is structurally operable; this layer surfaces the TERMINATION gaps the AU stall audit found:
+ * a self-driving board whose escalation loop or human parks have nowhere to land. Each is a warning,
+ * not an error, because a minimal human-run board (no execution stage) legitimately omits them — the
+ * point is to make the gap visible at authoring time, not to forbid it. Returns `{ ok, warnings }`
+ * where `ok` means "no liveness gap" and each warning is `{ code, detail }`.
+ *
+ * Codes:
+ *   no_human_lane      — execution columns exist but no `await_human` column: a needs_human escalation
+ *                        (a worker asking a person) has no lane to park in (AU06).
+ *   no_reject_terminal — an escalation/recovery path exists but no `closeKind:'rejected'` terminal:
+ *                        an exhausted, unrecoverable card can never reach a discard terminal (AU19).
+ *   no_terminal_path   — a non-terminal column cannot reach ANY terminal following forward+recovery
+ *                        edges: a card there is structurally trapped.
+ */
+export function validateBoardLiveness(board) {
+  let classifier = classifyWorkflowGraph(board);
+  let columns = Array.isArray(board?.columns) ? board.columns : [];
+  let warnings = [];
+
+  let executionColumns = columns.filter(column => workflowActionIsExecution(textOrNull(column?.automation?.action)));
+  let hasHumanLane = columns.some(column => textOrNull(column?.automation?.action) === 'await_human');
+  let hasRejectTerminal = columns.some(column =>
+    textOrNull(column?.automation?.action) === 'close'
+    && textOrNull(column?.automation?.closeKind) === 'rejected');
+  let hasRecoveryEdge = classifier.edges.some(edge => edge.edgeClass === 'recovery');
+
+  if (executionColumns.length && !hasHumanLane) {
+    warnings.push({
+      code: 'no_human_lane',
+      detail: 'Board has execution columns but no await_human lane; a needs_human escalation has nowhere to park.',
+    });
+  }
+  if ((executionColumns.length || hasRecoveryEdge) && !hasRejectTerminal) {
+    warnings.push({
+      code: 'no_reject_terminal',
+      detail: 'Board has an escalation/recovery path but no rejected close terminal; an exhausted card cannot terminate.',
+    });
+  }
+
+  // Co-reachability: from each non-terminal column, can a terminal be reached following ANY edge
+  // (forward or recovery)? Reverse-BFS from the terminal set over all edges is O(V+E).
+  let adjacencyInto = new Map(columns.map(column => [column.id, []]));
+  for (let edge of classifier.edges) {
+    if (adjacencyInto.has(edge.to)) adjacencyInto.get(edge.to).push(edge.from);
+  }
+  let canReachTerminal = new Set(classifier.terminals);
+  let stack = [...classifier.terminals];
+  while (stack.length) {
+    let node = stack.pop();
+    for (let predecessor of adjacencyInto.get(node) ?? []) {
+      if (!canReachTerminal.has(predecessor)) {
+        canReachTerminal.add(predecessor);
+        stack.push(predecessor);
+      }
+    }
+  }
+  for (let column of columns) {
+    if (classifier.isTerminal(column.id)) continue;
+    if (!canReachTerminal.has(column.id)) {
+      warnings.push({
+        code: 'no_terminal_path',
+        detail: `Non-terminal column "${column.id}" cannot reach any terminal following forward or recovery edges.`,
+      });
+    }
+  }
+
+  return { ok: warnings.length === 0, warnings };
+}
+
+/**
  * Audit-domination check: does every forward path from any source to `terminal` traverse at least one
  * audit-gated edge? Walk forward edges from the sources but stop descending through audit-gated edges
  * (they satisfy domination on that path). If the terminal is still reachable without crossing an audit

@@ -39,6 +39,7 @@ import {
   isWakeDrivingReturn,
   normalizeWorkflowTransitionEvent,
   normalizeWorkflowTransitionRequest,
+  validateBoardLiveness,
   validateWorkflowTransitionGraph,
   createWorkflowBoard,
   isKnownWorkflowGate,
@@ -810,6 +811,13 @@ export function createWorkflowBoardService(opts = {}) {
     // ticking and looks healthy. Surface it by default; the host may override with structured logging.
     onReconcileTickError = (err, boardId) => {
       console.error(`[workflow-board] reconcile tick failed for board ${boardId ?? '?'}:`, err?.stack || err);
+    },
+    // F3 liveness alarm: invoked once per reconcile cycle with any FROZEN cards (worked, stopped, in
+    // an auto-advancing non-terminal column, yet with no waiting reason — a genuine stall). Healthy
+    // boards never fire it. Default logs; the host may override to route it to real alerting.
+    onLivenessAlert = (frozen, boardId) => {
+      console.warn(`[workflow-board] ${frozen.length} frozen card(s) on board ${boardId ?? '?'}:`,
+        frozen.map(item => `${item.cardId}@${item.columnId}`).join(', '));
     },
     // Release-gate test verification (proof-contract). Injectable so the unit harness can stub it
     // instead of spawning a real `npm` subprocess; defaults to the module-level probe.
@@ -3136,6 +3144,53 @@ export function createWorkflowBoardService(opts = {}) {
     return { ok: true, boardId: board.id, escalated };
   }
 
+  // F3 — read-only liveness assertion. `escalateStaleCards` is the ACTIVE occupancy backstop; this is
+  // the passive ALARM beside it. It reports (a) the board's authoring-time liveness warnings and (b)
+  // every card that is genuinely FROZEN — worked (>=1 run), not running, in a non-terminal column the
+  // board intends to auto-advance, yet with NO derived waiting reason to explain the stall. On a
+  // healthy board `frozen` is always empty: a card is always running, waiting on a named axis, parked
+  // for a human, or terminal. A non-empty `frozen` is the exact stall class the AU audit hunted by
+  // hand — now a single queryable signal. Pure read: never mutates. Diagnostics/tests consult it; the
+  // reconcile loop surfaces it through onLivenessAlert.
+  function auditBoardLiveness(boardId) {
+    let board = ensureBoard(boardId);
+    let classifier = classifyWorkflowGraph(board);
+    let humanLaneId = decisionColumnId(board);
+    let currentNow = now();
+    let frozen = [];
+    let waiting = [];
+    for (let card of boardCardsFor(board.id)) {
+      if (classifier.isTerminal(card.columnId)) continue;
+      let running = Boolean(activeRunForCard(card.id));
+      let record = deriveWorkflowWaiting(card, {
+        now: currentNow,
+        inHumanLane: Boolean(humanLaneId) && card.columnId === humanLaneId,
+        isTerminal: false,
+        hasActiveRun: running,
+        maxBlockedAgeMs: MAX_BLOCKED_AGE_MS,
+      });
+      if (record) waiting.push({ cardId: card.id, columnId: card.columnId, reason: record.reason });
+      if (running || record) continue;
+      // Never-run cards are intake awaiting a trigger, not frozen; a human-gated column legitimately
+      // holds a worked card (autoAdvance off), so only an auto-advancing column counts as a stall.
+      if (!getRunsForCard(card.id).length) continue;
+      if (!columnAutoAdvances(board, card.columnId)) continue;
+      frozen.push({
+        cardId: card.id,
+        columnId: card.columnId,
+        lifecycle: normalizeWorkflowLifecycle(card.lifecycle),
+        recoveryFlags: normalizeRecoveryFlags(card.recoveryFlags),
+      });
+    }
+    return {
+      ok: frozen.length === 0,
+      boardId: board.id,
+      warnings: validateBoardLiveness(board).warnings,
+      frozen,
+      waiting,
+    };
+  }
+
   // Per-root convergence breach resolution (Step 4). The admission gate (perRootConvergenceAvailable,
   // ~1975) REFUSES a fresh re-decompose wave once a root hits its depth/fanout/runCount cap, but a
   // refusal alone leaves the breached root resting non-terminal — the happy-path loop would simply idle
@@ -3539,7 +3594,15 @@ export function createWorkflowBoardService(opts = {}) {
       [{ op: 'set', path: `workflowBoards/${nextBoard.id}`, value: nextBoard }],
       sourceForPrincipal(principal),
     );
-    return { ok: true, board: clone(nextBoard), ...extra };
+    // F3: advisory liveness contract — the board is structurally valid, but surface any TERMINATION
+    // gap (no human lane, no reject terminal, a trapped column) as non-blocking authoring feedback.
+    let liveness = validateBoardLiveness(nextBoard);
+    return {
+      ok: true,
+      board: clone(nextBoard),
+      ...(liveness.warnings.length ? { livenessWarnings: liveness.warnings } : {}),
+      ...extra,
+    };
   }
 
   // define_column: add OR update a board column. Gate policy.define. Apply to board.columns (insert at
@@ -9490,6 +9553,12 @@ export function createWorkflowBoardService(opts = {}) {
             escalateStaleCards(board.id);
             // Per-root convergence sweep: terminate any root that hit its re-decompose cap (Step 4).
             resolveRootConvergenceBreaches(board.id);
+            // F3 liveness alarm (passive): after the active backstops ran, any still-frozen card is a
+            // genuine stall with no driver — surface it loudly instead of letting it sit silently.
+            let liveness = auditBoardLiveness(board.id);
+            if (liveness.frozen.length) {
+              try { onLivenessAlert(liveness.frozen, board.id); } catch { /* alerting must never abort a tick */ }
+            }
           }
           // Scheduler loop: a bounded admission pass drains the queue under the board-admission
           // lease. Separate from reconcile (which never takes that lease) per AD-9/16.
@@ -9583,6 +9652,7 @@ export function createWorkflowBoardService(opts = {}) {
     defineWorkflowGate,
     releaseDependencies,
     escalateStaleCards,
+    auditBoardLiveness,
     resolveRootConvergenceBreaches,
     columnOccupancyAvailable,
     resumeWorkItem,
