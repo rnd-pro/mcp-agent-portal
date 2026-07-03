@@ -73,6 +73,23 @@ describe('workflow card telemetry helpers', () => {
     assert.equal(latestRun(card).status, 'recovery_detected');
   });
 
+  it('picks the newest run without sorting the full run list', () => {
+    let originalSort = Array.prototype.sort;
+    Array.prototype.sort = function failSort() {
+      throw new Error('latestRun must not sort long run arrays');
+    };
+    try {
+      assert.equal(latestRun({
+        runs: Array.from({ length: 50 }, (_, index) => ({
+          id: `run-${index}`,
+          updatedAt: `2020-01-01T00:${String(index).padStart(2, '0')}:00.000Z`,
+        })),
+      }).id, 'run-49');
+    } finally {
+      Array.prototype.sort = originalSort;
+    }
+  });
+
   it('resolves the agent name by precedence', () => {
     assert.equal(agentName({ assignedAgent: 'backend-engineer', owner: 'orchestrator' }), 'backend-engineer');
     assert.equal(agentName({ owner: 'orchestrator' }), 'orchestrator');

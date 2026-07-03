@@ -20,10 +20,12 @@ import {
   formatStatusLabel,
 } from './workflow-card-telemetry.js';
 import { statusChipKind } from './workflow-card-presentation.js';
+import {
+  createInspectorHistoryModel,
+  createInspectorRunsModel,
+} from './workflow-card-inspector-model.js';
 import { replyToCard } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
-
-const HISTORY_LIMIT = 8;
 
 const AUDIT_COLUMN_ID = 'quality-audit';
 // The human-decision lane: a card parked here (or carrying a needs_human escalation) shows the decision
@@ -444,27 +446,21 @@ export class WorkflowCardInspector extends Symbiote {
   }
 
   #renderRuns(card, sameCard = false) {
-    let runs = (Array.isArray(card.runs) ? card.runs : [])
-      .slice()
-      .sort((a, b) => (Date.parse(a.startedAt || '') || 0) - (Date.parse(b.startedAt || '') || 0));
-
-    let signature = JSON.stringify(runs.map(run => [
-      run.leaseOwner, run.status, run.startedAt, run.completedAt, run.tokens, run.chatId,
-    ]));
-    if (sameCard && this._sig?.runs === signature) return;
-    if (this._sig) this._sig.runs = signature;
+    let model = createInspectorRunsModel(card);
+    if (sameCard && this._sig?.runs === model.signature) return;
+    if (this._sig) this._sig.runs = model.signature;
 
     let list = this.ref.runsList;
     list.replaceChildren();
     // Only worth a list when the card went through more than one pass; a single run is already
     // summarized by the metrics row above.
-    if (runs.length < 2) {
+    if (model.totalCount < 2 || model.runs.length < 2) {
       this.ref.runsSection.hidden = true;
       return;
     }
     this.ref.runsSection.hidden = false;
 
-    for (let run of runs) {
+    for (let run of model.runs) {
       let item = document.createElement('li');
       item.className = 'wci-run-item';
       let kind = statusKind(run.status);
@@ -503,26 +499,19 @@ export class WorkflowCardInspector extends Symbiote {
   }
 
   #renderHistory(card, sameCard = false) {
-    let events = (Array.isArray(card.events) ? card.events : [])
-      .slice()
-      .sort((a, b) => (Date.parse(b.timestamp || '') || 0) - (Date.parse(a.timestamp || '') || 0))
-      .slice(0, HISTORY_LIMIT);
-
-    let signature = JSON.stringify(events.map(event => [
-      event.id, event.label, event.eventType, event.status, event.actor, event.timestamp, event.note,
-    ]));
-    if (sameCard && this._sig?.history === signature) return;
-    if (this._sig) this._sig.history = signature;
+    let model = createInspectorHistoryModel(card);
+    if (sameCard && this._sig?.history === model.signature) return;
+    if (this._sig) this._sig.history = model.signature;
 
     let list = this.ref.historyList;
     list.replaceChildren();
-    if (!events.length) {
+    if (!model.events.length) {
       this.ref.historySection.hidden = true;
       return;
     }
     this.ref.historySection.hidden = false;
 
-    for (let event of events) {
+    for (let event of model.events) {
       let item = document.createElement('li');
       item.className = 'wci-history-item';
       let kind = statusKind(event.status || event.label);

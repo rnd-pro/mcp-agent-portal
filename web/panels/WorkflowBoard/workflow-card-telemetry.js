@@ -10,13 +10,24 @@ function runRecency(run) {
 }
 
 export function latestRun(card = null) {
-  let pool = Array.isArray(card?.runs) ? card.runs.slice() : [];
+  let pool = Array.isArray(card?.runs) ? card.runs : [];
   // `card.run` is the projection's singular run, which the normalizer fills from runs[0] (array order,
   // not recency) when the projection omits it. Fold it into the pool and pick the newest by timestamp
   // so a stale first run never shadows the actual latest (e.g. an old `paused` hiding a live `running`).
-  if (card?.run && (card.run.id || card.run.status)) pool.push(card.run);
-  if (!pool.length) return null;
-  return pool.sort((a, b) => runRecency(b) - runRecency(a))[0];
+  let latest = null;
+  let latestRecency = -Infinity;
+  for (let run of pool) {
+    let recency = runRecency(run);
+    if (!latest || recency > latestRecency) {
+      latest = run;
+      latestRecency = recency;
+    }
+  }
+  if (card?.run && (card.run.id || card.run.status)) {
+    let recency = runRecency(card.run);
+    if (!latest || recency > latestRecency) latest = card.run;
+  }
+  return latest;
 }
 
 function cardLifecycle(card = null) {
