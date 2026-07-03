@@ -646,6 +646,17 @@ function isCapacityRejectionError(message) {
   return /at capacity|group_at_capacity|host_at_capacity|ledger_busy|ledger_error/i.test(text);
 }
 
+// A pre-delegate orchestrate throw that is TRANSIENT — a resource that will free (stage/board capacity,
+// occupancy WIP, budget, file-scope overlap) or a board that will resume (paused/draining). The
+// admission scheduler re-queues these. A permanent pre-delegate error (ineligible column, missing
+// owner/acceptance, mode disallows) is NOT tagged, so admitQueueEntry routes it to the hard-failure
+// branch instead of re-queuing it forever with zero runs (AU02).
+function transientAdmissionError(message) {
+  let error = new Error(message);
+  error.admissionTransient = true;
+  return error;
+}
+
 function recoverySummary(cards) {
   let summary = {
     needsResume: 0,
@@ -4157,7 +4168,17 @@ export function createWorkflowBoardService(opts = {}) {
         reason: textOrNull(opts.reason) ?? `Admission of card ${card.id}.`,
       }, { ...context, principal });
     } catch (error) {
-      orchestrateResult = { ok: false, error: error.message, sideEffects: [] };
+      // AU02: classify the thrown pre-delegate error. A TRANSIENT throw (capacity/occupancy/budget/
+      // file-conflict/board-not-accepting — tagged admissionTransient) re-queues and admits when the
+      // resource frees. A PERMANENT throw (ineligible column, missing owner/acceptance, mode disallows)
+      // must NOT re-queue: it would loop forever with zero runs, invisible to every sweep. Setting
+      // slotRejected explicitly routes the permanent case to the hard-failure branch below.
+      orchestrateResult = {
+        ok: false,
+        error: error.message,
+        slotRejected: Boolean(error?.admissionTransient) || isCapacityRejectionError(error.message),
+        sideEffects: [],
+      };
     }
 
     // F-SCH-3: re-validate that THIS pass still owns the admission lease before any promote/rollback
@@ -4200,9 +4221,25 @@ export function createWorkflowBoardService(opts = {}) {
         // lifecycle→idle in the SAME frame that drops the entry + record, keeping the failed run and
         // needs_audit flag so a human/auditor can re-engage. A stuck card is then always recoverable.
         let failedCard = stateGraph.get(`workflowCards/${card.id}`) ?? admittingCard;
+        // AU02: a hard delegation failure already recorded a failed run + needs_audit, so it is visible.
+        // But a PERMANENT pre-delegate THROW (ineligible column, missing owner/acceptance) records NO
+        // run — demoting it to idle with no signal would leave it invisible to every sweep (the exact
+        // stall). Raise a `rework` escalation carrying the error so the escalation driver returns it to
+        // the orchestrator to fix the card or reject it — bounded by the rework/reject backstop.
+        let noRunRecorded = !orchestrateResult?.run;
+        let recoveryMetadata = noRunRecorded
+          ? raiseEscalationMetadata(clone(failedCard), {
+            kind: 'rework',
+            detail: `Admission of ${card.id} failed before any run could start: ${orchestrateResult?.error ?? 'unknown error'}. Returning to the orchestrator to fix the card (owner / acceptance criteria / column routing) or reject it.`,
+            options: [],
+            runId: null,
+            at: now(),
+          })
+          : asObject(failedCard.metadata);
         let recoverableCard = normalizeWorkflowCardInput({
           ...clone(failedCard),
           lifecycle: 'idle',
+          metadata: recoveryMetadata,
           version: failedCard.version + 1,
           updatedAt: now(),
           updatedBy: principal.label,
@@ -5295,6 +5332,12 @@ export function createWorkflowBoardService(opts = {}) {
       ops: [
         { op: 'set', path: `workflowCards/${card.id}`, value: parked },
         { op: 'set', path: `workflowTransitions/${event.id}`, value: event },
+        // AU05: this park moves the card straight into the lane, so driveNeedsDecisionParking (which
+        // skips lane-resident cards) would never emit the human_escalated signal for a board-initiated
+        // needs_decision — a merge conflict / convergence breach / rework exhaustion would reach a human
+        // silently. Emit the single notification here, at the park chokepoint, so it is as watchable as
+        // an orchestrator ask.
+        humanEscalationNotificationOp(board, card, escalation, principal, ts),
       ],
       card: parked,
     };
@@ -5962,12 +6005,15 @@ export function createWorkflowBoardService(opts = {}) {
     return { advanced, closed, merged, conflicted, awaitingHuman, skippedStale, reworked };
   }
 
-  // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
-  // move — no transition gate). This surfaces the "waiting on a human" state as a visible column instead
-  // of a buried flag. `needs_human` is raised ONLY by the orchestrator's explicit `WORKFLOW_RESULT:
-  // needs_human` decision (with its own question + options) — the board's loop-safety backstops never
-  // fabricate one. Idempotent: a card already in the lane, already terminal, with a live run, or with no
-  // decision lane configured is left untouched.
+  // Park any card carrying the orchestrator's explicit `needs_human` ask in the human-decision lane (a
+  // daemon-bypass move — no transition gate). This surfaces the "waiting on a human" state as a visible
+  // column instead of a buried flag. `needs_human` is raised ONLY by the orchestrator's explicit
+  // `WORKFLOW_RESULT: needs_human` decision. The board's OWN loop-safety backstops (merge conflict,
+  // convergence breach, rework exhaustion) raise `needs_decision` and are moved to the lane by
+  // parkCardForDecisionOps directly — which now also emits the human_escalated notification (AU05) — so
+  // they need no handling here; a `needs_decision` NOT in the lane (an agent's WORKFLOW_RESULT: blocked)
+  // must keep returning to the orchestrator and must NOT be parked. Idempotent: a card already in the
+  // lane, terminal, with a live run, or with no decision lane configured is left untouched.
   function driveNeedsDecisionParking(board, principal, runtimeNow) {
     let laneId = decisionColumnId(board);
     if (!laneId) return { parked: [], notified: [] };
@@ -7881,7 +7927,7 @@ export function createWorkflowBoardService(opts = {}) {
       }
     }
     if (['paused', 'draining', 'stopped', 'maintenance', 'recovery_only'].includes(board.mode)) {
-      throw new Error(`Workflow board ${board.id} is not accepting orchestration while mode is ${board.mode}.`);
+      throw transientAdmissionError(`Workflow board ${board.id} is not accepting orchestration while mode is ${board.mode}.`);
     }
     let automation = cardAutomation(board, card);
     let stageAgent = chooseStageAgent(automation, card, args);
@@ -7908,19 +7954,19 @@ export function createWorkflowBoardService(opts = {}) {
     }
     let capacity = stageCapacityAvailable(board, card, automation);
     if (!capacity.ok && !args.force) {
-      throw new Error(capacity.reason);
+      throw transientAdmissionError(capacity.reason);
     }
     let boardCapacity = boardCapacityAvailable(board, card);
     if (!boardCapacity.ok && !args.force) {
-      throw new Error(boardCapacity.reason);
+      throw transientAdmissionError(boardCapacity.reason);
     }
     let occupancy = columnOccupancyAvailable(board, card, automation);
     if (!occupancy.ok && !args.force) {
-      throw new Error(occupancy.reason);
+      throw transientAdmissionError(occupancy.reason);
     }
     let boardBudget = boardBudgetAvailable(board);
     if (!boardBudget.ok && !args.force) {
-      throw new Error(boardBudget.reason);
+      throw transientAdmissionError(boardBudget.reason);
     }
     let fileConflicts = activeFileScopeConflicts(board, card, effectiveArgs);
     // The sync blocker above trusts the "will isolate" prediction. Falsify it here (the one pre-run
@@ -7932,7 +7978,7 @@ export function createWorkflowBoardService(opts = {}) {
       fileConflicts = activeFileScopeConflicts(board, card, effectiveArgs, { assumeSharedTree: true });
     }
     if (fileConflicts.length && !args.force) {
-      throw new Error(fileScopeConflictReason(fileConflicts));
+      throw transientAdmissionError(fileScopeConflictReason(fileConflicts));
     }
     let existingRun = activeRunForCard(card.id);
     if (existingRun && !args.force) {
@@ -8448,6 +8494,17 @@ export function createWorkflowBoardService(opts = {}) {
     return Array.isArray(returns) && returns.some(item => item?.hardInterrupt === true && !item?.consumedAt);
   }
 
+  // AU06: a human reply (replyToCard) mints a routed wake-driving return with a stable `reply-<hash>`
+  // eventId. A NON-resolving reply keeps the escalation, so the human-parked skip (needs_human/
+  // needs_decision) would otherwise strand the return in the inbox until the cap-12 slice evicts it — a
+  // person's reply doing nothing. This lets exactly that reply wake the orchestrator once (consumedAt is
+  // the idempotency), WITHOUT accruing an escalation attempt (it is human input, not a board retry).
+  function hasUnconsumedHumanReply(card = {}) {
+    let returns = card?.metadata?.returns;
+    return Array.isArray(returns) && returns.some(item => item && !item.consumedAt
+      && isWakeDrivingReturn(item) && typeof item.eventId === 'string' && item.eventId.startsWith('reply-'));
+  }
+
   // Compact one-line-per-return summary of the returns that actually DROVE this wake (wake-driving:
   // intermediate actionable or routed), newest first and capped, folded into the re-engagement reason
   // so the orchestrator wakes once and sees the batch (S10a). A bare self-completion terminal return is
@@ -8511,9 +8568,17 @@ export function createWorkflowBoardService(opts = {}) {
 
     // S9a: a queued actionable return is a driver candidate alongside an active escalation, so a
     // return drives the orchestrator through this SAME re-engagement driver.
+    // AU03: a TERMINAL-column card (done / rejected) is never a re-engagement candidate. A decomposition-
+    // closed parent sits in `done` and its children carry the remaining work; a routed child return
+    // landing on it would otherwise make it a perpetual candidate that every tick tries the non-existent
+    // `done → ready` edge (blocked, so it churns and — before the AU04 rollback — silently consumed the
+    // return). Excluding terminals stops the churn and matches decompositionClosesParent: the parent is
+    // done, the children own the rest. A still-ACTIVE owner (quality-audit, etc.) is unaffected.
+    let terminalClassifier = classifyWorkflowGraph(board);
     let candidateIds = Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(card => card.boardId === board.id)
       .filter(card => !projectId || card.projectId === projectId)
+      .filter(card => !terminalClassifier.isTerminal(card.columnId))
       .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card))
       .map(card => card.id);
 
@@ -8538,16 +8603,28 @@ export function createWorkflowBoardService(opts = {}) {
         if (!gateOpen) continue;
       }
       let state = normalizeWorkflowEscalationState(card.metadata.escalation);
-      // A `needs_human` episode is parked for an explicit human decision in the decision lane — the
-      // board never auto re-engages it. The parking driver surfaces it; a human answer reactivates it.
-      if (state.kind === 'needs_human') continue;
+      // A HUMAN-PARKED card is never auto re-engaged (AU05). Two things park for a person: a card already
+      // sitting in the decision lane (the board's loop-safety backstops — merge conflict, convergence
+      // breach, rework exhaustion — move it there via parkCardForDecisionOps), and the orchestrator's
+      // explicit `needs_human` ask (parked by driveNeedsDecisionParking). Before this fix a `needs_decision`
+      // card parked in the lane was auto-yanked back to `ready` (re-running it — e.g. on a still-conflicted
+      // worktree) and, past the attempt cap, auto-rejected — the human decision never happened. Note a
+      // `needs_decision` escalation on a card NOT in the lane (an agent's WORKFLOW_RESULT: blocked) is NOT
+      // a human park: it keeps returning to the orchestrator to decide (re-route / ask a human / reject).
+      // Carve-outs — a human REPLY (AU06: replyToCard, even non-resolving, is the person collaborating and
+      // must wake the orchestrator once) or an unconsumed hard-interrupt (a blocked CHILD's question that
+      // cannot self-clear, S9c/D4) wakes the card regardless of the park.
+      let laneId = decisionColumnId(board);
+      let humanReplyWake = hasUnconsumedHumanReply(card);
+      let humanParked = (laneId && card.columnId === laneId) || state.kind === 'needs_human';
+      if (humanParked && !humanReplyWake && !hasUnconsumedHardInterrupt(card)) continue;
       // A card with an UNSATISFIED dependency must wait for its release tick, not re-engage — but only
       // AFTER the guards above: a `needs_human` park stays a human's turn (never silently re-blocked),
       // and an unconsumed hard-interrupt (a blocked CHILD's question to this card) must wake it
       // regardless of the card's own upstream edges — deferring the answer until an unrelated upstream
       // finishes would starve the waiting child. Soft returns stay queued (unconsumed) through the
       // wait and are delivered when the dependency releases the card.
-      if (cardDependsOn(card).length && !hasUnconsumedHardInterrupt(card)) {
+      if (cardDependsOn(card).length && !hasUnconsumedHardInterrupt(card) && !humanReplyWake) {
         let dependencyRestored = restoreDependencyWait(board, card, principal, { clearStaleEscalation: true });
         if (dependencyRestored.ok) {
           if (!dependencyRestored.unchanged) {
@@ -8604,7 +8681,8 @@ export function createWorkflowBoardService(opts = {}) {
           continue;
         }
       }
-      if (state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
+      // A human-reply wake ignores the escalation backoff window: the person acted now, deliver it now.
+      if (!humanReplyWake && state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
       // window plus this guard mean each round drives exactly one orchestration.
       if (activeRunForCard(card.id) && !args.force) continue;
@@ -8616,7 +8694,7 @@ export function createWorkflowBoardService(opts = {}) {
       // looping and decides (reject / ask a human / one targeted fix). Past the hard ceiling the card must
       // still reach a terminal (every card resolves), so the board retires it to the reject terminal as a
       // last-resort discard — a legitimate board terminal, never a fabricated human prompt or park.
-      if (state.attemptCount >= maxAttempts * 2) {
+      if (state.attemptCount >= maxAttempts * 2 && !humanReplyWake) {
         let rejectColumnId = rejectTerminalColumnId(board);
         if (rejectColumnId) {
           let reason = `Automatic re-engagement exhausted after ${state.attemptCount} attempts without an orchestrator terminal decision; retiring ${card.id} to the reject terminal.`;
@@ -8652,7 +8730,10 @@ export function createWorkflowBoardService(opts = {}) {
       // card bumps its attempt counter and pushes the backoff window; a card driven purely by a queued
       // return (no active escalation) accrues no phantom escalation state — `consumedAt` below is its
       // idempotency mechanism, and it re-engages immediately (no backoff).
-      let escalated = hasActiveEscalation(card);
+      // A human-reply wake re-engages like a return-only wake: no attempt accrual, no backoff push, so a
+      // person's notes cannot climb the escalation counter toward the reject backstop. The escalation
+      // itself is preserved (this branch does not clear it), so if the orchestrator re-asks, it re-parks.
+      let escalated = hasActiveEscalation(card) && !humanReplyWake;
       let attemptCount = escalated ? state.attemptCount + 1 : 0;
       let nextAttemptAt = escalated
         ? currentNow + DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1)
@@ -8716,7 +8797,38 @@ export function createWorkflowBoardService(opts = {}) {
       } catch (error) {
         outcome = { ok: false, error: error.message };
       }
-      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued?.kind ?? null, ok: Boolean(outcome?.ok) });
+      // AU04: `consumed` must mean DELIVERED. The returns were stamped consumedAt in the accrual commit
+      // above (before dispatch, so the accrual stays idempotent). If the dispatch did NOT deliver — a
+      // candidate skip (capacity / file-conflict / "decomposed parent waits for child returns"), a
+      // blocked transition gate, or a throw — roll back ONLY this pass's consumedAt stamps so the wake
+      // retries next tick instead of being silently lost. Escalation attempt accrual is left intact. A
+      // return-only wake (no escalation, no backoff) would otherwise be lost permanently. Re-read +
+      // version-fence so a concurrent write is never clobbered. NB: requestWorkflowTransition reports a
+      // BLOCKED transition as { ok:true, status:'blocked' } (it did not actually move the card), so a
+      // bare `!ok` check misses it — treat a blocked status as undelivered too.
+      let delivered = Boolean(outcome?.ok) && outcome?.status !== 'blocked';
+      if (!delivered) {
+        let live = getCard(card.id);
+        let liveReturns = Array.isArray(live?.metadata?.returns) ? live.metadata.returns : null;
+        if (liveReturns) {
+          let restored = liveReturns.map((r) => {
+            if (r && r.consumedAt === currentNow) { let rest = { ...r }; delete rest.consumedAt; return rest; }
+            return r;
+          });
+          if (JSON.stringify(restored) !== JSON.stringify(liveReturns)
+            && stateGraph.get(`workflowCards/${card.id}`)?.version === live.version) {
+            let revertedCard = normalizeWorkflowCardInput({
+              ...live, metadata: { ...live.metadata, returns: restored },
+              version: live.version + 1, updatedAt: currentNow, updatedBy: principal.label,
+            }, {
+              id: card.id, actor: principal.label, now: currentNow,
+              version: live.version + 1, createdAt: live.createdAt, updatedAt: currentNow,
+            });
+            stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: revertedCard }], sourceForPrincipal(principal));
+          }
+        }
+      }
+      reengaged.push({ cardId: card.id, attempt: attemptCount, kind: accrued?.kind ?? null, ok: delivered });
     }
 
     // A fully-manual board (neither recovery nor returnWake auto) still reports `skipped` when nothing

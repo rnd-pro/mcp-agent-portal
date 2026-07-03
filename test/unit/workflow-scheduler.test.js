@@ -413,6 +413,34 @@ describe('workflow admission scheduler (WS-B1)', () => {
     assert.equal(Object.values(sg.get('workflowQueueEntries') || {}).filter(e => e.cardId === card.id).length, 0);
   });
 
+  // AU02 regression: a PERMANENT pre-delegate orchestrate throw (here: the card sits in an ineligible
+  // column) must NOT be misclassified as a transient capacity rejection and re-queued forever with zero
+  // runs (invisible to every sweep). It takes the hard-failure branch, demotes to a recoverable idle,
+  // and raises a rework escalation so the orchestrator sees it.
+  it('AU02: a permanent pre-delegate admission error surfaces as a rework escalation, not a zero-run requeue', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    let board = service.ensureBoard();
+    let card = makeReadyCard(service, { resourceGroup: 'impl' });
+    // Move it to an ineligible column AFTER enqueue, so admitQueueEntry's orchestrateWorkItem throws the
+    // permanent "not eligible for orchestration" error (untagged — not admissionTransient).
+    service.enqueueWorkItem(board, service.getCard(card.id), {});
+    let base = sg.get(`workflowCards/${card.id}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: { ...base, columnId: 'ideas', lifecycle: 'queued' } }], 'move-ineligible', { durable: true });
+
+    let drain = await service.drainWorkflowQueue(board.id, {});
+    assert.equal(drain.admitted.some(i => i.cardId === card.id), false, 'the permanent-error card is not admitted');
+
+    let after = service.getCard(card.id);
+    assert.notEqual(after.lifecycle, 'queued', 'it is NOT re-queued (no infinite zero-run loop)');
+    assert.notEqual(after.lifecycle, 'admitting', 'and never stranded in admitting');
+    assert.ok(after.metadata.escalation, 'the failure surfaces as an escalation (visible, not silent)');
+    assert.equal(after.metadata.escalation.kind, 'rework');
+    assert.equal(service.listQueueEntries(board.id).some(e => e.cardId === card.id), false, 'the queue entry is dropped');
+    assert.equal(Object.values(sg.get('workflowRuns') || {}).filter(r => r.cardId === card.id).length, 0, 'no phantom run was recorded');
+  });
+
   // F-SCH-2 regression: a hard (non-capacity) delegation failure must RELEASE the reserved ledger slot
   // before deleting the admission record. Pre-fix the record was deleted without releasing the slot,
   // orphaning capacity that recovery could no longer see (record gone).

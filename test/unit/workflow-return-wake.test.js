@@ -486,4 +486,106 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
     assert.ok(finalB.version > bVersionAfterComment, 'card B advanced past the comment (accrual commit landed after it)');
     assert.equal(finalB.metadata.comments?.at(-1)?.body, 'Please hold off, I am checking this.', 'the concurrent human comment was not clobbered');
   });
+
+  it('AU06: a non-resolving human reply wakes the orchestrator once, without accruing an escalation attempt', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto', returnWake: 'auto' } }, actor: 'test', reason: 'auto' });
+    let board = service.ensureBoard();
+    let card = makeReadyCard(service, { title: 'ask-a-human', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${card.id}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+      ...base, metadata: { ...base.metadata, escalation: {
+        schema: 'workflow-escalation-state/v1', kind: 'needs_human', detail: 'Which provider?', attemptCount: 0,
+      } },
+    } }], 'seed-needs-human', { durable: true });
+
+    // A parked needs_human card is not auto re-engaged on its own.
+    let idle = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(idle.reengaged.some(r => r.cardId === card.id), false, 'the board does not auto re-engage a needs_human park');
+
+    // The person replies WITHOUT closing the decision — this must still wake the orchestrator once.
+    let reply = service.replyToCard({ cardId: card.id, body: 'Here is the extra context you asked for.', resolve: false });
+    assert.equal(reply.ok, true);
+    assert.equal(reply.resolved, false);
+
+    let woke = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(woke.reengaged.some(r => r.cardId === card.id), true, 'the human reply wakes the orchestrator');
+    let after = service.getCard(card.id);
+    assert.ok(after.metadata.escalation, 'the escalation survives a non-resolving reply');
+    assert.equal(after.metadata.escalation.attemptCount ?? 0, 0, 'a human reply does not accrue an escalation attempt');
+
+    // Idempotent: the consumed reply does not re-wake on the next pass.
+    let again = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(again.reengaged.some(r => r.cardId === card.id), false, 'a consumed human reply does not re-wake');
+  });
+
+  it('AU05: a card parked in the decision lane is neither auto-yanked nor auto-rejected', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'auto' });
+    let board = service.ensureBoard();
+    let card = makeReadyCard(service, { title: 'parked-conflict', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${card.id}`);
+    // Board-parked in the decision lane (e.g. a merge conflict) with an attempt count already past the
+    // reject ceiling — before the fix the driver would yank it back to ready and then reject it.
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+      ...base, columnId: 'needs-decision', lifecycle: 'idle', metadata: { ...base.metadata, escalation: {
+        schema: 'workflow-escalation-state/v1', kind: 'needs_decision', detail: 'Merge conflict — human to resolve.',
+        attemptCount: 6, nextAttemptAt: 0,
+      } },
+    } }], 'seed-parked', { durable: true });
+
+    let res = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    let after = service.getCard(card.id);
+    assert.equal(after.columnId, 'needs-decision', 'the parked card stays in the decision lane');
+    assert.equal(res.reengaged.some(r => r.cardId === card.id), false, 'it is not yanked back to ready');
+    assert.equal((res.terminated ?? []).some(r => r.cardId === card.id), false, 'it is not auto-rejected at the attempt ceiling');
+    assert.notEqual(after.columnId, 'rejected');
+  });
+
+  it('AU03: a routed return on a decomposition-closed (done) parent is not churned nor consumed-and-dropped', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto' } }, actor: 'test', reason: 'auto' });
+    let board = service.ensureBoard();
+    let parent = makeReadyCard(service, { title: 'closed-parent', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${parent.id}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${parent.id}`, value: {
+      ...base, columnId: 'done', lifecycle: 'idle',
+      metadata: { ...base.metadata, returns: [returnEvent({ kind: 'completed', correlationId: parent.id, terminal: true, routed: true })] },
+    } }], 'seed-done-parent', { durable: true });
+
+    let res = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    assert.equal(res.reengaged.some(r => r.cardId === parent.id), false, 'a done parent is not a re-engagement candidate');
+    let after = service.getCard(parent.id);
+    assert.equal(after.columnId, 'done', 'the parent stays done (its children carry the work)');
+    assert.ok(!after.metadata.returns[0].consumedAt, 'the routed return is not consumed-and-dropped — it survives in history');
+  });
+
+  it('AU04: a return-only wake whose dispatch is blocked keeps its return unconsumed (retries, not lost)', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({ patch: { automation: { recovery: 'auto', returnWake: 'auto' } }, actor: 'test', reason: 'auto' });
+    let board = service.ensureBoard();
+    // A card parked in commit-publish (there is no commit-publish -> ready edge), carrying a queued
+    // wake-driving return. The driver tries to route it to `ready`, the transition is blocked, so the
+    // dispatch does not deliver — the return must NOT be consumed-and-dropped.
+    let card = makeReadyCard(service, { title: 'blocked-dispatch', resourceGroup: 'impl' });
+    let base = sg.get(`workflowCards/${card.id}`);
+    sg.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: {
+      ...base, columnId: 'commit-publish', lifecycle: 'idle',
+      metadata: { ...base.metadata, returns: [returnEvent({ kind: 'discovered', detail: 'found work', correlationId: card.id })] },
+    } }], 'seed-blocked-dispatch', { durable: true });
+
+    let res = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    let entry = res.reengaged.find(r => r.cardId === card.id);
+    assert.ok(entry && entry.ok === false, 'the dispatch was attempted but the transition was blocked');
+    let after = service.getCard(card.id);
+    assert.ok(!after.metadata.returns[0].consumedAt, 'consumed==delivered: an undelivered wake stays unconsumed to retry');
+  });
 });
