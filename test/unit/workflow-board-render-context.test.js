@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildWorkflowBoardProjectionFromContext,
   createWorkflowBoardRenderContext,
+  workflowBoardGraphTopologySignature,
   workflowBoardRenderScopeKey,
 } from '../../web/panels/WorkflowBoard/workflow-board-render-context.js';
 
@@ -45,6 +46,10 @@ function buildBoard() {
     ],
     cards: [alpha, beta, hiddenGoal, hiddenChat],
   };
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 describe('workflow board render context', () => {
@@ -94,6 +99,58 @@ describe('workflow board render context', () => {
     assert.equal(
       workflowBoardRenderScopeKey({ scope: 'project', projectId: 'a', goalId: 'g1', chatId: 'c1' }),
       workflowBoardRenderScopeKey({ scope: 'project', projectId: 'a', goalId: 'g1', chatId: 'c1' }),
+    );
+  });
+
+  it('keeps graph topology signatures stable for status-only card refreshes', () => {
+    let board = buildBoard();
+    let changed = clone(board);
+    changed.cards[0] = {
+      ...changed.cards[0],
+      status: 'running',
+      updatedAt: 123,
+      ticker: { label: 'Running tests', kind: 'state' },
+      raw: {
+        ...changed.cards[0].raw,
+        status: 'running',
+        latestEvent: { id: 'event-1' },
+      },
+    };
+    changed.columns[0].cards[0] = changed.cards[0];
+
+    let scope = { goalId: 'goal-a', chatId: 'chat-a' };
+    assert.equal(
+      workflowBoardGraphTopologySignature(createWorkflowBoardRenderContext(board, scope)),
+      workflowBoardGraphTopologySignature(createWorkflowBoardRenderContext(changed, scope)),
+    );
+  });
+
+  it('invalidates graph topology signatures for dependency and board-topology changes', () => {
+    let base = createWorkflowBoardRenderContext(buildBoard(), { goalId: 'goal-a', chatId: 'chat-a' });
+    let baseSignature = workflowBoardGraphTopologySignature(base);
+
+    let dependencyChanged = clone(buildBoard());
+    dependencyChanged.cards[1].dependsOn = [{ cardId: 'alpha', releaseWhen: 'audit_passed' }];
+    dependencyChanged.columns[0].cards[1] = dependencyChanged.cards[1];
+    assert.notEqual(
+      workflowBoardGraphTopologySignature(createWorkflowBoardRenderContext(dependencyChanged, { goalId: 'goal-a', chatId: 'chat-a' })),
+      baseSignature,
+    );
+
+    let columnChanged = clone(buildBoard());
+    columnChanged.cards[1].columnId = 'done';
+    columnChanged.columns[0].cards = [columnChanged.cards[0]];
+    columnChanged.columns[1].cards = [columnChanged.cards[1]];
+    assert.notEqual(
+      workflowBoardGraphTopologySignature(createWorkflowBoardRenderContext(columnChanged, { goalId: 'goal-a', chatId: 'chat-a' })),
+      baseSignature,
+    );
+
+    let transitionChanged = clone(buildBoard());
+    transitionChanged.transitions = [{ from: 'done', to: 'ready', gate: 'rework_authorized' }];
+    assert.notEqual(
+      workflowBoardGraphTopologySignature(createWorkflowBoardRenderContext(transitionChanged, { goalId: 'goal-a', chatId: 'chat-a' })),
+      baseSignature,
     );
   });
 });

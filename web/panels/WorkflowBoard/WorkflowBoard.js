@@ -40,6 +40,7 @@ import {
 import {
   buildWorkflowBoardProjectionFromContext,
   createWorkflowBoardRenderContext,
+  workflowBoardGraphTopologySignature,
   workflowBoardRenderScopeKey,
 } from './workflow-board-render-context.js';
 import { decideWorkflowBoardRealtimeRefresh } from './workflow-board-realtime.js';
@@ -227,6 +228,7 @@ export class WorkflowBoard extends Symbiote {
   #renderContext = null;
   #renderContextBoard = null;
   #renderContextScopeKey = '';
+  #graphRenderCache = null;
   // Per-column header memoization: the same DOM node is returned while the column's rendered config
   // is unchanged, so the board's keyed reconciliation never rebuilds a header (or tears down its
   // open settings popover) on a silent refresh. Keyed by column id → { key, element, stale }.
@@ -857,13 +859,21 @@ export class WorkflowBoard extends Symbiote {
 
   #renderGraph(context = this.#getRenderContext()) {
     let cards = context.visibleCards;
-    let projection = buildWorkflowBoardProjectionFromContext(context);
-    let graphModel = buildWorkflowBoardGraphModel(projection);
-    let canvasModel = buildWorkflowBoardCanvasGraphModel(projection);
+    let signature = workflowBoardGraphTopologySignature(context);
+    let rebuilt = false;
+    if (!this.#graphRenderCache || this.#graphRenderCache.signature !== signature) {
+      let projection = buildWorkflowBoardProjectionFromContext(context);
+      this.#graphRenderCache = {
+        signature,
+        graphModel: buildWorkflowBoardGraphModel(projection),
+        canvasModel: buildWorkflowBoardCanvasGraphModel(projection),
+      };
+      rebuilt = true;
+    }
     let hasCards = cards.length > 0;
     this.ref.graphEmpty.hidden = hasCards;
-    this.ref.graphCanvas.setGraphModel?.(canvasModel);
-    this.#renderGraphStats(graphModel);
+    if (rebuilt) this.ref.graphCanvas.setGraphModel?.(this.#graphRenderCache.canvasModel);
+    this.#renderGraphStats(this.#graphRenderCache.graphModel);
   }
 
   #renderGraphStats(model) {
@@ -887,6 +897,7 @@ export class WorkflowBoard extends Symbiote {
   }
 
   #renderEmptyShell() {
+    this.#graphRenderCache = null;
     this.$.modeLabel = formatMode('passive');
     this.$.scopeLabel = tPortal('workflow.scope.none');
     this.ref.boardView.setBoard({ columns: [] });

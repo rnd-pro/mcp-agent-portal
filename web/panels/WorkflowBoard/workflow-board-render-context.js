@@ -15,6 +15,28 @@ function dependencyCardId(dep) {
   return normalizeText(dep?.cardId ?? dep?.card_id);
 }
 
+function dependencySignature(dep) {
+  if (typeof dep === 'string') return { cardId: normalizeText(dep) };
+  let source = asObject(dep);
+  return {
+    cardId: dependencyCardId(source),
+    releaseWhen: normalizeText(source.releaseWhen ?? source.release_when),
+    onUpstreamFailure: normalizeText(source.onUpstreamFailure ?? source.on_upstream_failure),
+    mode: normalizeText(source.mode),
+  };
+}
+
+function queueSignature(queue = {}) {
+  let source = asObject(queue);
+  return {
+    enqueuedAt: source.enqueuedAt ?? null,
+    queueEpoch: source.queueEpoch ?? null,
+    admissionId: source.admissionId ?? null,
+    priority: source.priority ?? null,
+    position: source.position ?? null,
+  };
+}
+
 function buildCardIndex(cards) {
   let index = new Map();
   for (let card of cards) {
@@ -122,4 +144,39 @@ export function buildWorkflowBoardProjectionFromContext(context = {}) {
     cards: projectionCards,
     version: board?.version ?? null,
   };
+}
+
+export function workflowBoardGraphTopologySignature(context = {}) {
+  let board = context.board;
+  let columns = asArray(context.columns);
+  let cards = asArray(context.visibleCards);
+  return JSON.stringify({
+    boardId: normalizeText(board?.boardId || board?.id),
+    scope: workflowBoardRenderScopeKey(context.scope),
+    columns: columns.map(column => ({
+      id: normalizeText(column.id),
+      title: normalizeText(column.title),
+      gate: normalizeText(column.gate),
+      automation: asObject(column.automation),
+      cardIds: asArray(column.cards).map(card => normalizeText(card?.id)).filter(Boolean),
+    })),
+    transitions: asArray(board?.transitions).map(transition => ({
+      from: normalizeText(transition?.from),
+      to: normalizeText(transition?.to),
+      gate: normalizeText(transition?.gate),
+      gates: asArray(transition?.gates).map(normalizeText).filter(Boolean),
+    })),
+    cards: cards.map((card) => {
+      let raw = asObject(card.raw);
+      return {
+        id: normalizeText(card.id),
+        title: normalizeText(card.title),
+        columnId: normalizeText(card.columnId),
+        priority: normalizeText(card.priority),
+        lifecycle: normalizeText(raw.lifecycle ?? card.lifecycle ?? 'idle'),
+        dependsOn: asArray(raw.dependsOn ?? raw.depends_on ?? card.dependsOn).map(dependencySignature),
+        queue: queueSignature(raw.queue ?? card.queue),
+      };
+    }),
+  });
 }
