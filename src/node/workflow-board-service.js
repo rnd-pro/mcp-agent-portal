@@ -877,6 +877,29 @@ export function createWorkflowBoardService(opts = {}) {
     return textOrNull(card?.metadata?.worktree?.path) || textOrNull(card?.cwd) || projectRoot;
   }
 
+  function filePathForCardWorktree(file, card = {}) {
+    let value = textOrNull(file);
+    let wt = cardWorktree(card);
+    if (!value || !wt?.path) return value;
+
+    if (path.isAbsolute(value)) {
+      let alreadyInWorktree = path.relative(wt.path, value);
+      if (alreadyInWorktree && !alreadyInWorktree.startsWith('..') && !path.isAbsolute(alreadyInWorktree)) {
+        return value;
+      }
+      let relative = path.relative(cardBaseRepo(card), value);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return value;
+      return path.join(wt.path, relative);
+    }
+
+    if (value === '..' || value.startsWith(`..${path.sep}`)) return value;
+    return path.join(wt.path, value);
+  }
+
+  function workerFileScope(card = {}, args = {}) {
+    return cardFileScope(card, args).map(file => filePathForCardWorktree(file, card));
+  }
+
   // Persist (or clear) the worktree record on a card. A shallow StateGraph merge replaces `metadata`
   // wholesale, so the full metadata object is written; the live `card` is mutated in place so the
   // caller sees the update without a re-read.
@@ -7345,7 +7368,7 @@ export function createWorkflowBoardService(opts = {}) {
         + ' Make your changes here; the board commits and merges this branch back to base automatically.'
         + ' Do not commit, push, switch, or delete branches yourself.'
       : (card.cwd ? `\n\nWorking directory: ${card.cwd}` : '');
-    let fileScope = cardFileScope(card, args);
+    let fileScope = workerFileScope(card, args);
     let fileScopeHint = fileScope.length
       ? `\n\nFile ownership scope:\n${fileScope.map(file => `- ${file}`).join('\n')}`
       : '';
@@ -7625,7 +7648,7 @@ export function createWorkflowBoardService(opts = {}) {
     if (approvalMode) delegateArgs.approval_mode = approvalMode;
     let resourceGroup = textOrNull(args.resource_group ?? card.resourceGroup);
     if (resourceGroup) delegateArgs.resource_group = resourceGroup;
-    let files = cardFileScope(card, args);
+    let files = workerFileScope(card, args);
     if (files.length) delegateArgs.files = files;
 
     let prepared = await prepareDelegateTaskCall(pm, 'delegate_task', delegateArgs, {

@@ -120,6 +120,11 @@ describe('per-card worktree isolation (service wiring)', () => {
     return call?.payload?.arguments?.cwd ?? null;
   }
 
+  function lastDelegateArgs() {
+    let call = ledgerCalls.filter(c => c.server === 'agent-pool' && c.payload?.name === 'delegate_task').at(-1);
+    return call?.payload?.arguments ?? null;
+  }
+
   // Plant a card already in commit-publish with its floor checks signed and an isolated worktree, mirroring
   // a card the release tail is about to publish.
   function plantPublishCard(id, { worktree = true } = {}) {
@@ -153,7 +158,8 @@ describe('per-card worktree isolation (service wiring)', () => {
 
   it('provisions a worktree on dispatch and routes the run cwd into it', async () => {
     autonomous();
-    let card = createCard('exec-1', 'in-progress', { files: ['src/x.js'] });
+    let baseFile = path.join(tmpDir, 'src/x.js');
+    let card = createCard('exec-1', 'in-progress', { files: [baseFile] });
     assert.equal(card.metadata?.worktree, undefined, 'no worktree before the first run');
 
     await service.orchestrateWorkItem({ cardId: 'exec-1', force: true });
@@ -163,6 +169,10 @@ describe('per-card worktree isolation (service wiring)', () => {
     assert.equal(after.metadata.worktree.path, '/wt/exec-1', 'the worktree record is persisted on the card');
     assert.equal(after.metadata.worktree.branch, 'agent-portal/exec-1');
     assert.equal(lastDelegateCwd(), '/wt/exec-1', 'the delegated run executes in the worktree, not the shared tree');
+    let delegateArgs = lastDelegateArgs();
+    assert.deepEqual(delegateArgs.files, ['/wt/exec-1/src/x.js'], 'file hints point at the worktree copy');
+    assert.equal(delegateArgs.prompt.includes(`- /wt/exec-1/src/x.js`), true, 'prompt ownership scope points at the worktree copy');
+    assert.equal(delegateArgs.prompt.includes(baseFile), false, 'prompt does not hand the worker a base-tree edit target');
   });
 
   it('provisions a worktree for the orchestrate stage too (work runs from the orchestrate column)', async () => {
