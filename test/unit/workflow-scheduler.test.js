@@ -1201,7 +1201,10 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     let card = service.getCard(cardId);
     assert.equal(card.columnId, 'quality-audit', 'failing unit tests hold the card despite a self-reported PASS');
     assert.equal(card.recoveryFlags.includes('needs_audit'), true, 'it is held for rework');
+    assert.equal(card.metadata.escalation?.kind, 'rework', 'the failing release gate is actionable, not a silent hold');
+    assert.match(card.metadata.escalation.lastEscalation.detail, /Release test gate failed/, 'the rework reason names the release gate');
     assert.equal(result.releaseTail.advanced.some(i => i.cardId === cardId), false, 'broken work never advances to commit');
+    assert.ok(result.releaseTail.reworked.some(i => i.cardId === cardId), 'the release tail reports the rework');
   });
 
   it('release gate: a PASS verdict with a green unit suite advances to commit-publish', async () => {

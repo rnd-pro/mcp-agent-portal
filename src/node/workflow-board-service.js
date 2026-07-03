@@ -5569,6 +5569,7 @@ export function createWorkflowBoardService(opts = {}) {
     let conflicted = [];
     let awaitingHuman = [];
     let skippedStale = [];
+    let reworked = [];
     // Gate once up-front: if the daemon may not record bookkeeping there is nothing this pass may do —
     // including the worktree commit/merge side effects, which must never outrun their card records.
     if (!gate('daemon.bookkeeping', principal, { boardId: board.id }).ok) {
@@ -5669,9 +5670,29 @@ export function createWorkflowBoardService(opts = {}) {
             let expectedRedAllowance = expectedRedReleaseTestAllowance(latestCard, auditText, testProbe);
             if (testProbe.available && !testProbe.passed && !expectedRedAllowance) {
               let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
+              let nextMetadata = latestCard.metadata;
+              if (!hasActiveEscalation(latestCard)) {
+                let reworkCycles = Number(latestCard.metadata?.reworkCycles ?? 0) + 1;
+                let exhausted = reworkCycles > DEFAULT_AUDIT_REWORK_LIMIT;
+                let reason = textOrNull(testProbe.reason) ?? 'unit tests failed';
+                let detail = exhausted
+                  ? `Release test gate failed for ${card.id} after ${reworkCycles - 1} orchestrator re-routes (${reason}); automatic rework is exhausted. Decide now: reject (WORKFLOW_RESULT: rejected) or — only if a person genuinely must choose — ask a human (WORKFLOW_RESULT: needs_human with your own question and options). Do not request another plain rework.`
+                  : `Release test gate failed for ${card.id}: ${reason}. Returning to the orchestrator to re-route (re-audit with an expected-red ledger if this red is allowed, re-execute, or reject).`;
+                nextMetadata = {
+                  ...raiseEscalationMetadata(latestCard, {
+                    kind: 'rework',
+                    detail,
+                    options: [],
+                    runId: latestFinished?.id ?? null,
+                    at: runtimeNow,
+                  }),
+                  reworkCycles,
+                };
+                reworked.push({ cardId: card.id, reason });
+              }
               let held = normalizeWorkflowCardInput({
                 ...latestCard, recoveryFlags: nextFlags, version: latestCard.version + 1,
-                updatedAt: runtimeNow, updatedBy: principal.label,
+                metadata: nextMetadata, updatedAt: runtimeNow, updatedBy: principal.label,
               }, {
                 id: latestCard.id, actor: principal.label, now: runtimeNow,
                 version: latestCard.version + 1, createdAt: latestCard.createdAt, updatedAt: runtimeNow,
@@ -5890,7 +5911,7 @@ export function createWorkflowBoardService(opts = {}) {
       }
       commitCardOps(card.id, baseVersion, cardOps);
     }
-    return { advanced, closed, merged, conflicted, awaitingHuman, skippedStale };
+    return { advanced, closed, merged, conflicted, awaitingHuman, skippedStale, reworked };
   }
 
   // Park any card carrying an active `needs_human` escalation in the human-decision lane (a daemon-bypass
