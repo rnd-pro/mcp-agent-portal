@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { DEFAULT_WORKFLOW_BOARD_ID } from '../../src/iso/workflow-board.js';
 import { StateGraph } from '../../src/node/state-graph.js';
 import { createWorkflowBoardService } from '../../src/node/workflow-board-service.js';
 import { humanPrincipal } from '../../src/node/server/principal.js';
@@ -210,6 +209,43 @@ describe('workflow escalation driver — return wake (S9–S10)', () => {
       result.reengaged.some(item => item.cardId === parent.id),
       'the card is re-engaged so the orchestrator can answer its child',
     );
+  });
+
+  it('an unconsumed hard-interrupt overrides a needs_human wait and is delivered', async () => {
+    let ledger = makeLedgerProxy({ groupLimits: { impl: 5 } });
+    let service = makeService(ledger.proxy);
+    relaxBoardPreChecks(service);
+    service.updateWorkflowBoard({
+      patch: { automation: { recovery: 'auto', returnWake: 'auto' } },
+      actor: 'test',
+      reason: 'enable recovery',
+    });
+    let board = service.ensureBoard();
+
+    let parent = makeReadyCard(service, { title: 'human-parked-parent', resourceGroup: 'impl' });
+    seedHardInterrupt(
+      parent,
+      [returnEvent({
+        kind: 'blocked',
+        detail: 'child cannot proceed without parent input',
+        correlationId: parent.id,
+        hardInterrupt: true,
+      })],
+      {
+        schema: 'workflow-escalation-state/v1',
+        kind: 'needs_human',
+        detail: 'Which provider should the parent use?',
+        attemptCount: 0,
+        nextAttemptAt: 1_000_000,
+      },
+    );
+
+    let result = await service.reconcileWorkflowEscalations({ boardId: board.id }, { proxyManager: ledger.proxy });
+    let reengaged = result.reengaged.find(item => item.cardId === parent.id);
+    assert.equal(reengaged?.ok, true, 'the hard-interrupt wake is delivered through the stage guard');
+    let after = service.getCard(parent.id);
+    assert.ok(after.metadata.returns[0].consumedAt, 'delivered hard-interrupt returns are consumed once');
+    assert.equal(after.metadata.escalation.attemptCount ?? 0, 0, 'external wake input does not accrue an unrelated escalation attempt');
   });
 
   it('a queued discovered return re-engages once on an auto board and stamps consumedAt (idempotent)', async () => {

@@ -10,7 +10,8 @@ import {
 
 // F2: one derived record folds the five overlapping "is this card waiting" signals (dependency
 // block, human escalation, machine backoff, queued return, run-error recovery flags) into a single
-// {reason, since, dueAt, owner, wakeOn}. These pin the reason each axis maps to and the precedence.
+// {reason, since, dueAt, owner, wakeOn, wake}. These pin the reason each axis maps to and the
+// precedence.
 
 const HOUR = 3_600_000;
 
@@ -84,6 +85,31 @@ describe('deriveWorkflowWaiting (F2 unified waiting record)', () => {
     assert.equal(w.owner, 'orchestrator');
     assert.equal(w.wakeOn, 'return');
     assert.equal(w.since, 42);
+    assert.equal(w.wake.actionableReturn, true);
+  });
+
+  it('keeps wake carve-outs on the derived record even when the primary wait is human', () => {
+    let hardInterrupt = normalizeWorkflowReturnEvent(
+      { kind: 'blocked', correlationId: 'c1', detail: 'child is blocked' },
+      { now: 42 },
+    );
+    let humanReply = {
+      ...normalizeWorkflowReturnEvent(
+        { kind: 'discovered', correlationId: 'c2', detail: 'human added context' },
+        { now: 43 },
+      ),
+      eventId: 'reply-c2',
+    };
+    let w = deriveWorkflowWaiting(card({
+      metadata: {
+        escalation: { kind: 'needs_human', lastAt: 10 },
+        returns: [hardInterrupt, humanReply],
+      },
+    }));
+    assert.equal(w.reason, 'human');
+    assert.equal(w.wake.actionableReturn, true);
+    assert.equal(w.wake.hardInterrupt, true);
+    assert.equal(w.wake.humanReply, true);
   });
 
   it('ignores a consumed return (no longer waiting on that axis)', () => {

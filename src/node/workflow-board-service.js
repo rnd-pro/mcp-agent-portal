@@ -2085,19 +2085,20 @@ export function createWorkflowBoardService(opts = {}) {
     ) {
       return { ok: false, reason: 'decomposed parent waits for child returns instead of re-running', automation };
     }
-    // A live needs_human episode is a HUMAN's turn: no stage may auto-start on the card. Without this
-    // guard, a failed run carrying a needs_human block routes to the audit column, the audit's on_enter
-    // fires BEFORE the parking driver moves the card to the decision lane, and a passing audit then
-    // erases the unanswered question via the completed-run escalation clear — half-done work ships and
-    // the human is never asked. The escalation driver already refuses to re-engage needs_human (AU05);
-    // this closes the same door for on_enter/scope auto-starts. Carve-out (AU06): an unconsumed human
-    // reply is the person speaking — that wake must start the orchestrator; a resolving reply deletes
-    // the episode and every auto path resumes.
-    if (hasActiveEscalation(card)
-      && normalizeWorkflowEscalationState(card.metadata.escalation).kind === 'needs_human'
-      && !hasUnconsumedHumanReply(card)
-      && args.humanReplyWake !== true) {
-      return { ok: false, reason: 'card awaits a human answer (needs_human); no stage auto-starts', automation };
+    // A derived human wait is a HUMAN's turn: no stage may auto-start on the card. Without this guard,
+    // a failed run carrying a needs_human block routes to the audit column, the audit's on_enter fires
+    // BEFORE the parking driver moves the card to the decision lane, and a passing audit then erases
+    // the unanswered question via the completed-run escalation clear — half-done work ships and the
+    // human is never asked. Carve-outs live on the same derived waiting contract: a human reply (AU06)
+    // or a hard-interrupt child return is new input that must be delivered exactly once.
+    let waiting = deriveCardWaiting(board, card, { now: now() });
+    let wake = waiting?.wake ?? {};
+    let hasWakeCarveOut = wake.humanReply === true
+      || wake.hardInterrupt === true
+      || args.humanReplyWake === true
+      || args.hardInterruptWake === true;
+    if (waiting?.reason === 'human' && !hasWakeCarveOut) {
+      return { ok: false, reason: 'card awaits a human answer; no stage auto-starts', automation };
     }
     if (board.mode !== 'armed' && board.mode !== 'autonomous') {
       return { ok: false, reason: `board mode ${board.mode} does not allow automatic orchestration`, automation };
@@ -3019,12 +3020,12 @@ export function createWorkflowBoardService(opts = {}) {
     for (let card of boardCardsFor(board.id)) {
       if (classifier.isTerminal(card.columnId)) continue;
       let running = Boolean(activeRunForCard(card.id));
-      let record = deriveWorkflowWaiting(card, {
+      let record = deriveCardWaiting(board, card, {
         now: currentNow,
-        inHumanLane: Boolean(humanLaneId) && card.columnId === humanLaneId,
+        classifier,
+        humanLaneId,
         isTerminal: false,
         hasActiveRun: running,
-        maxBlockedAgeMs: MAX_BLOCKED_AGE_MS,
       });
       if (record) waiting.push({ cardId: card.id, columnId: card.columnId, reason: record.reason });
       if (running || record) continue;
@@ -4756,6 +4757,7 @@ export function createWorkflowBoardService(opts = {}) {
     ])));
     let runtimeCards = runtimeTaskProjectionCards(board, projectId, linkedTaskIds, runtimeTasks);
     let waitingContext = {
+      board,
       now: now(),
       classifier: classifyWorkflowGraph(board),
       humanLaneId: decisionColumnId(board),
@@ -4811,20 +4813,32 @@ export function createWorkflowBoardService(opts = {}) {
   // shape. lifecycle and dependsOn are normalized (idle / [] defaults via the iso normalizers). The
   // per-card queue slot is all-null until the scheduler (S8) populates it; existing values on the
   // card are surfaced, never invented.
+  function deriveCardWaiting(board, card, opts = {}) {
+    let classifier = opts.classifier ?? classifyWorkflowGraph(board);
+    let humanLaneId = opts.humanLaneId ?? decisionColumnId(board);
+    let hasActiveRun = opts.hasActiveRun;
+    if (hasActiveRun === undefined) hasActiveRun = Boolean(activeRunForCard(card.id));
+    return deriveWorkflowWaiting(card, {
+      now: opts.now ?? now(),
+      inHumanLane: Boolean(humanLaneId) && card.columnId === humanLaneId,
+      isTerminal: opts.isTerminal ?? classifier.isTerminal(card.columnId),
+      hasActiveRun: Boolean(hasActiveRun),
+      maxBlockedAgeMs: MAX_BLOCKED_AGE_MS,
+    });
+  }
+
   function projectCardV2(card, context = {}) {
     let queueSource = card.queue ?? {};
-    let classifier = context.classifier;
     let hasActiveRun = Array.isArray(card.runs)
       && card.runs.some(run => RUNNING_RUN_STATUSES.has(String(run?.status ?? '').toLowerCase()));
     // F2: the single derived "why is this card waiting" fact (dependency / human / backoff / return /
     // run_error), folded from the durable on-card state. One field for the UI and monitoring to read
     // instead of re-deriving from five axes; null when the card is running, fresh, or terminal-settled.
-    let waiting = deriveWorkflowWaiting(card, {
+    let waiting = deriveCardWaiting(context.board, card, {
       now: context.now,
-      inHumanLane: Boolean(context.humanLaneId) && card.columnId === context.humanLaneId,
-      isTerminal: classifier ? classifier.isTerminal(card.columnId) : false,
+      classifier: context.classifier,
+      humanLaneId: context.humanLaneId,
       hasActiveRun,
-      maxBlockedAgeMs: MAX_BLOCKED_AGE_MS,
     });
     return {
       ...card,
@@ -8610,26 +8624,6 @@ export function createWorkflowBoardService(opts = {}) {
     return Array.isArray(returns) && returns.some(item => isWakeDrivingReturn(item));
   }
 
-  // A hard-interrupt return (a blocked / needs_decision / needs_permission child) must wake the
-  // orchestrator regardless of the board's `recovery` setting — a stuck child cannot self-clear, so
-  // gating it on `recovery === 'auto'` would stall it forever (S9c, D4). Detected off the inbox so the
-  // gate is per-card, not a single board-level early return.
-  function hasUnconsumedHardInterrupt(card = {}) {
-    let returns = card?.metadata?.returns;
-    return Array.isArray(returns) && returns.some(item => item?.hardInterrupt === true && !item?.consumedAt);
-  }
-
-  // AU06: a human reply (replyToCard) mints a routed wake-driving return with a stable `reply-<hash>`
-  // eventId. A NON-resolving reply keeps the escalation, so the human-parked skip (needs_human/
-  // needs_decision) would otherwise strand the return in the inbox until the cap-12 slice evicts it — a
-  // person's reply doing nothing. This lets exactly that reply wake the orchestrator once (consumedAt is
-  // the idempotency), WITHOUT accruing an escalation attempt (it is human input, not a board retry).
-  function hasUnconsumedHumanReply(card = {}) {
-    let returns = card?.metadata?.returns;
-    return Array.isArray(returns) && returns.some(item => item && !item.consumedAt
-      && isWakeDrivingReturn(item) && typeof item.eventId === 'string' && item.eventId.startsWith('reply-'));
-  }
-
   // Compact one-line-per-return summary of the returns that actually DROVE this wake (wake-driving:
   // intermediate actionable or routed), newest first and capped, folded into the re-engagement reason
   // so the orchestrator wakes once and sees the batch (S10a). A bare self-completion terminal return is
@@ -8726,13 +8720,22 @@ export function createWorkflowBoardService(opts = {}) {
       let card = getCard(cardId);
       if (!card || card.boardId !== board.id) continue;
       if (!(hasActiveEscalation(card) || hasQueuedActionableReturn(card))) continue;
+      let waiting = deriveCardWaiting(board, card, {
+        now: currentNow,
+        classifier: terminalClassifier,
+        isTerminal: false,
+        hasActiveRun: false,
+      });
+      let wake = waiting?.wake ?? {};
+      let hardInterruptWake = wake.hardInterrupt === true;
+      let humanReplyWake = wake.humanReply === true;
       // Per-card wake gate (D4 + returnWake), applied PER-CARD not as a board-level early return:
       //   - an unconsumed hard-interrupt (a blocked child) wakes regardless — it cannot self-clear;
       //   - otherwise a queued wake-driving (soft) return is NEW actionable work, gated on `returnWake`
       //     (auto by default, so the return loop wakes a dormant orchestrator out of the box);
       //   - a card driven only by an escalation (stuck/recovering work) stays gated on `recovery`.
-      if (!args.force && !hasUnconsumedHardInterrupt(card)) {
-        let gateOpen = hasQueuedActionableReturn(card) ? returnWakeAuto : recoveryAuto;
+      if (!args.force && !hardInterruptWake) {
+        let gateOpen = wake.actionableReturn === true ? returnWakeAuto : recoveryAuto;
         if (!gateOpen) continue;
       }
       let state = normalizeWorkflowEscalationState(card.metadata.escalation);
@@ -8748,16 +8751,17 @@ export function createWorkflowBoardService(opts = {}) {
       // must wake the orchestrator once) or an unconsumed hard-interrupt (a blocked CHILD's question that
       // cannot self-clear, S9c/D4) wakes the card regardless of the park.
       let laneId = decisionColumnId(board);
-      let humanReplyWake = hasUnconsumedHumanReply(card);
-      let humanParked = (laneId && card.columnId === laneId) || state.kind === 'needs_human';
-      if (humanParked && !humanReplyWake && !hasUnconsumedHardInterrupt(card)) continue;
+      let humanParked = waiting?.reason === 'human'
+        || (laneId && card.columnId === laneId)
+        || state.kind === 'needs_human';
+      if (humanParked && !humanReplyWake && !hardInterruptWake) continue;
       // A card with an UNSATISFIED dependency must wait for its release tick, not re-engage — but only
       // AFTER the guards above: a `needs_human` park stays a human's turn (never silently re-blocked),
       // and an unconsumed hard-interrupt (a blocked CHILD's question to this card) must wake it
       // regardless of the card's own upstream edges — deferring the answer until an unrelated upstream
       // finishes would starve the waiting child. Soft returns stay queued (unconsumed) through the
       // wait and are delivered when the dependency releases the card.
-      if (cardDependsOn(card).length && !hasUnconsumedHardInterrupt(card) && !humanReplyWake) {
+      if (cardDependsOn(card).length && !hardInterruptWake && !humanReplyWake) {
         let dependencyRestored = restoreDependencyWait(board, card, principal, { clearStaleEscalation: true });
         if (dependencyRestored.ok) {
           if (!dependencyRestored.unchanged) {
@@ -8814,8 +8818,11 @@ export function createWorkflowBoardService(opts = {}) {
           continue;
         }
       }
-      // A human-reply wake ignores the escalation backoff window: the person acted now, deliver it now.
-      if (!humanReplyWake && state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) continue;
+      // External wake input ignores the escalation backoff window: something acted now, deliver it now.
+      if (!humanReplyWake && !hardInterruptWake
+        && state.nextAttemptAt !== null && currentNow < state.nextAttemptAt && !args.force) {
+        continue;
+      }
       // Self-feed guard: never re-engage while a run is still active for this card. The backoff
       // window plus this guard mean each round drives exactly one orchestration.
       if (activeRunForCard(card.id) && !args.force) continue;
@@ -8827,7 +8834,7 @@ export function createWorkflowBoardService(opts = {}) {
       // looping and decides (reject / ask a human / one targeted fix). Past the hard ceiling the card must
       // still reach a terminal (every card resolves), so the board retires it to the reject terminal as a
       // last-resort discard — a legitimate board terminal, never a fabricated human prompt or park.
-      if (state.attemptCount >= maxAttempts * 2 && !humanReplyWake) {
+      if (state.attemptCount >= maxAttempts * 2 && !humanReplyWake && !hardInterruptWake) {
         let rejectColumnId = rejectTerminalColumnId(board);
         if (rejectColumnId) {
           let reason = `Automatic re-engagement exhausted after ${state.attemptCount} attempts without an orchestrator terminal decision; retiring ${card.id} to the reject terminal.`;
@@ -8863,10 +8870,11 @@ export function createWorkflowBoardService(opts = {}) {
       // card bumps its attempt counter and pushes the backoff window; a card driven purely by a queued
       // return (no active escalation) accrues no phantom escalation state — `consumedAt` below is its
       // idempotency mechanism, and it re-engages immediately (no backoff).
-      // A human-reply wake re-engages like a return-only wake: no attempt accrual, no backoff push, so a
-      // person's notes cannot climb the escalation counter toward the reject backstop. The escalation
-      // itself is preserved (this branch does not clear it), so if the orchestrator re-asks, it re-parks.
-      let escalated = hasActiveEscalation(card) && !humanReplyWake;
+      // External wake input re-engages like a return-only wake: no attempt accrual, no backoff push, so
+      // a person's notes or a blocked child's question cannot climb an unrelated escalation counter
+      // toward the reject backstop. The escalation itself is preserved, so if the orchestrator re-asks,
+      // it re-parks.
+      let escalated = hasActiveEscalation(card) && !humanReplyWake && !hardInterruptWake;
       let attemptCount = escalated ? state.attemptCount + 1 : 0;
       let nextAttemptAt = escalated
         ? currentNow + Math.min(DEFAULT_ESCALATION_BACKOFF_MS * 2 ** (attemptCount - 1), MAX_ESCALATION_BACKOFF_MS)
@@ -8923,6 +8931,7 @@ export function createWorkflowBoardService(opts = {}) {
         // the dispatch target cannot re-derive "a human just replied" from the card. Carry the wake
         // context so the needs_human auto-start guard lets THIS dispatch through (and only this one).
         humanReplyWake,
+        hardInterruptWake,
       };
       let outcome = null;
       let orchestrateStageId = columnIdByAction(board, 'orchestrate') ?? 'ready';
