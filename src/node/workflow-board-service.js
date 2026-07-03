@@ -1677,6 +1677,12 @@ export function createWorkflowBoardService(opts = {}) {
     return sumRunsBudget(boardRuns(boardId));
   }
 
+  function chargesRootConvergenceRun(run) {
+    if (textArray(run?.taskIds).length) return true;
+    let tokens = Number(run?.tokens);
+    return Number.isFinite(tokens) && tokens > 0;
+  }
+
   // Board budget status: cumulative spend evaluated against the board's configured budget. ok=true and
   // configured=false when no budget is authored (uncapped — the prior behaviour).
   function boardBudgetStatus(board) {
@@ -1786,7 +1792,7 @@ export function createWorkflowBoardService(opts = {}) {
     };
     let depth = 0;
     for (let card of group) depth = Math.max(depth, depthOf(card));
-    let runCount = sumRunsBudget(runsByRoot.get(root) ?? []).runCount;
+    let runCount = sumRunsBudget((runsByRoot.get(root) ?? []).filter(chargesRootConvergenceRun)).runCount;
     return { depth, fanout: group.length, runCount };
   }
 
@@ -2481,13 +2487,98 @@ export function createWorkflowBoardService(opts = {}) {
   // Persist the dependent out of `blocked` back to `idle` (blocked→idle), clearing the blocked-age
   // clock. The release tick / auto-admit path then decides whether to enqueue.
   function commitDependencyUnblock(card, principal) {
-    if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked') return card;
+    let lifecycle = normalizeWorkflowLifecycle(card.lifecycle);
+    let hasBlock = Boolean(dependencyBlockState(card));
+    let hasDependencyFailureEscalation = Boolean(dependencyFailureEscalationUpstreamId(card));
+    if (lifecycle !== 'blocked' && !hasBlock && !hasDependencyFailureEscalation) return card;
     let ts = now();
     let metadata = { ...(card.metadata ?? {}) };
     delete metadata.dependencyBlock;
-    let idle = dependencyLifecycleCard(card, 'idle', principal, ts, metadata);
-    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: idle }], sourceForPrincipal(principal));
-    return idle;
+    if (hasDependencyFailureEscalation) delete metadata.escalation;
+    let nextLifecycle = lifecycle === 'blocked' ? 'idle' : lifecycle;
+    let next = dependencyLifecycleCard(card, nextLifecycle, principal, ts, metadata);
+    stateGraph.commit([{ op: 'set', path: `workflowCards/${card.id}`, value: next }], sourceForPrincipal(principal));
+    return next;
+  }
+
+  function dependencyFailureEscalationUpstreamId(card) {
+    if (!card?.metadata?.escalation) return null;
+    let state = normalizeWorkflowEscalationState(card.metadata.escalation);
+    let detail = textOrNull(state.detail ?? state.lastEscalation?.detail);
+    if (!detail) return null;
+    return detail.match(/^Upstream dependency\s+(\S+)\s+reached a terminal failure;/)?.[1] ?? null;
+  }
+
+  function dependencyFailureEscalationIsStale(card) {
+    let upstreamId = dependencyFailureEscalationUpstreamId(card);
+    if (!upstreamId) return false;
+    if (!cardDependsOn(card).some(dep => dep.cardId === upstreamId)) return true;
+    let upstream = stateGraph.get(`workflowCards/${upstreamId}`);
+    if (!upstream) return false;
+    return !upstreamInTerminalFailure(upstream);
+  }
+
+  function dependencyWaitQueueEntries(boardId, cardId) {
+    return listQueueEntries(boardId).filter(entry => entry.cardId === cardId);
+  }
+
+  function restoreDependencyWait(board, card, principal, { clearStaleEscalation = false } = {}) {
+    let deps = cardDependsOn(card);
+    if (!deps.length) return { ok: false, reason: 'no_dependencies', card };
+    let classifier = classifyWorkflowGraph(board);
+    let releasedEdges = releasedEdgesFor(card);
+    if (allDependenciesSatisfied(card, board, classifier, releasedEdges)) {
+      return { ok: false, reason: 'dependencies_satisfied', card };
+    }
+    let ts = now();
+    let metadata = { ...(card.metadata ?? {}) };
+    let block = dependencyBlockState(card) ?? {};
+    metadata.dependencyBlock = {
+      blockedAt: Number(block.blockedAt) || ts,
+      releasedEdges: Array.isArray(block.releasedEdges) ? block.releasedEdges : [],
+    };
+    if (clearStaleEscalation && dependencyFailureEscalationIsStale(card)) {
+      delete metadata.escalation;
+    }
+    let blocked = normalizeWorkflowCardInput({
+      ...card,
+      lifecycle: 'blocked',
+      metadata,
+      version: card.version + 1,
+      updatedAt: ts,
+      updatedBy: principal.label,
+    }, {
+      id: card.id,
+      actor: principal.label,
+      now: ts,
+      version: card.version + 1,
+      createdAt: card.createdAt,
+      updatedAt: ts,
+    });
+    let queueEntries = dependencyWaitQueueEntries(board.id, card.id);
+    let ops = [
+      { op: 'set', path: `workflowCards/${card.id}`, value: blocked },
+      ...queueEntries.map(entry => ({ op: 'delete', path: `workflowQueueEntries/${entry.admissionId}` })),
+    ];
+    if (queueEntries.length) {
+      let epoch = readQueueEpoch(board.id);
+      let result = stateGraph.commitCAS(
+        `workflowQueueEpoch/${board.id}`,
+        epoch,
+        ops,
+        sourceForPrincipal(principal),
+        { durable: true },
+      );
+      if (!result.ok) return { ok: false, reason: 'queue_contended', card };
+    } else {
+      stateGraph.commit(ops, sourceForPrincipal(principal));
+    }
+    return {
+      ok: true,
+      card: blocked,
+      droppedQueueEntries: queueEntries.map(entry => entry.admissionId),
+      clearedEscalation: clearStaleEscalation && dependencyFailureEscalationIsStale(card),
+    };
   }
 
   // Build the frozen-channel pieces of a typed `needs_decision` escalation: the normalized escalation
@@ -2676,7 +2767,8 @@ export function createWorkflowBoardService(opts = {}) {
       // members were already satisfied at materialization is created `idle`, so the plain blocked
       // guard would skip it and the owner would never be woken.
       let pendingJoin = card.kind === 'join' && !card.metadata?.ownerNotifiedAt;
-      if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked' && !pendingJoin) continue;
+      let dependencyBlocked = Boolean(dependencyBlockState(card));
+      if (normalizeWorkflowLifecycle(card.lifecycle) !== 'blocked' && !pendingJoin && !dependencyBlocked) continue;
       let live = clone(card);
       let releasedEdges = releasedEdgesFor(live);
       // F-DEP-2: level-trigger onUpstreamFailure. Before the satisfaction check, resolve any edge
@@ -2719,6 +2811,17 @@ export function createWorkflowBoardService(opts = {}) {
         let idle = commitDependencyUnblock(live, principal);
         let enqueued = enqueueWorkItem(board, idle);
         if (enqueued.ok) released.push({ cardId: card.id, admissionId: enqueued.entry?.admissionId });
+        continue;
+      }
+      if (normalizeWorkflowLifecycle(live.lifecycle) !== 'blocked') {
+        let restored = restoreDependencyWait(board, live, principal, { clearStaleEscalation: true });
+        if (restored.ok) {
+          escalated.push({
+            cardId: card.id,
+            resolution: 'dependency_wait_restored',
+            droppedQueueEntries: restored.droppedQueueEntries,
+          });
+        }
         continue;
       }
       let block = dependencyBlockState(live);
@@ -7845,6 +7948,10 @@ export function createWorkflowBoardService(opts = {}) {
     let principal = daemonPrincipal();
     let actor = principal.label;
     await seedWorkflowWorkItemsForProjection(args);
+    let board = ensureBoard(args.boardId ?? args.board_id ?? DEFAULT_WORKFLOW_BOARD_ID);
+    let dependencyRelease = ['stopped', 'maintenance'].includes(board.mode)
+      ? { ok: true, boardId: board.id, skipped: true, reason: `board_mode_${board.mode}` }
+      : releaseDependencies(board.id);
     let projection = getBoardProjection(args);
     let runtimeTasks = await readRuntimeTasks(context);
     let currentNow = now();
@@ -7898,6 +8005,7 @@ export function createWorkflowBoardService(opts = {}) {
     }
     return {
       ok: true,
+      dependencyRelease,
       reconciled,
       recovery: getRecoveryState(args),
     };
@@ -7988,12 +8096,35 @@ export function createWorkflowBoardService(opts = {}) {
 
     // S9a: a queued actionable return is a driver candidate alongside an active escalation, so a
     // return drives the orchestrator through this SAME re-engagement driver.
-    let cards = Object.values(getCollection(stateGraph, 'workflowCards'))
+    let candidateIds = Object.values(getCollection(stateGraph, 'workflowCards'))
       .filter(card => card.boardId === board.id)
       .filter(card => !projectId || card.projectId === projectId)
-      .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card));
+      .filter(card => hasActiveEscalation(card) || hasQueuedActionableReturn(card))
+      .map(card => card.id);
 
-    for (let card of cards) {
+    for (let cardId of candidateIds) {
+      // Re-read fresh on every iteration: this loop `await`s a re-engagement dispatch per card (below),
+      // which yields the event loop for however long orchestration takes — long enough for a human
+      // reply, another reconcile tick, or an admission drain to rewrite a LATER card in this list while
+      // an earlier one is still in flight. Using the pre-loop snapshot for the accrual/consume commit
+      // would silently clobber that concurrent write with stale data. Everything from here through the
+      // accrual commit below runs synchronously (no `await`), so this read stays authoritative for the
+      // whole decision + commit.
+      let card = getCard(cardId);
+      if (!card || card.boardId !== board.id) continue;
+      if (!(hasActiveEscalation(card) || hasQueuedActionableReturn(card))) continue;
+      if (cardDependsOn(card).length) {
+        let dependencyRestored = restoreDependencyWait(board, card, principal, { clearStaleEscalation: true });
+        if (dependencyRestored.ok) {
+          terminated.push({
+            cardId: card.id,
+            kind: 'dependency_wait_restored',
+            droppedQueueEntries: dependencyRestored.droppedQueueEntries,
+            clearedEscalation: dependencyRestored.clearedEscalation,
+          });
+          continue;
+        }
+      }
       // Per-card wake gate (D4 + returnWake), applied PER-CARD not as a board-level early return:
       //   - an unconsumed hard-interrupt (a blocked child) wakes regardless — it cannot self-clear;
       //   - otherwise a queued wake-driving (soft) return is NEW actionable work, gated on `returnWake`

@@ -57,7 +57,7 @@ describe('workflow board root index + per-root convergence counts', () => {
     }).card;
   }
 
-  function seedRun(cardId, tokens) {
+  function seedRun(cardId, tokens, overrides = {}) {
     let runId = `seed-run-${++idSeq}`;
     sg.commit([{ op: 'set', path: `workflowRuns/${runId}`, value: {
       schema: 'workflow-run/v1',
@@ -70,6 +70,7 @@ describe('workflow board root index + per-root convergence counts', () => {
       completedAt: 2,
       tokens,
       taskIds: [],
+      ...overrides,
     } }], 'test:seed-run');
     return runId;
   }
@@ -152,5 +153,21 @@ describe('workflow board root index + per-root convergence counts', () => {
     let other = makeCard();
     let otherCounts = service.perRootConvergenceCounts(board, other.id);
     assert.deepEqual(otherCounts, { depth: 0, fanout: 1, runCount: 0 });
+  });
+
+  it('does not charge no-task/no-token synthetic failures to root convergence runCount', () => {
+    let root = makeCard();
+    let child = makeCard({ parentCardId: root.id, rootCardId: root.id });
+
+    seedRun(child.id, null, { status: 'failed', taskIds: [] });
+    seedRun(child.id, 0, { status: 'error', taskIds: [] });
+    seedRun(child.id, null, { status: 'completed', taskIds: ['real-task'] });
+
+    let index = service.rootIndex(boardId);
+    assert.equal(index.runsByRoot.get(root.id).length, 3, 'audit/budget history keeps every run');
+
+    let counts = service.perRootConvergenceCounts(service.ensureBoard(), root.id);
+    assert.deepEqual(counts, { depth: 1, fanout: 2, runCount: 1 },
+      'only task-backed or token-spending runs burn the re-decompose convergence cap');
   });
 });

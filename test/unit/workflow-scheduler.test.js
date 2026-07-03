@@ -828,6 +828,98 @@ describe('workflow runtime reconcile auto-advance + on_enter drive', () => {
     assert.equal(result.propagated?.some?.(p => p.cardId === cardId) ?? false, false, 'a resumable interruption is not a terminal failure to dependents');
   });
 
+  it('dependency recovery: public reconcile restores dependency wait and clears stale failure escalation', async () => {
+    let board = service.ensureBoard();
+    let upstream = service.createOrUpdateCard({
+      id: 'up-resumed',
+      title: 'Upstream resumed',
+      columnId: 'in-progress',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      assignedAgent: 'backend-engineer',
+      resourceGroup: 'impl',
+      acceptanceCriteria: ['Upstream running'],
+      actor: 'test',
+    }).card;
+    let dependent = service.createOrUpdateCard({
+      id: 'downstream-waiter',
+      title: 'Downstream waiter',
+      columnId: 'ready',
+      projectId: 'agent-portal',
+      domain: 'backend',
+      owner: 'orchestrator',
+      assignedAgent: 'backend-engineer',
+      resourceGroup: 'impl',
+      acceptanceCriteria: ['Wait for upstream'],
+      dependsOn: [{ cardId: upstream.id, releaseWhen: 'card_done', onUpstreamFailure: 'block_and_escalate' }],
+      actor: 'test',
+    }).card;
+    let detail = `Upstream dependency ${upstream.id} reached a terminal failure; resolving edge on ${dependent.id} per onUpstreamFailure=block_and_escalate.`;
+    let liveDependent = service.getCard(dependent.id);
+    sg.commit([
+      { op: 'set', path: `workflowCards/${upstream.id}`, value: { ...upstream, columnId: 'in-progress', lifecycle: 'running' } },
+      { op: 'set', path: 'workflowRuns/run-up-old-failed', value: {
+        schema: 'workflow-run/v1', id: 'run-up-old-failed', boardId: board.id, cardId: upstream.id,
+        status: 'failed', taskIds: [], startedAt: 100, updatedAt: 101,
+      } },
+      { op: 'set', path: 'workflowRuns/run-up-resumed', value: {
+        schema: 'workflow-run/v1', id: 'run-up-resumed', boardId: board.id, cardId: upstream.id,
+        status: 'running', taskIds: ['task-up-resumed'], startedAt: 200, updatedAt: 201,
+      } },
+      { op: 'set', path: `workflowCards/${dependent.id}`, value: {
+        ...liveDependent,
+        lifecycle: 'queued',
+        metadata: {
+          ...liveDependent.metadata,
+          dependencyBlock: { blockedAt: 50, releasedEdges: [] },
+          escalation: {
+            schema: 'workflow-escalation-state/v1',
+            kind: 'needs_decision',
+            detail,
+            lastEscalation: { schema: 'workflow-escalation/v1', kind: 'needs_decision', detail, raisedBy: 'daemon', raisedAt: 150 },
+            attemptCount: 1,
+            firstAt: 150,
+            lastAt: 150,
+            nextAttemptAt: 151,
+            humanEscalated: false,
+            history: [{ kind: 'needs_decision', detail, runId: null, at: 150 }],
+          },
+        },
+      } },
+      { op: 'set', path: 'workflowQueueEntries/adm-stale-dependent', value: {
+        schema: 'workflow-queue-entry/v1',
+        admissionId: 'adm-stale-dependent',
+        cardId: dependent.id,
+        boardId: board.id,
+        columnId: 'ready',
+        groupKey: 'impl',
+        priority: 1,
+        basePriority: 1,
+        priorityLabel: 'normal',
+        enqueuedAt: 160,
+        queueEpoch: sg.get(`workflowQueueEpoch/${board.id}`) ?? 0,
+        notBefore: 151,
+      } },
+    ], 'test:plant-stale-dependency-escalation', { durable: true });
+
+    let delegateCallsBefore = ledger.calls
+      .filter(call => call.server === 'agent-pool' && call.payload?.name === 'delegate_task').length;
+    let result = await service.reconcileWorkflowRecovery({ boardId: board.id, force: true });
+
+    let restored = service.getCard(dependent.id);
+    assert.equal(restored.lifecycle, 'blocked', 'dependent is restored to dependency wait, not re-engaged');
+    assert.equal(restored.metadata?.escalation, undefined, 'stale upstream-failure escalation is cleared once upstream is running again');
+    assert.equal(restored.metadata?.dependencyBlock?.blockedAt, 50, 'dependency block clock is preserved');
+    assert.equal(service.listQueueEntries(board.id).some(entry => entry.cardId === dependent.id), false, 'stale queue entry is dropped');
+    assert.equal(
+      ledger.calls.filter(call => call.server === 'agent-pool' && call.payload?.name === 'delegate_task').length,
+      delegateCallsBefore,
+      'no worker is delegated for an unsatisfied dependency',
+    );
+    assert.ok(result.dependencyRelease.escalated.some(item => item.cardId === dependent.id && item.resolution === 'dependency_wait_restored'));
+  });
+
   it('drive on: fires the quality-audit on_enter automation for the advanced card (a real audit delegation)', async () => {
     let { cardId, taskId } = plantRunningCard('wip-drive');
     let runtimeTasks = new Map([[taskId, { id: taskId, status: 'completed', completedAt: 1500 }]]);
