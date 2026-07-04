@@ -305,6 +305,12 @@ export function deriveCardTicker(card = {}, { now = Date.now() } = {}) {
 }
 
 const AUTOMATED_BOARD_MODES = new Set(['autonomous', 'armed']);
+// Triggers where automation acts on a card WITHOUT a human moving it: the card is picked up on
+// entry / when a lease frees. A column with such a trigger and assigned agents runs its work
+// automatically under an autonomous board even if its configured mode is 'manual' (e.g.
+// quality-audit: on_enter + qa/code-review agents auto-audit; mode 'manual' only means no extra
+// approval gate beyond the audit verdict). Only a trigger of 'manual' is genuinely hand-driven.
+const AUTOMATED_TRIGGERS = new Set(['on_enter', 'lease_required']);
 
 // The column header shows the EFFECTIVE execution mode — what actually happens to a card entering
 // the column — not the column's configured mode in isolation. Automation only drives when the BOARD
@@ -357,6 +363,20 @@ export function effectiveColumnAutomation(boardMode = '', automation = {}) {
       kind: 'status',
       icon: 'checklist',
       title: title(tPortal('workflow.automation.autoGatesTitle')),
+    };
+  }
+  // configured === 'manual', but an automated trigger + agents means automation still runs the
+  // column's work on its own (e.g. an on_enter audit) — that reads as 'Авто', not hand-driven.
+  if (AUTOMATED_TRIGGERS.has(trigger) && agentCount > 0) {
+    return {
+      effective: 'auto',
+      configured,
+      label: tPortal('workflow.automation.auto'),
+      kind: 'state',
+      icon: 'bolt',
+      title: title(tPortal('workflow.automation.autoTriggerTitle', {
+        trigger: localizeWorkflowEnum(trigger),
+      })),
     };
   }
   return {

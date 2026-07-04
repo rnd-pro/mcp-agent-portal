@@ -36,6 +36,22 @@ describe('workflow card presentation helpers', () => {
       pickMode(effectiveColumnAutomation('autonomous', { mode: 'gated', trigger: 'on_enter' })),
       { effective: 'gated', label: 'Auto + gates', kind: 'status', icon: 'checklist' },
     );
+    // quality-audit shape: mode 'manual' but an on_enter trigger with agents auto-runs the audit,
+    // so under an autonomous board it reads 'Auto', not hand-driven.
+    assert.deepEqual(
+      pickMode(effectiveColumnAutomation('autonomous', { mode: 'manual', trigger: 'on_enter', agents: ['qa-engineer', 'code-reviewer'] })),
+      { effective: 'auto', label: 'Auto', kind: 'state', icon: 'bolt' },
+    );
+    // A genuinely hand-driven column (trigger 'manual', no agents) stays Manual even when autonomous.
+    assert.deepEqual(
+      pickMode(effectiveColumnAutomation('autonomous', { mode: 'manual', trigger: 'manual', agents: [] })),
+      { effective: 'manual', label: 'Manual', kind: '', icon: 'pan_tool' },
+    );
+    // manual mode + automated trigger but NO agents: nothing runs → still Manual.
+    assert.deepEqual(
+      pickMode(effectiveColumnAutomation('autonomous', { mode: 'manual', trigger: 'on_enter', agents: [] })),
+      { effective: 'manual', label: 'Manual', kind: '', icon: 'pan_tool' },
+    );
     let idle = effectiveColumnAutomation('manual', { mode: 'auto', trigger: 'on_enter' });
     assert.deepEqual(pickMode(idle), {
       effective: 'manual',
