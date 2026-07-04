@@ -1,6 +1,5 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,8 +24,17 @@ const MAX_ITERATIONS = 60;
 const MAX_IDLE_JUMPS = 6;
 const HOUR_MS = 60 * 60 * 1000;
 
-// Worker-outcome alphabet. `writeFile` simulates real produced work (an uncommitted doc change in
-// the card's repo) so the release tail's clean-diff probe sees a shippable, test-exempt changeset.
+// The release-tail clean-diff/hygiene probe, stubbed to report a shippable, test-exempt changeset.
+// Injected in place of the real `git status` probe so the simulator drives the whole autonomy loop
+// (including autonomous publish) with zero subprocess forks — fast and contention-free. The real probe
+// has its own coverage; here the concern is loop LIVENESS, not git-status parsing.
+const SIM_RELEASE_GATE = () => ({
+  available: true, hasDiff: true, hygiene: true, changedFiles: 1, changedPaths: ['docs/sim.md'], offenders: [],
+  reason: 'sim: shippable changeset',
+});
+
+// Worker-outcome alphabet. (`writeFile` is a legacy no-op flag kept for readability; the release probe
+// is stubbed, so no real file/diff is needed.)
 const OUTCOMES = {
   exec_ok: { status: 'completed', text: 'Work complete.\nWORKFLOW_RESULT: completed', writeFile: true },
   exec_fail: { status: 'failed', text: 'Build exploded halfway through.' },
@@ -79,18 +87,6 @@ function makeSimPool(clock) {
   return { proxy, tasks };
 }
 
-function initGitRepo(root) {
-  fs.mkdirSync(root, { recursive: true });
-  let git = (args) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
-  git(['init', '-q']);
-  git(['config', 'user.email', 'sim@test.local']);
-  git(['config', 'user.name', 'Board Sim']);
-  fs.writeFileSync(path.join(root, 'README.md'), 'sim fixture\n');
-  git(['add', '.']);
-  git(['commit', '-q', '-m', 'init']);
-  return root;
-}
-
 describe('workflow board chain simulation (liveness to quiescence)', () => {
   let cleanups = [];
 
@@ -101,7 +97,8 @@ describe('workflow board chain simulation (liveness to quiescence)', () => {
   async function runChain(script, { reply = false, filler = 'ok_pass' } = {}) {
     let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-chain-sim-'));
     fs.mkdirSync(path.join(tmpDir, 'chats'), { recursive: true });
-    let repo = initGitRepo(path.join(tmpDir, 'repo'));
+    let repo = path.join(tmpDir, 'repo');
+    fs.mkdirSync(repo, { recursive: true });
     let sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -117,7 +114,8 @@ describe('workflow board chain simulation (liveness to quiescence)', () => {
       makeId: (prefix) => `${prefix}-${++idSeq}`,
       projectRoot: tmpDir,
       proxyManager: pool.proxy,
-      // Shared-tree model: no real worktree lifecycle; the clean-diff probe runs on the card's repo.
+      // Shared-tree model: no real worktree lifecycle. The release-tail probes are stubbed so the loop
+      // drives publish without any real git — see SIM_RELEASE_GATE.
       worktreeOps: {
         isGitRepo: async () => false,
         provisionWorktree: async () => ({ ok: false }),
@@ -127,6 +125,8 @@ describe('workflow board chain simulation (liveness to quiescence)', () => {
         reapOrphanWorktrees: async () => [],
       },
       probeReleaseTests: async () => ({ available: false }),
+      probeReleaseGate: SIM_RELEASE_GATE,
+      changesetTouchesCode: () => false,
       defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'sim-human' }),
     });
     cleanups.push(async () => {
@@ -169,10 +169,6 @@ describe('workflow board chain simulation (liveness to quiescence)', () => {
         completedAt: simNow,
         events: outcome.text ? [{ text: outcome.text }] : [],
       }, 'sim');
-      if (outcome.writeFile && task.cwd) {
-        fs.mkdirSync(path.join(task.cwd, 'docs'), { recursive: true });
-        fs.writeFileSync(path.join(task.cwd, 'docs', `sim-${outcomesApplied.length}.md`), 'change\n');
-      }
       outcomesApplied.push(outcome);
     };
 

@@ -1,6 +1,5 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,23 +21,18 @@ const MAX_IDLE_JUMPS = 8;
 const HOUR_MS = 3_600_000;
 
 const OUTCOMES = {
-  exec_ok: { status: 'completed', text: 'Work complete.\nWORKFLOW_RESULT: completed', writeFile: true },
+  exec_ok: { status: 'completed', text: 'Work complete.\nWORKFLOW_RESULT: completed' },
   audit_pass: { status: 'completed', text: 'Reviewed.\nCOMPLETION_PROOF: PASS' },
   audit_fail: { status: 'completed', text: 'Criterion unmet.\nCOMPLETION_PROOF: FAIL' },
-  ok_pass: { status: 'completed', text: 'Done.\nCOMPLETION_PROOF: PASS', writeFile: true },
+  ok_pass: { status: 'completed', text: 'Done.\nCOMPLETION_PROOF: PASS' },
 };
 
-function initGitRepo(root) {
-  fs.mkdirSync(root, { recursive: true });
-  let git = (args) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
-  git(['init', '-q']);
-  git(['config', 'user.email', 'sim@test.local']);
-  git(['config', 'user.name', 'Fleet Sim']);
-  fs.writeFileSync(path.join(root, 'README.md'), 'fleet fixture\n');
-  git(['add', '.']);
-  git(['commit', '-q', '-m', 'init']);
-  return root;
-}
+// Stubbed release probe (see the chain simulator): reports a shippable changeset so the autonomous
+// publish path drives without real git, keeping the fleet fast and contention-free.
+const SIM_RELEASE_GATE = () => ({
+  available: true, hasDiff: true, hygiene: true, changedFiles: 1, changedPaths: ['docs/sim.md'], offenders: [],
+  reason: 'sim: shippable changeset',
+});
 
 describe('workflow board fleet simulation (multi-card liveness)', () => {
   let cleanups = [];
@@ -50,7 +44,8 @@ describe('workflow board fleet simulation (multi-card liveness)', () => {
   function makeFleet() {
     let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-fleet-sim-'));
     fs.mkdirSync(path.join(tmpDir, 'chats'), { recursive: true });
-    let repo = initGitRepo(path.join(tmpDir, 'repo'));
+    let repo = path.join(tmpDir, 'repo');
+    fs.mkdirSync(repo, { recursive: true });
     let sg = new StateGraph({
       snapshotPath: path.join(tmpDir, 'state.json'),
       walPath: path.join(tmpDir, 'state.wal'),
@@ -92,6 +87,8 @@ describe('workflow board fleet simulation (multi-card liveness)', () => {
         reapOrphanWorktrees: async () => [],
       },
       probeReleaseTests: async () => ({ available: false }),
+      probeReleaseGate: SIM_RELEASE_GATE,
+      changesetTouchesCode: () => false,
       defaultPrincipal: humanPrincipal({ transport: { channel: 'loopback' }, label: 'sim-human' }),
     });
     cleanups.push(async () => {
@@ -101,7 +98,6 @@ describe('workflow board fleet simulation (multi-card liveness)', () => {
     });
     service.ensureBoard();
 
-    let writeSeq = 0;
     // Map a running pool task to its card via the task record the service stamps, then pull that
     // card's next scripted outcome. Cards not in the script fall through to a passing filler.
     let applyOutcomes = (scripts) => {
@@ -121,10 +117,6 @@ describe('workflow board fleet simulation (multi-card liveness)', () => {
           status: outcome.status, updatedAt: simNow, completedAt: simNow,
           events: outcome.text ? [{ text: outcome.text }] : [],
         }, 'sim');
-        if (outcome.writeFile && task.cwd) {
-          fs.mkdirSync(path.join(task.cwd, 'docs'), { recursive: true });
-          fs.writeFileSync(path.join(task.cwd, 'docs', `sim-${writeSeq++}.md`), 'change\n');
-        }
         applied += 1;
       }
       return applied;

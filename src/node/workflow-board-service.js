@@ -679,6 +679,11 @@ export function createWorkflowBoardService(opts = {}) {
     // Release-gate test verification (proof-contract). Injectable so the unit harness can stub it
     // instead of spawning a real `npm` subprocess; defaults to the module-level probe.
     probeReleaseTests: runReleaseTests = probeReleaseTests,
+    // Working-tree clean-diff/hygiene probe + changeset classifier. Both shell out to real `git` in the
+    // card's cwd; injectable (mirroring probeReleaseTests) so a harness can drive the release tail
+    // without provisioning a real repo — the module-level probes stay the production default.
+    probeReleaseGate: runReleaseGate = probeReleaseGate,
+    changesetTouchesCode: runChangesetTouchesCode = changesetTouchesCode,
     // Trusted-embedder seam. `defaultPrincipal` is the committing identity for direct,
     // in-process callers (and the unit-test harness) that do not flow through the HTTP/MCP
     // seams. PRODUCTION wiring (web-server routes, MCP tool handler) never sets it, so the
@@ -5995,7 +6000,7 @@ export function createWorkflowBoardService(opts = {}) {
             // resets its checks and re-verifies); a verified absence of a test setup does not block. A
             // docs/prose-only changeset has nothing the suite could verify, so skip it rather than risk a
             // FALSE hold from the load-sensitive suite (the clean-diff + hygiene floor still gate it).
-            let testProbe = changesetTouchesCode(cardWorkingDir(latestCard))
+            let testProbe = runChangesetTouchesCode(cardWorkingDir(latestCard))
               ? await runReleaseTests(cardWorkingDir(latestCard))
               : { available: false, reason: 'changeset touches no code; unit gate not applicable' };
             // Expected-red may be ledgered ONLY by an independent auditor (AU21 composes with AU01): a
@@ -6163,7 +6168,7 @@ export function createWorkflowBoardService(opts = {}) {
         // is unavailable (no git repo) or shows an empty diff / hygiene offenders, the card is HELD as
         // needs_audit rather than auto-closed — fail-closed, so unverifiable work never ships.
         if (needCleanDiff || needHygiene) {
-          let probe = probeReleaseGate(cardWorkingDir(card));
+          let probe = runReleaseGate(cardWorkingDir(card));
           if (!probe.available || !probe.hasDiff || !probe.hygiene) {
             let nextFlags = normalizeRecoveryFlags([...flags, 'needs_audit']);
             let held = normalizeWorkflowCardInput({
@@ -6662,7 +6667,7 @@ export function createWorkflowBoardService(opts = {}) {
               (board.columns ?? []).find(column => column.id === latestCard.columnId)?.automation?.action,
             );
             if (nextStatus === 'completed' && columnAction === 'execute') {
-              let probe = probeReleaseGate(cardWorkingDir(latestCard));
+              let probe = runReleaseGate(cardWorkingDir(latestCard));
               if (probe.available && !probe.hasDiff) flags.add('needs_audit');
             }
           }
