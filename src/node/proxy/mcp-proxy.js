@@ -464,6 +464,14 @@ export class MCPProxyManager {
       console.error(`[${serverName}] Spawn error:`, err);
     });
 
+    // A child that crashes/exits on startup closes its stdin read end, so any in-flight write to it
+    // (e.g. the synthetic-initialize handshake fired ~500ms after spawn) surfaces as an EPIPE 'error'
+    // event on the stdin stream. Without a listener Node re-throws it as an unhandled exception and
+    // takes the manager down. Swallow it here — the exit handler owns lifecycle/respawn.
+    child.stdin.on('error', (err) => {
+      if (err?.code !== 'EPIPE') console.error(`[${serverName}] stdin error:`, err);
+    });
+
     child.on('exit', (code, signal) => {
       settings.process = null;
       settings.pid = null;
@@ -573,7 +581,13 @@ export class MCPProxyManager {
   sendToChild(serverName, msg) {
     let s = this.servers.get(serverName);
     if (s && s.process && s.process.stdin.writable) {
-      s.process.stdin.write(JSON.stringify(msg) + '\n');
+      // A concurrently-dying child can pass the `writable` check yet reject the write (EPIPE); the
+      // stdin `error` handler (spawnServer) catches the async case, this guards the sync throw.
+      try {
+        s.process.stdin.write(JSON.stringify(msg) + '\n');
+      } catch (err) {
+        if (err?.code !== 'EPIPE') throw err;
+      }
     }
   }
 

@@ -120,6 +120,45 @@ test('MCP proxy passes configured memory and skills roots to child servers', asy
   }
 });
 
+test('sendToChild survives an EPIPE when the child stdin pipe has closed (no unhandled crash)', async () => {
+  // Regression: under load a child MCP server can close its stdin read end (crashing/exiting on
+  // startup) while its process object is still alive and `stdin.writable` is momentarily true. The
+  // synthetic-initialize write then EPIPEs on the stdin stream; without a stdin `error` handler Node
+  // re-throws it as an unhandled exception and takes the whole manager (and the test run) down. This
+  // pins the fix: spawnServer attaches a stdin error handler and sendToChild guards the sync throw.
+  let tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-mcp-epipe-'));
+  let originalConfigPath = process.env.PORTAL_CONFIG_PATH;
+  process.env.PORTAL_CONFIG_PATH = path.join(tmpDir, 'agent-portal.json');
+  fs.writeFileSync(process.env.PORTAL_CONFIG_PATH, '{}');
+  let uncaught = null;
+  let onUncaught = (err) => { uncaught = err; };
+  process.on('uncaughtException', onUncaught);
+  try {
+    let { MCPProxyManager } = await import(`../../src/node/proxy/mcp-proxy.js?epipe=${Date.now()}-${Math.random()}`);
+    let manager = new MCPProxyManager(tmpDir);
+    // A child that closes its stdin READ end but stays alive briefly — so a parent write hits EPIPE
+    // while the process object is still present, the exact production race window.
+    manager.servers.set('epipe-probe', {
+      command: process.execPath,
+      args: ['-e', 'require("fs").closeSync(0); setTimeout(() => process.exit(0), 1000)'],
+      agents: 0, pid: null, process: null, crashes: 0, respawnTimer: null,
+    });
+    manager.spawnServer('epipe-probe');
+    await new Promise(resolve => setTimeout(resolve, 150)); // let the child close fd 0
+    for (let i = 0; i < 10; i += 1) {
+      manager.sendToChild('epipe-probe', { jsonrpc: '2.0', method: 'ping', data: 'y'.repeat(100000) });
+    }
+    await new Promise(resolve => setTimeout(resolve, 250)); // let any async stdin error settle
+    try { manager.servers.get('epipe-probe').process?.kill(); } catch { /* already gone */ }
+    assert.equal(uncaught, null, `no unhandled exception (got ${uncaught?.code ?? uncaught?.message ?? 'none'})`);
+  } finally {
+    process.removeListener('uncaughtException', onUncaught);
+    if (originalConfigPath === undefined) delete process.env.PORTAL_CONFIG_PATH;
+    else process.env.PORTAL_CONFIG_PATH = originalConfigPath;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('resume_chat meta-tool exposes structured context controls', () => {
   let resumeChat = META_TOOLS.find(tool => tool.name === 'resume_chat');
   let properties = resumeChat.inputSchema.properties;
