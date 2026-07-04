@@ -68,6 +68,10 @@ export function createWorkflowBoardRoutes(ctx = {}) {
           includeEvents: queryBoolean(req, 'includeEvents', false),
           includeRuntime: queryBoolean(req, 'includeRuntime', false),
           compact: queryBoolean(req, 'compact', false),
+          // The web board list opt-in for the compact face projection (truncated events/runs, no
+          // body/context, top-level cards[] dropped). Must be forwarded here or the service never
+          // sees it and ships the full ~4.5MB v2 projection.
+          cardView: queryValue(req, 'cardView') ?? queryValue(req, 'card_view'),
           eventLimit: queryValue(req, 'eventLimit'),
           view: queryValue(req, 'view'),
           mode: queryValue(req, 'mode'),
