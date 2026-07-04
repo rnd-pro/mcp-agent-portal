@@ -210,7 +210,11 @@ export class ChatSidebar extends ChatSidebarShell {
   _renderNavItems() {
     this._ensureRouteActiveChat();
     this.setGroupDividers(!dashState.activeProjectId);
-    if (this.$.navCollapsed && !this._hasVisibleActiveChat()) {
+    // The collapsed sidebar has zero width — none of the chat items render. Building the (recursive,
+    // potentially thousands-strong) tree for a panel that shows nothing is pure waste, so skip it
+    // entirely while collapsed; the collapse-change listener rebuilds the full tree on expand and the
+    // active-chat highlight comes back with it.
+    if (this.$.navCollapsed) {
       this.setChats([]);
       return;
     }
@@ -222,11 +226,6 @@ export class ChatSidebar extends ChatSidebarShell {
       activeGroupId: this._activeGroupId || null,
       expandedGroupIds: this._expandedGroupIds || new Set(),
     }));
-  }
-
-  _hasVisibleActiveChat() {
-    if (dashState.activeChatId) return true;
-    return (dashState.chats || []).some((chat) => Boolean(chat.pendingTaskId));
   }
 }
 
