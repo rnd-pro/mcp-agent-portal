@@ -37,6 +37,7 @@ export class ChatSidebar extends ChatSidebarShell {
       if (!event.detail?.auto) {
         persistUiValue(STORAGE_COLLAPSED_PATH, Boolean(event.detail?.collapsed), STORAGE_COLLAPSED_KEY);
       }
+      this._renderNavItems();
     });
     this.addEventListener('chat-sidebar-width-change', (event) => {
       if (!this.$.navCollapsed) {
@@ -209,6 +210,10 @@ export class ChatSidebar extends ChatSidebarShell {
   _renderNavItems() {
     this._ensureRouteActiveChat();
     this.setGroupDividers(!dashState.activeProjectId);
+    if (this.$.navCollapsed && !this._hasVisibleActiveChat()) {
+      this.setChats([]);
+      return;
+    }
     this.setChats(buildChatNavTree({
       chats: dashState.chats || [],
       projectId: dashState.activeProjectId,
@@ -217,6 +222,11 @@ export class ChatSidebar extends ChatSidebarShell {
       activeGroupId: this._activeGroupId || null,
       expandedGroupIds: this._expandedGroupIds || new Set(),
     }));
+  }
+
+  _hasVisibleActiveChat() {
+    if (dashState.activeChatId) return true;
+    return (dashState.chats || []).some((chat) => Boolean(chat.pendingTaskId));
   }
 }
 

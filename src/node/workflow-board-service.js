@@ -4440,6 +4440,16 @@ export function createWorkflowBoardService(opts = {}) {
     return wantsCompactProjection(filter) && (filter.includeCards ?? filter.include_cards) === false;
   }
 
+  // The web board list opt-in: the full v2 projection shape, but each card truncated to its face
+  // (single newest run/event, no body/context/criteria, pruned metadata) and the redundant top-level
+  // cards[] dropped. Distinct from `compact` (the cardless L1 status projection) — face keeps
+  // per-column cards so the kanban still renders. MCP/tests never set it, so their payload is
+  // unchanged.
+  function wantsFaceProjection(filter = {}) {
+    let view = String(filter.cardView ?? filter.card_view ?? '').trim().toLowerCase();
+    return view === 'face';
+  }
+
   function projectionScope(filter = {}) {
     return {
       projectId: textOrNull(filter.projectId ?? filter.project_id),
@@ -4593,6 +4603,67 @@ export function createWorkflowBoardService(opts = {}) {
   function hasFailedCheck(card = {}) {
     return Object.values(card.checks || {})
       .some(check => String(check?.status || '').toLowerCase() === 'fail');
+  }
+
+  // Metadata keys the board FACE, its chips, and the ticker read: the audit-escalation state, the
+  // terminal resolution record, the per-root idea-realization rollup, and (truncated to the single
+  // newest entry) the worker-return inbox the ticker scans. Everything else on metadata (join
+  // subscriptions, wave bookkeeping, root ids, budget breaker, full return history) belongs to the
+  // lazy card-detail fetch, not the list payload.
+  function faceCardMetadata(metadata = {}) {
+    let source = asObject(metadata);
+    let face = {};
+    if (source.escalation !== undefined) face.escalation = source.escalation;
+    if (source.resolution !== undefined) face.resolution = source.resolution;
+    if (source.realization !== undefined) face.realization = source.realization;
+    if (Array.isArray(source.returns) && source.returns.length) {
+      let newest = source.returns
+        .slice()
+        .sort((a, b) => ((b?.raisedAt ?? 0) - (a?.raisedAt ?? 0)))[0];
+      if (newest) face.returns = [newest];
+    }
+    return face;
+  }
+
+  // The FACE projection of a fully-projected v2 card: the SAME shape and the SAME field values,
+  // with the heavy arrays truncated to what the board list actually paints. events[] and runs[]
+  // collapse to their single newest member (so deriveCardTicker's "scan for newest" and every chip
+  // helper keep working against a length-1 array unchanged); body / context / acceptanceCriteria are
+  // dropped (the inspector re-fetches them via the card-detail endpoint); metadata is pruned to the
+  // face keys. Everything the chips/ticker/lifecycle need — checks, dependsOn, flags, priority,
+  // agent, lease, lifecycle, waiting, queue, entityRefs, child ids — passes through verbatim.
+  function faceWorkflowCard(card = {}) {
+    let newestRun = (Array.isArray(card.runs) ? card.runs : [])
+      .slice()
+      .sort((a, b) => ((b?.updatedAt ?? b?.startedAt ?? 0) - (a?.updatedAt ?? a?.startedAt ?? 0)))[0];
+    let newestEvent = (Array.isArray(card.events) ? card.events : [])
+      .slice()
+      .sort((a, b) => ((b?.createdAt ?? 0) - (a?.createdAt ?? 0)))[0];
+    let { body, context, acceptanceCriteria, ...rest } = card;
+    return {
+      ...rest,
+      runs: newestRun ? [newestRun] : [],
+      events: newestEvent ? [newestEvent] : [],
+      metadata: faceCardMetadata(card.metadata),
+    };
+  }
+
+  // Apply the face truncation across a v2 projection while keeping its exact top-level shape (board,
+  // columns, counts, events, queue, telemetry, version). The redundant top-level cards[] array is
+  // dropped — the web board renders by column, so columns[].cards is the single card source and
+  // shipping the cards twice doubled the payload for nothing.
+  function faceBoardProjection(projection) {
+    let columns = (Array.isArray(projection.columns) ? projection.columns : [])
+      .map(column => ({
+        ...column,
+        cards: (Array.isArray(column.cards) ? column.cards : []).map(faceWorkflowCard),
+      }));
+    return {
+      ...projection,
+      schema: 'workflow-board-face-projection/v2',
+      columns,
+      cards: [],
+    };
   }
 
   function isCompactRelevantCard(card = {}, successColumnIds = new Set()) {
@@ -4928,9 +4999,10 @@ export function createWorkflowBoardService(opts = {}) {
         : listEvents({ boardId: board.id, limit: filter.eventLimit ?? filter.event_limit ?? 20 }),
       version: stateGraph.version,
     };
-    return wantsCompactProjection(filter)
-      ? compactBoardProjection(projection, { tasks: runtimeTasks })
-      : projection;
+    if (wantsCompactProjection(filter)) {
+      return compactBoardProjection(projection, { tasks: runtimeTasks });
+    }
+    return wantsFaceProjection(filter) ? faceBoardProjection(projection) : projection;
   }
 
   // projection-v2 (AD-12): stamp every projected card with the frozen lifecycle / dependsOn / queue
@@ -5008,13 +5080,38 @@ export function createWorkflowBoardService(opts = {}) {
       view: undefined,
       projection: undefined,
     }, runtimeState.tasks);
-    return wantsCompactProjection(filter)
-      ? compactBoardProjection(projection, {
+    if (wantsCompactProjection(filter)) {
+      return compactBoardProjection(projection, {
         tasks: runtimeState.tasks,
         systemLoad: runtimeState.systemLoad,
         runtime: compactRuntimeSummary(runtimeState.tasks),
-      })
-      : projection;
+      });
+    }
+    // getBoardProjection already applied the face truncation when cardView=face rode the filter
+    // through; nothing to re-wrap here.
+    return projection;
+  }
+
+  // The lazy card-detail read backing the inspector: the FULL projected card (full events[], runs[],
+  // body, context, checks, metadata, childCardIds, waiting) — everything the face list projection
+  // truncated away. Built off the same full v2 projection the canonical read produces, then the one
+  // card is picked out, so the detail is byte-identical to what a non-face board fetch would ship for
+  // that card. Returns null when the card is not on the board.
+  function getWorkflowCardDetail(filter = {}) {
+    let cardId = textOrNull(filter.cardId ?? filter.card_id);
+    if (!cardId) throw new Error('Workflow card id is required.');
+    let projection = getBoardProjection({
+      boardId: filter.boardId ?? filter.board_id,
+      projectId: filter.projectId ?? filter.project_id,
+      goalId: filter.goalId ?? filter.goal_id,
+      chatId: filter.chatId ?? filter.chat_id,
+      includeEvents: true,
+      compact: false,
+      cardView: undefined,
+    });
+    let card = (Array.isArray(projection.cards) ? projection.cards : [])
+      .find(item => item.id === cardId) ?? null;
+    return { card, boardId: projection.boardId, version: projection.version };
   }
 
   function runtimeTaskProjectionCards(board, projectId, linkedTaskIds = new Set(), runtimeTasks = null) {
@@ -9626,6 +9723,7 @@ export function createWorkflowBoardService(opts = {}) {
     createOrUpdateCard,
     getBoardProjection,
     getBoardProjectionWithRuntime,
+    getWorkflowCardDetail,
     requestTransition,
     listEvents,
     getRecoveryState,

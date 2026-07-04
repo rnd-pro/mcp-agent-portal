@@ -9,6 +9,7 @@ const WORKFLOW_BOARD_AUTOMATION_ENDPOINT = '/api/workflow-board/automation';
 const WORKFLOW_COLUMN_UPDATE_ENDPOINT = '/api/workflow-board/columns/update';
 const WORKFLOW_RECOVERY_RECONCILE_ENDPOINT = '/api/workflow-board/recovery/reconcile';
 const WORKFLOW_MARKDOWN_IMPORT_ENDPOINT = '/api/workflow-board/markdown/import';
+const WORKFLOW_CARD_DETAIL_ENDPOINT = '/api/workflow-board/card';
 
 const DEFAULT_BOARD_ID = 'agent-workflow-default';
 const DEFAULT_BOARD_MODE = 'passive';
@@ -369,6 +370,48 @@ function normalizeCard(raw = {}, index = 0, fallbackColumnId = DEFAULT_COLUMN_ID
   };
 }
 
+// A small stable digest of ONLY the fields that change the card's rendered FACE (title, priority,
+// kind, lifecycle, agent, latest-run status/time, latest-event time, dependency count, lease owner,
+// flags). The symbiote-ui kanban reconciler reads this off `card.raw.renderSignature` to decide
+// whether a card actually needs re-rendering, so it stops JSON.stringify-ing the full (heavy) card on
+// every realtime refresh. Runs/events are already truncated to length-1 on the face projection, so
+// the newest is runs[0]/events[0]; fall back to a recency scan for a full-card payload.
+function newestByRecency(items, recencyOf) {
+  let best = null;
+  let bestScore = -Infinity;
+  for (let item of asArray(items)) {
+    let score = recencyOf(item);
+    if (!best || score > bestScore) {
+      best = item;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function deriveCardRenderSignature(card) {
+  let run = newestByRecency(
+    card.runs,
+    r => Date.parse(r?.updatedAt || r?.startedAt || r?.completedAt || '') || 0,
+  ) || card.run || {};
+  let event = newestByRecency(card.events, e => Date.parse(e?.timestamp || '') || 0) || {};
+  return JSON.stringify([
+    card.id,
+    card.columnId,
+    card.title,
+    card.priority,
+    card.kind,
+    card.lifecycle || card.status,
+    card.assignedAgent || card.owner,
+    run.status || '',
+    run.updatedAt || run.startedAt || run.completedAt || '',
+    event.timestamp || '',
+    asArray(card.raw?.dependsOn ?? card.dependsOn).length,
+    card.lease?.leaseOwner || '',
+    asArray(card.flags).join(','),
+  ]);
+}
+
 function normalizeTransition(raw = {}) {
   let transition = asObject(raw);
   let from = normalizeId(transition.from || transition.fromColumnId || transition.from_column_id);
@@ -531,6 +574,7 @@ export function buildWorkflowBoardUrl(filters = {}, endpoint = WORKFLOW_BOARD_EN
   appendParam(params, 'boardId', filters.boardId);
   appendParam(params, 'mode', filters.mode);
   appendParam(params, 'view', filters.view);
+  appendParam(params, 'cardView', filters.cardView);
   appendParam(params, 'eventLimit', filters.eventLimit);
   appendBooleanParam(params, 'includeCards', filters.includeCards);
   appendBooleanParam(params, 'includeEvents', filters.includeEvents);
@@ -574,15 +618,41 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
       || projection
       || root,
   );
-  let rawColumns = asArray(source.columns || root.columns);
-  let rawCards = [
-    ...embeddedCardsFromColumns(rawColumns),
-    ...asArray(source.cards || source.items || projection.cards || projection.items || root.cards || root.items),
-  ];
+  // The projection carries TWO column arrays: `projection.board.columns` is the board CONFIG (title,
+  // automation — no cards), while `projection.columns` is the card-bearing render layout (config PLUS
+  // columns[].cards). Prefer the card-bearing layout so the face projection (which drops the top-level
+  // cards[] and ships cards only under columns[].cards) still yields cards; fall back to the config
+  // columns for a payload that only has those.
+  let projectionColumns = asArray(projection.columns);
+  let hasEmbeddedCards = projectionColumns.some(column => asArray(column?.cards || column?.items).length);
+  let rawColumns = hasEmbeddedCards ? projectionColumns : asArray(source.columns || root.columns);
+  // The face projection ships cards ONCE, under columns[].cards, with the top-level cards[] dropped
+  // (empty). A non-face projection still carries both. Merge the two sources but de-duplicate by id,
+  // preferring the column-embedded card (it already carries its resolved columnId), so a payload that
+  // does ship both never double-counts a card and an absent top-level array is a no-op.
+  let embeddedCards = embeddedCardsFromColumns(rawColumns);
+  let topLevelCards = asArray(
+    source.cards || source.items || projection.cards || projection.items || root.cards || root.items,
+  );
+  let rawCards = [...embeddedCards];
+  let seenIds = new Set(
+    embeddedCards.map(card => normalizeText(card?.id || card?.cardId || card?.key)).filter(Boolean),
+  );
+  for (let card of topLevelCards) {
+    let id = normalizeText(card?.id || card?.cardId || card?.key);
+    if (id && seenIds.has(id)) continue;
+    if (id) seenIds.add(id);
+    rawCards.push(card);
+  }
 
   let normalizedCards = rawCards.map((card, index) => {
     let fallbackColumnId = normalizeId(card?.columnId || card?.column_id || DEFAULT_COLUMN_ID);
-    return normalizeCard(card, index, fallbackColumnId);
+    let normalized = normalizeCard(card, index, fallbackColumnId);
+    // Stamp the face-only render signature onto the raw projection card the reconciler diffs against.
+    if (normalized.raw && typeof normalized.raw === 'object') {
+      normalized.raw.renderSignature = deriveCardRenderSignature(normalized);
+    }
+    return normalized;
   });
 
   let columns = ensureColumns(
@@ -639,13 +709,52 @@ export function normalizeWorkflowBoardPayload(payload = {}, filters = {}) {
 }
 
 export async function fetchWorkflowBoard(filters = {}, options = {}) {
-  let payload = await fetchWorkflowBoardJson(filters, options);
-  return normalizeWorkflowBoardPayload(payload, filters);
+  // The web board list only paints each card's face (latest run/event + chip inputs). Request the
+  // compact face projection so the list payload drops full events/runs/body/context per card and the
+  // redundant top-level cards[] array; the inspector re-hydrates the full card lazily on selection.
+  // An explicit cardView on the caller's filters wins (e.g. a caller that wants full list cards).
+  let faceFilters = { cardView: 'face', ...filters };
+  let payload = await fetchWorkflowBoardJson(faceFilters, options);
+  return normalizeWorkflowBoardPayload(payload, faceFilters);
 }
 
 export async function fetchWorkflowBoardProjection(filters = {}, options = {}) {
   let payload = await fetchWorkflowBoardJson(filters, options);
   return payload?.projection || payload;
+}
+
+// The lazy inspector detail read: the FULL card (full events/runs/body/context/checks/metadata) the
+// board list's face projection truncates away. Normalized through the same `normalizeCard` path as the
+// list cards so the inspector reads one card shape. Returns null when the card is not found.
+export async function fetchWorkflowCardDetail(input = {}, options = {}) {
+  let fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Workflow card detail fetch failed: fetch is not available in this runtime.');
+  }
+  let cardId = normalizeText(input.cardId || input.card_id || input.id);
+  if (!cardId) throw new Error('Workflow card detail fetch failed: cardId is required.');
+
+  let params = new URLSearchParams();
+  params.set('cardId', cardId);
+  appendParam(params, 'boardId', input.boardId || input.board_id);
+  appendParam(params, 'projectId', input.projectId || input.project_id);
+  appendParam(params, 'goalId', input.goalId || input.goal_id);
+  appendParam(params, 'chatId', input.chatId || input.chat_id);
+
+  let response = await fetchImpl(`${WORKFLOW_CARD_DETAIL_ENDPOINT}?${params.toString()}`, {
+    signal: options.signal,
+    headers: { Accept: 'application/json' },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Workflow card detail fetch failed: ${WORKFLOW_CARD_DETAIL_ENDPOINT} returned HTTP ${response.status}.`);
+  }
+  let payload = await response.json();
+  if (payload?.error) throw new Error(`Workflow card detail fetch failed: ${payload.error}`);
+  let raw = payload?.card;
+  if (!raw) return null;
+  let fallbackColumnId = normalizeId(raw?.columnId || raw?.column_id || DEFAULT_COLUMN_ID);
+  return normalizeCard(raw, 0, fallbackColumnId);
 }
 
 export async function requestWorkflowTransition(input = {}, options = {}) {

@@ -25,7 +25,7 @@ import {
   createInspectorRunsModel,
 } from './workflow-card-inspector-model.js';
 import { createInspectorDecisionModel } from './workflow-card-inspector-decision.js';
-import { replyToCard } from '../../services/workflow-board.js';
+import { replyToCard, fetchWorkflowCardDetail } from '../../services/workflow-board.js';
 import { checkPassed } from '../../../src/iso/workflow-board.js';
 
 const AUDIT_COLUMN_ID = 'quality-audit';
@@ -165,14 +165,27 @@ export class WorkflowCardInspector extends Symbiote {
   // patches values in place (textContent/dataset on fixed refs) and only rebuilds a list/section
   // whose derived content actually changed — so an open decision draft, focus, and scroll survive
   // realtime refreshes.
+  //
+  // The board list ships each card in its FACE form (latest run/event only, no body/full history), so
+  // on selection we render the face immediately (no blank flash) and lazily fetch the FULL card detail
+  // (full runs/events/body/metadata), cached per id for the session. When the detail resolves for the
+  // still-selected card we re-render from the hydrated card, filling the runs/history/body sections.
   renderSelection(selection = null) {
-    let card = selection?.card || null;
     let board = selection?.board || null;
+    // The board version advances on every reload / mutation; when it moves, the cached full details
+    // may be stale, so drop the per-session cache and re-hydrate against the fresh board.
+    let boardVersion = board?.version ?? null;
+    if (boardVersion !== null && boardVersion !== this._detailBoardVersion) {
+      this._detailBoardVersion = boardVersion;
+      this.clearDetailCache();
+    }
+    let card = this.#hydrate(selection?.card || null);
     if (!card) {
       this._chatId = null;
       this._decisionCard = null;
       this._decisionBoard = null;
       this._renderedCardId = '';
+      this._selectedBoard = null;
       this._sig = null;
       this.ref.title.textContent = tPortal('text.cardInspector');
       this.ref.statusBadge.hidden = true;
@@ -184,9 +197,12 @@ export class WorkflowCardInspector extends Symbiote {
     }
     this._decisionCard = card;
     this._decisionBoard = board;
+    this._selectedBoard = board;
     let sameCard = this._renderedCardId === card.id;
     this._renderedCardId = card.id;
     if (!sameCard || !this._sig) this._sig = {};
+    // Kick off (or reuse) the lazy full-detail fetch for this card; when it lands it re-renders.
+    this.#ensureCardDetail(card, board);
 
     this.ref.empty.hidden = true;
     this.ref.content.hidden = false;
@@ -239,6 +255,62 @@ export class WorkflowCardInspector extends Symbiote {
       this._sig.body = body;
       this.ref.viewer?.setContent?.(body, 'markdown');
     }
+  }
+
+  // Merge the cached full detail (full events/runs/body/context/metadata/checks) onto the face card
+  // so every downstream helper reads the complete card. The face card's live fields (columnId, flags,
+  // lifecycle, lease, latest run/event) win — the face list refresh is fresher than a cached detail —
+  // while the detail supplies the heavy history the face omitted.
+  #hydrate(card) {
+    if (!card) return null;
+    let detail = this._detailCache?.get(card.id);
+    if (!detail) return card;
+    return {
+      ...detail,
+      ...card,
+      // Prefer the fuller arrays/body from the detail; the face card only carries length-1 arrays.
+      runs: (Array.isArray(detail.runs) && detail.runs.length >= (card.runs?.length ?? 0))
+        ? detail.runs : card.runs,
+      events: (Array.isArray(detail.events) && detail.events.length >= (card.events?.length ?? 0))
+        ? detail.events : card.events,
+      body: text(card.body) || text(detail.body),
+      metadata: { ...(detail.metadata || {}), ...(card.metadata || {}) },
+      raw: { ...(detail.raw || {}), ...(card.raw || {}) },
+    };
+  }
+
+  // Fetch the full card detail once per id (session cache) and re-render on arrival if the card is
+  // still selected. A fetch already in flight or a cached detail short-circuits.
+  #ensureCardDetail(card, board) {
+    if (!this._detailCache) this._detailCache = new Map();
+    if (!this._detailPending) this._detailPending = new Set();
+    let cardId = text(card?.id);
+    if (!cardId || this._detailCache.has(cardId) || this._detailPending.has(cardId)) return;
+    this._detailPending.add(cardId);
+    fetchWorkflowCardDetail({
+      cardId,
+      boardId: board?.boardId || board?.id,
+      projectId: board?.projectId,
+    })
+      .then((detail) => {
+        this._detailPending.delete(cardId);
+        if (!detail) return;
+        this._detailCache.set(cardId, detail);
+        // Only re-render if this card is still the one on screen; a stale fetch never clobbers a newer
+        // selection.
+        if (this._renderedCardId === cardId) {
+          this.renderSelection({ card, board: this._selectedBoard || board });
+        }
+      })
+      .catch(() => {
+        this._detailPending.delete(cardId);
+      });
+  }
+
+  // Drop the per-session detail cache — the board reloaded, so cached full cards may be stale.
+  clearDetailCache() {
+    this._detailCache?.clear();
+    this._detailPending?.clear();
   }
 
   // Surface the quality-audit outcome: the verdict (pass / reject / pending), the auditor and any

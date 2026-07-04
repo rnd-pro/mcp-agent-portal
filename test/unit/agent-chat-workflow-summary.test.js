@@ -98,9 +98,12 @@ test('chat workflow summary fetch carries workflow ref filters to the board serv
     },
   });
 
+  // fetchWorkflowBoard requests the compact face projection (cardView=face) for every board list read,
+  // including the goal summary — the summary only needs card counts and the stage label, both of which
+  // the face projection carries.
   assert.equal(
     requestedUrl,
-    '/api/workflow-board?projectId=agent-portal&goalId=goal-1&chatId=chat-1',
+    '/api/workflow-board?projectId=agent-portal&goalId=goal-1&chatId=chat-1&cardView=face',
   );
   assert.equal(summary.cardCount, 1);
   assert.equal(summary.stageLabel, 'Tasks / Ready');

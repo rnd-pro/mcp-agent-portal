@@ -80,6 +80,28 @@ export function createWorkflowBoardRoutes(ctx = {}) {
       }
     },
 
+    // Lazy card detail for the inspector: the FULL card (full events/runs/body/context/checks/
+    // metadata/history) the compact face list projection omits. Fetched on card selection and cached
+    // per id for the session.
+    'GET /api/workflow-board/card': (req, res) => {
+      try {
+        let detail = resolveService().getWorkflowCardDetail({
+          boardId: queryValue(req, 'boardId'),
+          projectId: queryValue(req, 'projectId') ?? queryValue(req, 'project'),
+          goalId: queryValue(req, 'goalId') ?? queryValue(req, 'goal'),
+          chatId: queryValue(req, 'chatId') ?? queryValue(req, 'chat'),
+          cardId: queryValue(req, 'cardId') ?? queryValue(req, 'card'),
+        });
+        if (!detail.card) {
+          json(res, { ok: false, error: 'Workflow card not found.' }, 404);
+          return;
+        }
+        json(res, { ok: true, ...detail });
+      } catch (error) {
+        routeError(res, error);
+      }
+    },
+
     'GET /api/workflow-board/boards': (req, res) => {
       try {
         let result = resolveService().listWorkflowBoards({

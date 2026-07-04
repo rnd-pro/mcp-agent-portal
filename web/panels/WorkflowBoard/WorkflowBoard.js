@@ -228,7 +228,14 @@ export class WorkflowBoard extends Symbiote {
   #renderContext = null;
   #renderContextBoard = null;
   #renderContextScopeKey = '';
+  // Lazily-built graph/canvas model cache. Kept keyed on a cheap topology signature so a graph-view
+  // re-render (or a switch back to graph without a data change) reuses the built models instead of
+  // rebuilding. Kanban-view renders never touch this — the builders only run inside #renderGraph,
+  // which #render calls only when #activeView === 'graph'.
   #graphRenderCache = null;
+  // Instrumentation: how many times the (expensive) graph/canvas builders have actually run. A test
+  // can read graphBuildCount to prove a kanban-view render did not invoke the builders.
+  #graphBuildCount = 0;
   // Per-column header memoization: the same DOM node is returned while the column's rendered config
   // is unchanged, so the board's keyed reconciliation never rebuilds a header (or tears down its
   // open settings popover) on a silent refresh. Keyed by column id → { key, element, stale }.
@@ -857,20 +864,31 @@ export class WorkflowBoard extends Symbiote {
     this.ref.graphViewBtn.classList.toggle('is-active', isGraph);
   }
 
-  #renderGraph(context = this.#getRenderContext()) {
-    let cards = context.visibleCards;
+  // Number of times the graph/canvas builders have actually executed. Stays flat across kanban-view
+  // renders and across graph re-renders with unchanged topology; increments only on a material
+  // data change while the graph view is active.
+  get graphBuildCount() {
+    return this.#graphBuildCount;
+  }
+
+  // Lazily build (or reuse) the graph + canvas models for the current topology. Returns whether the
+  // models were rebuilt on this call. Only ever invoked from #renderGraph, i.e. in the graph view.
+  #ensureGraphModel(context) {
     let signature = workflowBoardGraphTopologySignature(context);
-    let rebuilt = false;
-    if (!this.#graphRenderCache || this.#graphRenderCache.signature !== signature) {
-      let projection = buildWorkflowBoardProjectionFromContext(context);
-      this.#graphRenderCache = {
-        signature,
-        graphModel: buildWorkflowBoardGraphModel(projection),
-        canvasModel: buildWorkflowBoardCanvasGraphModel(projection),
-      };
-      rebuilt = true;
-    }
-    let hasCards = cards.length > 0;
+    if (this.#graphRenderCache && this.#graphRenderCache.signature === signature) return false;
+    let projection = buildWorkflowBoardProjectionFromContext(context);
+    this.#graphRenderCache = {
+      signature,
+      graphModel: buildWorkflowBoardGraphModel(projection),
+      canvasModel: buildWorkflowBoardCanvasGraphModel(projection),
+    };
+    this.#graphBuildCount += 1;
+    return true;
+  }
+
+  #renderGraph(context = this.#getRenderContext()) {
+    let rebuilt = this.#ensureGraphModel(context);
+    let hasCards = context.visibleCards.length > 0;
     this.ref.graphEmpty.hidden = hasCards;
     if (rebuilt) this.ref.graphCanvas.setGraphModel?.(this.#graphRenderCache.canvasModel);
     this.#renderGraphStats(this.#graphRenderCache.graphModel);
