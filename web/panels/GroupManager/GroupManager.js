@@ -4,28 +4,24 @@ import template from './GroupManager.tpl.js';
 import { buildHash, getRoute, parseQuery, sharedUiStyles as cssShared } from 'symbiote-ui/ui';
 import 'symbiote-ui/board';
 import cssLocal from './GroupManager.css.js';
+import {
+  cloneLoadedGroups,
+  modelReasoningEfforts,
+  modelServiceTiers,
+  profileSettingSummary,
+  providerModelIds,
+  reconcileModelSetting,
+} from './model-settings.js';
 
 const PROVIDERS = ['codex', 'claude', 'opencode', 'antigravity'];
 const DEFAULT_CHAT_AGENT = 'orchestrator';
 const APPROVAL_MODES = ['yolo', 'auto_edit', 'plan'];
-const DEFAULT_CODEX_MODELS = ['default', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'];
-const PROVIDER_REASONING_LEVELS = {
-  codex: ['default', 'low', 'medium', 'high', 'xhigh'],
-  claude: ['default', 'low', 'medium', 'high', 'xhigh', 'max'],
-};
 const DEFAULT_MODELS = {
-  codex: DEFAULT_CODEX_MODELS,
+  codex: ['default'],
   claude: ['default', 'fable', 'opus', 'sonnet', 'haiku', 'claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
   opencode: ['default', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
   antigravity: ['default', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)'],
 };
-
-function cloneGroup(group) {
-  return {
-    ...group,
-    profiles: Array.isArray(group.profiles) ? group.profiles.map(p => ({ ...p })) : [],
-  };
-}
 
 function makeElement(tagName, className = '', text = '') {
   let node = document.createElement(tagName);
@@ -56,20 +52,6 @@ function makeOption(value, selected = false) {
   option.textContent = value;
   option.selected = selected;
   return option;
-}
-
-function providerReasoningLevels(provider) {
-  return PROVIDER_REASONING_LEVELS[provider] || [];
-}
-
-function normalizeProviderReasoning(provider, value) {
-  let normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized || normalized === 'default') return '';
-  return providerReasoningLevels(provider).includes(normalized) ? normalized : '';
-}
-
-function profileReasoning(provider, profile) {
-  return normalizeProviderReasoning(provider, profile?.reasoningEffort ?? profile?.reasoning_effort);
 }
 
 export class GroupManager extends Symbiote {
@@ -111,27 +93,30 @@ export class GroupManager extends Symbiote {
       }
       this._modelsByProvider = modelsInfo.userModels || {};
       this._defaultModelsByProvider = modelsInfo.defaultModels || {};
-      this.$.groups = Array.isArray(groups) ? groups.map(cloneGroup) : [];
+      this._codexModelsMetadata = modelsInfo.codexModels || [];
+      this._codexDiscovery = modelsInfo.codexDiscovery || null;
+      this.$.groups = cloneLoadedGroups(groups);
       this.$.agents = Array.isArray(agentsInfo.agents) ? agentsInfo.agents.map(agent => ({ ...agent })) : [];
       if (retry && this.$.groups.length === 0) {
         setTimeout(() => this.loadGroups({ retry: false }), 1000);
       }
       this.renderBoard();
+      if (this._codexDiscovery?.error) {
+        this._flashStatus(`Codex model discovery: ${this._codexDiscovery.error}`);
+      }
     } catch (err) {
       console.error('Failed to load groups:', err);
       this._renderBoardMessage(`Error: ${err.message}`);
     }
   }
-
   _modelsFor(provider) {
-    let apiDefaults = (this._defaultModelsByProvider[provider] || [])
-      .map(model => typeof model === 'string' ? model : model?.id)
-      .filter(Boolean);
-    return Array.from(new Set([
-      ...apiDefaults,
-      ...(DEFAULT_MODELS[provider] || ['default']),
-      ...(this._modelsByProvider[provider] || []),
-    ]));
+    return providerModelIds({
+      provider,
+      apiDefaults: this._defaultModelsByProvider[provider] || [],
+      fallbackDefaults: DEFAULT_MODELS[provider] || ['default'],
+      userModels: this._modelsByProvider[provider] || [],
+      codexModels: this._codexModelsMetadata || [],
+    });
   }
 
   renderBoard() {
@@ -316,19 +301,29 @@ export class GroupManager extends Symbiote {
     modelSelect.dataset.addModel = group.name;
     modelSelect.replaceChildren(...models.map(m => makeOption(m)));
 
+    let activeModel = models[0] || 'default';
+
     let reasoningSelect = document.createElement('select');
     reasoningSelect.dataset.addReasoning = group.name;
     reasoningSelect.title = 'Provider reasoning effort';
-    let reasoningLevels = providerReasoningLevels(provider);
+    let reasoningLevels = modelReasoningEfforts(provider, activeModel, this._codexModelsMetadata);
     reasoningSelect.replaceChildren(...reasoningLevels.map(level => makeOption(level)));
     reasoningSelect.hidden = reasoningLevels.length === 0;
     reasoningSelect.disabled = reasoningLevels.length === 0;
+
+    let serviceTierSelect = document.createElement('select');
+    serviceTierSelect.dataset.addServiceTier = group.name;
+    serviceTierSelect.title = 'Service tier';
+    let serviceTiers = modelServiceTiers(provider, activeModel, this._codexModelsMetadata);
+    serviceTierSelect.replaceChildren(...serviceTiers.map(tier => makeOption(tier)));
+    serviceTierSelect.hidden = serviceTiers.length === 0;
+    serviceTierSelect.disabled = serviceTiers.length === 0;
 
     let addButton = makeIconButton();
     addButton.title = 'Add profile';
     addButton.dataset.addProfile = group.name;
     addButton.replaceChildren(makeIcon('add'));
-    addProfile.replaceChildren(providerSelect, modelSelect, reasoningSelect, addButton);
+    addProfile.replaceChildren(providerSelect, modelSelect, reasoningSelect, serviceTierSelect, addButton);
 
     column.replaceChildren(header, agentSection, config, profileList, addProfile);
     return column;
@@ -387,10 +382,8 @@ export class GroupManager extends Symbiote {
     let providerNode = makeElement('div', 'gm-profile-provider', profile.label || provider);
     let modelNode = makeElement('div', 'gm-profile-model', model);
     modelNode.title = model;
-    let details = [];
-    let reasoning = profileReasoning(provider, profile);
-    if (reasoning) details.push(`effort ${reasoning}`);
-    let detailNode = details.length ? makeElement('div', 'gm-profile-meta-line', details.join(' · ')) : null;
+    let settingSummary = profileSettingSummary(profile);
+    let detailNode = settingSummary ? makeElement('div', 'gm-profile-meta-line', settingSummary) : null;
     main.replaceChildren(...[providerNode, modelNode, detailNode].filter(Boolean));
 
     if (profile.inherited) {
@@ -430,8 +423,37 @@ export class GroupManager extends Symbiote {
       providerEl.onchange = () => {
         let modelEl = this.ref.board.querySelector(`[data-add-model="${CSS.escape(providerEl.dataset.addProvider)}"]`);
         let reasoningEl = this.ref.board.querySelector(`[data-add-reasoning="${CSS.escape(providerEl.dataset.addProvider)}"]`);
+        let serviceTierEl = this.ref.board.querySelector(`[data-add-service-tier="${CSS.escape(providerEl.dataset.addProvider)}"]`);
         if (!modelEl) return;
-        this._syncAddProfileControls(providerEl, modelEl, reasoningEl);
+        this._syncAddProfileControls(providerEl, modelEl, reasoningEl, serviceTierEl);
+      };
+    });
+
+    this.ref.board.querySelectorAll('[data-add-model]').forEach(modelEl => {
+      modelEl.onchange = () => {
+        let providerEl = this.ref.board.querySelector(`[data-add-provider="${CSS.escape(modelEl.dataset.addModel)}"]`);
+        let reasoningEl = this.ref.board.querySelector(`[data-add-reasoning="${CSS.escape(modelEl.dataset.addModel)}"]`);
+        let serviceTierEl = this.ref.board.querySelector(`[data-add-service-tier="${CSS.escape(modelEl.dataset.addModel)}"]`);
+        let provider = providerEl?.value || 'codex';
+        let activeModel = modelEl.value || 'default';
+
+        if (reasoningEl) {
+          let previousReasoning = reasoningEl.value;
+          let reasoningLevels = modelReasoningEfforts(provider, activeModel, this._codexModelsMetadata);
+          reasoningEl.replaceChildren(...reasoningLevels.map(level => makeOption(level)));
+          reasoningEl.hidden = reasoningLevels.length === 0;
+          reasoningEl.disabled = reasoningLevels.length === 0;
+          reasoningEl.value = reconcileModelSetting(previousReasoning, reasoningLevels);
+        }
+
+        if (serviceTierEl) {
+          let previousServiceTier = serviceTierEl.value;
+          let serviceTiers = modelServiceTiers(provider, activeModel, this._codexModelsMetadata);
+          serviceTierEl.replaceChildren(...serviceTiers.map(tier => makeOption(tier)));
+          serviceTierEl.hidden = serviceTiers.length === 0;
+          serviceTierEl.disabled = serviceTiers.length === 0;
+          serviceTierEl.value = reconcileModelSetting(previousServiceTier, serviceTiers);
+        }
       };
     });
 
@@ -542,17 +564,34 @@ export class GroupManager extends Symbiote {
     return (this.$.groups || []).find(group => group.name === name);
   }
 
-  _syncAddProfileControls(providerEl, modelEl, reasoningEl) {
+  _syncAddProfileControls(providerEl, modelEl, reasoningEl, serviceTierEl) {
     let provider = providerEl?.value || 'codex';
-    modelEl.replaceChildren(...this._modelsFor(provider).map(m => makeOption(m)));
+    let previousModel = modelEl.value;
+    let previousReasoning = reasoningEl?.value;
+    let previousServiceTier = serviceTierEl?.value;
+    let models = this._modelsFor(provider);
+    modelEl.replaceChildren(...models.map(m => makeOption(m)));
+    modelEl.value = models.includes(previousModel) ? previousModel : (models[0] || '');
     let addProfile = providerEl.closest?.('.gm-add-profile');
     if (addProfile) addProfile.dataset.provider = provider;
-    if (!reasoningEl) return;
-    let reasoningLevels = providerReasoningLevels(provider);
-    reasoningEl.replaceChildren(...reasoningLevels.map(level => makeOption(level)));
-    reasoningEl.hidden = reasoningLevels.length === 0;
-    reasoningEl.disabled = reasoningLevels.length === 0;
-    reasoningEl.value = 'default';
+
+    let activeModel = modelEl.value || 'default';
+
+    if (reasoningEl) {
+      let reasoningLevels = modelReasoningEfforts(provider, activeModel, this._codexModelsMetadata);
+      reasoningEl.replaceChildren(...reasoningLevels.map(level => makeOption(level)));
+      reasoningEl.hidden = reasoningLevels.length === 0;
+      reasoningEl.disabled = reasoningLevels.length === 0;
+      reasoningEl.value = reconcileModelSetting(previousReasoning, reasoningLevels);
+    }
+
+    if (serviceTierEl) {
+      let serviceTiers = modelServiceTiers(provider, activeModel, this._codexModelsMetadata);
+      serviceTierEl.replaceChildren(...serviceTiers.map(tier => makeOption(tier)));
+      serviceTierEl.hidden = serviceTiers.length === 0;
+      serviceTierEl.disabled = serviceTiers.length === 0;
+      serviceTierEl.value = reconcileModelSetting(previousServiceTier, serviceTiers);
+    }
   }
 
   _normalProfiles(group) {
@@ -596,11 +635,47 @@ export class GroupManager extends Symbiote {
     let providerEl = this.ref.board.querySelector(`[data-add-provider="${CSS.escape(groupName)}"]`);
     let modelEl = this.ref.board.querySelector(`[data-add-model="${CSS.escape(groupName)}"]`);
     let reasoningEl = this.ref.board.querySelector(`[data-add-reasoning="${CSS.escape(groupName)}"]`);
+    let serviceTierEl = this.ref.board.querySelector(`[data-add-service-tier="${CSS.escape(groupName)}"]`);
     let previousProfiles = this._normalProfiles(group).map(profile => ({ ...profile }));
     let provider = providerEl?.value || group.provider || 'codex';
     let nextProfile = { provider, model: modelEl?.value || 'default' };
-    let reasoningEffort = normalizeProviderReasoning(provider, reasoningEl?.value);
-    if (reasoningEffort) nextProfile.reasoningEffort = reasoningEffort;
+
+    if (reasoningEl && !reasoningEl.disabled && !reasoningEl.hidden) {
+      let val = reasoningEl.value;
+      if (val && val !== 'default') {
+        nextProfile.reasoningEffort = val;
+      }
+    }
+
+    if (serviceTierEl && !serviceTierEl.disabled && !serviceTierEl.hidden) {
+      let val = serviceTierEl.value;
+      if (val && val !== 'default') {
+        nextProfile.serviceTier = val;
+      }
+    }
+
+    if (provider === 'codex') {
+      let meta = this._codexModelsMetadata?.find(m => m.id === nextProfile.model);
+      if (meta) {
+        if (nextProfile.reasoningEffort && nextProfile.reasoningEffort !== 'default') {
+          let supported = Array.isArray(meta.supportedReasoningEfforts) &&
+            meta.supportedReasoningEfforts.some(e => e.reasoningEffort === nextProfile.reasoningEffort);
+          if (!supported) {
+            this._flashStatus(`Invalid reasoning effort: ${nextProfile.reasoningEffort} is not supported by ${nextProfile.model}`);
+            return;
+          }
+        }
+        if (nextProfile.serviceTier && nextProfile.serviceTier !== 'default') {
+          let supported = Array.isArray(meta.serviceTiers) &&
+            meta.serviceTiers.some(t => t.id === nextProfile.serviceTier);
+          if (!supported) {
+            this._flashStatus(`Invalid service tier: ${nextProfile.serviceTier} is not supported by ${nextProfile.model}`);
+            return;
+          }
+        }
+      }
+    }
+
     group.profiles = this._normalProfiles(group);
     group.profiles.push(nextProfile);
     this.renderBoard();

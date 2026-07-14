@@ -77,6 +77,7 @@ describe('resource groups demo contract', () => {
     let source = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.js'), 'utf8');
     let templateSource = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.tpl.js'), 'utf8');
     let cssSource = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/GroupManager.css.js'), 'utf8');
+    let modelSettingsSource = fs.readFileSync(path.join(ROOT, 'web/panels/GroupManager/model-settings.js'), 'utf8');
     let skillManagerSource = fs.readFileSync(path.join(ROOT, 'web/panels/SkillManager/SkillManager.js'), 'utf8');
 
     assert.ok(source.includes("import 'symbiote-ui/board'"), 'GroupManager must use the shared Kanban board package export');
@@ -112,13 +113,13 @@ describe('resource groups demo contract', () => {
     assert.ok(source.includes('normalizeAgentColor'), 'GroupManager must validate metadata colors before applying them');
     assert.ok(source.includes("iconWrap.style.setProperty('--gm-agent-color', color)"), 'GroupManager must pass agent markdown colors through a scoped CSS custom property');
     assert.ok(source.includes('profile.label || provider'), 'GroupManager must render profile labels when demo data provides them');
-    assert.ok(source.includes('DEFAULT_CODEX_MODELS'), 'GroupManager must publish Codex CLI model choices for resource profiles');
-    assert.ok(source.includes('gpt-5.5'), 'GroupManager must include the top Codex CLI model option');
-    assert.ok(source.includes('PROVIDER_REASONING_LEVELS'), 'GroupManager must expose provider reasoning effort choices');
-    assert.ok(source.includes('max'), 'GroupManager must include the top Claude reasoning effort option');
+    assert.ok(source.includes('providerModelIds'), 'GroupManager must derive Codex CLI model choices from provider metadata');
+    assert.ok(modelSettingsSource.includes('visibleCodexModels'), 'GroupManager must filter hidden discovered Codex models');
+    assert.ok(source.includes('modelReasoningEfforts'), 'GroupManager must expose model-specific reasoning choices');
+    assert.ok(modelSettingsSource.includes("'max'"), 'GroupManager must include the top Claude reasoning effort option');
     assert.ok(source.includes('data-add-reasoning'), 'GroupManager must render a provider reasoning selector in add-profile controls');
-    assert.match(cssSource, /\.gm-add-profile\[data-provider="codex"\] \[data-add-reasoning\],\s*\.gm-add-profile\[data-provider="claude"\] \[data-add-reasoning\]/, 'Codex and Claude add-profile controls must both show provider reasoning selector');
     assert.match(cssSource, /\.gm-add-profile:not\(\[data-provider="codex"\]\):not\(\[data-provider="claude"\]\) \[data-add-reasoning\]/, 'Providers without reasoning support must keep the add-profile reasoning selector hidden');
+    assert.match(cssSource, /\.gm-add-profile:not\(\[data-provider="codex"\]\) \[data-add-service-tier\]/, 'Non-Codex providers must keep the service-tier selector hidden');
     assert.ok(source.includes('reasoningEffort'), 'GroupManager must persist provider reasoning effort on profiles');
     assert.ok(source.includes('gm-profile-meta-line'), 'GroupManager must show profile-level reasoning metadata');
     assert.ok(source.includes('APPROVAL_MODES'), 'GroupManager must publish approval-mode choices as group config');

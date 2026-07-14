@@ -51,6 +51,8 @@ export class ChatWsServer {
 
   async _handleChatSend(ws, params) {
     let { chatId, prompt, sessionId, timeout, model, provider, approval_mode, resource_group, context_mode } = params;
+    let reasoningEffort = params.reasoningEffort ?? params.reasoning_effort;
+    let serviceTier = params.serviceTier ?? params.service_tier;
     let agentSlug = params.agent || params.agent_slug || null;
     if (!prompt) return;
     let hasResourceGroupOverride = resource_group !== undefined
@@ -68,8 +70,10 @@ export class ChatWsServer {
         name: prompt.substring(0, 40) + (prompt.length > 40 ? '...' : ''),
         projectId: proj.id,
         agent: agentSlug && agentSlug !== 'none' ? agentSlug : null,
-        provider: provider || null,
-        model: model || null,
+        provider: resource_group ? null : (provider || null),
+        model: resource_group ? null : (model || null),
+        reasoningEffort: resource_group ? null : (reasoningEffort ?? null),
+        serviceTier: resource_group ? null : (serviceTier ?? null),
         approval_mode: approval_mode || null,
         resource_group,
       });
@@ -88,11 +92,13 @@ export class ChatWsServer {
     if (!resolvedCwd) resolvedCwd = this.mcpProxy.projectRoot !== '/' ? this.mcpProxy.projectRoot : process.env.HOME;
 
 
-    if (!provider || !model || !sessionId) {
+    if (!provider || !model || !sessionId || reasoningEffort == null || serviceTier == null) {
       let chatData = sg.getChat(chatId);
       if (chatData) {
         if (!provider && chatData.provider) provider = chatData.provider;
         if (!model && chatData.model) model = chatData.model;
+        if (reasoningEffort == null && chatData.reasoningEffort != null) reasoningEffort = chatData.reasoningEffort;
+        if (serviceTier == null && chatData.serviceTier != null) serviceTier = chatData.serviceTier;
         if (!sessionId && chatData.sessionId) sessionId = chatData.sessionId;
         if (!approval_mode && chatData.approval_mode) approval_mode = chatData.approval_mode;
         if (!hasResourceGroupOverride && !resource_group && chatData.resource_group) {
@@ -112,12 +118,16 @@ export class ChatWsServer {
     if (resource_group) {
       provider = null;
       model = null;
+      reasoningEffort = null;
+      serviceTier = null;
     }
     
     let delegateArgs = { prompt, timeout: timeout || 600, cwd: resolvedCwd };
     if (sessionId) delegateArgs.session_id = sessionId;
     if (model) delegateArgs.model = model;
     if (provider) delegateArgs.provider = provider;
+    if (reasoningEffort != null) delegateArgs.reasoningEffort = reasoningEffort;
+    if (serviceTier != null) delegateArgs.serviceTier = serviceTier;
     if (approval_mode) delegateArgs.approval_mode = approval_mode;
     if (resource_group) delegateArgs.resource_group = resource_group;
     if (context_mode === 'auto' || context_mode === 'off') delegateArgs.context_mode = context_mode;

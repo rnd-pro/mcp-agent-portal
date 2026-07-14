@@ -121,7 +121,7 @@ export function createOperationRoutes(ctx) {
 
     'POST /api/adapter/run': async (req, res) => {
       try {
-        let { type, prompt, cwd, model, timeout } = await parseBody(req, 10 * 1024 * 1024);
+        let { type, prompt, cwd, model, timeout, reasoningEffort, serviceTier } = await parseBody(req, 10 * 1024 * 1024);
         if (!type || !prompt) {
           json(res, { error: 'Missing type or prompt' }, 400);
           return;
@@ -132,7 +132,7 @@ export function createOperationRoutes(ctx) {
           return;
         }
         try {
-          let result = await adapter.run({ prompt, cwd, model, timeout });
+          let result = await adapter.run({ prompt, cwd, model, timeout, reasoningEffort, serviceTier });
           json(res, result);
         } finally {
           proxyManager.adapterPool.release(adapter);

@@ -335,6 +335,8 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
       agent: childAgent,
       provider: childResourceGroup ? null : (next.provider || null),
       model: childResourceGroup ? null : (next.model || null),
+      reasoningEffort: childResourceGroup ? null : (next.reasoningEffort ?? next.reasoning_effort ?? null),
+      serviceTier: childResourceGroup ? null : (next.serviceTier ?? next.service_tier ?? null),
       approval_mode: childApprovalMode,
       resource_group: childResourceGroup,
       parentChatId,
@@ -373,9 +375,19 @@ export async function prepareDelegateTaskCall(proxyManager, toolName, args = {},
   if (next.resource_group) {
     delete next.provider;
     delete next.model;
+    delete next.reasoningEffort;
+    delete next.reasoning_effort;
+    delete next.serviceTier;
+    delete next.service_tier;
   } else {
     if (!next.provider && contextChat?.provider) next.provider = contextChat.provider;
     if (!next.model && contextChat?.model) next.model = contextChat.model;
+    if (next.reasoningEffort == null && next.reasoning_effort == null && contextChat?.reasoningEffort != null) {
+      next.reasoningEffort = contextChat.reasoningEffort;
+    }
+    if (next.serviceTier == null && next.service_tier == null && contextChat?.serviceTier != null) {
+      next.serviceTier = contextChat.serviceTier;
+    }
   }
 
   if (contextChat) {

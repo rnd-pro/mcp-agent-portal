@@ -164,9 +164,9 @@ describe('agent chat input state', () => {
     assert.match(agentChat, /updatedParams\.approval_mode = this\._getResourceGroupDefaultApprovalMode\(val\) \|\| updatedParams\.approval_mode;/);
     assert.match(agentChat, /params = this\._normalizePoolChatParams\(params\);/);
     assert.match(agentChat, /delete params\.prompt;/);
-    assert.match(agentChat, /if \(params\.resource_group && params\.resource_group !== 'none'\) \{[\s\S]*delete params\.provider;[\s\S]*delete params\.model;[\s\S]*\}/);
-    assert.match(agentChat, /if \(hasResourceGroup && \(key === 'provider' \|\| key === 'model'\)\) continue;/);
-    assert.match(agentChat, /result\.provider = null;[\s\S]*result\.model = null;/);
+    assert.match(agentChat, /if \(params\.resource_group && params\.resource_group !== 'none'\) \{[\s\S]*delete params\.provider;[\s\S]*delete params\.model;[\s\S]*delete params\.reasoningEffort;[\s\S]*delete params\.serviceTier;[\s\S]*\}/);
+    assert.match(agentChat, /\['provider', 'model', 'reasoningEffort', 'serviceTier'\]\.includes\(key\)/);
+    assert.match(agentChat, /result\.provider = null;[\s\S]*result\.model = null;[\s\S]*result\.reasoningEffort = null;[\s\S]*result\.serviceTier = null;/);
     assert.match(wsClient, /let params = \{ \.\.\.chatParams, chatId, prompt \};/);
     assert.match(wsClient, /dashEmit\("chat-live-updated", \{[\s\S]*source: "meta"/);
     assert.match(wsClient, /case 'chat\.done': \{[\s\S]*this\._pullMessages\(chatId, \{ final: true \}\)\.then\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.catch\(\(\) => \{[\s\S]*dashEmit\("chats-updated"\);[\s\S]*\}\)\.finally\(\(\) => \{[\s\S]*if \(this\.opts\.onDone\) this\.opts\.onDone\(msg\.params \|\| \{\}\);[\s\S]*resolve\(''\);/);
@@ -343,7 +343,10 @@ describe('agent chat input state', () => {
     assert.equal(source.includes('footerHtml: this.$.composerFooterHtml'), false);
     assert.equal(source.includes('setFooterHtml'), false);
     assert.match(source, /for \(let p of paramsToMap\) \{/);
-    assert.match(source, /if \(p\.type === 'select' && Array\.isArray\(p\.options\)\) \{/);
+    assert.match(source, /let modelOptions = p\.optionsByModel\?\.\[currentParams\.model\];/);
+    assert.match(source, /if \(p\.type === 'select' && Array\.isArray\(options\)\) \{/);
+    assert.doesNotMatch(source, /delete currentParams\[p\.id\]/);
+    assert.match(source, /if \(id === 'model'\) \{[\s\S]*parameter\?\.optionsByModel\?\.\[val\][\s\S]*clearedModelSettings\.push\(settingId\);/);
     assert.match(source, /p\.id === 'resource_group'/);
     assert.match(source, /p\.id === 'model'/);
     assert.match(source, /currentParams\[p\.id\] = paramValue;/);

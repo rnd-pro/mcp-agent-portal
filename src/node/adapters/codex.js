@@ -1,5 +1,5 @@
 // @ctx adapters.ctx
-import { spawn } from 'node:child_process';
+import child_process from 'node:child_process';
 
 let DEFAULT_TIMEOUT_SEC = 300;
 
@@ -132,9 +132,37 @@ export function createCodexAdapter(config = {}) {
     type: 'codex',
     get busy() { return busy; },
 
-    async run({ prompt, cwd, model, timeout }) {
+    async run({ prompt, cwd, model, timeout, reasoningEffort, serviceTier }) {
       busy = true;
       try {
+        let normalizedReasoning = null;
+        if (reasoningEffort !== undefined && reasoningEffort !== null) {
+          if (typeof reasoningEffort !== 'string') {
+            throw new Error('Invalid reasoningEffort: must be a string');
+          }
+          let trimmed = reasoningEffort.trim();
+          if (trimmed === '') {
+            throw new Error('Invalid reasoningEffort: must be a non-empty string');
+          }
+          if (trimmed !== 'default') {
+            normalizedReasoning = trimmed;
+          }
+        }
+
+        let normalizedServiceTier = null;
+        if (serviceTier !== undefined && serviceTier !== null) {
+          if (typeof serviceTier !== 'string') {
+            throw new Error('Invalid serviceTier: must be a string');
+          }
+          let trimmed = serviceTier.trim();
+          if (trimmed === '') {
+            throw new Error('Invalid serviceTier: must be a non-empty string');
+          }
+          if (trimmed !== 'default') {
+            normalizedServiceTier = trimmed;
+          }
+        }
+
         const { getGlobalTeamRules } = await import('../server/context-injector.js');
         const rules = getGlobalTeamRules();
         let finalPrompt = prompt;
@@ -148,13 +176,22 @@ export function createCodexAdapter(config = {}) {
             'exec',
             '--json',
             '-s', 'danger-full-access',
-            finalPrompt,
           ];
 
-          let effectiveModel = model || config.model;
+          let effectiveModel = model ?? config.model;
+          if (typeof effectiveModel === 'string') effectiveModel = effectiveModel.trim();
           if (effectiveModel && effectiveModel !== 'default') {
             args.push('--model', effectiveModel);
           }
+
+          if (normalizedReasoning) {
+            args.push('-c', `model_reasoning_effort=${normalizedReasoning}`);
+          }
+          if (normalizedServiceTier) {
+            args.push('-c', `service_tier=${normalizedServiceTier}`);
+          }
+
+          args.push(finalPrompt);
 
           let timeoutMs = (timeout ?? DEFAULT_TIMEOUT_SEC) * 1000;
 
@@ -165,7 +202,7 @@ export function createCodexAdapter(config = {}) {
             detached: true,
           };
 
-          childProc = spawn('codex', args, spawnOpts);
+          childProc = child_process.spawn('codex', args, spawnOpts);
 
           let events = [];
           let stderrData = '';

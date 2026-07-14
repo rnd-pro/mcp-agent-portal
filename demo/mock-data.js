@@ -4269,6 +4269,47 @@ export const adapterTypes = {
         },
       ],
     },
+    codex: {
+      label: 'Codex CLI',
+      discovery: { status: 'ready', error: null, timestamp: 0 },
+      parameters: [
+        {
+          id: 'model',
+          label: 'Model',
+          type: 'select',
+          options: [
+            { val: 'default', text: 'Default' },
+            { val: 'gpt-5.6-sol', text: 'GPT-5.6-Sol' },
+            { val: 'gpt-5.6-terra', text: 'GPT-5.6-Terra' },
+            { val: 'gpt-5.6-luna', text: 'GPT-5.6-Luna' },
+          ],
+        },
+        {
+          id: 'reasoningEffort',
+          label: 'Reasoning',
+          type: 'select',
+          options: ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+          optionsByModel: {
+            default: ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+            'gpt-5.6-sol': ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+            'gpt-5.6-terra': ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+            'gpt-5.6-luna': ['default', 'low', 'medium', 'high', 'xhigh', 'max'],
+          },
+        },
+        {
+          id: 'serviceTier',
+          label: 'Service tier',
+          type: 'select',
+          options: ['default', 'priority'],
+          optionsByModel: {
+            default: ['default', 'priority'],
+            'gpt-5.6-sol': ['default', 'priority'],
+            'gpt-5.6-terra': ['default', 'priority'],
+            'gpt-5.6-luna': ['default', 'priority'],
+          },
+        },
+      ],
+    },
     opencode: {
       label: 'OpenCode',
       parameters: [

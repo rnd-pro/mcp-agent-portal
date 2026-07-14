@@ -1,6 +1,12 @@
 import { createAntigravityAdapter } from './antigravity.js';
 import { createClaudeAdapter } from './claude.js';
 import { createCodexAdapter } from './codex.js';
+import {
+  discoverCodexModels,
+  getCachedCodexModels,
+  getCodexDiscoveryStatus,
+} from './codex-discovery.js';
+export { discoverCodexModels, getCachedCodexModels, getCodexDiscoveryStatus } from './codex-discovery.js';
 import { getStateGraph } from '../state-graph.js';
 import { listGroups } from '../../../packages/agent-pool-mcp/src/tools/groups.js';
 import { getSkillsRoot, getTeamMemoryRoot } from '../../../packages/agent-pool-mcp/src/runtime/paths.js';
@@ -44,7 +50,7 @@ const CLAUDE_CODE_MODEL_CATALOG = Object.freeze([
 const DEFAULT_MODELS = {
   antigravity: ['default', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)', 'Claude Sonnet 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)', 'GPT-OSS 120B (Medium)'],
   claude: CLAUDE_CODE_MODEL_CATALOG.map(model => model.id),
-  codex: ['default', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+  codex: ['default'],
   opencode: ['default', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
 };
 const CLAUDE_CODE_MODEL_NAMES = new Map(CLAUDE_CODE_MODEL_CATALOG.map(model => [model.id, model.name]));
@@ -173,6 +179,9 @@ function getEffectiveModels(provider) {
       ...DEFAULT_MODELS.claude,
       ...(userModels.claude || []),
     ];
+  } else if (provider === 'codex') {
+    let discovered = getCachedCodexModels().map(model => model.id);
+    models = ['default', ...(userModels.codex || []), ...discovered];
   } else if (userModels[provider]?.length > 0) {
     models = userModels[provider];
   } else if (provider === 'opencode' && _cliModels.length > 0) {
@@ -190,11 +199,62 @@ function getEffectiveModels(provider) {
     let lookupId = id.replace('openrouter/', '');
     if (provider === 'claude' && CLAUDE_CODE_MODEL_NAMES.has(id)) {
       text = CLAUDE_CODE_MODEL_NAMES.get(id);
+    } else if (provider === 'codex') {
+      let found = getCachedCodexModels().find(m => m.id === id);
+      if (found) text = found.displayName || id;
     } else if (_openRouterMetadata.has(lookupId)) {
       text = _openRouterMetadata.get(lookupId).name || id;
     }
     return { val: id, text };
   });
+}
+
+function getCodexCapabilityParameters(preferred = []) {
+  let models = getCachedCodexModels();
+  let defaultModel = models.find(model => model.isDefault) || null;
+  let defaultReasoningOptions = defaultModel
+    ? ['default', ...defaultModel.supportedReasoningEfforts.map(option => option.reasoningEffort)]
+    : ['default'];
+  let defaultServiceTierOptions = defaultModel
+    ? ['default', ...defaultModel.serviceTiers.map(tier => tier.id)]
+    : ['default'];
+  let reasoningOptions = [...defaultReasoningOptions];
+  let serviceTierOptions = [...defaultServiceTierOptions];
+  let reasoningOptionsByModel = { default: [...new Set(defaultReasoningOptions)] };
+  let serviceTierOptionsByModel = { default: [...new Set(defaultServiceTierOptions)] };
+
+  for (let model of models) {
+    let modelReasoning = ['default', ...model.supportedReasoningEfforts.map(option => option.reasoningEffort)];
+    let modelServiceTiers = ['default', ...model.serviceTiers.map(tier => tier.id)];
+    reasoningOptionsByModel[model.id] = [...new Set(modelReasoning)];
+    serviceTierOptionsByModel[model.id] = [...new Set(modelServiceTiers)];
+    reasoningOptions.push(...modelReasoning);
+    serviceTierOptions.push(...modelServiceTiers);
+  }
+
+  return [
+    {
+      id: 'model',
+      label: 'Model',
+      type: 'select',
+      options: getEffectiveModels('codex'),
+      preferred,
+    },
+    {
+      id: 'reasoningEffort',
+      label: 'Reasoning',
+      type: 'select',
+      options: [...new Set(reasoningOptions)],
+      optionsByModel: reasoningOptionsByModel,
+    },
+    {
+      id: 'serviceTier',
+      label: 'Service tier',
+      type: 'select',
+      options: [...new Set(serviceTierOptions)],
+      optionsByModel: serviceTierOptionsByModel,
+    },
+  ];
 }
 
 // ── Agent catalog ─────────────────────────────────────────
@@ -272,7 +332,7 @@ function loadResourceGroupPreferences() {
         name,
         provider,
         model: config.model || null,
-        profiles: Array.isArray(config.profiles) ? config.profiles : [],
+        profiles: Array.isArray(config.profiles) ? config.profiles.map(p => ({ ...p })) : [],
         rotation_mode: config.rotation_mode || 'error_fallback',
         approval_mode: config.approval_mode || config.approvalMode || null,
         policy: config.policy || null,
@@ -355,9 +415,9 @@ function buildAdapterMetadata() {
     codex: {
       name: 'Codex CLI',
       supportsAudio: false,
-      parameters: [
-        { id: 'model', label: 'Model', type: 'select', options: getEffectiveModels('codex'), preferred: rgPrefs.byProvider['codex'] || [] }
-      ]
+      models: getCachedCodexModels(),
+      discovery: getCodexDiscoveryStatus(),
+      parameters: getCodexCapabilityParameters(rgPrefs.byProvider['codex'] || []),
     },
     opencode: {
       name: 'OpenCode',
@@ -386,3 +446,4 @@ export function listAdapterTypes() {
 // immediately for the initial /api/adapter/types request when a chat opens.
 discoverOpenCodeModels().catch(() => {});
 discoverAntigravityModels().catch(() => {});
+discoverCodexModels().catch(() => {});

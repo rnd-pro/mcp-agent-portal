@@ -4,7 +4,7 @@ import { readConfig } from '../../config-store.js';
 import { getTeamMemoryRoot } from '../../../../packages/agent-pool-mcp/src/runtime/paths.js';
 import { getStateGraph } from '../../state-graph.js';
 import { getFlywheelStats } from '../../mlops/flywheel.js';
-import { listAdapterTypes, getAgentList, invalidateAgentList } from '../../adapters/index.js';
+import { discoverCodexModels, listAdapterTypes, getAgentList, invalidateAgentList } from '../../adapters/index.js';
 import { REGISTRY, getRegistryByCategory } from '../marketplace-registry.js';
 import { getLogPath } from '../../ops/runtime.js';
 import { createXrDiagnosticLogStore } from '../xr-diagnostics-log.js';
@@ -135,7 +135,10 @@ export function createCoreRoutes(ctx) {
       json(res, getFlywheelStats());
     },
 
-    'GET /api/adapter/types': (_req, res) => {
+    'GET /api/adapter/types': async (_req, res) => {
+      try {
+        await discoverCodexModels();
+      } catch {}
       json(res, listAdapterTypes());
     },
 

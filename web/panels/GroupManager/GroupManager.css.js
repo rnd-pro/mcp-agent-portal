@@ -392,13 +392,25 @@ pg-group-manager {
   grid-column: 2;
 }
 
-.gm-add-profile[data-provider="codex"] [data-add-profile],
+.gm-add-profile[data-provider="codex"] [data-add-service-tier] {
+  grid-column: 2;
+}
+
+.gm-add-profile[data-provider="codex"] [data-add-profile] {
+  grid-column: 3;
+  grid-row: 1 / span 3;
+}
+
 .gm-add-profile[data-provider="claude"] [data-add-profile] {
   grid-column: 3;
   grid-row: 1 / span 2;
 }
 
 .gm-add-profile:not([data-provider="codex"]):not([data-provider="claude"]) [data-add-reasoning] {
+  display: none;
+}
+
+.gm-add-profile:not([data-provider="codex"]) [data-add-service-tier] {
   display: none;
 }
 `;

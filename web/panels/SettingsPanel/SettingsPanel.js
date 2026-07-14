@@ -521,9 +521,14 @@ export class SettingsPanel extends Symbiote {
       
       this._userModels = modelsInfo.userModels || {};
       this._cliModels = modelsInfo.cliModels || [];
+      this._codexModels = modelsInfo.codexModels || [];
+      this._codexDiscovery = modelsInfo.codexDiscovery || null;
       this._defaultModels = modelsInfo.defaultModels || {};
       this._applyProviderAuth(modelsInfo.providerAuth || { providers: {} }, { render: false, notify: true });
       this._renderProviderTabs();
+      if (this._codexDiscovery?.error) {
+        this._setModelStatus(`Codex discovery: ${this._codexDiscovery.error}`, 'error');
+      }
       
       this.ref.backendCard.replaceChildren(
         renderMetric(tPortal('text.status'), tPortal('text.running'), "success"),
@@ -594,6 +599,8 @@ export class SettingsPanel extends Symbiote {
   _activeProvider = 'opencode';
   _userModels = {};
   _cliModels = [];
+  _codexModels = [];
+  _codexDiscovery = null;
   _defaultModels = {};
   _providerAuth = { providers: {} };
   
@@ -822,6 +829,26 @@ export class SettingsPanel extends Symbiote {
         }
         children.push(suggestions);
       }
+    }
+    if (this._activeProvider === 'codex' && this._codexModels.length > 0) {
+      let suggestions = document.createElement('div');
+      suggestions.className = 'pm-model-suggestions';
+      let label = document.createElement('span');
+      label.textContent = 'Codex CLI models';
+      suggestions.append(label);
+      for (let entry of this._codexModels) {
+        let button = document.createElement('sn-button');
+        button.className = 'pm-suggest-model';
+        button.dataset.m = entry.id;
+        button.textContent = entry.displayName || entry.id;
+        let efforts = entry.supportedReasoningEfforts?.map(option => option.reasoningEffort).join(', ');
+        let tiers = entry.serviceTiers?.map(tier => tier.name || tier.id).join(', ');
+        button.title = [entry.id, efforts ? `reasoning: ${efforts}` : '', tiers ? `tiers: ${tiers}` : '']
+          .filter(Boolean)
+          .join(' · ');
+        suggestions.append(button);
+      }
+      children.push(suggestions);
     }
 
     if (models.length === 0) {
@@ -1062,13 +1089,21 @@ export class SettingsPanel extends Symbiote {
     renderIconTextButton(btn, "sync", tPortal('text.discovering'), true);
     btn.disabled = true;
     try {
-      let r = await fetch('/api/settings/models/refresh', { method: 'POST' }).then(res => res.json());
+      let response = await fetch('/api/settings/models/refresh', { method: 'POST' });
+      let r = await response.json();
       this._cliModels = r.models || [];
+      this._codexModels = r.codexModels || this._codexModels;
+      this._codexDiscovery = r.codexDiscovery || this._codexDiscovery;
       this._defaultModels = r.defaultModels || this._defaultModels;
       this._providerAuth = r.providerAuth || this._providerAuth;
       this._renderProviderAuth();
+      this._renderModelList();
       this._renderDirectory();
-      this._setModelStatus(`Discovered ${r.count} models`, "accent");
+      if (!response.ok || r.ok === false) {
+        let details = Object.values(r.errors || {}).join(' · ') || `HTTP ${response.status}`;
+        throw new Error(details);
+      }
+      this._setModelStatus(`Discovered ${r.count} OpenCode and ${r.codexCount || 0} Codex models`, "accent");
     } catch (e) {
       this._setModelStatus(`Sync failed: ${e.message}`, "error");
     } finally {

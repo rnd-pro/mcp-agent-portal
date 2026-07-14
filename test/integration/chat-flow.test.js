@@ -160,7 +160,7 @@ async function run() {
     ws.close();
   });
 
-  await test('resource group routing does not leak manual provider/model overrides', async () => {
+  await test('resource group routing does not leak manual provider or execution-setting overrides', async () => {
     let ws = await connectChatClient();
     let originalRequest = proxyManager.requestFromChild;
     let capturedArgs = null;
@@ -192,16 +192,26 @@ async function run() {
         resource_group: 'reasoning-heavy',
         provider: 'antigravity',
         model: 'default',
+        reasoningEffort: 'ultra',
+        serviceTier: 'priority',
       }
     }));
 
-    await receivedDelegated;
+    let delegated = await receivedDelegated;
     proxyManager.requestFromChild = originalRequest;
 
     assert.equal(capturedArgs.resource_group, 'reasoning-heavy');
     assert.equal(capturedArgs.agent_slug, 'orchestrator');
     assert.equal(capturedArgs.provider, undefined);
     assert.equal(capturedArgs.model, undefined);
+    assert.equal(capturedArgs.reasoningEffort, undefined);
+    assert.equal(capturedArgs.serviceTier, undefined);
+    let { getStateGraph } = await import('../../src/node/state-graph.js');
+    let persistedChat = getStateGraph().getChat(delegated.params.chatId);
+    assert.equal(persistedChat.provider, null);
+    assert.equal(persistedChat.model, null);
+    assert.equal(persistedChat.reasoningEffort, null);
+    assert.equal(persistedChat.serviceTier, null);
     ws.close();
   });
 
@@ -261,7 +271,60 @@ async function run() {
     }
   });
 
-  await test('chat.send forwards structured files and context mode to delegate_task', async () => {
+  await test('chat.send hydrates persisted Codex settings before delegation', async () => {
+    let ws = await connectChatClient();
+    let { getStateGraph } = await import('../../src/node/state-graph.js');
+    let sg = getStateGraph();
+    let project = sg.addProject({ path: process.cwd(), name: 'agent-portal' });
+    let chat = sg.createChat({
+      name: 'Persisted Codex chat',
+      projectId: project.id,
+      agent: 'orchestrator',
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'ultra',
+      serviceTier: 'priority',
+    }, 'test');
+    let originalRequest = proxyManager.requestFromChild;
+    let capturedArgs = null;
+    proxyManager.requestFromChild = async (_server, _method, payload) => {
+      capturedArgs = payload.arguments;
+      return {
+        isError: false,
+        content: [{ type: 'text', text: 'Delegated task 11111111-2222-4333-8444-555555555555' }],
+      };
+    };
+
+    try {
+      let receivedDelegated = new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('Timeout waiting for chat.delegated')), 10000);
+        ws.on('message', data => {
+          let message = JSON.parse(data.toString());
+          if (message.method === 'chat.delegated') {
+            clearTimeout(timer);
+            resolve(message);
+          }
+        });
+      });
+
+      ws.send(JSON.stringify({
+        method: 'chat.send',
+        params: { chatId: chat.id, prompt: 'use persisted Codex settings' },
+      }));
+      await receivedDelegated;
+
+      assert.equal(capturedArgs.provider, 'codex');
+      assert.equal(capturedArgs.model, 'gpt-5.6-sol');
+      assert.equal(capturedArgs.reasoningEffort, 'ultra');
+      assert.equal(capturedArgs.serviceTier, 'priority');
+    } finally {
+      proxyManager.requestFromChild = originalRequest;
+      sg.deleteChat(chat.id, 'test');
+      ws.close();
+    }
+  });
+
+  await test('chat.send forwards structured files, context mode, and Codex settings to delegate_task', async () => {
     let ws = await connectChatClient();
     let originalRequest = proxyManager.requestFromChild;
     let capturedArgs = null;
@@ -292,6 +355,10 @@ async function run() {
           prompt: 'test context files',
           files: ['web/app.js', 'web/app.js', 'src/node/server.js'],
           context_mode: 'off',
+          provider: 'codex',
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'ultra',
+          serviceTier: 'priority',
         }
       }));
 
@@ -300,6 +367,8 @@ async function run() {
       assert.deepEqual(capturedArgs.files, ['web/app.js', 'src/node/server.js']);
       assert.equal(capturedArgs.context_mode, 'off');
       assert.equal(capturedArgs.agent_slug, 'orchestrator');
+      assert.equal(capturedArgs.reasoningEffort, 'ultra');
+      assert.equal(capturedArgs.serviceTier, 'priority');
     } finally {
       proxyManager.requestFromChild = originalRequest;
       ws.close();

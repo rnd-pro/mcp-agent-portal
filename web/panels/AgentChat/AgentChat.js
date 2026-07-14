@@ -581,6 +581,23 @@ export class AgentChat extends Symbiote {
 
     if (id === 'provider') {
       delete updatedParams.model;
+      delete updatedParams.reasoningEffort;
+      delete updatedParams.serviceTier;
+    }
+    let clearedModelSettings = [];
+    if (id === 'model') {
+      let adapter = this.$.chatAdapter || 'pool';
+      let provider = adapter === 'pool' ? updatedParams.provider : adapter;
+      let parameters = this.$.adapterMeta?.[provider]?.parameters || [];
+      for (let settingId of ['reasoningEffort', 'serviceTier']) {
+        let parameter = parameters.find(item => item.id === settingId);
+        let modelOptions = parameter?.optionsByModel?.[val];
+        let currentValue = updatedParams[settingId];
+        if (currentValue && Array.isArray(modelOptions) && !modelOptions.includes(currentValue)) {
+          delete updatedParams[settingId];
+          clearedModelSettings.push(settingId);
+        }
+      }
     }
     if (id === 'agent') {
       // Auto-select resource group from agent binding
@@ -596,6 +613,8 @@ export class AgentChat extends Symbiote {
       if (val !== 'none') {
         delete updatedParams.provider;
         delete updatedParams.model;
+        delete updatedParams.reasoningEffort;
+        delete updatedParams.serviceTier;
       }
       updatedParams.approval_mode = this._getResourceGroupDefaultApprovalMode(val) || updatedParams.approval_mode;
     }
@@ -605,7 +624,11 @@ export class AgentChat extends Symbiote {
     let chatId = this._loadedChatId || dashState.activeChatId;
     if (chatId) {
       let saveData = { id: chatId, [id]: val };
-      if (id === 'provider') saveData.model = null;
+      if (id === 'provider') {
+        saveData.model = null;
+        saveData.reasoningEffort = null;
+        saveData.serviceTier = null;
+      }
       if (id === 'agent') {
         saveData.approval_mode = updatedParams.approval_mode;
         if (updatedParams.resource_group) saveData.resource_group = updatedParams.resource_group;
@@ -613,7 +636,10 @@ export class AgentChat extends Symbiote {
       if (id === 'resource_group') {
         saveData.provider = null;
         saveData.model = null;
+        saveData.reasoningEffort = null;
+        saveData.serviceTier = null;
       }
+      for (let settingId of clearedModelSettings) saveData[settingId] = null;
       fetch('/api/chats/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1876,17 +1902,19 @@ export class AgentChat extends Symbiote {
     if (paramsToMap.length > 0) {
       let paramsChanged = defaultParamsChanged;
       for (let p of paramsToMap) {
-        if (p.type === 'select' && Array.isArray(p.options)) {
+        let modelOptions = p.optionsByModel?.[currentParams.model];
+        let options = Array.isArray(modelOptions) ? modelOptions : p.options;
+        if (p.type === 'select' && Array.isArray(options)) {
           let paramValue = currentParams[p.id];
-          if (!paramValue && p.options.length > 0) {
+          if (!paramValue && options.length > 0) {
             if (p.id === 'resource_group') {
               // Auto-select group from current agent's binding
               let agentGroup = this._getAgentResourceGroup(currentParams.agent);
               if (agentGroup) {
-                let found = p.options.find(o => (typeof o === 'string' ? o : o.val) === agentGroup);
-                paramValue = found ? (typeof found === 'string' ? found : found.val) : (typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val);
+                let found = options.find(o => (typeof o === 'string' ? o : o.val) === agentGroup);
+                paramValue = found ? (typeof found === 'string' ? found : found.val) : (typeof options[0] === 'string' ? options[0] : options[0].val);
               } else {
-                paramValue = typeof p.options[0] === 'string' ? p.options[0] : p.options[0].val;
+                paramValue = typeof options[0] === 'string' ? options[0] : options[0].val;
               }
             } else if (p.id === 'approval_mode') {
               paramValue = this._getResourceGroupDefaultApprovalMode(currentParams.resource_group)
@@ -1899,15 +1927,15 @@ export class AgentChat extends Symbiote {
 
               // Default to first preferred model, or first option
               if (preferred.length > 0) {
-                let found = p.options.find(o => preferred.includes(typeof o === 'string' ? o : o.val));
+                let found = options.find(o => preferred.includes(typeof o === 'string' ? o : o.val));
                 paramValue = found ? (typeof found === 'string' ? found : found.val) : null;
               }
               if (!paramValue) {
-                let firstOpt = p.options[0];
+                let firstOpt = options[0];
                 paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
               }
             } else {
-              let firstOpt = p.options[0];
+              let firstOpt = options[0];
               paramValue = typeof firstOpt === 'string' ? firstOpt : firstOpt.val;
             }
             // Track default for batched update after loop
@@ -2573,16 +2601,18 @@ export class AgentChat extends Symbiote {
     if (params.resource_group && params.resource_group !== 'none') {
       delete params.provider;
       delete params.model;
+      delete params.reasoningEffort;
+      delete params.serviceTier;
     }
     return params;
   }
 
   _getPersistedChatParams(params = this.$.chatParams || {}) {
-    let allowed = ['agent', 'provider', 'model', 'approval_mode', 'resource_group', 'chatType', 'goalIntentActive', 'goalQueueMode'];
+    let allowed = ['agent', 'provider', 'model', 'reasoningEffort', 'serviceTier', 'approval_mode', 'resource_group', 'chatType', 'goalIntentActive', 'goalQueueMode'];
     let result = {};
     let hasResourceGroup = params.resource_group && params.resource_group !== 'none';
     for (let key of allowed) {
-      if (hasResourceGroup && (key === 'provider' || key === 'model')) continue;
+      if (hasResourceGroup && ['provider', 'model', 'reasoningEffort', 'serviceTier'].includes(key)) continue;
       let value = params[key];
       if (value == null || value === '') continue;
       result[key] = value;
@@ -2590,6 +2620,8 @@ export class AgentChat extends Symbiote {
     if (hasResourceGroup) {
       result.provider = null;
       result.model = null;
+      result.reasoningEffort = null;
+      result.serviceTier = null;
     }
     return result;
   }

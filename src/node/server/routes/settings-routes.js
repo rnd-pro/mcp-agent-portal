@@ -9,7 +9,7 @@ import {
   setAnthropicGatewayConfig,
 } from '../../config-store.js';
 import { getStateGraph } from '../../state-graph.js';
-import { discoverOpenCodeModels, getCLIModels, getDefaultProviderModels } from '../../adapters/index.js';
+import { discoverOpenCodeModels, getCLIModels, getDefaultProviderModels, discoverCodexModels, getCachedCodexModels, getCodexDiscoveryStatus } from '../../adapters/index.js';
 import { json, parseBody } from './http.js';
 import { createClaudeDirectEnv } from '../../../../packages/agent-pool-mcp/src/runner/provider-config.js';
 
@@ -230,13 +230,19 @@ export function createSettingsRoutes(ctx = {}) {
       }
     },
 
-    'GET /api/settings/models': (_req, res) => {
+    'GET /api/settings/models': async (_req, res) => {
+      try {
+        await discoverCodexModels();
+      } catch {}
       let sg = getStateGraph();
       let userModels = sg.getAllProviderModels();
       let cliModels = getCLIModels();
+      let codexModels = getCachedCodexModels();
       json(res, {
         userModels,
         cliModels,
+        codexModels,
+        codexDiscovery: getCodexDiscoveryStatus(),
         defaultModels: getDefaultProviderModels(),
         providerAuth: providerAuthStatusReader(),
       });
@@ -287,18 +293,28 @@ export function createSettingsRoutes(ctx = {}) {
     },
 
     'POST /api/settings/models/refresh': async (_req, res) => {
-      try {
-        let models = await discoverOpenCodeModels();
-        json(res, {
-          ok: true,
-          count: models.length,
-          models,
-          defaultModels: getDefaultProviderModels(),
-          providerAuth: providerAuthStatusReader(),
-        });
-      } catch (err) {
-        json(res, { error: err.message }, 500);
-      }
+      let [openCodeResult, codexResult] = await Promise.allSettled([
+        discoverOpenCodeModels(),
+        discoverCodexModels({ force: true }),
+      ]);
+      let errors = {};
+      let openCodeModels = getCLIModels();
+      let codexModels = getCachedCodexModels();
+      if (openCodeResult.status === 'fulfilled') openCodeModels = openCodeResult.value;
+      else errors.opencode = openCodeResult.reason?.message || 'OpenCode discovery failed';
+      if (codexResult.status === 'fulfilled') codexModels = codexResult.value;
+      else errors.codex = codexResult.reason?.message || 'Codex discovery failed';
+      json(res, {
+        ok: Object.keys(errors).length === 0,
+        count: openCodeModels.length,
+        models: openCodeModels,
+        codexCount: codexModels.length,
+        codexModels,
+        codexDiscovery: getCodexDiscoveryStatus(),
+        errors,
+        defaultModels: getDefaultProviderModels(),
+        providerAuth: providerAuthStatusReader(),
+      });
     },
   };
 }

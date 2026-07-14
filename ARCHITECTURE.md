@@ -342,9 +342,9 @@ Agent Portal manages the RND-PRO MCP ecosystem. The core workspace owns `project
 |----------|--------|-------------|
 | `/api/settings` | GET | Read portal settings |
 | `/api/settings` | POST | Update portal settings |
-| `/api/settings/models` | GET | Get configured provider models |
+| `/api/settings/models` | GET | Get configured provider models plus the live Codex catalog, capabilities, and discovery state |
 | `/api/settings/models` | POST | Save provider model configuration |
-| `/api/settings/models/refresh` | POST | Re-discover models from providers |
+| `/api/settings/models/refresh` | POST | Force and await independent provider catalog refreshes, returning partial errors when needed |
 | `/api/adapter/status` | GET | Adapter pool status |
 | `/api/adapter/types` | GET | Available adapter types |
 | `/api/adapter/run` | POST | Run a prompt through an adapter |

@@ -365,6 +365,54 @@ Body
     }
   });
 
+  it('persists Codex execution settings when chats are created and updated', async () => {
+    let tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-chat-codex-settings-'));
+    let { StateGraph } = await import('../../src/node/state-graph.js');
+    let { createProjectRoutes } = await import('../../src/node/server/api-routes-projects.js');
+    let sg = new StateGraph({
+      snapshotPath: path.join(tmpDir, 'state.json'),
+      walPath: path.join(tmpDir, 'state.wal'),
+      chatsDir: path.join(tmpDir, 'chats'),
+    });
+
+    try {
+      let routes = createProjectRoutes({ ...makeRoutes(tmpDir), stateGraph: sg });
+      let createRes = makeRes();
+      await routes['POST /api/chats'](
+        makeReq('POST', '/api/chats', {
+          name: 'Codex settings',
+          adapter: 'codex',
+          provider: 'codex',
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'ultra',
+          serviceTier: 'priority',
+        }),
+        createRes,
+      );
+      let chatId = createRes.json().id;
+      assert.equal(sg.getChat(chatId).reasoningEffort, 'ultra');
+      assert.equal(sg.listChats().find(chat => chat.id === chatId).serviceTier, 'priority');
+
+      let updateRes = makeRes();
+      await routes['POST /api/chats/update'](
+        makeReq('POST', '/api/chats/update', {
+          id: chatId,
+          reasoningEffort: 'max',
+          serviceTier: null,
+        }),
+        updateRes,
+      );
+
+      assert.equal(updateRes.status, 200);
+      assert.equal(sg.getChat(chatId).reasoningEffort, 'max');
+      assert.equal(sg.getChat(chatId).serviceTier, null);
+    } finally {
+      await sg.flushChatWrites();
+      sg.flush();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('records XR diagnostics posted by browser clients', async () => {
     let { createRoutes } = await import('../../src/node/server/api-routes.js');
     let routes = createRoutes(makeRoutes('/tmp/project'));

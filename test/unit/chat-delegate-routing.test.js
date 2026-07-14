@@ -45,6 +45,10 @@ describe('chat delegate routing', () => {
     let prepared = await prepareDelegateTaskCall(proxyManager, 'delegate_task', {
       chat_id: chat.id,
       prompt: 'Plan the work',
+      reasoningEffort: 'ultra',
+      reasoning_effort: 'max',
+      serviceTier: 'priority',
+      service_tier: 'future-tier',
     }, { stateGraph: sg, source: 'test' });
 
     assert.equal(prepared.args.agent_slug, 'orchestrator');
@@ -52,6 +56,10 @@ describe('chat delegate routing', () => {
     assert.equal(prepared.args.approval_mode, 'yolo');
     assert.equal(prepared.args.provider, undefined);
     assert.equal(prepared.args.model, undefined);
+    assert.equal(prepared.args.reasoningEffort, undefined);
+    assert.equal(prepared.args.reasoning_effort, undefined);
+    assert.equal(prepared.args.serviceTier, undefined);
+    assert.equal(prepared.args.service_tier, undefined);
     assert.equal(prepared.args.cwd, projectPath);
     assert.match(prepared.args.prompt, /^\[Goal Intent\]/);
     assert.deepEqual(prepared.delegationPolicy, {
@@ -75,6 +83,27 @@ describe('chat delegate routing', () => {
 
     assert.match(prepared.args.prompt, /^\[Active Goal\]/);
     assert.match(prepared.args.prompt, new RegExp(goal.id));
+  });
+
+  it('inherits persisted Codex execution settings for direct chat delegation', async () => {
+    let chat = sg.createChat({
+      name: 'Codex chat',
+      agent: 'orchestrator',
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      reasoningEffort: 'ultra',
+      serviceTier: 'priority',
+    }, 'test');
+
+    let prepared = await prepareDelegateTaskCall(proxyManager, 'delegate_task', {
+      chat_id: chat.id,
+      prompt: 'Continue with saved settings',
+    }, { stateGraph: sg, source: 'test' });
+
+    assert.equal(prepared.args.provider, 'codex');
+    assert.equal(prepared.args.model, 'gpt-5.6-sol');
+    assert.equal(prepared.args.reasoningEffort, 'ultra');
+    assert.equal(prepared.args.serviceTier, 'priority');
   });
 
   it('injects selected queued goal messages into chat-bound MCP delegation', async () => {

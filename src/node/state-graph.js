@@ -999,6 +999,8 @@ export class StateGraph extends EventEmitter {
       agent: chat.agent || chat.agent_slug || fallback.agent || null,
       provider: metadataValue(chat.provider, fallback.provider),
       model: metadataValue(chat.model, fallback.model),
+      reasoningEffort: metadataValue(chat.reasoningEffort, fallback.reasoningEffort),
+      serviceTier: metadataValue(chat.serviceTier, fallback.serviceTier),
       approval_mode: metadataValue(chat.approval_mode, fallback.approval_mode),
       resource_group: metadataValue(chat.resource_group, fallback.resource_group),
       chatType: metadataValue(chat.chatType, fallback.chatType),
@@ -1177,7 +1179,7 @@ export class StateGraph extends EventEmitter {
 
   /**
    * Create a new chat.
-   * @param {Object|{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, agent?: string, agent_slug?: string, approval_mode?: string, resource_group?: string, chatType?: string }} opts
+   * @param {Object|{ projectId?: string, name?: string, adapter?: string, model?: string, provider?: string, reasoningEffort?: string, serviceTier?: string, agent?: string, agent_slug?: string, approval_mode?: string, resource_group?: string, chatType?: string }} opts
    * @param {string} [source]
    * @returns {{ id: string }}
    */
@@ -1196,6 +1198,8 @@ export class StateGraph extends EventEmitter {
       agent,
       provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'antigravity' ? 'default' : opts.adapter === 'opencode' ? 'deepseek/deepseek-v4-pro' : null),
+      reasoningEffort: opts.reasoningEffort ?? null,
+      serviceTier: opts.serviceTier ?? null,
       approval_mode: opts.approval_mode || null,
       resource_group: opts.resource_group || null,
       chatType: opts.chatType || null,
@@ -1222,6 +1226,8 @@ export class StateGraph extends EventEmitter {
       agent,
       provider: opts.provider || null,
       model: opts.model || (opts.adapter === 'antigravity' ? 'default' : opts.adapter === 'opencode' ? 'deepseek/deepseek-v4-pro' : null),
+      reasoningEffort: opts.reasoningEffort ?? null,
+      serviceTier: opts.serviceTier ?? null,
       approval_mode: opts.approval_mode || null,
       resource_group: opts.resource_group || null,
       chatType: opts.chatType || null,
@@ -1645,7 +1651,7 @@ export class StateGraph extends EventEmitter {
 
   // Update chat metadata fields.
   updateChat(chatId, updates, source = 'system') {
-    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin', 'lastTaskStatus', 'activeGoalId', 'goalIntentActive', 'goalQueueMode']);
+    let allowed = new Set(['name', 'adapter', 'model', 'provider', 'reasoningEffort', 'serviceTier', 'chatType', 'agent', 'approval_mode', 'resource_group', 'projectId', 'parentChatId', 'origin', 'lastTaskStatus', 'activeGoalId', 'goalIntentActive', 'goalQueueMode']);
     let filtered = {};
     let current = this.get(`chats/${chatId}`) || {};
     for (let [k, v] of Object.entries(updates)) {

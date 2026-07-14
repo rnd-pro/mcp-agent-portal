@@ -467,8 +467,143 @@ function demoModels() {
       opencode: ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
       antigravity: ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)'],
       claude: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-      codex: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+      codex: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
     },
+    codexModels: [
+      {
+        id: 'gpt-5.6-sol',
+        model: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6-Sol',
+        description: 'Latest frontier agentic coding model.',
+        hidden: false,
+        isDefault: true,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' },
+          { reasoningEffort: 'max', description: 'Maximum reasoning depth for the hardest problems' },
+          { reasoningEffort: 'ultra', description: 'Maximum reasoning with automatic task delegation' }
+        ],
+        defaultReasoningEffort: 'low',
+        serviceTiers: [
+          { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }
+        ],
+        defaultServiceTier: null
+      },
+      {
+        id: 'gpt-5.6-terra',
+        model: 'gpt-5.6-terra',
+        displayName: 'GPT-5.6-Terra',
+        description: 'Balanced agentic coding model for everyday work.',
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' },
+          { reasoningEffort: 'max', description: 'Maximum reasoning depth for the hardest problems' },
+          { reasoningEffort: 'ultra', description: 'Maximum reasoning with automatic task delegation' }
+        ],
+        defaultReasoningEffort: 'medium',
+        serviceTiers: [
+          { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }
+        ],
+        defaultServiceTier: null
+      },
+      {
+        id: 'gpt-5.6-luna',
+        model: 'gpt-5.6-luna',
+        displayName: 'GPT-5.6-Luna',
+        description: 'Fast and affordable agentic coding model.',
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' },
+          { reasoningEffort: 'max', description: 'Maximum reasoning depth for the hardest problems' }
+        ],
+        defaultReasoningEffort: 'medium',
+        serviceTiers: [
+          { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }
+        ],
+        defaultServiceTier: null
+      },
+      {
+        id: 'gpt-5.5',
+        model: 'gpt-5.5',
+        displayName: 'GPT-5.5',
+        description: 'Frontier model for complex coding, research, and real-world work.',
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
+        ],
+        defaultReasoningEffort: 'medium',
+        serviceTiers: [
+          { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }
+        ],
+        defaultServiceTier: null
+      },
+      {
+        id: 'gpt-5.4-mini',
+        model: 'gpt-5.4-mini',
+        displayName: 'GPT-5.4-Mini',
+        description: 'Small, fast, and cost-efficient model for simpler coding tasks.',
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
+        ],
+        defaultReasoningEffort: 'medium',
+        serviceTiers: [],
+        defaultServiceTier: null
+      },
+      {
+        id: 'gpt-5.3-codex-spark',
+        model: 'gpt-5.3-codex-spark',
+        displayName: 'GPT-5.3-Codex-Spark',
+        description: 'Ultra-fast coding model.',
+        hidden: false,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
+        ],
+        defaultReasoningEffort: 'high',
+        serviceTiers: [],
+        defaultServiceTier: null
+      },
+      {
+        id: 'codex-auto-review',
+        model: 'codex-auto-review',
+        displayName: 'Codex Auto Review',
+        description: 'Automatic approval review model for Codex.',
+        hidden: true,
+        isDefault: false,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast responses with lighter reasoning' },
+          { reasoningEffort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+          { reasoningEffort: 'high', description: 'Greater reasoning depth for complex problems' },
+          { reasoningEffort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
+        ],
+        defaultReasoningEffort: 'medium',
+        serviceTiers: [],
+        defaultServiceTier: null
+      }
+    ].filter(m => !m.hidden),
+    codexDiscovery: { status: 'ready', error: null, timestamp: Date.now() },
     defaultModels: {
       claude: [
         { id: 'default', name: 'Default', description: 'Claude Code tier default' },
