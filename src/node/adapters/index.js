@@ -7,6 +7,13 @@ import {
   getCodexDiscoveryStatus,
 } from './codex-discovery.js';
 export { discoverCodexModels, getCachedCodexModels, getCodexDiscoveryStatus } from './codex-discovery.js';
+import { createKimiAdapter } from './kimi.js';
+import {
+  discoverKimiModels,
+  getCachedKimiModels,
+  getKimiDiscoveryStatus,
+} from './kimi-discovery.js';
+export { discoverKimiModels, getCachedKimiModels, getKimiDiscoveryStatus, clearKimiDiscoveryCache } from './kimi-discovery.js';
 import { getStateGraph } from '../state-graph.js';
 import { listGroups } from '../../../packages/agent-pool-mcp/src/tools/groups.js';
 import { getSkillsRoot, getTeamMemoryRoot } from '../../../packages/agent-pool-mcp/src/runtime/paths.js';
@@ -18,6 +25,7 @@ let ADAPTERS = {
   antigravity: createAntigravityAdapter,
   claude: createClaudeAdapter,
   codex: createCodexAdapter,
+  kimi: createKimiAdapter,
 };
 
 /**
@@ -51,6 +59,7 @@ const DEFAULT_MODELS = {
   antigravity: ['default', 'Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)', 'Claude Sonnet 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)', 'GPT-OSS 120B (Medium)'],
   claude: CLAUDE_CODE_MODEL_CATALOG.map(model => model.id),
   codex: ['default'],
+  kimi: ['default', 'kimi-code/k3'],
   opencode: ['default', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash'],
 };
 const CLAUDE_CODE_MODEL_NAMES = new Map(CLAUDE_CODE_MODEL_CATALOG.map(model => [model.id, model.name]));
@@ -182,6 +191,9 @@ function getEffectiveModels(provider) {
   } else if (provider === 'codex') {
     let discovered = getCachedCodexModels().map(model => model.id);
     models = ['default', ...(userModels.codex || []), ...discovered];
+  } else if (provider === 'kimi') {
+    let discovered = getCachedKimiModels().map(model => model.id);
+    models = [...DEFAULT_MODELS.kimi, ...(userModels.kimi || []), ...discovered];
   } else if (userModels[provider]?.length > 0) {
     models = userModels[provider];
   } else if (provider === 'opencode' && _cliModels.length > 0) {
@@ -201,6 +213,9 @@ function getEffectiveModels(provider) {
       text = CLAUDE_CODE_MODEL_NAMES.get(id);
     } else if (provider === 'codex') {
       let found = getCachedCodexModels().find(m => m.id === id);
+      if (found) text = found.displayName || id;
+    } else if (provider === 'kimi') {
+      let found = getCachedKimiModels().find(m => m.id === id);
       if (found) text = found.displayName || id;
     } else if (_openRouterMetadata.has(lookupId)) {
       text = _openRouterMetadata.get(lookupId).name || id;
@@ -253,6 +268,24 @@ function getCodexCapabilityParameters(preferred = []) {
       type: 'select',
       options: [...new Set(serviceTierOptions)],
       optionsByModel: serviceTierOptionsByModel,
+    },
+  ];
+}
+
+function getKimiCapabilityParameters(preferred = []) {
+  return [
+    {
+      id: 'model',
+      label: 'Model',
+      type: 'select',
+      options: getEffectiveModels('kimi'),
+      preferred,
+    },
+    {
+      id: 'thinkingEffort',
+      label: 'Thinking',
+      type: 'select',
+      options: ['default', 'low', 'high', 'max'],
     },
   ];
 }
@@ -419,6 +452,13 @@ function buildAdapterMetadata() {
       discovery: getCodexDiscoveryStatus(),
       parameters: getCodexCapabilityParameters(rgPrefs.byProvider['codex'] || []),
     },
+    kimi: {
+      name: 'Kimi Code CLI',
+      supportsAudio: false,
+      models: getCachedKimiModels(),
+      discovery: getKimiDiscoveryStatus(),
+      parameters: getKimiCapabilityParameters(rgPrefs.byProvider['kimi'] || []),
+    },
     opencode: {
       name: 'OpenCode',
       supportsAudio: true,
@@ -447,3 +487,4 @@ export function listAdapterTypes() {
 discoverOpenCodeModels().catch(() => {});
 discoverAntigravityModels().catch(() => {});
 discoverCodexModels().catch(() => {});
+discoverKimiModels().catch(() => {});
