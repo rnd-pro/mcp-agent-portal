@@ -1,0 +1,2097 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/graph-layout-quality-v1.json",
+  "title": "Symbiote Graph Layout Quality Report",
+  "description": "Deterministic quality report for a settled 2D graph layout.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "status",
+    "pass",
+    "complete",
+    "normalization",
+    "policy",
+    "metrics",
+    "coverage",
+    "findings"
+  ],
+  "properties": {
+    "version": {
+      "const": "graph-layout-quality-v1"
+    },
+    "status": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "incomplete"
+      ],
+      "description": "Overall audit outcome; incomplete takes precedence over fail and warn."
+    },
+    "pass": {
+      "type": "boolean",
+      "description": "True only when analysis is complete and has no objective failure."
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "False when input, numeric representability, or deterministic coverage was incomplete."
+    },
+    "normalization": {
+      "$ref": "#/$defs/normalization"
+    },
+    "policy": {
+      "$ref": "#/$defs/resolvedPolicy"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "pass"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pass": {
+            "const": true
+          },
+          "complete": {
+            "const": true
+          },
+          "findings": {
+            "type": "array",
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "warn"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pass": {
+            "const": true
+          },
+          "complete": {
+            "const": true
+          },
+          "findings": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "ruleId": {
+                  "enum": [
+                    "parent.too-distant",
+                    "edge.too-long",
+                    "edge.crossing",
+                    "node.too-distant",
+                    "viewport.node-too-small",
+                    "layout.unstable"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "fail"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pass": {
+            "const": false
+          },
+          "complete": {
+            "const": true
+          },
+          "findings": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "ruleId": {
+                  "enum": [
+                    "parent.too-distant",
+                    "edge.too-long",
+                    "edge.crossing",
+                    "node.too-distant",
+                    "viewport.node-too-small",
+                    "layout.unstable",
+                    "edge.node-intersection",
+                    "node.overlap"
+                  ]
+                }
+              }
+            },
+            "contains": {
+              "type": "object",
+              "properties": {
+                "ruleId": {
+                  "enum": [
+                    "edge.node-intersection",
+                    "node.overlap"
+                  ]
+                }
+              }
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "incomplete"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pass": {
+            "const": false
+          },
+          "complete": {
+            "const": false
+          },
+          "findings": {
+            "type": "array",
+            "minItems": 1,
+            "contains": {
+              "type": "object",
+              "properties": {
+                "ruleId": {
+                  "enum": [
+                    "policy.invalid",
+                    "policy.unknown-field",
+                    "policy.invalid-field",
+                    "input.invalid-version",
+                    "input.invalid-nodes",
+                    "input.invalid-edges",
+                    "node.invalid-id",
+                    "node.duplicate-id",
+                    "node.invalid-geometry",
+                    "parent.invalid",
+                    "parent.cycle",
+                    "baseline.invalid",
+                    "baseline.duplicate-id",
+                    "edge.invalid-id",
+                    "edge.duplicate-id",
+                    "edge.invalid-endpoint",
+                    "edge.invalid-points",
+                    "layout.analysis-budget-exceeded",
+                    "layout.numeric-underflow",
+                    "viewport.invalid"
+                  ]
+                }
+              }
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "coverage": {
+            "type": "object",
+            "required": [
+              "checks"
+            ],
+            "properties": {
+              "checks": {
+                "type": "object",
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "nodePairs"
+                    ],
+                    "properties": {
+                      "nodePairs": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "const": "skipped-budget"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "edgeNodePairs"
+                    ],
+                    "properties": {
+                      "edgeNodePairs": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "const": "skipped-budget"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "edgePairs"
+                    ],
+                    "properties": {
+                      "edgePairs": {
+                        "type": "object",
+                        "required": [
+                          "status"
+                        ],
+                        "properties": {
+                          "status": {
+                            "const": "skipped-budget"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "incomplete"
+          },
+          "findings": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "properties": {
+                "ruleId": {
+                  "const": "layout.analysis-budget-exceeded"
+                }
+              }
+            },
+            "minContains": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "inputPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1e+150,
+          "maximum": 1e+150
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1e+150,
+          "maximum": 1e+150
+        }
+      }
+    },
+    "inputBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bounds must also satisfy x + width > x and y + height > y in IEEE-754 arithmetic; violations are reported as incomplete semantic findings.",
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1e+150,
+          "maximum": 1e+150
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1e+150,
+          "maximum": 1e+150
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1e-150,
+          "maximum": 1e+150
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1e-150,
+          "maximum": 1e+150
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "bounds"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "description": "Canonical ID without leading or trailing whitespace."
+        },
+        "parentId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "description": "Canonical ID without leading or trailing whitespace."
+        },
+        "bounds": {
+          "$ref": "#/$defs/inputBounds"
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceId",
+        "targetId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "description": "Canonical ID without leading or trailing whitespace."
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "description": "Canonical ID without leading or trailing whitespace."
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "description": "Canonical ID without leading or trailing whitespace."
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/inputPoint"
+          }
+        }
+      }
+    },
+    "baselineArrayNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "bounds"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "description": "Canonical ID without leading or trailing whitespace."
+            },
+            "bounds": {
+              "$ref": "#/$defs/inputBounds"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "description": "Canonical ID without leading or trailing whitespace."
+            },
+            "x": {
+              "type": "number",
+              "minimum": -1e+150,
+              "maximum": 1e+150
+            },
+            "y": {
+              "type": "number",
+              "minimum": -1e+150,
+              "maximum": 1e+150
+            },
+            "width": {
+              "type": "number",
+              "minimum": 1e-150,
+              "maximum": 1e+150
+            },
+            "height": {
+              "type": "number",
+              "minimum": 1e-150,
+              "maximum": 1e+150
+            }
+          }
+        }
+      ]
+    },
+    "baselineMapNode": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/inputBounds"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bounds"
+          ],
+          "properties": {
+            "bounds": {
+              "$ref": "#/$defs/inputBounds"
+            }
+          }
+        }
+      ]
+    },
+    "inputPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxEdgeLengthRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 4,
+          "description": "Maximum route length divided by the normalization unit."
+        },
+        "maxNearestNeighborDistanceRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 4,
+          "description": "Maximum nearest-neighbor center distance divided by the normalization unit."
+        },
+        "maxParentDistanceRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 2.5,
+          "description": "Maximum parent-child center distance divided by the normalization unit."
+        },
+        "maxStabilityShiftRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0.75,
+          "description": "Maximum translation-aligned baseline shift divided by the normalization unit."
+        },
+        "minRenderedNodeSize": {
+          "type": "number",
+          "minimum": 0,
+          "default": 24,
+          "description": "Minimum node width or height after fit-to-viewport scaling, in viewport units."
+        },
+        "overlapTolerance": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Maximum allowed node intersection area in squared layout units."
+        },
+        "maxPairChecks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "default": 100000,
+          "description": "Maximum worst-case primitive geometry comparisons reserved for deterministic checks."
+        },
+        "idealEdgeLength": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1e-150,
+          "maximum": 1e+150,
+          "default": null,
+          "description": "Absolute normalization unit inside the numeric domain, or null to use median node diagonal."
+        }
+      }
+    },
+    "resolvedPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxEdgeLengthRatio",
+        "maxNearestNeighborDistanceRatio",
+        "maxParentDistanceRatio",
+        "maxStabilityShiftRatio",
+        "minRenderedNodeSize",
+        "overlapTolerance",
+        "maxPairChecks",
+        "idealEdgeLength"
+      ],
+      "properties": {
+        "maxEdgeLengthRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 4,
+          "description": "Maximum route length divided by the normalization unit."
+        },
+        "maxNearestNeighborDistanceRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 4,
+          "description": "Maximum nearest-neighbor center distance divided by the normalization unit."
+        },
+        "maxParentDistanceRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 2.5,
+          "description": "Maximum parent-child center distance divided by the normalization unit."
+        },
+        "maxStabilityShiftRatio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0.75,
+          "description": "Maximum translation-aligned baseline shift divided by the normalization unit."
+        },
+        "minRenderedNodeSize": {
+          "type": "number",
+          "minimum": 0,
+          "default": 24,
+          "description": "Minimum node width or height after fit-to-viewport scaling, in viewport units."
+        },
+        "overlapTolerance": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Maximum allowed node intersection area in squared layout units."
+        },
+        "maxPairChecks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "default": 100000,
+          "description": "Maximum worst-case primitive geometry comparisons reserved for deterministic checks."
+        },
+        "idealEdgeLength": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1e-150,
+          "maximum": 1e+150,
+          "default": null,
+          "description": "Absolute normalization unit inside the numeric domain, or null to use median node diagonal."
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "nodes"
+      ],
+      "properties": {
+        "version": {
+          "const": "graph-layout-snapshot-v1"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "width",
+            "height"
+          ],
+          "properties": {
+            "width": {
+              "type": "number",
+              "minimum": 1e-150,
+              "maximum": 1e+150
+            },
+            "height": {
+              "type": "number",
+              "minimum": 1e-150,
+              "maximum": 1e+150
+            },
+            "padding": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1e+150,
+              "description": "Must be smaller than half of both viewport dimensions."
+            }
+          }
+        },
+        "baseline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nodes"
+          ],
+          "properties": {
+            "nodes": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/baselineArrayNode"
+                  }
+                },
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                    "description": "Canonical ID without leading or trailing whitespace."
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/baselineMapNode"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "policy": {
+          "$ref": "#/$defs/inputPolicy"
+        }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "unit"
+      ],
+      "properties": {
+        "basis": {
+          "enum": [
+            "empty-layout-default",
+            "median-node-diagonal",
+            "ideal-edge-length-override"
+          ]
+        },
+        "unit": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "nodeMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "analyzed",
+        "overlaps"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "analyzed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "overlaps": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "edgeMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "analyzed",
+        "nodeIntersections",
+        "crossings",
+        "averageLengthRatio",
+        "maxLengthRatio"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "analyzed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nodeIntersections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "crossings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "averageLengthRatio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxLengthRatio": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "viewportMetrics": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provided",
+            "fitScale",
+            "minRenderedNodeSize"
+          ],
+          "properties": {
+            "provided": {
+              "const": false
+            },
+            "fitScale": {
+              "type": "null"
+            },
+            "minRenderedNodeSize": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provided",
+            "width",
+            "height",
+            "padding",
+            "fitScale",
+            "minRenderedNodeSize"
+          ],
+          "properties": {
+            "provided": {
+              "const": true
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "padding": {
+              "type": "number",
+              "minimum": 0
+            },
+            "fitScale": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "minRenderedNodeSize": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes",
+        "edges",
+        "bounds",
+        "nearestNeighborDistance",
+        "viewport",
+        "locality",
+        "stability"
+      ],
+      "properties": {
+        "nodes": {
+          "$ref": "#/$defs/nodeMetrics"
+        },
+        "edges": {
+          "$ref": "#/$defs/edgeMetrics"
+        },
+        "bounds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/bounds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nearestNeighborDistance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "averageRatio",
+            "maxRatio"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "averageRatio": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maxRatio": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "viewport": {
+          "$ref": "#/$defs/viewportMetrics"
+        },
+        "locality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "averageDistanceRatio"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "averageDistanceRatio": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "stability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "translation",
+            "averageShiftRatio",
+            "maxShiftRatio"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "translation": {
+              "$ref": "#/$defs/point"
+            },
+            "averageShiftRatio": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maxShiftRatio": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "coverageCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Entity coverage; skippedIds contains only canonical IDs, while counts include malformed and duplicate entries.",
+      "required": [
+        "total",
+        "analyzedIds",
+        "skippedIds",
+        "skippedCount",
+        "unidentifiedCount"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "analyzedIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+            "description": "Canonical ID without leading or trailing whitespace."
+          }
+        },
+        "skippedIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+            "description": "Canonical ID without leading or trailing whitespace."
+          }
+        },
+        "skippedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total skipped input entries, including every duplicate occurrence."
+        },
+        "unidentifiedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Skipped entries that had no canonical ID and therefore do not appear in skippedIds."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "total": {
+                "const": 0
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "analyzedIds": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "skippedIds": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "skippedCount": {
+                "type": "integer",
+                "const": 0
+              },
+              "unidentifiedCount": {
+                "type": "integer",
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "checkCounter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "status",
+        "budgetCost"
+      ],
+      "properties": {
+        "required": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "skipped-budget"
+          ]
+        },
+        "budgetCost": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Worst-case primitive geometry comparisons required for this check family."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped-budget"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes",
+        "edges",
+        "baseline",
+        "checks"
+      ],
+      "properties": {
+        "nodes": {
+          "$ref": "#/$defs/coverageCollection"
+        },
+        "edges": {
+          "$ref": "#/$defs/coverageCollection"
+        },
+        "baseline": {
+          "$ref": "#/$defs/coverageCollection"
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nodePairs",
+            "edgeNodePairs",
+            "edgePairs"
+          ],
+          "properties": {
+            "nodePairs": {
+              "$ref": "#/$defs/checkCounter"
+            },
+            "edgeNodePairs": {
+              "$ref": "#/$defs/checkCounter"
+            },
+            "edgePairs": {
+              "$ref": "#/$defs/checkCounter"
+            }
+          }
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ruleId",
+        "severity",
+        "actual",
+        "limit",
+        "message"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "description": "Canonical ID without leading or trailing whitespace."
+        },
+        "ruleId": {
+          "enum": [
+            "policy.invalid",
+            "policy.unknown-field",
+            "policy.invalid-field",
+            "input.invalid-version",
+            "input.invalid-nodes",
+            "input.invalid-edges",
+            "node.invalid-id",
+            "node.duplicate-id",
+            "node.invalid-geometry",
+            "parent.invalid",
+            "parent.cycle",
+            "parent.too-distant",
+            "baseline.invalid",
+            "baseline.duplicate-id",
+            "edge.invalid-id",
+            "edge.duplicate-id",
+            "edge.invalid-endpoint",
+            "edge.invalid-points",
+            "edge.too-long",
+            "edge.node-intersection",
+            "edge.crossing",
+            "layout.analysis-budget-exceeded",
+            "layout.numeric-underflow",
+            "node.overlap",
+            "node.too-distant",
+            "viewport.invalid",
+            "viewport.node-too-small",
+            "layout.unstable"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning"
+          ]
+        },
+        "nodeIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+            "description": "Canonical ID without leading or trailing whitespace."
+          }
+        },
+        "edgeIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+            "description": "Canonical ID without leading or trailing whitespace."
+          }
+        },
+        "actual": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "limit": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "policy.invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "policy.unknown-field"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "policy.invalid-field"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "input.invalid-version"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "input.invalid-nodes"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "input.invalid-edges"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "node.invalid-id"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "node.duplicate-id"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "node.invalid-geometry"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "parent.invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "parent.cycle"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "parent.too-distant"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              },
+              "actual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "baseline.invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "baseline.duplicate-id"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.invalid-id"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.duplicate-id"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.invalid-endpoint"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sourceId",
+                  "targetId"
+                ],
+                "properties": {
+                  "sourceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "targetId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.invalid-points"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.too-long"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              },
+              "actual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.node-intersection"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "edge.crossing"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              },
+              "actual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "layout.analysis-budget-exceeded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "layout.numeric-underflow"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "metric",
+                  "operands",
+                  "roundedValue"
+                ],
+                "properties": {
+                  "metric": {
+                    "enum": [
+                      "node-overlap-area",
+                      "edge-length-ratio",
+                      "edge-average-length-ratio",
+                      "implicit-edge-center-route",
+                      "nearest-neighbor-ratio",
+                      "nearest-neighbor-average-ratio",
+                      "parent-distance-ratio",
+                      "parent-average-distance-ratio",
+                      "viewport-fit-scale",
+                      "viewport-rendered-node-size",
+                      "stability-shift-ratio",
+                      "stability-translation-x",
+                      "stability-translation-y",
+                      "stability-average-shift-ratio"
+                    ]
+                  },
+                  "operands": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "description": "Positive source magnitudes plus the normalization scale or aggregate divisor."
+                  },
+                  "roundedValue": {
+                    "const": 0
+                  }
+                }
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "node.overlap"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "node.too-distant"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              },
+              "actual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "viewport.invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "error"
+              },
+              "actual": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "limit": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "viewport.node-too-small"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              },
+              "actual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ruleId"
+            ],
+            "properties": {
+              "ruleId": {
+                "const": "layout.unstable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "severity": {
+                "const": "warning"
+              },
+              "actual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "jsonValue": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      ]
+    }
+  }
+}

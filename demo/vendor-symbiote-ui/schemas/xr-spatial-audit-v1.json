@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/xr-spatial-audit-v1.json",
+  "title": "XR Spatial Audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "target",
+    "targetValidation",
+    "runtimeVerdict",
+    "eligibility",
+    "observations",
+    "objectResults",
+    "constraintResults",
+    "stability",
+    "projections"
+  ],
+  "properties": {
+    "version": { "const": "xr-spatial-audit-v1" },
+    "target": { "$ref": "https://rnd-pro.github.io/symbiote-ui/schemas/xr-spatial-target-v1.json" },
+    "targetValidation": { "$ref": "#/$defs/targetValidation" },
+    "runtimeVerdict": { "enum": ["NOT_EVALUATED", "INVALID_EVIDENCE", "FAIL", "PASS"] },
+    "eligibility": { "$ref": "#/$defs/eligibility" },
+    "observations": {
+      "type": "array",
+      "items": { "$ref": "https://rnd-pro.github.io/symbiote-ui/schemas/xr-spatial-observation-v1.json" }
+    },
+    "objectResults": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/objectResult" }
+    },
+    "constraintResults": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/constraintResult" }
+    },
+    "stability": { "$ref": "#/$defs/stability" },
+    "projections": { "$ref": "#/$defs/projections" }
+  },
+  "$defs": {
+    "reasonList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "targetValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "reasons", "errors"],
+      "properties": {
+        "verdict": { "enum": ["VALID", "INVALID"] },
+        "reasons": { "$ref": "#/$defs/reasonList" },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "path"],
+            "properties": {
+              "code": { "type": "string", "minLength": 1 },
+              "path": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "rejectedSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observationId", "frameId", "reasons"],
+      "properties": {
+        "observationId": { "type": ["string", "null"] },
+        "frameId": { "type": ["string", "null"] },
+        "reasons": { "$ref": "#/$defs/reasonList" }
+      }
+    },
+    "acceptedWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameCount", "durationMs", "firstFrameId", "lastFrameId"],
+      "properties": {
+        "frameCount": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "firstFrameId": { "type": ["string", "null"] },
+        "lastFrameId": { "type": ["string", "null"] }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resetReasons", "lastRejectedSample", "acceptedWindow"],
+      "properties": {
+        "resetReasons": { "$ref": "#/$defs/reasonList" },
+        "lastRejectedSample": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/rejectedSample" }
+          ]
+        },
+        "acceptedWindow": { "$ref": "#/$defs/acceptedWindow" }
+      }
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["positionMeters", "orientationDegrees", "cornerEdgeMeters", "sizeMeters"],
+      "properties": {
+        "positionMeters": { "type": "number", "minimum": 0 },
+        "orientationDegrees": { "type": "number", "minimum": 0 },
+        "cornerEdgeMeters": { "type": "number", "minimum": 0 },
+        "sizeMeters": { "type": "number", "minimum": 0 }
+      }
+    },
+    "objectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "passed", "maximumErrors", "failedFrameIds"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "maximumErrors": { "$ref": "#/$defs/errors" },
+        "failedFrameIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "constraintSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameId", "passed", "actual", "limit"],
+      "properties": {
+        "frameId": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "actual": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "limit": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "constraintResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "passed", "failedFrameIds", "samples"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["datum", "alignment", "clearance", "containment", "safety-state"] },
+        "passed": { "type": "boolean" },
+        "failedFrameIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "samples": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/constraintSample" }
+        }
+      }
+    },
+    "objectMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "passed",
+        "p95TranslationJitterMeters",
+        "maximumTranslationDriftMeters",
+        "p95RotationJitterDegrees",
+        "maximumRotationDriftDegrees"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "passed": { "type": "boolean" },
+        "p95TranslationJitterMeters": { "type": "number", "minimum": 0 },
+        "maximumTranslationDriftMeters": { "type": "number", "minimum": 0 },
+        "p95RotationJitterDegrees": { "type": "number", "minimum": 0 },
+        "maximumRotationDriftDegrees": { "type": "number", "minimum": 0 }
+      }
+    },
+    "stability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "passed", "minimumFrames", "minimumDurationMs", "frameCount", "durationMs", "objectMetrics"],
+      "properties": {
+        "complete": { "type": "boolean" },
+        "passed": { "type": "boolean" },
+        "minimumFrames": { "const": 30 },
+        "minimumDurationMs": { "const": 750 },
+        "frameCount": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "objectMetrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/objectMetrics" }
+        }
+      }
+    },
+    "metricPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["u", "v"],
+      "properties": {
+        "u": { "type": "number" },
+        "v": { "type": "number" }
+      }
+    },
+    "metricBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minU", "maxU", "minV", "maxV"],
+      "properties": {
+        "minU": { "type": "number" },
+        "maxU": { "type": "number" },
+        "minV": { "type": "number" },
+        "maxV": { "type": "number" }
+      }
+    },
+    "orthographicObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "center", "bounds", "corners"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "center": { "$ref": "#/$defs/metricPoint" },
+        "bounds": { "$ref": "#/$defs/metricBounds" },
+        "corners": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/metricPoint" }
+        }
+      }
+    },
+    "orthographicSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "front", "right"],
+      "properties": {
+        "top": { "type": "array", "items": { "$ref": "#/$defs/orthographicObject" } },
+        "front": { "type": "array", "items": { "$ref": "#/$defs/orthographicObject" } },
+        "right": { "type": "array", "items": { "$ref": "#/$defs/orthographicObject" } }
+      }
+    },
+    "axisMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["horizontal", "vertical"],
+      "properties": {
+        "horizontal": { "type": "string", "minLength": 1 },
+        "vertical": { "type": "string", "minLength": 1 }
+      }
+    },
+    "orthographic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "unit", "target", "observed"],
+      "properties": {
+        "status": { "enum": ["READY", "UNAVAILABLE"] },
+        "reason": { "type": ["string", "null"] },
+        "unit": { "const": "meters" },
+        "axes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["top", "front", "right"],
+          "properties": {
+            "top": { "$ref": "#/$defs/axisMap" },
+            "front": { "$ref": "#/$defs/axisMap" },
+            "right": { "$ref": "#/$defs/axisMap" }
+          }
+        },
+        "target": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/orthographicSet" }]
+        },
+        "observed": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/orthographicSet" }]
+        }
+      }
+    },
+    "axonometric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "referenceOnly", "metric", "target", "observed"],
+      "properties": {
+        "status": { "enum": ["READY", "UNAVAILABLE"] },
+        "reason": { "type": ["string", "null"] },
+        "referenceOnly": { "const": true },
+        "metric": { "const": false },
+        "target": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/orthographicObject" } }
+          ]
+        },
+        "observed": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "$ref": "#/$defs/orthographicObject" } }
+          ]
+        }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "screenPoint": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "depth"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "depth": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "stereoObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "reason", "corners"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["READY", "UNAVAILABLE"] },
+        "reason": { "type": ["string", "null"] },
+        "corners": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/screenPoint" }
+        }
+      }
+    },
+    "eyeProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewport", "target", "observed"],
+      "properties": {
+        "viewport": { "$ref": "#/$defs/viewport" },
+        "target": { "type": "array", "items": { "$ref": "#/$defs/stereoObject" } },
+        "observed": { "type": "array", "items": { "$ref": "#/$defs/stereoObject" } }
+      }
+    },
+    "eyes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "right"],
+      "properties": {
+        "left": { "$ref": "#/$defs/eyeProjection" },
+        "right": { "$ref": "#/$defs/eyeProjection" }
+      }
+    },
+    "stereo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "eyes"],
+      "properties": {
+        "status": { "enum": ["READY", "UNAVAILABLE"] },
+        "reason": { "type": ["string", "null"] },
+        "eyes": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/eyes" }]
+        }
+      }
+    },
+    "projections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "orthographic", "axonometric", "stereo"],
+      "properties": {
+        "version": { "const": "xr-spatial-projection-v1" },
+        "orthographic": { "$ref": "#/$defs/orthographic" },
+        "axonometric": { "$ref": "#/$defs/axonometric" },
+        "stereo": { "$ref": "#/$defs/stereo" }
+      }
+    }
+  }
+}

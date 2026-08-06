@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/data-grid-v1.json",
+  "title": "DataGridOptionsV1",
+  "description": "Validation schema for sn-data-table grid configurations.",
+  "type": "object",
+  "properties": {
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "align": { "type": "string", "enum": ["start", "center", "end"] },
+          "sortable": { "type": "boolean" },
+          "sortDirection": { "type": "string", "enum": ["asc", "desc", "none"] },
+          "visible": { "type": "boolean" },
+          "pinned": { "type": "string", "enum": ["left", "right", "none"] },
+          "width": { "type": ["string", "number"] }
+        },
+        "required": ["key"]
+      }
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": ["string", "number"] },
+          "cells": { "type": "object" },
+          "details": { "type": "string" },
+          "children": { "type": "array" }
+        }
+      }
+    },
+    "selectionMode": {
+      "type": "string",
+      "enum": ["none", "single", "multi"]
+    },
+    "emptyText": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

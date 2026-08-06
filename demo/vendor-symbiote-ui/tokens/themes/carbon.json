@@ -1,0 +1,11 @@
+{
+  "name": "carbon",
+  "extends": "../base.json",
+  "color": {
+    "background": { "$type": "color", "$value": "hsl(220, 13%, 9%)" },
+    "surface": { "$type": "color", "$value": "hsl(220, 13%, 14%)" },
+    "border": { "$type": "color", "$value": "hsl(220, 10%, 24%)" },
+    "text": { "$type": "color", "$value": "hsl(210, 16%, 92%)" },
+    "accent": { "$type": "color", "$value": "hsl(196, 100%, 55%)" }
+  }
+}

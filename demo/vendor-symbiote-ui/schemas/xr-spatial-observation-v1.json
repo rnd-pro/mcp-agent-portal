@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/xr-spatial-observation-v1.json",
+  "title": "XR Spatial Observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "observationId",
+    "targetHash",
+    "provenance",
+    "session",
+    "frame",
+    "referenceSpace",
+    "root",
+    "posePhase",
+    "viewerPose",
+    "activeGrab",
+    "views",
+    "objects",
+    "inputs"
+  ],
+  "properties": {
+    "version": { "const": "xr-spatial-observation-v1" },
+    "observationId": { "type": "string", "minLength": 1 },
+    "targetHash": { "type": "string", "minLength": 1 },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "session": { "$ref": "#/$defs/session" },
+    "frame": { "$ref": "#/$defs/frame" },
+    "referenceSpace": { "$ref": "#/$defs/referenceSpace" },
+    "root": { "$ref": "#/$defs/root" },
+    "posePhase": { "const": "committed" },
+    "viewerPose": { "$ref": "#/$defs/nullablePoseMatrix" },
+    "activeGrab": { "$ref": "#/$defs/activeGrab" },
+    "views": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/view" }
+    },
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/objectObservation" }
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/input" }
+    }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "quaternion": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "type": "number" }
+    },
+    "matrix4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": { "type": "number" }
+    },
+    "pose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position", "quaternion"],
+      "properties": {
+        "position": { "$ref": "#/$defs/vector3" },
+        "quaternion": { "$ref": "#/$defs/quaternion" }
+      }
+    },
+    "nullablePose": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/pose" }
+      ]
+    },
+    "nullableMatrix": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/matrix4" }
+      ]
+    },
+    "nullablePoseMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix", "pose"],
+      "properties": {
+        "matrix": { "$ref": "#/$defs/nullableMatrix" },
+        "pose": { "$ref": "#/$defs/nullablePose" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtimeId",
+        "runtimeVersion",
+        "appId",
+        "buildHash",
+        "deviceId",
+        "deviceKind",
+        "emulation"
+      ],
+      "properties": {
+        "runtimeId": { "type": "string", "minLength": 1 },
+        "runtimeVersion": { "type": "string", "minLength": 1 },
+        "appId": { "type": "string", "minLength": 1 },
+        "buildHash": { "type": "string", "minLength": 1 },
+        "deviceId": { "type": "string", "minLength": 1 },
+        "deviceKind": { "enum": ["headset", "desktop", "emulator"] },
+        "emulation": { "enum": ["native", "iwer", "none"] }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mode", "visibility"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "mode": { "enum": ["immersive-ar", "immersive-vr", "inline"] },
+        "visibility": { "enum": ["visible", "visible-blurred", "hidden"] }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sequence", "time", "predictedDisplayTime", "captureTime"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "time": { "type": "number", "minimum": 0 },
+        "predictedDisplayTime": { "type": "number", "minimum": 0 },
+        "captureTime": { "type": "number", "minimum": 0 }
+      }
+    },
+    "referenceSpace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "resetEpoch"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "resetEpoch": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "commitId", "matrix", "pose"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "commitId": { "type": "string", "minLength": 1 },
+        "matrix": { "$ref": "#/$defs/nullableMatrix" },
+        "pose": { "$ref": "#/$defs/nullablePose" }
+      }
+    },
+    "activeGrab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "sourceId", "objectId"],
+      "properties": {
+        "active": { "type": "boolean" },
+        "sourceId": { "type": ["string", "null"] },
+        "objectId": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "active": { "const": false } } },
+          "then": {
+            "properties": {
+              "sourceId": { "const": null },
+              "objectId": { "const": null }
+            }
+          }
+        }
+      ]
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0 },
+        "y": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "nullableViewport": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/viewport" }
+      ]
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameId", "eye", "viewMatrix", "projectionMatrix", "viewport"],
+      "properties": {
+        "frameId": { "type": "string", "minLength": 1 },
+        "eye": { "enum": ["left", "right"] },
+        "viewMatrix": { "$ref": "#/$defs/nullableMatrix" },
+        "projectionMatrix": { "$ref": "#/$defs/nullableMatrix" },
+        "viewport": { "$ref": "#/$defs/nullableViewport" }
+      }
+    },
+    "objectObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameId", "id", "matrix", "pose", "size", "visible", "state"],
+      "properties": {
+        "frameId": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "matrix": { "$ref": "#/$defs/nullableMatrix" },
+        "pose": { "$ref": "#/$defs/nullablePose" },
+        "size": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          ]
+        },
+        "visible": { "type": "boolean" },
+        "state": { "type": ["string", "null"] }
+      }
+    },
+    "targetRay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix", "origin", "direction"],
+      "properties": {
+        "matrix": { "$ref": "#/$defs/matrix4" },
+        "origin": { "$ref": "#/$defs/vector3" },
+        "direction": { "$ref": "#/$defs/vector3" }
+      }
+    },
+    "grip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix"],
+      "properties": {
+        "matrix": { "$ref": "#/$defs/matrix4" }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frameId",
+        "sourceId",
+        "kind",
+        "handedness",
+        "profiles",
+        "targetRay",
+        "grip"
+      ],
+      "properties": {
+        "frameId": { "type": "string", "minLength": 1 },
+        "sourceId": { "type": ["string", "null"] },
+        "kind": { "enum": ["controller", "hand", "gaze", "screen"] },
+        "handedness": { "enum": ["left", "right", "none"] },
+        "profiles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "targetRay": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/targetRay" }
+          ]
+        },
+        "grip": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/grip" }
+          ]
+        }
+      }
+    }
+  }
+}

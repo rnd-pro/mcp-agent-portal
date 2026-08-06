@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://rnd-pro.github.io/symbiote-ui/sitemap.xml

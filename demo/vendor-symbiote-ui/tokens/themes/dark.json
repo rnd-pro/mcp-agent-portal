@@ -1,0 +1,12 @@
+{
+  "name": "dark",
+  "extends": "../base.json",
+  "color": {
+    "background": { "$type": "color", "$value": "hsl(230, 30%, 12%)" },
+    "surface": { "$type": "color", "$value": "hsl(230, 30%, 18%)" },
+    "border": { "$type": "color", "$value": "hsl(230, 15%, 22%)" },
+    "text": { "$type": "color", "$value": "hsl(230, 15%, 89%)" },
+    "textDim": { "$type": "color", "$value": "hsl(230, 15%, 63%)" },
+    "accent": { "$type": "color", "$value": "hsl(215, 60%, 65%)" }
+  }
+}

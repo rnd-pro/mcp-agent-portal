@@ -15,3 +15,4 @@ output.txt
 coverage/
 dist/
 .agent-portal
+.symbiote-ui-repo/

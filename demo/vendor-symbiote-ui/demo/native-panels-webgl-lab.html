@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Native Panels WebGL Lab</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="../icons/material-symbols.css">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--sn-sys-surface, #151515);
+      color: var(--sn-sys-on-surface, #f0f0f0);
+      font-family: var(--sn-font, Inter, system-ui, sans-serif);
+    }
+
+    body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 360px;
+    }
+
+    .reference {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      border-right: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+      background: var(--sn-sys-surface-sunken, var(--sn-sys-surface));
+    }
+
+    .reference[hidden] {
+      display: none;
+    }
+
+    #reference-frame {
+      display: block;
+      width: 1280px;
+      height: 720px;
+      border: 0;
+    }
+
+    .stage {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+      background: var(--sn-sys-surface-sunken, var(--sn-sys-surface));
+    }
+
+    #gl {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      min-width: 0;
+      min-height: 0;
+      background: var(--sn-sys-surface-panel, var(--sn-sys-surface));
+    }
+
+    .panel-head,
+    .diagnostics {
+      padding: 16px;
+      border-bottom: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+    }
+
+    .panel-head {
+      display: grid;
+      gap: 6px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .hint {
+      color: var(--sn-sys-on-surface-dim, var(--sn-sys-on-surface));
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .controls {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      min-height: 0;
+      overflow: auto;
+      padding: 12px;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+      border-radius: var(--sn-card-radius, var(--sn-radius-md));
+      background: var(--sn-sys-surface-raised, var(--sn-sys-surface));
+      box-shadow: var(--sn-sys-shadow-raised, none);
+    }
+
+    .control-group-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .control-kicker {
+      color: var(--sn-sys-on-surface, currentColor);
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.2;
+    }
+
+    .control-caption {
+      margin-top: 3px;
+      color: var(--sn-sys-on-surface-dim, var(--sn-sys-on-surface));
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .field-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--sn-sys-on-surface-dim, var(--sn-sys-on-surface));
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .field-row strong {
+      color: var(--sn-sys-on-surface, currentColor);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    input[type="range"] {
+      appearance: none;
+      width: 100%;
+      height: 18px;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 999px;
+      background: var(
+        --sn-slider-track-bg,
+        color-mix(in srgb, var(--sn-sys-on-surface) 12%, transparent)
+      );
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      margin-top: -6px;
+      border: 2px solid var(--sn-slider-thumb-border, var(--sn-sys-accent));
+      border-radius: 50%;
+      background: var(--sn-slider-thumb-bg, var(--sn-sys-on-accent));
+      box-shadow: var(--sn-sys-shadow-raised, none);
+    }
+
+    input[type="range"]:focus-visible {
+      outline: var(--sn-slider-focus-ring, 2px solid var(--sn-sys-focus-ring));
+      outline-offset: 2px;
+      border-radius: 999px;
+    }
+
+    select {
+      width: 100%;
+      min-height: calc(36px * var(--sn-density, 1));
+      padding: 0 10px;
+      border: 1px solid var(--sn-field-control-border, var(--sn-sys-outline-subtle));
+      border-radius: var(--sn-field-control-radius, 7px);
+      background: var(--sn-field-control-bg, var(--sn-sys-surface));
+      color: var(--sn-sys-on-surface, currentColor);
+      font: inherit;
+      font-size: 13px;
+    }
+
+    select:focus-visible {
+      border-color: var(--sn-sys-accent);
+      outline: none;
+      box-shadow: 0 0 0 2px var(--sn-sys-focus-ring);
+    }
+
+    .control-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: calc(30px * var(--sn-density, 1));
+      padding: 0 9px;
+      border: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+      border-radius: var(--sn-button-radius, var(--sn-radius-sm));
+      background: var(--sn-sys-surface, transparent);
+      color: var(--sn-sys-on-surface, currentColor);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .control-button:hover {
+      background: color-mix(
+        in srgb,
+        var(--sn-sys-accent) var(--sn-sys-state-hover-mix),
+        var(--sn-sys-surface)
+      );
+    }
+
+    .control-button:focus-visible {
+      outline: 2px solid var(--sn-sys-focus-ring);
+      outline-offset: 2px;
+    }
+
+    .control-button .material-symbols-outlined {
+      font-size: 16px;
+    }
+
+    .diagnostics {
+      display: grid;
+      gap: 8px;
+      border-top: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+      border-bottom: 0;
+      color: var(--sn-sys-on-surface-dim, var(--sn-sys-on-surface));
+      font-size: 12px;
+    }
+
+    .diagnostics code {
+      display: block;
+      max-height: 220px;
+      overflow: auto;
+      padding: 9px;
+      border: 1px solid var(--sn-sys-outline-subtle, var(--sn-sys-outline));
+      border-radius: var(--sn-card-radius, var(--sn-radius-md));
+      background: var(--sn-sys-surface-sunken, var(--sn-sys-surface));
+      color: var(--sn-sys-on-surface, currentColor);
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="reference" id="reference">
+    <iframe
+      id="reference-frame"
+      title="Live Symbiote reference layout"
+      src="./cascade-theme-lab.html#multi-agent-dev/source-editor"
+    ></iframe>
+  </main>
+  <main class="stage">
+    <canvas id="gl"></canvas>
+  </main>
+  <aside class="panel">
+    <header class="panel-head">
+      <h1>Native Panels WebGL Lab</h1>
+      <div class="hint">
+        Experimental native 3D panels: the live Symbiote reference layout is measured into a
+        spatial snapshot and re-rendered as native Three primitives beside it, with
+        deterministic parity diagnostics.
+      </div>
+    </header>
+    <section class="controls" aria-label="Native panel controls">
+      <section class="control-group" aria-labelledby="scene-controls-title">
+        <header class="control-group-head">
+          <div>
+            <div class="control-kicker" id="scene-controls-title">Scene</div>
+            <div class="control-caption">Independent window presentation</div>
+          </div>
+          <button class="control-button" id="reset-windows" type="button">
+            <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
+            <span>Reset</span>
+          </button>
+        </header>
+        <label class="field">
+          <span class="field-row"><strong>Source</strong></span>
+          <select id="source">
+            <option value="real-layout">Measured real layout</option>
+            <option value="mock-families">Mock families</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-row"><strong>Camera</strong></span>
+          <select id="camera">
+            <option value="front">Front orthographic</option>
+            <option value="perspective">Perspective</option>
+            <option value="spatial">Spatial</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-row"><strong>Window gap</strong><span id="window-gap-value">0.06 m</span></span>
+          <input type="range" id="window-gap" min="0" max="0.18" step="0.01" value="0.06">
+        </label>
+        <label class="field">
+          <span class="field-row"><strong>Layer explode</strong><span id="explode-value">0.00 m</span></span>
+          <input type="range" id="explode" min="0" max="0.12" step="0.005" value="0">
+        </label>
+      </section>
+      <section class="control-group" aria-labelledby="appearance-controls-title">
+        <header class="control-group-head">
+          <div>
+            <div class="control-kicker" id="appearance-controls-title">Appearance</div>
+            <div class="control-caption">Global cascade theme</div>
+          </div>
+        </header>
+        <label class="field">
+          <span class="field-row"><strong>Theme</strong></span>
+          <select id="theme">
+            <option value="dark">Cascade dark</option>
+            <option value="light">Cascade light</option>
+          </select>
+        </label>
+      </section>
+    </section>
+    <footer class="diagnostics">
+      <div>Diagnostics</div>
+      <code id="diagnostics">{}</code>
+    </footer>
+  </aside>
+  <script type="module" src="./native-panels-webgl-lab.js?v=native-panels-webgl-lab-v3"></script>
+</body>
+
+</html>

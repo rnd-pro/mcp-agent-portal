@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/message-part-v1.json",
+  "title": "Symbiote Agent Message Part",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "text",
+        "text_delta",
+        "stream_delta",
+        "reasoning",
+        "status",
+        "tool_call",
+        "tool_result",
+        "source",
+        "attachment",
+        "artifact",
+        "approval",
+        "action",
+        "retry",
+        "cancel",
+        "error",
+        "cancelled"
+      ]
+    },
+    "text": { "type": "string" },
+    "name": { "type": "string" },
+    "id": { "type": "string" },
+    "args": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+    "result": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+    "status": { "type": "string" },
+    "title": { "type": "string" },
+    "url": { "type": "string" },
+    "mimeType": { "type": "string" },
+    "meta": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

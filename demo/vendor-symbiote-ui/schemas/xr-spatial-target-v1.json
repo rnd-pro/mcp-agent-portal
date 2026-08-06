@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/xr-spatial-target-v1.json",
+  "title": "XR Spatial Target",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "targetId",
+    "contentHash",
+    "provenance",
+    "units",
+    "transformConvention",
+    "tolerances",
+    "requiredEvidenceProfile",
+    "objects",
+    "constraints"
+  ],
+  "properties": {
+    "version": { "const": "xr-spatial-target-v1" },
+    "targetId": { "type": "string", "minLength": 1 },
+    "contentHash": { "type": "string", "minLength": 1 },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "units": { "const": "meters" },
+    "transformConvention": { "$ref": "#/$defs/transformConvention" },
+    "tolerances": { "$ref": "#/$defs/tolerances" },
+    "requiredEvidenceProfile": { "$ref": "#/$defs/evidenceProfile" },
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/objectTarget" }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/constraint" }
+    }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "quaternion": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "type": "number" }
+    },
+    "matrix4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": { "type": "number" }
+    },
+    "pose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position", "quaternion"],
+      "properties": {
+        "position": { "$ref": "#/$defs/vector3" },
+        "quaternion": { "$ref": "#/$defs/quaternion" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourceId", "commitId", "derivedFromHash"],
+      "properties": {
+        "kind": { "enum": ["approved", "committed"] },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "commitId": { "type": ["string", "null"] },
+        "derivedFromHash": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "approved" } } },
+          "then": {
+            "properties": {
+              "commitId": { "const": null },
+              "derivedFromHash": { "const": null }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "committed" } } },
+          "then": {
+            "properties": {
+              "commitId": { "type": "string", "minLength": 1 },
+              "derivedFromHash": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "transformConvention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "matrixOrder",
+        "vectorConvention",
+        "quaternionOrder",
+        "pivot",
+        "eulerComposition"
+      ],
+      "properties": {
+        "matrixOrder": { "const": "column-major" },
+        "vectorConvention": { "const": "column-vectors" },
+        "quaternionOrder": { "const": "xyzw" },
+        "pivot": { "const": "center" },
+        "eulerComposition": { "const": "T*Rz*Ry*Rx" }
+      }
+    },
+    "tolerances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "positionMeters",
+        "orientationDegrees",
+        "cornerEdgeMeters",
+        "sizeMeters",
+        "minimumFrames",
+        "minimumDurationMs",
+        "p95TranslationJitterMeters",
+        "maximumTranslationDriftMeters",
+        "p95RotationJitterDegrees",
+        "maximumRotationDriftDegrees"
+      ],
+      "properties": {
+        "positionMeters": { "const": 0.025 },
+        "orientationDegrees": { "const": 2 },
+        "cornerEdgeMeters": { "const": 0.025 },
+        "sizeMeters": { "const": 0.025 },
+        "minimumFrames": { "const": 30 },
+        "minimumDurationMs": { "const": 750 },
+        "p95TranslationJitterMeters": { "const": 0.008 },
+        "maximumTranslationDriftMeters": { "const": 0.015 },
+        "p95RotationJitterDegrees": { "const": 0.75 },
+        "maximumRotationDriftDegrees": { "const": 1.5 }
+      }
+    },
+    "evidenceProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "stereoRequired",
+        "inputProof",
+        "maximumSampleAgeMs"
+      ],
+      "properties": {
+        "profileId": { "type": "string", "minLength": 1 },
+        "stereoRequired": { "const": true },
+        "inputProof": { "enum": ["captured-only", "interaction-proof"] },
+        "maximumSampleAgeMs": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "objectTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "expectedPose", "expectedMatrix", "size"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "expectedPose": { "$ref": "#/$defs/pose" },
+        "expectedMatrix": { "$ref": "#/$defs/matrix4" },
+        "size": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "constraint": {
+      "oneOf": [
+        { "$ref": "#/$defs/datumConstraint" },
+        { "$ref": "#/$defs/alignmentConstraint" },
+        { "$ref": "#/$defs/clearanceConstraint" },
+        { "$ref": "#/$defs/containmentConstraint" },
+        { "$ref": "#/$defs/safetyStateConstraint" }
+      ]
+    },
+    "datumConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "objectId", "axis", "expectedCoordinate", "tolerance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "const": "datum" },
+        "objectId": { "type": "string", "minLength": 1 },
+        "axis": { "enum": ["x", "y", "z"] },
+        "expectedCoordinate": { "type": "number" },
+        "tolerance": { "type": "number", "minimum": 0 }
+      }
+    },
+    "alignmentConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "objectAId", "objectBId", "axis", "expectedOffset", "tolerance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "const": "alignment" },
+        "objectAId": { "type": "string", "minLength": 1 },
+        "objectBId": { "type": "string", "minLength": 1 },
+        "axis": { "enum": ["x", "y", "z"] },
+        "expectedOffset": { "type": "number" },
+        "tolerance": { "type": "number", "minimum": 0 }
+      }
+    },
+    "clearanceConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "objectAId", "objectBId", "minimumDistance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "const": "clearance" },
+        "objectAId": { "type": "string", "minLength": 1 },
+        "objectBId": { "type": "string", "minLength": 1 },
+        "minimumDistance": { "type": "number", "minimum": 0 }
+      }
+    },
+    "containmentConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "innerObjectId", "outerObjectId", "margin"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "const": "containment" },
+        "innerObjectId": { "type": "string", "minLength": 1 },
+        "outerObjectId": { "type": "string", "minLength": 1 },
+        "margin": { "type": "number", "minimum": 0 }
+      }
+    },
+    "safetyStateConstraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "objectId", "requiredState"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "const": "safety-state" },
+        "objectId": { "type": "string", "minLength": 1 },
+        "requiredState": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

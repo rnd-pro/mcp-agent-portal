@@ -1,0 +1,11 @@
+{
+  "name": "synthwave",
+  "extends": "../base.json",
+  "color": {
+    "background": { "$type": "color", "$value": "hsl(257, 48%, 10%)" },
+    "surface": { "$type": "color", "$value": "hsl(257, 44%, 16%)" },
+    "border": { "$type": "color", "$value": "hsl(326, 95%, 60%)" },
+    "text": { "$type": "color", "$value": "hsl(46, 100%, 86%)" },
+    "accent": { "$type": "color", "$value": "hsl(326, 95%, 60%)" }
+  }
+}

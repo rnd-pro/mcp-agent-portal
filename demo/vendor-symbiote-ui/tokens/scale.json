@@ -1,0 +1,131 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "Canonical geometry scale. The numbered step ladder (step.0..12 → --sn-step-N) is the universal spacing primitive: px = STEP_MULTIPLES[n] × --sn-base × --sn-density (product base 2px → 0/2/4/6/8/10/12/14/16/20/24/28/32). The legacy t-shirt rungs (space.xs..xl → --sn-space-*) are permanent deprecated aliases onto even step rungs and keep their stable uuids. Rung token names are the stable contract; per-register profile values are carried under $extensions.sn.registers. Default $value uses the airy 'product' profile. $extensions.sn.uuid is the stable identity used for rename-aware diffs.",
+  "step": {
+    "$type": "dimension",
+    "$description": "Universal step ladder. Rung index is register-agnostic; px is register-scoped via base × density. Prefer a --sn-step-* rung over a raw px; prefer a semantic token when a family owns the role.",
+    "0": {
+      "$value": { "value": 0, "unit": "px" },
+      "$description": "Step rung 0 — zero (no spacing).",
+      "$extensions": { "sn": { "token": "--sn-step-0", "uuid": "geo-step-0", "k": 0, "registers": { "product": 0, "tool": 0, "spacious": 0 } } }
+    },
+    "1": {
+      "$value": { "value": 2, "unit": "px" },
+      "$description": "Step rung 1.",
+      "$extensions": { "sn": { "token": "--sn-step-1", "uuid": "geo-step-1", "k": 1, "registers": { "product": 2, "tool": 1.5, "spacious": 2.5 } } }
+    },
+    "2": {
+      "$value": { "value": 4, "unit": "px" },
+      "$description": "Step rung 2 — alias target of --sn-space-xs.",
+      "$extensions": { "sn": { "token": "--sn-step-2", "uuid": "geo-step-2", "k": 2, "registers": { "product": 4, "tool": 3, "spacious": 5 } } }
+    },
+    "3": {
+      "$value": { "value": 6, "unit": "px" },
+      "$description": "Step rung 3.",
+      "$extensions": { "sn": { "token": "--sn-step-3", "uuid": "geo-step-3", "k": 3, "registers": { "product": 6, "tool": 4.5, "spacious": 7.5 } } }
+    },
+    "4": {
+      "$value": { "value": 8, "unit": "px" },
+      "$description": "Step rung 4 — alias target of --sn-space-sm.",
+      "$extensions": { "sn": { "token": "--sn-step-4", "uuid": "geo-step-4", "k": 4, "registers": { "product": 8, "tool": 6, "spacious": 10 } } }
+    },
+    "5": {
+      "$value": { "value": 10, "unit": "px" },
+      "$description": "Step rung 5.",
+      "$extensions": { "sn": { "token": "--sn-step-5", "uuid": "geo-step-5", "k": 5, "registers": { "product": 10, "tool": 7.5, "spacious": 12.5 } } }
+    },
+    "6": {
+      "$value": { "value": 12, "unit": "px" },
+      "$description": "Step rung 6 — alias target of --sn-space-md.",
+      "$extensions": { "sn": { "token": "--sn-step-6", "uuid": "geo-step-6", "k": 6, "registers": { "product": 12, "tool": 9, "spacious": 15 } } }
+    },
+    "7": {
+      "$value": { "value": 14, "unit": "px" },
+      "$description": "Step rung 7.",
+      "$extensions": { "sn": { "token": "--sn-step-7", "uuid": "geo-step-7", "k": 7, "registers": { "product": 14, "tool": 10.5, "spacious": 17.5 } } }
+    },
+    "8": {
+      "$value": { "value": 16, "unit": "px" },
+      "$description": "Step rung 8 — alias target of --sn-space-lg.",
+      "$extensions": { "sn": { "token": "--sn-step-8", "uuid": "geo-step-8", "k": 8, "registers": { "product": 16, "tool": 12, "spacious": 20 } } }
+    },
+    "9": {
+      "$value": { "value": 20, "unit": "px" },
+      "$description": "Step rung 9.",
+      "$extensions": { "sn": { "token": "--sn-step-9", "uuid": "geo-step-9", "k": 10, "registers": { "product": 20, "tool": 15, "spacious": 25 } } }
+    },
+    "10": {
+      "$value": { "value": 24, "unit": "px" },
+      "$description": "Step rung 10 — alias target of --sn-space-xl.",
+      "$extensions": { "sn": { "token": "--sn-step-10", "uuid": "geo-step-10", "k": 12, "registers": { "product": 24, "tool": 18, "spacious": 30 } } }
+    },
+    "11": {
+      "$value": { "value": 28, "unit": "px" },
+      "$description": "Step rung 11.",
+      "$extensions": { "sn": { "token": "--sn-step-11", "uuid": "geo-step-11", "k": 14, "registers": { "product": 28, "tool": 21, "spacious": 35 } } }
+    },
+    "12": {
+      "$value": { "value": 32, "unit": "px" },
+      "$description": "Step rung 12.",
+      "$extensions": { "sn": { "token": "--sn-step-12", "uuid": "geo-step-12", "k": 16, "registers": { "product": 32, "tool": 24, "spacious": 40 } } }
+    }
+  },
+  "space": {
+    "$type": "dimension",
+    "$description": "Legacy t-shirt spacing rungs — permanent deprecated aliases onto even step rungs. Names and uuids are stable; consume --sn-step-* directly for new code.",
+    "xs": {
+      "$value": { "value": 4, "unit": "px" },
+      "$deprecated": "Alias of --sn-step-2; prefer the step rung.",
+      "$extensions": { "sn": { "token": "--sn-space-xs", "uuid": "geo-space-xs", "aliasOf": "--sn-step-2", "registers": { "product": 4, "tool": 3, "spacious": 5 } } }
+    },
+    "sm": {
+      "$value": { "value": 8, "unit": "px" },
+      "$deprecated": "Alias of --sn-step-4; prefer the step rung.",
+      "$extensions": { "sn": { "token": "--sn-space-sm", "uuid": "geo-space-sm", "aliasOf": "--sn-step-4", "registers": { "product": 8, "tool": 6, "spacious": 10 } } }
+    },
+    "md": {
+      "$value": { "value": 12, "unit": "px" },
+      "$deprecated": "Alias of --sn-step-6; prefer the step rung.",
+      "$extensions": { "sn": { "token": "--sn-space-md", "uuid": "geo-space-md", "aliasOf": "--sn-step-6", "registers": { "product": 12, "tool": 9, "spacious": 15 } } }
+    },
+    "lg": {
+      "$value": { "value": 16, "unit": "px" },
+      "$deprecated": "Alias of --sn-step-8; prefer the step rung.",
+      "$extensions": { "sn": { "token": "--sn-space-lg", "uuid": "geo-space-lg", "aliasOf": "--sn-step-8", "registers": { "product": 16, "tool": 12, "spacious": 20 } } }
+    },
+    "xl": {
+      "$value": { "value": 24, "unit": "px" },
+      "$deprecated": "Alias of --sn-step-10; prefer the step rung.",
+      "$extensions": { "sn": { "token": "--sn-space-xl", "uuid": "geo-space-xl", "aliasOf": "--sn-step-10", "registers": { "product": 24, "tool": 18, "spacious": 30 } } }
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "node": {
+      "$value": "{space.md}",
+      "$extensions": { "sn": { "token": "--sn-node-radius", "uuid": "geo-radius-node", "rungByRegister": { "product": "md", "tool": "md", "spacious": "lg" } } }
+    },
+    "comment": {
+      "$value": "{space.sm}",
+      "$extensions": { "sn": { "token": "--sn-comment-radius", "uuid": "geo-radius-comment", "rungByRegister": { "product": "sm", "tool": "sm", "spacious": "md" } } }
+    }
+  },
+  "size": {
+    "$type": "dimension",
+    "socket": {
+      "$value": "{space.md}",
+      "$extensions": { "sn": { "token": "--sn-socket-size", "uuid": "geo-size-socket", "rungByRegister": { "product": "md", "tool": "md", "spacious": "md" } } }
+    },
+    "grid": {
+      "$value": "{space.xl}",
+      "$extensions": { "sn": { "token": "--sn-grid-size", "uuid": "geo-size-grid", "rungByRegister": { "product": "xl", "tool": "xl", "spacious": "xl" } } }
+    }
+  },
+  "font": {
+    "size": {
+      "$type": "dimension",
+      "$value": { "value": 13, "unit": "px" },
+      "$extensions": { "sn": { "token": "--sn-font-size", "uuid": "geo-font-size", "registers": { "product": 13, "tool": 12, "spacious": 14 } } }
+    }
+  }
+}

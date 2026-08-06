@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>symbiote-ui Showcase Demo</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@symbiotejs/symbiote": "../node_modules/@symbiotejs/symbiote/core/index.js",
+        "@symbiotejs/symbiote/": "../node_modules/@symbiotejs/symbiote/",
+        "symbiote-engine": "../node_modules/symbiote-engine/index.js",
+        "symbiote-engine/": "../node_modules/symbiote-engine/"
+      }
+    }
+  </script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--sn-sys-surface);
+      color: var(--sn-sys-on-surface);
+      font-family: var(--sn-font, Inter, system-ui, sans-serif);
+    }
+
+    body {
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    .lab-shell {
+      width: 100%;
+      height: 100dvh;
+      min-height: 100dvh;
+      --sn-tabs-height: var(--sn-lab-tabs-height, 34px);
+      --sn-tabs-item-height: var(--sn-lab-tabs-item-height, 30px);
+      --sn-tabs-border: var(--sn-sys-outline);
+      --sn-tabs-active-bg: var(--sn-sys-surface-panel);
+      --sn-tabs-hover-bg: color-mix(in oklch, var(--sn-sys-accent) var(--sn-sys-state-hover-mix), var(--sn-sys-surface));
+      --sn-tabs-divider: var(--sn-sys-outline);
+      --sn-tabs-radius: 6px 6px 0 0;
+      --sn-tabs-corner-size: 8px;
+      --sn-tabs-corner-cut: 7px;
+      --sn-tabs-accent: var(--sn-sys-accent);
+    }
+
+    .lab-shell-action {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sn-lab-menu-button-gap, 5px);
+    }
+
+    cascade-theme-widget[slot="actions"] {
+      z-index: 30;
+    }
+
+    .lab-content {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .lab-layout {
+      flex: 1 1 auto;
+      width: auto;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    cascade-graph-panel,
+    cascade-ui-panel,
+    cascade-overview-panel {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .lab-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .sample-panel {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: var(--sn-lab-panel-gap, 12px);
+      height: 100%;
+      padding: var(--sn-lab-panel-padding, 12px);
+      background: var(--sn-sys-surface-panel);
+      color: var(--sn-sys-on-surface);
+      overflow: hidden;
+    }
+
+    .sample-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sn-lab-row-gap, 8px);
+      align-items: center;
+    }
+
+    .sample-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: var(--sn-lab-scroll-padding, 8px);
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: var(--sn-node-radius);
+      background: var(--sn-sys-surface);
+      scrollbar-color: var(--sn-scrollbar-thumb) var(--sn-scrollbar-track);
+      scrollbar-width: var(--sn-scrollbar-width, thin);
+    }
+
+    .sample-scroll::-webkit-scrollbar {
+      width: var(--sn-scrollbar-size, 10px);
+      height: var(--sn-scrollbar-size, 10px);
+    }
+
+    .sample-scroll::-webkit-scrollbar-track {
+      background: var(--sn-scrollbar-track, transparent);
+    }
+
+    .sample-scroll::-webkit-scrollbar-thumb {
+      min-height: var(--sn-scrollbar-thumb-min-size, 36px);
+      border: var(--sn-scrollbar-thumb-border, 3px solid transparent);
+      border-radius: var(--sn-scrollbar-radius, 999px);
+      background: var(--sn-scrollbar-thumb);
+      background-clip: content-box;
+    }
+
+    .sample-scroll::-webkit-scrollbar-thumb:hover {
+      background: var(--sn-scrollbar-thumb-hover);
+      background-clip: content-box;
+    }
+
+    .sample-stack {
+      display: grid;
+      gap: var(--sn-lab-stack-gap, 10px);
+      min-height: 720px;
+    }
+
+    .token-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--sn-lab-token-gap, 8px);
+    }
+
+    .token-chip {
+      min-width: 0;
+      padding: var(--sn-lab-token-padding, 10px);
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: var(--sn-node-radius);
+      background: var(--sn-sys-surface-raised);
+    }
+
+    .token-chip strong,
+    .token-chip span {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .token-chip strong {
+      color: var(--sn-sys-on-surface);
+      font-size: var(--sn-lab-token-label-size, 12px);
+    }
+
+    .token-chip span {
+      margin-top: 4px;
+      color: var(--sn-sys-on-surface-dim);
+      font-size: var(--sn-lab-token-value-size, 11px);
+      font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 860px) {
+      body {
+        overflow: auto;
+      }
+      .lab-shell-action span:not(.material-symbols-outlined) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <layout-shell-menu
+    class="lab-shell"
+    title="symbiote-ui Showcase"
+    title-icon="hub"
+    project-path="project-type workspaces / agent constructor"
+  >
+    <cascade-theme-widget
+      slot="actions"
+      storage-key="symbiote-ui:cascade-theme-lab"
+      target-selector=":root"
+    ></cascade-theme-widget>
+    <button class="lab-shell-action" slot="actions" type="button" data-layout-command="reset">
+      <span class="material-symbols-outlined">restart_alt</span><span>Reset</span>
+    </button>
+    <layout-sidebar id="lab-sidebar" slot="sidebar"></layout-sidebar>
+    <section class="lab-content" aria-label="Agent workspace feature showcase">
+      <panel-layout class="lab-layout"></panel-layout>
+    </section>
+  </layout-shell-menu>
+  <script type="module" src="./cascade-theme-lab.js?v=video-studio-theme-2"></script>
+</body>
+
+</html>

@@ -1,0 +1,465 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "symbiote-ui T2 system-role contract (generated from tokens/tiers.js — do not edit by hand)",
+  "sys": {
+    "surface": {
+      "surface-sunken": {
+        "$type": "color",
+        "$value": "var(--sn-sys-surface-sunken)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "surface": {
+        "$type": "color",
+        "$value": "var(--sn-sys-surface)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "surface-panel": {
+        "$type": "color",
+        "$value": "var(--sn-sys-surface-panel)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "surface-raised": {
+        "$type": "color",
+        "$value": "var(--sn-sys-surface-raised)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "surface-toolbar": {
+        "$type": "color",
+        "$value": "var(--sn-sys-surface-toolbar)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "surface-overlay": {
+        "$type": "color",
+        "$value": "var(--sn-sys-surface-overlay)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "scrim": {
+        "$type": "color",
+        "$value": "var(--sn-sys-scrim)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-surface": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-surface)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-surface-dim": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-surface-dim)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-surface-faint": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-surface-faint)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      }
+    },
+    "content": {
+      "on-accent": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-accent)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-status": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-status)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-success-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-success-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-warning-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-warning-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-danger-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-danger-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "on-info-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-on-info-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      }
+    },
+    "outline": {
+      "outline-subtle": {
+        "$type": "color",
+        "$value": "var(--sn-sys-outline-subtle)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "outline": {
+        "$type": "color",
+        "$value": "var(--sn-sys-outline)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "outline-strong": {
+        "$type": "color",
+        "$value": "var(--sn-sys-outline-strong)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "outline-focus": {
+        "$type": "color",
+        "$value": "var(--sn-sys-outline-focus)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      }
+    },
+    "accent-status": {
+      "accent": {
+        "$type": "color",
+        "$value": "var(--sn-sys-accent)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "accent-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-accent-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "success": {
+        "$type": "color",
+        "$value": "var(--sn-sys-success)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "success-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-success-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "warning": {
+        "$type": "color",
+        "$value": "var(--sn-sys-warning)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "warning-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-warning-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "danger": {
+        "$type": "color",
+        "$value": "var(--sn-sys-danger)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "danger-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-danger-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "info": {
+        "$type": "color",
+        "$value": "var(--sn-sys-info)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "info-container": {
+        "$type": "color",
+        "$value": "var(--sn-sys-info-container)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      }
+    },
+    "state": {
+      "state-hover-mix": {
+        "$type": "number",
+        "$value": "var(--sn-sys-state-hover-mix)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<percentage>"
+          }
+        }
+      },
+      "state-pressed-mix": {
+        "$type": "number",
+        "$value": "var(--sn-sys-state-pressed-mix)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<percentage>"
+          }
+        }
+      },
+      "state-selected-mix": {
+        "$type": "number",
+        "$value": "var(--sn-sys-state-selected-mix)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<percentage>"
+          }
+        }
+      },
+      "state-dragged-mix": {
+        "$type": "number",
+        "$value": "var(--sn-sys-state-dragged-mix)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<percentage>"
+          }
+        }
+      },
+      "state-disabled-opacity": {
+        "$type": "number",
+        "$value": "var(--sn-sys-state-disabled-opacity)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<number>"
+          }
+        }
+      }
+    },
+    "focus": {
+      "focus-ring": {
+        "$type": "color",
+        "$value": "var(--sn-sys-focus-ring)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<color>"
+          }
+        }
+      },
+      "focus-ring-width": {
+        "$type": "dimension",
+        "$value": "var(--sn-sys-focus-ring-width)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<length>"
+          }
+        }
+      },
+      "focus-ring-offset": {
+        "$type": "dimension",
+        "$value": "var(--sn-sys-focus-ring-offset)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "<length>"
+          }
+        }
+      }
+    },
+    "elevation": {
+      "shadow-raised": {
+        "$type": "shadow",
+        "$value": "var(--sn-sys-shadow-raised)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "*"
+          }
+        }
+      },
+      "shadow-overlay": {
+        "$type": "shadow",
+        "$value": "var(--sn-sys-shadow-overlay)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "*"
+          }
+        }
+      }
+    },
+    "geometry": {
+      "density": {
+        "$type": "dimension",
+        "$value": "var(--sn-sys-density)",
+        "$extensions": {
+          "symbiote-ui": {
+            "tier": "sys",
+            "registeredSyntax": "*"
+          }
+        }
+      }
+    }
+  },
+  "state": {
+    "hover": {
+      "$type": "dimension",
+      "$value": "8%"
+    },
+    "pressed": {
+      "$type": "dimension",
+      "$value": "12%"
+    },
+    "selected": {
+      "$type": "dimension",
+      "$value": "16%"
+    },
+    "dragged": {
+      "$type": "dimension",
+      "$value": "20%"
+    },
+    "disabledOpacity": {
+      "$type": "number",
+      "$value": 0.38
+    }
+  },
+  "ref": {
+    "$description": "T1 ramps are implementation, not public API; listed for tooling completeness.",
+    "families": {
+      "$type": "string",
+      "$value": "neutral,accent,success,warning,danger,info"
+    },
+    "stops": {
+      "$type": "string",
+      "$value": "0,5,10,15,20,30,40,50,60,70,80,90,95,100"
+    }
+  }
+}

@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>symbiote-ui PCB Router Stress</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--sn-sys-surface);
+      color: var(--sn-sys-on-surface);
+      font-family: var(--sn-font, Inter, system-ui, sans-serif);
+    }
+
+    .shell {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--sn-sys-outline);
+      background: var(--sn-node-header-bg, #252525);
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .topbar a {
+      color: var(--sn-cat-data, #5c8dbf);
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .topbar .spacer {
+      flex: 1;
+    }
+
+    .control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--sn-sys-on-surface-dim);
+      font-size: 12px;
+    }
+
+    button,
+    select,
+    input {
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: 6px;
+      background: var(--sn-sys-surface-raised);
+      color: var(--sn-sys-on-surface);
+      font: inherit;
+    }
+
+    button,
+    select {
+      height: 30px;
+      padding: 0 10px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    input[type="range"] {
+      width: 120px;
+      accent-color: var(--sn-sys-accent);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      min-height: 0;
+    }
+
+    .stage {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle, var(--sn-grid-dot, rgba(255, 255, 255, 0.04)) 1.4px, transparent 1.4px) 0 0 / var(--sn-grid-size, 20px) var(--sn-grid-size, 20px),
+        var(--sn-sys-surface);
+    }
+
+    .routes {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .route {
+      fill: none;
+      stroke: var(--sn-conn-color, #c87533);
+      stroke-width: var(--sn-conn-width, 1.5);
+      stroke-linecap: var(--sn-conn-linecap, square);
+      stroke-linejoin: var(--sn-conn-linejoin, miter);
+      vector-effect: non-scaling-stroke;
+      opacity: 0.82;
+    }
+
+    .route[data-violating="true"] {
+      stroke: var(--sn-sys-danger);
+      stroke-width: 2.4;
+      opacity: 1;
+    }
+
+    .route-dot {
+      fill: var(--sn-conn-dot-fill, #c87533);
+      stroke: var(--sn-conn-dot-stroke, #222);
+      stroke-width: var(--sn-conn-dot-stroke-width, 2px);
+    }
+
+    .route-dot[data-violating="true"] {
+      fill: var(--sn-sys-danger);
+    }
+
+    .node {
+      position: absolute;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: 8px;
+      background: var(--sn-sys-surface-raised);
+      box-shadow: var(--sn-node-shadow, 0 1px 4px rgba(0, 0, 0, 0.5));
+      transform: translate3d(var(--x), var(--y), 0);
+      will-change: transform;
+    }
+
+    .node[data-moving="true"] {
+      border-color: color-mix(in srgb, var(--sn-sys-accent) 70%, var(--sn-sys-outline));
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--sn-sys-accent) 52%, transparent),
+        var(--sn-node-shadow, 0 1px 4px rgba(0, 0, 0, 0.5));
+    }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--sn-sys-outline);
+      background: var(--sn-node-header-bg, #252525);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .node-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: var(--accent, var(--sn-cat-data, #5c8dbf));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #5c8dbf) 18%, transparent);
+      flex: 0 0 auto;
+    }
+
+    .node-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .node-body {
+      display: grid;
+      align-content: center;
+      gap: 6px;
+      padding: 10px;
+      color: var(--sn-sys-on-surface-dim);
+      font-size: 12px;
+    }
+
+    .node-line {
+      height: 6px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent, #5c8dbf) 24%, transparent);
+    }
+
+    .node-line:nth-child(2) {
+      width: 68%;
+    }
+
+    .panel {
+      display: grid;
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
+      min-height: 0;
+      border-left: 1px solid var(--sn-sys-outline);
+      background: var(--sn-sys-surface-raised);
+    }
+
+    .panel-section {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--sn-sys-outline);
+    }
+
+    .panel-section h2 {
+      margin: 0;
+      color: var(--sn-sys-on-surface);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .stat {
+      display: grid;
+      gap: 3px;
+      padding: 8px;
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--sn-node-header-bg, #252525) 76%, transparent);
+    }
+
+    .stat strong {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .stat span {
+      color: var(--sn-sys-on-surface-dim);
+      font-size: 11px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px 10px;
+      color: var(--sn-sys-on-surface-dim);
+      font-size: 12px;
+    }
+
+    .metrics b {
+      color: var(--sn-sys-on-surface);
+      font-weight: 600;
+      text-align: right;
+    }
+
+    .orbit-stats {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(132px, 1fr);
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .orbit-card {
+      display: grid;
+      gap: 5px;
+      padding: 8px;
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--sn-node-header-bg, #252525) 76%, transparent);
+      font-size: 11px;
+    }
+
+    .orbit-card[data-active="true"] {
+      border-color: color-mix(in srgb, var(--sn-sys-accent) 55%, var(--sn-sys-outline));
+    }
+
+    .orbit-card strong {
+      color: var(--sn-sys-on-surface);
+      font-size: 12px;
+    }
+
+    .orbit-card span {
+      color: var(--sn-sys-on-surface-dim);
+      white-space: nowrap;
+    }
+
+    .keyframes {
+      display: grid;
+      gap: 8px;
+      max-height: 180px;
+      overflow: auto;
+    }
+
+    .keyframe {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid var(--sn-sys-outline);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--sn-node-header-bg, #252525) 76%, transparent);
+      color: inherit;
+      text-align: left;
+    }
+
+    .keyframe:hover,
+    .keyframe:focus-visible {
+      border-color: color-mix(in srgb, var(--sn-cat-data, #5c8dbf) 65%, var(--sn-sys-outline));
+    }
+
+    .keyframe strong {
+      color: var(--sn-sys-on-surface);
+      font-size: 12px;
+    }
+
+    .keyframe span {
+      color: var(--sn-sys-on-surface-dim);
+      font-size: 11px;
+    }
+
+    .keyframe-empty {
+      color: var(--sn-sys-on-surface-dim);
+      font-size: 11px;
+    }
+
+    .log {
+      min-height: 0;
+      overflow: auto;
+      padding: 12px;
+      color: var(--sn-sys-on-surface-dim);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .log-entry {
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid color-mix(in srgb, var(--sn-sys-outline) 55%, transparent);
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 920px) {
+      .topbar {
+        flex-wrap: wrap;
+      }
+
+      .content {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(440px, 1fr) 220px;
+      }
+
+      .panel {
+        border-top: 1px solid var(--sn-sys-outline);
+        border-left: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <h1>PCB Router Stress</h1>
+      <a href="./index.html">Demo index</a>
+      <span class="spacer"></span>
+      <button id="toggle">Pause</button>
+      <button id="reset">Reset counters</button>
+      <button id="oneOrbit">Run one orbit</button>
+      <label class="control">Mode
+        <select id="modeSelect">
+          <option value="raw">Raw geometry</option>
+          <option value="snapped">Grid snapped</option>
+        </select>
+      </label>
+      <label class="control">Route <select id="routeSelect"></select></label>
+      <label class="control">Speed <input id="speed" type="range" min="0.25" max="2.5" value="1" step="0.25"></label>
+    </header>
+    <main class="content">
+      <section id="stage" class="stage" aria-label="Animated PCB routing stress canvas">
+        <svg id="routes" class="routes"></svg>
+        <div id="nodes"></div>
+      </section>
+      <aside class="panel">
+        <section class="panel-section">
+          <h2>Aggregates</h2>
+          <div id="stats" class="stats"></div>
+        </section>
+        <section class="panel-section">
+          <h2>Selected route</h2>
+          <div id="metrics" class="metrics"></div>
+        </section>
+        <section class="panel-section">
+          <h2>Orbit history</h2>
+          <div id="orbitStats" class="orbit-stats"></div>
+        </section>
+        <section class="panel-section">
+          <h2>Problem keyframes</h2>
+          <div id="keyframes" class="keyframes"></div>
+        </section>
+        <div id="log" class="log" aria-live="polite"></div>
+      </aside>
+    </main>
+  </div>
+  <script type="module" src="./pcb-router-stress.js"></script>
+</body>
+
+</html>

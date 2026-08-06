@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "symbiote-3x",
+  "version": "1.0.0",
+  "description": "Machine-readable Symbiote.js 3.x rules for reusable package, UI, and provider contracts.",
+  "rules": [
+    {
+      "id": "SYM-001",
+      "name": "triple-file-standard",
+      "description": "Production components are split into .js, .tpl.js, and .css.js files.",
+      "severity": "error",
+      "filePattern": "**/*.js",
+      "check": "component_has_triple_files",
+      "tags": ["symbiote", "components", "architecture"]
+    },
+    {
+      "id": "SYM-002",
+      "name": "no-inline-templates",
+      "description": "Templates are defined in .tpl.js files instead of inline component bodies.",
+      "severity": "error",
+      "filePattern": "**/*.js",
+      "check": "no_inline_html_template",
+      "tags": ["symbiote", "templates"]
+    },
+    {
+      "id": "SYM-003",
+      "name": "reg-call-required",
+      "description": "Every custom element component calls .reg('kebab-case-tag').",
+      "severity": "error",
+      "filePattern": "**/*.js",
+      "check": "has_reg_call",
+      "tags": ["symbiote", "web-components"]
+    },
+    {
+      "id": "SYM-004",
+      "name": "css-token-usage",
+      "description": "Component CSS uses --sn-* custom properties for themeable values.",
+      "severity": "warning",
+      "filePattern": "**/*.css.js",
+      "check": "uses_sn_css_tokens",
+      "tags": ["symbiote", "theming", "tokens"]
+    },
+    {
+      "id": "SYM-005",
+      "name": "node-safe-core",
+      "description": "Root, core, manifest, rules, schemas, and tokens remain importable without DOM globals.",
+      "severity": "error",
+      "filePattern": ["index.js", "core/**/*.js", "manifest/**/*.js"],
+      "check": "no_dom_side_effects",
+      "tags": ["symbiote", "node-safe", "library"]
+    },
+    {
+      "id": "SYM-006",
+      "name": "single-binding-block",
+      "description": "Each template element has at most one Symbiote binding block.",
+      "severity": "error",
+      "filePattern": "**/*.tpl.js",
+      "check": "no_multiple_binding_blocks",
+      "tags": ["symbiote", "templates", "bindings"]
+    },
+    {
+      "id": "SYM-007",
+      "name": "published-library-contract",
+      "description": "Public metadata, rules, schemas, and token files are reachable from package exports and files[].",
+      "severity": "error",
+      "filePattern": "package.json",
+      "check": "published_contract_in_exports_and_files",
+      "tags": ["package", "exports", "library"]
+    },
+    {
+      "id": "SYM-008",
+      "name": "agent-boundary",
+      "description": "Agent-facing manifests describe modules and rules without importing browser components.",
+      "severity": "error",
+      "filePattern": "manifest/**/*.js",
+      "check": "manifest_is_side_effect_free",
+      "tags": ["agents", "mcp", "architecture"]
+    },
+    {
+      "id": "SYM-009",
+      "name": "public-subpath-imports",
+      "description": "Consumers import symbiote-ui through package exports instead of relative package internals or deep implementation paths.",
+      "severity": "error",
+      "filePattern": "**/*.js",
+      "check": "uses_public_package_exports",
+      "tags": ["package", "exports", "library", "agents"]
+    },
+    {
+      "id": "SYM-010",
+      "name": "light-dom-host-selector",
+      "description": "Light DOM rootStyles use the registered custom element selector as the host selector; Shadow DOM styles use :host. Shared CSS that must run in both modes includes both selectors.",
+      "severity": "error",
+      "filePattern": "**/*.css.js",
+      "check": "root_styles_use_registered_host_selector",
+      "tags": ["symbiote", "styles", "light-dom", "theming"]
+    },
+    {
+      "id": "SYM-011",
+      "name": "theme-cascade-contract",
+      "description": "Themeable components consume inherited CSS custom properties and do not require per-component applyTheme calls or local token resets.",
+      "severity": "error",
+      "filePattern": ["**/*.css.js", "themes/**/*.js", "tokens/**/*.json"],
+      "check": "theme_values_cascade_from_stable_root",
+      "tags": ["symbiote", "theming", "tokens", "library"]
+    },
+    {
+      "id": "SYM-012",
+      "name": "css-data-for-visual-tokens",
+      "description": "Static visual tokens such as colors, spacing, radius, typography, and icon fonts are carried by CSS custom properties; PubSub and JS setters are reserved for application state or explicit dynamic measurements.",
+      "severity": "warning",
+      "filePattern": "**/*.js",
+      "check": "visual_tokens_use_css_custom_properties",
+      "tags": ["symbiote", "css-data", "theming", "state"]
+    },
+    {
+      "id": "SYM-013",
+      "name": "data-driven-runtime-ui",
+      "description": "Reusable UI primitives expose clean data, props, events, and manifest metadata so agents can assemble layouts and functionality at runtime without product-specific coupling.",
+      "severity": "error",
+      "filePattern": ["**/*.js", "manifest/**/*.js", "custom-elements.json"],
+      "check": "component_contract_is_data_driven",
+      "tags": ["symbiote", "agents", "runtime-ui", "library"]
+    },
+    {
+      "id": "SYM-014",
+      "name": "theme-rule-block-composition",
+      "description": "Themes are composed from named rule blocks: source accents, derived color formulas, geometry formulas, typography formulas, motion/effect formulas, semantic aliases, and component aliases.",
+      "severity": "error",
+      "filePattern": ["themes/**/*.js", "tokens/**/*.json", "manifest/**/*.js"],
+      "check": "theme_exposes_composable_rule_blocks",
+      "tags": ["symbiote", "themes", "agents", "design-rules"]
+    },
+    {
+      "id": "SYM-015",
+      "name": "geometry-cascade-formulas",
+      "description": "Spacing, radius, stroke, density, panel gaps, and component sizing derive from root geometry tokens through documented formulas instead of unrelated fixed values.",
+      "severity": "error",
+      "filePattern": ["themes/**/*.js", "tokens/**/*.json", "**/*.css.js"],
+      "check": "geometry_tokens_derive_from_root_scale",
+      "tags": ["symbiote", "themes", "geometry", "tokens"]
+    },
+    {
+      "id": "SYM-016",
+      "name": "color-cascade-formulas",
+      "description": "Surface, text, border, accent, state, and overlay tokens derive from source palettes or accent tokens through documented formulas with contrast-aware roles.",
+      "severity": "error",
+      "filePattern": ["themes/**/*.js", "tokens/**/*.json", "**/*.css.js"],
+      "check": "color_tokens_derive_from_source_palette",
+      "tags": ["symbiote", "themes", "color", "tokens", "accessibility"]
+    },
+    {
+      "id": "SYM-017",
+      "name": "interaction-effect-formulas",
+      "description": "Hover, focus, active, selected, loading, error, and transition effects derive from semantic state tokens and motion formulas, not per-component bespoke effects.",
+      "severity": "warning",
+      "filePattern": ["themes/**/*.js", "tokens/**/*.json", "**/*.css.js"],
+      "check": "interaction_effects_derive_from_state_tokens",
+      "tags": ["symbiote", "themes", "motion", "effects", "interaction"]
+    },
+    {
+      "id": "SYM-018",
+      "name": "no-legacy-ui-shell-classes",
+      "description": "Reusable and provider-owned UI must not introduce legacy .ui-* shared shell classes; use provider custom elements, host selectors, or component-namespaced classes.",
+      "severity": "error",
+      "filePattern": ["**/*.tpl.js", "**/*.css.js", "**/*.js"],
+      "check": "no_legacy_ui_shell_classes",
+      "tags": ["symbiote", "styles", "theming", "components"]
+    },
+    {
+      "id": "SYM-019",
+      "name": "data-display-selection-rules",
+      "description": "Rules directing agents to select list, tree, table, timeline, or description surfaces appropriately based on dataset characteristics.",
+      "severity": "info",
+      "filePattern": "manifest/**/*.js",
+      "check": "data_display_selection_guideline",
+      "tags": ["symbiote", "agents", "data-display", "metadata"]
+    },
+    {
+      "id": "SYM-020",
+      "name": "no-hardcoded-visual-values",
+      "description": "Component CSS must not use raw hex, rgb(), hsl(), or named CSS colors outside accepted functional exceptions (ColorPicker swatches, media poster geometry, known-accent foreground). Use --sn-* cascade tokens.",
+      "severity": "warning",
+      "filePattern": "**/*.css.js",
+      "check": "no_raw_color_values_in_css",
+      "tags": ["symbiote", "theming", "tokens", "design-quality"]
+    }
+  ]
+}

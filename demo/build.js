@@ -69,6 +69,10 @@ function webFilter(name) {
 console.log('  → Copying web/');
 copyDir(path.join(ROOT, 'web'), path.join(DIST, 'web'), webFilter);
 
+// ── Copy src/iso/ (shared isomorphic modules used by web panels) ─
+console.log('  → Copying src/iso/');
+copyDir(path.join(ROOT, 'src', 'iso'), path.join(DIST, 'src', 'iso'), webFilter);
+
 // ── Copy demo/ (adapter + mock data) ─────────────────────────────
 console.log('  → Copying demo/');
 for (let f of ['demo-adapter.js', 'mock-data.js']) {
@@ -123,14 +127,23 @@ mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
 fs.writeFileSync(mockPath, mockSrc);
 
 // ── Copy public Symbiote packages ────────────────────────────────
-for (let packageName of ['symbiote-ui', 'symbiote-engine']) {
-  console.log(`  → Copying ${packageName}`);
-  copyDir(
-    path.join(ROOT, 'node_modules', packageName),
-    path.join(DIST, 'packages', packageName),
-    (name) => !SKIP_DIRS.has(name) && name !== '.git',
-  );
-}
+// symbiote-ui: the npm package (alpha) is heavily outdated vs the repo.
+// A full copy of the repo source is vendored in demo/vendor-symbiote-ui/.
+// To update: clone rnd-pro/symbiote-ui and replace vendor-symbiote-ui/.
+console.log('  → Copying symbiote-ui (from vendored repo source)');
+copyDir(
+  path.join(ROOT, 'demo', 'vendor-symbiote-ui'),
+  path.join(DIST, 'packages', 'symbiote-ui'),
+  (name) => !SKIP_DIRS.has(name) && name !== '.git' && name !== 'package-lock.json',
+);
+
+// symbiote-engine: still fine from npm
+console.log('  → Copying symbiote-engine');
+copyDir(
+  path.join(ROOT, 'node_modules', 'symbiote-engine'),
+  path.join(DIST, 'packages', 'symbiote-engine'),
+  (name) => !SKIP_DIRS.has(name) && name !== '.git',
+);
 
 // ── Copy node_modules/@symbiotejs/symbiote/ ──────────────────────
 console.log('  → Copying @symbiotejs/symbiote');

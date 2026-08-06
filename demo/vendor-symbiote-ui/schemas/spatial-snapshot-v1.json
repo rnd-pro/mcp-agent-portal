@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://symbiote.dev/schemas/spatial-snapshot-v1.json",
+  "title": "Spatial Snapshot v1",
+  "description": "Browser-measured, renderer-neutral spatial UI snapshot: root-relative CSS-pixel boxes, resolved allowlisted styles, text/state/action provenance, and structured diagnostics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "unit", "coordinateSpace", "capture", "nodes", "diagnostics"],
+  "properties": {
+    "version": { "const": "spatial-snapshot-v1" },
+    "unit": { "const": "css-pixel" },
+    "coordinateSpace": { "const": "capture-root-relative" },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewport"],
+      "properties": {
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "number", "exclusiveMinimum": 0 },
+            "height": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "route": { "type": "string" },
+        "themeScope": { "type": "string" }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unsupported", "unknownVisible"],
+      "properties": {
+        "unsupported": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unsupportedFeature" }
+        },
+        "unknownVisible": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unknownVisibleBox" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "targetId", "intent"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "targetId": { "type": "string", "minLength": 1 },
+        "intent": { "type": "string", "minLength": 1 }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parentId", "component", "part", "rect"],
+      "allOf": [
+        {
+          "if": { "properties": { "part": { "const": "icon" } } },
+          "then": {
+            "required": ["icon"],
+            "properties": { "icon": { "$ref": "#/$defs/icon" } }
+          }
+        },
+        {
+          "if": {
+            "required": ["icon"],
+            "properties": { "icon": { "$ref": "#/$defs/icon" } }
+          },
+          "then": { "properties": { "part": { "const": "icon" } } }
+        },
+        {
+          "not": {
+            "required": ["icon", "text"],
+            "properties": {
+              "icon": { "$ref": "#/$defs/icon" },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parentId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "component": { "type": "string", "minLength": 1 },
+        "part": { "type": "string", "minLength": 1 },
+        "rect": { "$ref": "#/$defs/rect" },
+        "style": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "text": { "type": "string" },
+        "icon": { "$ref": "#/$defs/icon" },
+        "state": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [{ "type": "boolean" }, { "type": "string" }, { "type": "number" }]
+          }
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/action" }
+        }
+      }
+    },
+    "icon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9_]+$" }
+      }
+    },
+    "unsupportedFeature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature"],
+      "properties": {
+        "feature": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    },
+    "unknownVisibleBox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature"],
+      "properties": {
+        "signature": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}

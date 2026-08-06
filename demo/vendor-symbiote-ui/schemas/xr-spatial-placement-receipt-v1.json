@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/xr-spatial-placement-receipt-v1.json",
+  "title": "XR Spatial Placement Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "receiptId",
+    "sessionId",
+    "referenceSpaceId",
+    "inputSourceId",
+    "inputKind",
+    "handedness",
+    "profiles",
+    "hitTestResultId",
+    "hitPose",
+    "surfaceNormal",
+    "selectStart",
+    "selectEnd"
+  ],
+  "properties": {
+    "version": { "const": "xr-spatial-placement-receipt-v1" },
+    "receiptId": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "referenceSpaceId": { "type": "string", "minLength": 1 },
+    "inputSourceId": { "type": "string", "minLength": 1 },
+    "inputKind": { "enum": ["controller", "hand"] },
+    "handedness": { "enum": ["left", "right", "none"] },
+    "profiles": { "$ref": "#/$defs/profiles" },
+    "hitTestResultId": { "type": "string", "minLength": 1 },
+    "hitPose": { "$ref": "#/$defs/hitPose" },
+    "surfaceNormal": { "$ref": "#/$defs/surfaceNormal" },
+    "selectStart": {
+      "allOf": [
+        { "$ref": "#/$defs/placementPhase" },
+        {
+          "type": "object",
+          "properties": {
+            "phase": { "const": "selectstart" },
+            "startEventId": { "const": null }
+          }
+        }
+      ]
+    },
+    "selectEnd": {
+      "allOf": [
+        { "$ref": "#/$defs/placementPhase" },
+        {
+          "type": "object",
+          "properties": {
+            "phase": { "const": "selectend" },
+            "startEventId": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "quaternion": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "type": "number" }
+    },
+    "matrix4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": { "type": "number" }
+    },
+    "pose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position", "quaternion"],
+      "properties": {
+        "position": { "$ref": "#/$defs/vector3" },
+        "quaternion": { "$ref": "#/$defs/quaternion" }
+      }
+    },
+    "hitPose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix", "pose"],
+      "properties": {
+        "matrix": { "$ref": "#/$defs/matrix4" },
+        "pose": { "$ref": "#/$defs/pose" }
+      }
+    },
+    "surfaceNormal": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number", "minimum": -1, "maximum": 1 }
+    },
+    "profiles": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "placementPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "eventId",
+        "phase",
+        "sessionId",
+        "frameId",
+        "frameSequence",
+        "timestamp",
+        "referenceSpaceId",
+        "inputSourceId",
+        "inputKind",
+        "handedness",
+        "profiles",
+        "hitTestResultId",
+        "hitPose",
+        "surfaceNormal",
+        "startEventId"
+      ],
+      "properties": {
+        "version": { "const": "xr-spatial-placement-phase-v1" },
+        "eventId": { "type": "string", "minLength": 1 },
+        "phase": { "enum": ["selectstart", "selectend"] },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "frameId": { "type": "string", "minLength": 1 },
+        "frameSequence": { "type": "integer", "minimum": 0 },
+        "timestamp": { "type": "number", "minimum": 0 },
+        "referenceSpaceId": { "type": "string", "minLength": 1 },
+        "inputSourceId": { "type": "string", "minLength": 1 },
+        "inputKind": { "enum": ["controller", "hand"] },
+        "handedness": { "enum": ["left", "right", "none"] },
+        "profiles": { "$ref": "#/$defs/profiles" },
+        "hitTestResultId": { "type": "string", "minLength": 1 },
+        "hitPose": { "$ref": "#/$defs/hitPose" },
+        "surfaceNormal": { "$ref": "#/$defs/surfaceNormal" },
+        "startEventId": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

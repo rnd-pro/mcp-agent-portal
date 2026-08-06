@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rnd-pro.github.io/symbiote-ui/schemas/graph-v1.json",
+  "title": "Symbiote Node Graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "nodes", "connections"],
+  "properties": {
+    "version": { "const": "v1" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" },
+      "uniqueItems": true
+    },
+    "connections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/connection" },
+      "uniqueItems": true
+    },
+    "frames": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/frame" }
+    }
+  },
+  "$defs": {
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "activation"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "poster": { "type": "string" },
+        "alt": { "type": "string" },
+        "fit": { "enum": ["contain", "cover"] },
+        "activation": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["provider"],
+          "properties": {
+            "provider": { "type": "string", "minLength": 1 }
+          }
+        },
+        "targetIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "position": { "$ref": "#/$defs/point" },
+        "size": { "$ref": "#/$defs/point" },
+        "params": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "media": { "$ref": "#/$defs/media" }
+          }
+        },
+        "inputs": { "type": "array", "items": { "type": "string" } },
+        "outputs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "required": ["id", "source", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/endpoint" },
+        "target": { "$ref": "#/$defs/endpoint" },
+        "kind": { "type": "string", "minLength": 1 },
+        "direction": { "type": "string", "enum": ["none", "forward", "reverse", "both"] },
+        "design": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "marker": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "role": { "type": "string", "enum": ["none", "flow", "gate"] }
+              }
+            }
+          }
+        },
+        "label": { "type": "string" },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "required": ["nodeId", "socket"],
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": { "type": "string", "minLength": 1 },
+        "socket": { "type": "string", "minLength": 1 }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "nodeIds": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
