@@ -50,23 +50,20 @@
 <script type="module" src="./demo-adapter.js"></script>
 </head>
 <body>
-<app-shell class="app-shell">
+<div class="app-shell">
 <header class="app-topbar">
-  <div class="topbar-left">
-    <span class="material-symbols-outlined app-title-icon">hub</span>
-    <span class="app-title">Agent Portal</span>
-  </div>
-  <div class="topbar-center">
-    <span class="material-symbols-outlined topbar-project-icon">folder_open</span>
-    <span id="active-project-path">Workspace not selected</span>
-  </div>
-  <div class="topbar-right">
-    <cascade-theme-widget></cascade-theme-widget>
-  </div>
+<div class="topbar-left">
+<span class="material-symbols-outlined" style="font-size:20px;color:var(--project-accent,var(--sn-sys-accent))">hub</span>
+<span class="app-title">Agent Portal</span>
+</div>
+<div class="topbar-center" style="position: absolute; left: 50%; transform: translateX(-50%); font-family: 'SF Mono', monospace; font-size: 11px; color: var(--sn-sys-on-surface-dim); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw;">
+  <span class="material-symbols-outlined" style="font-size: 14px;">folder_open</span>
+  <span id="active-project-path">Workspace not selected</span>
+</div>
 </header>
 <project-tabs></project-tabs>
 <div id="main-layout" class="app-workspace" data-workspace-host></div>
-</app-shell>
+</div>
 <script type="module" src="../web/app.js"></script>
 </body>
 </html>
