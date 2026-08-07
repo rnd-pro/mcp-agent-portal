@@ -227,7 +227,10 @@ function scanBareImports(dir) {
       let re = /from\s+['"]([^.'"][^'"]*)['"]/g;
       let m;
       while ((m = re.exec(src))) specifiers.add(m[1]);
-      // Also catch dynamic imports
+      // Side-effect imports: import 'pkg' (no from, no bindings)
+      let side = /import\s+['"]([^.'"][^'"]*)['"]/g;
+      while ((m = side.exec(src))) specifiers.add(m[1]);
+      // Dynamic imports: import('pkg')
       let dyn = /import\(['"]([^.'"][^'"]*)['"]\)/g;
       while ((m = dyn.exec(src))) specifiers.add(m[1]);
     }
