@@ -177,6 +177,8 @@ let nodeExternals = [
   'library-pages/shell', 'library-pages/url',
   // ajv is server validation
   'ajv/dist/2020.js',
+  // three.js is heavy (~600KB) and only used for XR/spatial features
+  'three',
 ];
 
 try {
@@ -190,20 +192,24 @@ try {
     plugins: [mockDataPlugin],
     logLevel: 'warning',
     target: 'es2022',
-    minify: false,
+    minify: true,
     sourcemap: false,
   });
 
-  // Bundle web/app.js (main application)
+  // Bundle web/app.js (main application) with code-splitting
+  // Dynamic import() calls in app.js produce separate lazy chunks
   let appResult = await esbuild.build({
     entryPoints: [path.join(ROOT, 'web', 'app.js')],
     bundle: true,
     format: 'esm',
-    outfile: path.join(DIST, 'js', 'app.bundle.js'),
+    splitting: true,
+    outdir: path.join(DIST, 'js'),
+    entryNames: 'app.bundle',
+    chunkNames: 'chunk-[hash]',
     external: nodeExternals,
     logLevel: 'warning',
     target: 'es2022',
-    minify: false,
+    minify: true,
     sourcemap: false,
   });
 
