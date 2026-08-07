@@ -177,9 +177,16 @@ let nodeExternals = [
   'library-pages/shell', 'library-pages/url',
   // ajv is server validation
   'ajv/dist/2020.js',
-  // three.js is heavy (~600KB) and only used for XR/spatial features
-  'three',
 ];
+
+// three.js shim — replace heavy 3D library with no-op stubs (XR not used in demo)
+let threeShimPath = path.join(ROOT, 'demo', 'three-shim.js');
+let threeShimPlugin = {
+  name: 'three-shim',
+  setup(build) {
+    build.onResolve({ filter: /^three$/ }, () => ({ path: threeShimPath }));
+  },
+};
 
 try {
   // Bundle demo-adapter.js (loaded first, patches fetch/WebSocket)
@@ -189,7 +196,7 @@ try {
     format: 'esm',
     outfile: path.join(DIST, 'js', 'demo-adapter.bundle.js'),
     external: nodeExternals,
-    plugins: [mockDataPlugin],
+    plugins: [mockDataPlugin, threeShimPlugin],
     logLevel: 'warning',
     target: 'es2022',
     minify: true,
@@ -207,6 +214,7 @@ try {
     entryNames: 'app.bundle',
     chunkNames: 'chunk-[hash]',
     external: nodeExternals,
+    plugins: [threeShimPlugin],
     logLevel: 'warning',
     target: 'es2022',
     minify: true,
