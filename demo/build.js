@@ -2,9 +2,10 @@
 /**
  * demo/build.js — Assemble the demo dist for GitHub Pages deployment.
  *
- * Uses esbuild to bundle web/app.js and demo/demo-adapter.js into single
- * ESM bundles, resolving all bare-specifier imports from node_modules.
- * Static assets (CSS, icons, fonts) are copied directly.
+ * Platform-native approach per JSDA principles:
+ * - ESM import map for bare-specifier resolution (no bundler)
+ * - Git submodules as canonical library source
+ * - File copy to dist/ (no compile/bundle step)
  *
  * Usage:
  *   node demo/build.js                     # builds to dist/
@@ -13,7 +14,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import esbuild from 'esbuild';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT = path.join(__dirname, '..');
@@ -41,58 +41,95 @@ fs.mkdirSync(DIST, { recursive: true });
 
 function copyDir(src, dest, filter) {
   if (!fs.existsSync(src)) {
-    console.warn(`  ⚠ skipping (not found): ${src}`);
-    return;
+    console.warn(`  ⚠ skipping (not found): ${path.relative(ROOT, src)}`);
+    return 0;
   }
   fs.mkdirSync(dest, { recursive: true });
+  let count = 0;
   for (let entry of fs.readdirSync(src, { withFileTypes: true })) {
     let srcPath = path.join(src, entry.name);
     let destPath = path.join(dest, entry.name);
-    if (filter && !filter(entry.name, srcPath)) continue;
+    if (filter && !filter(entry.name, srcPath, entry)) continue;
     if (entry.isDirectory()) {
-      copyDir(srcPath, destPath, filter);
+      count += copyDir(srcPath, destPath, filter);
     } else {
       fs.copyFileSync(srcPath, destPath);
+      count++;
     }
   }
+  return count;
 }
 
 function copyFile(src, dest) {
+  if (!fs.existsSync(src)) {
+    console.warn(`  ⚠ skipping (not found): ${path.relative(ROOT, src)}`);
+    return;
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.DS_Store', 'tmp', 'coverage', '.context', '.agents', '.project-graph-cache.json']);
+const SKIP = new Set([
+  'node_modules', '.git', '.DS_Store', 'tmp', 'coverage',
+  '.context', '.agents', '.project-graph-cache.json',
+  'test', 'tests', '__tests__', 'scripts', '.github',
+]);
 
-function webFilter(name) {
-  return !SKIP_DIRS.has(name) && !name.endsWith('.log') && !name.endsWith('.tgz');
+function sourceFilter(name, fullPath, entry) {
+  if (SKIP.has(name)) return false;
+  if (name.startsWith('.') && name !== '.gitkeep') return false;
+  if (entry.isDirectory()) return true;
+  // Copy only JS, CSS, JSON, and font files
+  return /\.(js|mjs|css|json|ttf|woff2?)$/.test(name);
 }
 
-// ── Copy static assets ──────────────────────────────────────────
-// CSS, icons and fonts are loaded via <link> tags, not import — copy them.
-console.log('  → Copying static assets (CSS, icons, fonts)');
+// ── Step 1: Copy submodule packages to dist ─────────────────────
+console.log('  → Copying packages from submodules');
 
-// Material symbols CSS + font
-let iconsDir = path.join(ROOT, 'node_modules', 'symbiote-ui', 'icons');
-copyDir(iconsDir, path.join(DIST, 'assets', 'icons'), (name) => {
-  return name.endsWith('.css') || name.endsWith('.ttf') || name.endsWith('.woff2');
-});
+let uiCount = copyDir(
+  path.join(ROOT, 'packages', 'symbiote-ui'),
+  path.join(DIST, 'packages', 'symbiote-ui'),
+  sourceFilter,
+);
+console.log(`    symbiote-ui: ${uiCount} files`);
 
-// Default provider theme CSS
-let themeCss = path.join(ROOT, 'node_modules', 'symbiote-ui', 'themes', 'default-provider.css');
-if (fs.existsSync(themeCss)) {
-  copyFile(themeCss, path.join(DIST, 'assets', 'default-provider.css'));
-}
+let engineCount = copyDir(
+  path.join(ROOT, 'packages', 'symbiote-engine'),
+  path.join(DIST, 'packages', 'symbiote-engine'),
+  sourceFilter,
+);
+console.log(`    symbiote-engine: ${engineCount} files`);
 
-// Web app styles
-let webStyleCss = path.join(ROOT, 'web', 'style.css');
-if (fs.existsSync(webStyleCss)) {
-  copyFile(webStyleCss, path.join(DIST, 'assets', 'style.css'));
-}
+// @symbiotejs/symbiote from node_modules (npm package, not submodule yet)
+let symbioteCount = copyDir(
+  path.join(ROOT, 'node_modules', '@symbiotejs', 'symbiote'),
+  path.join(DIST, 'packages', '@symbiotejs', 'symbiote'),
+  sourceFilter,
+);
+console.log(`    @symbiotejs/symbiote: ${symbioteCount} files`);
 
-// ── Prepare mock-data.js with README injection ───────────────────
-console.log('  → Preparing mock-data.js');
+// ── Step 2: Copy web/ application source ─────────────────────────
+console.log('  → Copying web/ application');
 
+let webCount = copyDir(
+  path.join(ROOT, 'web'),
+  path.join(DIST, 'web'),
+  sourceFilter,
+);
+console.log(`    web: ${webCount} files`);
+
+// Copy src/iso/ (isomorphic code used by web/)
+let isoCount = copyDir(
+  path.join(ROOT, 'src', 'iso'),
+  path.join(DIST, 'src', 'iso'),
+  sourceFilter,
+);
+console.log(`    src/iso: ${isoCount} files`);
+
+// ── Step 3: Copy demo adapter ────────────────────────────────────
+console.log('  → Preparing demo adapter');
+
+// Preprocess mock-data.js with README injection
 function escapeForJsString(text) {
   return text
     .replace(/\\/g, '\\\\')
@@ -105,143 +142,104 @@ function stripBadges(text) {
   return text.replace(/^(\[!\[.*?\]\(.*?\)\]\(.*?\)\s*\n?)+\n*/m, '');
 }
 
-function resolveReadmePath(relPath) {
-  let packageMatch = relPath.match(/^packages\/(symbiote-ui|symbiote-engine)\/(.+)$/);
-  if (packageMatch) {
-    return path.join(ROOT, 'node_modules', packageMatch[1], packageMatch[2]);
-  }
-  return path.join(ROOT, relPath);
-}
+let mockSrc = fs.readFileSync(path.join(ROOT, 'demo', 'mock-data.js'), 'utf-8');
 
-// Copy mock-data.js to a temp location for preprocessing
-let mockSrcPath = path.join(ROOT, 'demo', 'mock-data.js');
-let mockSrc = fs.readFileSync(mockSrcPath, 'utf-8');
-
-// 1. Inject main README.md → __README_CONTENT__
+// Inject main README
 let readmePath = path.join(ROOT, 'README.md');
 if (fs.existsSync(readmePath)) {
   let readme = stripBadges(fs.readFileSync(readmePath, 'utf-8'));
-  let escaped = escapeForJsString(readme);
-  mockSrc = mockSrc.replace('__README_CONTENT__', () => escaped);
+  mockSrc = mockSrc.replace('__README_CONTENT__', () => escapeForJsString(readme));
 }
 
-// 2. Inject subproject READMEs → __SUBREADME:relative/path__
+// Inject subproject READMEs
 mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
-  let fullPath = resolveReadmePath(relPath);
+  // Resolve to packages/ submodule path first, then fallback to node_modules
+  let packageMatch = relPath.match(/^packages\/(symbiote-ui|symbiote-engine)\/(.+)$/);
+  let fullPath;
+  if (packageMatch) {
+    fullPath = path.join(ROOT, 'packages', packageMatch[1], packageMatch[2]);
+  } else {
+    fullPath = path.join(ROOT, relPath);
+  }
   if (fs.existsSync(fullPath)) {
-    let content = stripBadges(fs.readFileSync(fullPath, 'utf-8'));
-    return escapeForJsString(content);
+    return escapeForJsString(stripBadges(fs.readFileSync(fullPath, 'utf-8')));
   }
   console.warn(`  ⚠ README not found: ${relPath}`);
   return `*README not found: ${relPath}*`;
 });
 
-// Write preprocessed mock-data to temp file for esbuild to consume
-let tempMockPath = path.join(ROOT, 'demo', '.mock-data-processed.js');
-fs.writeFileSync(tempMockPath, mockSrc);
+fs.mkdirSync(path.join(DIST, 'demo'), { recursive: true });
+fs.writeFileSync(path.join(DIST, 'demo', 'mock-data.js'), mockSrc);
+copyFile(path.join(ROOT, 'demo', 'demo-adapter.js'), path.join(DIST, 'demo', 'demo-adapter.js'));
 
-// ── esbuild: Bundle app.js and demo-adapter.js ──────────────────
-console.log('  → Bundling with esbuild');
+// ── Step 4: Copy static assets ──────────────────────────────────
+console.log('  → Copying static assets');
 
-// Plugin to redirect mock-data.js imports to the preprocessed version
-let mockDataPlugin = {
-  name: 'mock-data-redirect',
-  setup(build) {
-    build.onResolve({ filter: /\.\/mock-data\.js$/ }, (args) => {
-      if (args.importer.includes('demo-adapter')) {
-        return { path: tempMockPath };
-      }
-    });
+// Material symbols CSS + font
+copyDir(
+  path.join(ROOT, 'packages', 'symbiote-ui', 'icons'),
+  path.join(DIST, 'packages', 'symbiote-ui', 'icons'),
+  (name) => /\.(css|ttf|woff2?)$/.test(name),
+);
+
+// ── Step 5: Generate three.js shim ──────────────────────────────
+// three.js is used only for XR/spatial features — stub it for the demo
+let threeShim = `// three.js shim — XR features not used in demo
+export default {};
+export class Scene {}
+export class PerspectiveCamera {}
+export class WebGLRenderer {}
+export class Vector3 { constructor() { this.x = 0; this.y = 0; this.z = 0; } set() { return this; } copy() { return this; } }
+export class Quaternion { constructor() { this.x = 0; this.y = 0; this.z = 0; this.w = 1; } }
+export class Color { constructor() {} set() { return this; } }
+export class Group { add() {} remove() {} }
+export class Mesh { constructor() { this.position = new Vector3(); this.rotation = { x: 0, y: 0, z: 0 }; } }
+export class BoxGeometry {}
+export class SphereGeometry {}
+export class MeshBasicMaterial {}
+export class MeshStandardMaterial {}
+export class LineBasicMaterial {}
+export class BufferGeometry {}
+export class Line { constructor() { this.position = new Vector3(); } }
+export class Raycaster { setFromCamera() {} intersectObjects() { return []; } }
+export class Clock { getDelta() { return 0; } getElapsedTime() { return 0; } }
+export class Object3D { add() {} remove() {} }
+export class Matrix4 {}
+export class Euler {}
+`;
+fs.mkdirSync(path.join(DIST, 'packages'), { recursive: true });
+fs.writeFileSync(path.join(DIST, 'packages', 'three-shim.js'), threeShim);
+
+// ── Step 6: Generate import map ─────────────────────────────────
+console.log('  → Generating import map');
+
+let importMap = {
+  imports: {
+    // @symbiotejs/symbiote — core framework
+    '@symbiotejs/symbiote': `${basePath}packages/@symbiotejs/symbiote/core/index.js`,
+    '@symbiotejs/symbiote/': `${basePath}packages/@symbiotejs/symbiote/`,
+
+    // symbiote-ui — UI library (submodule)
+    'symbiote-ui': `${basePath}packages/symbiote-ui/index.js`,
+    'symbiote-ui/': `${basePath}packages/symbiote-ui/`,
+
+    // symbiote-engine — runtime engine (submodule)
+    'symbiote-engine': `${basePath}packages/symbiote-engine/index.js`,
+    'symbiote-engine/': `${basePath}packages/symbiote-engine/`,
+
+    // three.js — shimmed (XR not used in demo)
+    'three': `${basePath}packages/three-shim.js`,
   },
 };
 
-// Node builtins that appear in symbiote-engine server-side code but are
-// never reached in the browser demo — mark them as external so esbuild
-// does not attempt to bundle them.
-let nodeExternals = [
-  'node:fs', 'node:path', 'node:url', 'node:child_process', 'node:http',
-  'node:https', 'node:net', 'node:os', 'node:stream', 'node:events',
-  'node:crypto', 'node:util', 'node:worker_threads', 'node:readline',
-  'node:process', 'node:buffer', 'node:assert', 'node:vm',
-  'fs', 'path', 'url', 'child_process', 'http', 'https', 'net', 'os',
-  'stream', 'events', 'crypto', 'util', 'worker_threads', 'readline',
-  'process', 'buffer', 'assert', 'vm',
-  // Server-side dependencies that won't work in browser
-  'ws', 'telegraf', '@modelcontextprotocol/sdk',
-  // linkedom is used for SSR only
-  'linkedom',
-  // jsda-kit is server tooling
-  'jsda-kit', 'jsda-kit/node/md.js',
-  // library-pages is server tooling
-  'library-pages/client', 'library-pages/jsda', 'library-pages/search',
-  'library-pages/shell', 'library-pages/url',
-  // ajv is server validation
-  'ajv/dist/2020.js',
-];
+let importMapJson = JSON.stringify(importMap, null, 2);
 
-// three.js shim — replace heavy 3D library with no-op stubs (XR not used in demo)
-let threeShimPath = path.join(ROOT, 'demo', 'three-shim.js');
-let threeShimPlugin = {
-  name: 'three-shim',
-  setup(build) {
-    build.onResolve({ filter: /^three$/ }, () => ({ path: threeShimPath }));
-  },
-};
-
-try {
-  // Bundle demo-adapter.js (loaded first, patches fetch/WebSocket)
-  let adapterResult = await esbuild.build({
-    entryPoints: [path.join(ROOT, 'demo', 'demo-adapter.js')],
-    bundle: true,
-    format: 'esm',
-    outfile: path.join(DIST, 'js', 'demo-adapter.bundle.js'),
-    external: nodeExternals,
-    plugins: [mockDataPlugin, threeShimPlugin],
-    logLevel: 'warning',
-    target: 'es2022',
-    minify: true,
-    sourcemap: false,
-  });
-
-  // Bundle web/app.js (main application)
-  // Single bundle matches the CV architecture — all code in one file,
-  // with lazy execution via internal import() calls in symbiote-ui.
-  let appResult = await esbuild.build({
-    entryPoints: [path.join(ROOT, 'web', 'app.js')],
-    bundle: true,
-    format: 'esm',
-    outfile: path.join(DIST, 'js', 'app.bundle.js'),
-    external: nodeExternals,
-    plugins: [threeShimPlugin],
-    logLevel: 'warning',
-    target: 'es2022',
-    minify: true,
-    sourcemap: false,
-  });
-
-  let adapterErrors = adapterResult.errors?.length || 0;
-  let appErrors = appResult.errors?.length || 0;
-  if (adapterErrors || appErrors) {
-    console.error(`  ✗ esbuild errors: adapter=${adapterErrors}, app=${appErrors}`);
-    process.exit(1);
-  }
-  console.log('  ✓ Bundles created');
-} catch (err) {
-  console.error('  ✗ esbuild failed:', err.message);
-  process.exit(1);
-} finally {
-  // Clean up temp file
-  try { fs.unlinkSync(tempMockPath); } catch {}
-}
-
-// ── Report bundle sizes ─────────────────────────────────────────
-let adapterSize = fs.statSync(path.join(DIST, 'js', 'demo-adapter.bundle.js')).size;
-let appSize = fs.statSync(path.join(DIST, 'js', 'app.bundle.js')).size;
-console.log(`    demo-adapter: ${(adapterSize / 1024).toFixed(0)} KB`);
-console.log(`    app:          ${(appSize / 1024).toFixed(0)} KB`);
-
-// ── Generate index.html ─────────────────────────────────────────
+// ── Step 7: Generate index.html ─────────────────────────────────
 console.log('  → Generating index.html');
+
+let iconsCssPath = `${basePath}packages/symbiote-ui/icons/material-symbols.css`;
+let themeCssPath = `${basePath}packages/symbiote-ui/themes/default-provider.css`;
+let styleCssPath = `${basePath}web/style.css`;
 
 let indexHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -253,11 +251,14 @@ let indexHtml = `<!DOCTYPE html>
 <meta property="og:title" content="Agent Portal — Live Demo">
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-	<link rel="stylesheet" href="${basePath}assets/icons/material-symbols.css">
-	<link rel="stylesheet" href="${basePath}assets/default-provider.css">
-	<link rel="stylesheet" href="${basePath}assets/style.css">
-<script type="module" src="${basePath}js/demo-adapter.bundle.js"></script>
+\t<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+\t<link rel="stylesheet" href="${iconsCssPath}">
+\t<link rel="stylesheet" href="${themeCssPath}">
+\t<link rel="stylesheet" href="${styleCssPath}">
+<script type="importmap">
+${importMapJson}
+</script>
+<script type="module" src="${basePath}demo/demo-adapter.js"></script>
 </head>
 <body>
 <div class="app-shell">
@@ -274,16 +275,12 @@ let indexHtml = `<!DOCTYPE html>
 <project-tabs></project-tabs>
 <div id="main-layout" class="app-workspace" data-workspace-host></div>
 </div>
-<script type="module" src="${basePath}js/app.bundle.js"></script>
+<script type="module" src="${basePath}web/app.js"></script>
 </body>
 </html>`;
 
 fs.writeFileSync(path.join(DIST, 'index.html'), indexHtml);
-
-// ── GitHub Pages: 404.html fallback for SPA routing ──────────────
 fs.writeFileSync(path.join(DIST, '404.html'), indexHtml);
-
-// ── .nojekyll to prevent GitHub Pages Jekyll processing ──────────
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '');
 
 // ── Summary ──────────────────────────────────────────────────────
@@ -295,4 +292,5 @@ function countFiles(dir) {
   }
 }
 countFiles(DIST);
-console.log(`\n  ✅ Built ${totalFiles} files → dist/\n`);
+console.log(`\n  ✅ Built ${totalFiles} files → dist/`);
+console.log(`  Import map: ${Object.keys(importMap.imports).length} entries\n`);

@@ -4,3 +4,9 @@
 [submodule "packages/project-graph-mcp"]
 	path = packages/project-graph-mcp
 	url = https://github.com/rnd-pro/project-graph-mcp.git
+[submodule "packages/symbiote-ui"]
+	path = packages/symbiote-ui
+	url = https://github.com/rnd-pro/symbiote-ui.git
+[submodule "packages/symbiote-engine"]
+	path = packages/symbiote-engine
+	url = https://github.com/rnd-pro/symbiote-engine.git
