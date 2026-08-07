@@ -1,7 +1,0 @@
-node_modules/
-coverage/
-tmp/
-*.log
-*.tgz
-.DS_Store
-.agent-portal

@@ -1,9 +1,0 @@
-{
-  "$comment": "Accepted debt ceiling for `node cli.js audit` warnings, per type. The audit surfaces existing hardcoded geometry/motion/color as warnings (not build-breaking errors); this baseline ratchets it down. A new component that adds hardcoded values pushes a count above its ceiling and fails audit-regression.test.js. Lower these numbers when debt is paid down; never raise them to make a new violation pass — fix the violation instead.",
-  "maxWarnings": {
-    "geometry-lint": 37,
-    "motion-lint": 4,
-    "css-lint": 101,
-    "component-sync": 0
-  }
-}

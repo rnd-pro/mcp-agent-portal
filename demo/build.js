@@ -2,8 +2,9 @@
 /**
  * demo/build.js — Assemble the demo dist for GitHub Pages deployment.
  *
- * Copies all required files into dist/ with correct relative paths.
- * Rewrites the importmap and asset paths for the GitHub Pages base path.
+ * Uses esbuild to bundle web/app.js and demo/demo-adapter.js into single
+ * ESM bundles, resolving all bare-specifier imports from node_modules.
+ * Static assets (CSS, icons, fonts) are copied directly.
  *
  * Usage:
  *   node demo/build.js                     # builds to dist/
@@ -12,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import esbuild from 'esbuild';
 
 let __dirname = path.dirname(fileURLToPath(import.meta.url));
 let ROOT = path.join(__dirname, '..');
@@ -33,6 +35,7 @@ console.log(`  Base path: ${basePath}\n`);
 if (fs.existsSync(DIST)) {
   fs.rmSync(DIST, { recursive: true });
 }
+fs.mkdirSync(DIST, { recursive: true });
 
 // ── Copy helpers ─────────────────────────────────────────────────
 
@@ -65,22 +68,30 @@ function webFilter(name) {
   return !SKIP_DIRS.has(name) && !name.endsWith('.log') && !name.endsWith('.tgz');
 }
 
-// ── Copy web/ ────────────────────────────────────────────────────
-console.log('  → Copying web/');
-copyDir(path.join(ROOT, 'web'), path.join(DIST, 'web'), webFilter);
+// ── Copy static assets ──────────────────────────────────────────
+// CSS, icons and fonts are loaded via <link> tags, not import — copy them.
+console.log('  → Copying static assets (CSS, icons, fonts)');
 
-// ── Copy src/iso/ (shared isomorphic modules used by web panels) ─
-console.log('  → Copying src/iso/');
-copyDir(path.join(ROOT, 'src', 'iso'), path.join(DIST, 'src', 'iso'), webFilter);
+// Material symbols CSS + font
+let iconsDir = path.join(ROOT, 'node_modules', 'symbiote-ui', 'icons');
+copyDir(iconsDir, path.join(DIST, 'assets', 'icons'), (name) => {
+  return name.endsWith('.css') || name.endsWith('.ttf') || name.endsWith('.woff2');
+});
 
-// ── Copy demo/ (adapter + mock data) ─────────────────────────────
-console.log('  → Copying demo/');
-for (let f of ['demo-adapter.js', 'mock-data.js']) {
-  copyFile(path.join(ROOT, 'demo', f), path.join(DIST, 'demo', f));
+// Default provider theme CSS
+let themeCss = path.join(ROOT, 'node_modules', 'symbiote-ui', 'themes', 'default-provider.css');
+if (fs.existsSync(themeCss)) {
+  copyFile(themeCss, path.join(DIST, 'assets', 'default-provider.css'));
 }
 
-// ── Inject README content into mock-data.js ──────────────────────
-console.log('  → Injecting README content into mock-data.js');
+// Web app styles
+let webStyleCss = path.join(ROOT, 'web', 'style.css');
+if (fs.existsSync(webStyleCss)) {
+  copyFile(webStyleCss, path.join(DIST, 'assets', 'style.css'));
+}
+
+// ── Prepare mock-data.js with README injection ───────────────────
+console.log('  → Preparing mock-data.js');
 
 function escapeForJsString(text) {
   return text
@@ -102,8 +113,9 @@ function resolveReadmePath(relPath) {
   return path.join(ROOT, relPath);
 }
 
-let mockPath = path.join(DIST, 'demo', 'mock-data.js');
-let mockSrc = fs.readFileSync(mockPath, 'utf-8');
+// Copy mock-data.js to a temp location for preprocessing
+let mockSrcPath = path.join(ROOT, 'demo', 'mock-data.js');
+let mockSrc = fs.readFileSync(mockSrcPath, 'utf-8');
 
 // 1. Inject main README.md → __README_CONTENT__
 let readmePath = path.join(ROOT, 'README.md');
@@ -124,44 +136,99 @@ mockSrc = mockSrc.replace(/__SUBREADME:([^_]+)__/g, (_match, relPath) => {
   return `*README not found: ${relPath}*`;
 });
 
-fs.writeFileSync(mockPath, mockSrc);
+// Write preprocessed mock-data to temp file for esbuild to consume
+let tempMockPath = path.join(ROOT, 'demo', '.mock-data-processed.js');
+fs.writeFileSync(tempMockPath, mockSrc);
 
-// ── Copy public Symbiote packages ────────────────────────────────
-// symbiote-ui: the npm package (alpha) is heavily outdated vs the repo.
-// A full copy of the repo source is vendored in demo/vendor-symbiote-ui/.
-// To update: clone rnd-pro/symbiote-ui and replace vendor-symbiote-ui/.
-console.log('  → Copying symbiote-ui (from vendored repo source)');
-copyDir(
-  path.join(ROOT, 'demo', 'vendor-symbiote-ui'),
-  path.join(DIST, 'packages', 'symbiote-ui'),
-  (name) => !SKIP_DIRS.has(name) && name !== '.git' && name !== 'package-lock.json',
-);
+// ── esbuild: Bundle app.js and demo-adapter.js ──────────────────
+console.log('  → Bundling with esbuild');
 
-// symbiote-engine: npm package is missing render-*.js files.
-// Full repo source is vendored in demo/vendor-symbiote-engine/.
-console.log('  → Copying symbiote-engine (from vendored repo source)');
-copyDir(
-  path.join(ROOT, 'demo', 'vendor-symbiote-engine'),
-  path.join(DIST, 'packages', 'symbiote-engine'),
-  (name) => !SKIP_DIRS.has(name) && name !== '.git' && name !== 'package-lock.json',
-);
+// Plugin to redirect mock-data.js imports to the preprocessed version
+let mockDataPlugin = {
+  name: 'mock-data-redirect',
+  setup(build) {
+    build.onResolve({ filter: /\.\/mock-data\.js$/ }, (args) => {
+      if (args.importer.includes('demo-adapter')) {
+        return { path: tempMockPath };
+      }
+    });
+  },
+};
 
-// ── Copy node_modules/@symbiotejs/symbiote/ ──────────────────────
-console.log('  → Copying @symbiotejs/symbiote');
-copyDir(
-  path.join(ROOT, 'node_modules', '@symbiotejs', 'symbiote'),
-  path.join(DIST, 'node_modules', '@symbiotejs', 'symbiote'),
-  (name) => name !== 'node_modules' && name !== '.git',
-);
+// Node builtins that appear in symbiote-engine server-side code but are
+// never reached in the browser demo — mark them as external so esbuild
+// does not attempt to bundle them.
+let nodeExternals = [
+  'node:fs', 'node:path', 'node:url', 'node:child_process', 'node:http',
+  'node:https', 'node:net', 'node:os', 'node:stream', 'node:events',
+  'node:crypto', 'node:util', 'node:worker_threads', 'node:readline',
+  'node:process', 'node:buffer', 'node:assert', 'node:vm',
+  'fs', 'path', 'url', 'child_process', 'http', 'https', 'net', 'os',
+  'stream', 'events', 'crypto', 'util', 'worker_threads', 'readline',
+  'process', 'buffer', 'assert', 'vm',
+  // Server-side dependencies that won't work in browser
+  'ws', 'telegraf', '@modelcontextprotocol/sdk',
+  // linkedom is used for SSR only
+  'linkedom',
+  // jsda-kit is server tooling
+  'jsda-kit', 'jsda-kit/node/md.js',
+  // library-pages is server tooling
+  'library-pages/client', 'library-pages/jsda', 'library-pages/search',
+  'library-pages/shell', 'library-pages/url',
+  // ajv is server validation
+  'ajv/dist/2020.js',
+];
 
-console.log('  → Copying three');
-copyDir(
-  path.join(ROOT, 'node_modules', 'three'),
-  path.join(DIST, 'vendor', 'three'),
-  (name) => name !== 'node_modules' && name !== '.git',
-);
+try {
+  // Bundle demo-adapter.js (loaded first, patches fetch/WebSocket)
+  let adapterResult = await esbuild.build({
+    entryPoints: [path.join(ROOT, 'demo', 'demo-adapter.js')],
+    bundle: true,
+    format: 'esm',
+    outfile: path.join(DIST, 'js', 'demo-adapter.bundle.js'),
+    external: nodeExternals,
+    plugins: [mockDataPlugin],
+    logLevel: 'warning',
+    target: 'es2022',
+    minify: false,
+    sourcemap: false,
+  });
 
-// ── Generate index.html with correct base paths ──────────────────
+  // Bundle web/app.js (main application)
+  let appResult = await esbuild.build({
+    entryPoints: [path.join(ROOT, 'web', 'app.js')],
+    bundle: true,
+    format: 'esm',
+    outfile: path.join(DIST, 'js', 'app.bundle.js'),
+    external: nodeExternals,
+    logLevel: 'warning',
+    target: 'es2022',
+    minify: false,
+    sourcemap: false,
+  });
+
+  let adapterErrors = adapterResult.errors?.length || 0;
+  let appErrors = appResult.errors?.length || 0;
+  if (adapterErrors || appErrors) {
+    console.error(`  ✗ esbuild errors: adapter=${adapterErrors}, app=${appErrors}`);
+    process.exit(1);
+  }
+  console.log('  ✓ Bundles created');
+} catch (err) {
+  console.error('  ✗ esbuild failed:', err.message);
+  process.exit(1);
+} finally {
+  // Clean up temp file
+  try { fs.unlinkSync(tempMockPath); } catch {}
+}
+
+// ── Report bundle sizes ─────────────────────────────────────────
+let adapterSize = fs.statSync(path.join(DIST, 'js', 'demo-adapter.bundle.js')).size;
+let appSize = fs.statSync(path.join(DIST, 'js', 'app.bundle.js')).size;
+console.log(`    demo-adapter: ${(adapterSize / 1024).toFixed(0)} KB`);
+console.log(`    app:          ${(appSize / 1024).toFixed(0)} KB`);
+
+// ── Generate index.html ─────────────────────────────────────────
 console.log('  → Generating index.html');
 
 let indexHtml = `<!DOCTYPE html>
@@ -175,46 +242,10 @@ let indexHtml = `<!DOCTYPE html>
 <meta property="og:description" content="Interactive demo of the unified AI agent control plane. Explore MCP tools, multi-agent orchestration, and real-time monitoring.">
 <meta property="og:type" content="website">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-	<link rel="stylesheet" href="${basePath}packages/symbiote-ui/icons/material-symbols.css">
-	<link rel="stylesheet" href="${basePath}packages/symbiote-ui/themes/default-provider.css">
-	<link rel="stylesheet" href="${basePath}web/style.css">
-<script type="importmap">
-    {
-      "imports": {
-        "@symbiotejs/symbiote": "${basePath}node_modules/@symbiotejs/symbiote/core/index.js",
-        "@symbiotejs/symbiote/utils": "${basePath}node_modules/@symbiotejs/symbiote/utils/index.js",
-        "@symbiotejs/symbiote/": "${basePath}node_modules/@symbiotejs/symbiote/",
-        "symbiote-ui": "${basePath}packages/symbiote-ui/index.js",
-        "symbiote-ui/core": "${basePath}packages/symbiote-ui/core/index.js",
-        "symbiote-ui/ui": "${basePath}packages/symbiote-ui/ui/index.js",
-        "symbiote-ui/graph": "${basePath}packages/symbiote-ui/graph/index.js",
-        "symbiote-ui/board": "${basePath}packages/symbiote-ui/board/index.js",
-        "symbiote-ui/locale": "${basePath}packages/symbiote-ui/locale/index.js",
-        "symbiote-ui/layout": "${basePath}packages/symbiote-ui/layout/index.js",
-        "symbiote-ui/runtime": "${basePath}packages/symbiote-ui/runtime/index.js",
-        "symbiote-ui/runtime/product-context": "${basePath}packages/symbiote-ui/runtime/product-context.js",
-        "symbiote-ui/manifest": "${basePath}packages/symbiote-ui/manifest/index.js",
-        "symbiote-ui/xr": "${basePath}packages/symbiote-ui/xr/index.js",
-        "symbiote-ui/webmcp": "${basePath}packages/symbiote-ui/webmcp.js",
-        "symbiote-ui/themes/Theme": "${basePath}packages/symbiote-ui/themes/Theme.js",
-        "symbiote-ui/themes/ThemeFactory": "${basePath}packages/symbiote-ui/themes/ThemeFactory.js",
-        "symbiote-ui/themes/Motion": "${basePath}packages/symbiote-ui/themes/Motion.js",
-        "symbiote-ui/display/highlight": "${basePath}packages/symbiote-ui/display/highlight.js",
-        "symbiote-ui/display/markdown-formatter": "${basePath}packages/symbiote-ui/display/markdown-formatter.js",
-        "symbiote-ui/display/format-utils": "${basePath}packages/symbiote-ui/display/format-utils.js",
-        "symbiote-ui/display/icons": "${basePath}packages/symbiote-ui/display/icons.js",
-        "symbiote-ui/display/code-block": "${basePath}packages/symbiote-ui/display/CodeBlock/CodeBlock.js",
-        "symbiote-ui/display/event-feed-adapter": "${basePath}packages/symbiote-ui/display/event-feed-adapter.js",
-        "symbiote-ui/": "${basePath}packages/symbiote-ui/",
-        "symbiote-engine": "${basePath}packages/symbiote-engine/index.js",
-        "symbiote-engine/contracts": "${basePath}packages/symbiote-engine/contracts/index.js",
-        "symbiote-engine/render-captions": "${basePath}packages/symbiote-engine/render-captions.js",
-        "symbiote-engine/": "${basePath}packages/symbiote-engine/",
-        "three": "${basePath}vendor/three/build/three.module.js?v=0-184-0"
-      }
-    }
-  </script>
-<script type="module" src="${basePath}demo/demo-adapter.js"></script>
+	<link rel="stylesheet" href="${basePath}assets/icons/material-symbols.css">
+	<link rel="stylesheet" href="${basePath}assets/default-provider.css">
+	<link rel="stylesheet" href="${basePath}assets/style.css">
+<script type="module" src="${basePath}js/demo-adapter.bundle.js"></script>
 </head>
 <body>
 <div class="app-shell">
@@ -231,7 +262,7 @@ let indexHtml = `<!DOCTYPE html>
 <project-tabs></project-tabs>
 <div id="main-layout" class="app-workspace" data-workspace-host></div>
 </div>
-<script type="module" src="${basePath}web/app.js"></script>
+<script type="module" src="${basePath}js/app.bundle.js"></script>
 </body>
 </html>`;
 
