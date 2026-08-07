@@ -203,16 +203,14 @@ try {
     sourcemap: false,
   });
 
-  // Bundle web/app.js (main application) with code-splitting
-  // Dynamic import() calls in app.js produce separate lazy chunks
+  // Bundle web/app.js (main application)
+  // Single bundle matches the CV architecture — all code in one file,
+  // with lazy execution via internal import() calls in symbiote-ui.
   let appResult = await esbuild.build({
     entryPoints: [path.join(ROOT, 'web', 'app.js')],
     bundle: true,
     format: 'esm',
-    splitting: true,
-    outdir: path.join(DIST, 'js'),
-    entryNames: 'app.bundle',
-    chunkNames: 'chunk-[hash]',
+    outfile: path.join(DIST, 'js', 'app.bundle.js'),
     external: nodeExternals,
     plugins: [threeShimPlugin],
     logLevel: 'warning',
