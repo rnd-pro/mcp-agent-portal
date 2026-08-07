@@ -222,10 +222,24 @@ let importMap = {
     // symbiote-ui — UI library (submodule)
     'symbiote-ui': `${basePath}packages/symbiote-ui/index.js`,
     'symbiote-ui/': `${basePath}packages/symbiote-ui/`,
+    // Extensionless subpath imports (directory → index.js, file → file.js)
+    'symbiote-ui/core': `${basePath}packages/symbiote-ui/core/index.js`,
+    'symbiote-ui/ui': `${basePath}packages/symbiote-ui/ui/index.js`,
+    'symbiote-ui/graph': `${basePath}packages/symbiote-ui/graph/index.js`,
+    'symbiote-ui/locale': `${basePath}packages/symbiote-ui/locale/index.js`,
+    'symbiote-ui/xr': `${basePath}packages/symbiote-ui/xr/index.js`,
+    'symbiote-ui/manifest': `${basePath}packages/symbiote-ui/manifest/index.js`,
+    'symbiote-ui/display/event-feed-adapter': `${basePath}packages/symbiote-ui/display/event-feed-adapter.js`,
+    'symbiote-ui/display/format-utils': `${basePath}packages/symbiote-ui/display/format-utils.js`,
+    'symbiote-ui/display/highlight': `${basePath}packages/symbiote-ui/display/highlight.js`,
+    'symbiote-ui/display/icons': `${basePath}packages/symbiote-ui/display/icons.js`,
+    'symbiote-ui/display/markdown-formatter': `${basePath}packages/symbiote-ui/display/markdown-formatter.js`,
 
     // symbiote-engine — runtime engine (submodule)
     'symbiote-engine': `${basePath}packages/symbiote-engine/index.js`,
     'symbiote-engine/': `${basePath}packages/symbiote-engine/`,
+    'symbiote-engine/contracts': `${basePath}packages/symbiote-engine/contracts/index.js`,
+    'symbiote-engine/render-captions': `${basePath}packages/symbiote-engine/render-captions.js`,
 
     // three.js — shimmed (XR not used in demo)
     'three': `${basePath}packages/three-shim.js`,
