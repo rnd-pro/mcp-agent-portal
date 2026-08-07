@@ -2,8 +2,18 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
+  RENDER_PERFORMANCE_PROOF_VERSION,
+  RENDER_SEGMENT_SEAM_PROOF_VERSION,
+  RENDER_STREAM_PTS_PROOF_VERSION,
+  RENDER_WORKER_CAPACITY_PROOF_VERSION,
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
+  buildRenderFrameCompletenessProof,
+  buildRenderPerformanceProof,
+  buildRenderSegmentSeamProof,
+  buildRenderStreamPtsProof,
+  buildRenderWorkerCapacityProof,
   countClipOverlaps,
   durationDriftMs,
   findProbeStream,
@@ -11,6 +21,145 @@ import {
   renderAuthorityDurationSec,
   streamDurationSec,
 } from '../render-proof.js';
+
+function seamSegment(id, start, end, boundary, overrides = {}) {
+  let segment = {
+    id,
+    tier: 'replayable-segment',
+    container: 'mp4',
+    videoCodec: 'h264',
+    audioCodec: null,
+    width: 1920,
+    height: 1080,
+    dpr: 1,
+    pixelFormat: 'yuv420p',
+    colorSpace: 'bt709',
+    colorPrimaries: 'bt709',
+    colorTransfer: 'bt709',
+    colorRange: 'tv',
+    chromaLocation: 'left',
+    frameRate: '30/1',
+    timeBase: '1/30',
+    frameDurationTicks: 1,
+    frameRange: { start, end },
+    captureRange: { start, end },
+    prerollFrames: 0,
+    postrollFrames: 0,
+    frameCount: end - start + 1,
+    timeRange: { startTicks: start, endTicks: end },
+    firstPts: start,
+    lastPts: end,
+    keyframePts: [start],
+    settingsHash: `sha256:${'a'.repeat(16)}`,
+    sourceHash: 'b'.repeat(16),
+    videoExtradataHash: 'c'.repeat(16),
+    streamLayoutHash: 'd'.repeat(16),
+    ...overrides,
+  };
+  if (boundary) {
+    segment.boundary = { version: 'render-seam-input/1', overlapOwner: 'trailing', ...boundary };
+  }
+  return segment;
+}
+
+test('frame completeness proof reuses strict completion semantics and reports every defect class', () => {
+  let pass = buildRenderFrameCompletenessProof({
+    expectedFrameCount: 4,
+    frames: [{ index: 0 }, { index: 1 }, { index: 2 }, { index: 3 }],
+  });
+  let fail = buildRenderFrameCompletenessProof({
+    expectedFrameCount: 4,
+    frames: [{ index: 0 }, { index: 2 }, { index: 2 }, { index: 1 }, { index: 9 }],
+  });
+
+  assert.equal(pass.version, RENDER_FRAME_COMPLETENESS_PROOF_VERSION);
+  assert.equal(pass.ok, true);
+  assert.equal(pass.contiguousFrameCount, 4);
+  assert.equal(fail.ok, false);
+  assert.deepEqual(fail.missingFrames, [3]);
+  assert.deepEqual(fail.duplicateFrames, [2]);
+  assert.deepEqual(fail.outOfRangeFrames, [{ position: 4, index: 9 }]);
+  assert.deepEqual(fail.reorderedTransitions, [{ position: 3, previous: 2, index: 1 }]);
+});
+
+test('performance proof derives deterministic throughput and resource verdicts from samples', () => {
+  let pass = buildRenderPerformanceProof({
+    frameCount: 300,
+    fps: 30,
+    captureDurationMs: 9000,
+    encodeDurationMs: 8000,
+    resourceSamples: [{ atMs: 0, rssBytes: 1000 }, { atMs: 5000, rssBytes: 1500 }],
+    previewSamples: [{ atMs: 0, decodedBytes: 400 }, { atMs: 5000, decodedBytes: 800 }],
+    thresholds: {
+      minCaptureFps: 30,
+      minEncodeFps: 30,
+      maxCaptureRealtimeRatio: 1,
+      maxPeakRssBytes: 2000,
+      maxPreviewWorkingSetBytes: 1000,
+    },
+  });
+  let fail = buildRenderPerformanceProof({
+    frameCount: 300,
+    fps: 30,
+    captureDurationMs: 12000,
+    encodeDurationMs: 15000,
+    peakRssBytes: 3000,
+    peakPreviewWorkingSetBytes: 1200,
+    thresholds: {
+      minCaptureFps: 30,
+      minEncodeFps: 30,
+      maxCaptureRealtimeRatio: 1,
+      maxPeakRssBytes: 2000,
+      maxPreviewWorkingSetBytes: 1000,
+    },
+  });
+
+  assert.equal(pass.version, RENDER_PERFORMANCE_PROOF_VERSION);
+  assert.equal(pass.ok, true);
+  assert.equal(pass.captureFps, 33.333);
+  assert.equal(pass.encodeFps, 37.5);
+  assert.equal(pass.peakRssBytes, 1500);
+  assert.equal(pass.peakPreviewWorkingSetBytes, 800);
+  assert.equal(fail.ok, false);
+  assert.deepEqual(Object.values(fail.checks), [false, false, false, false, false]);
+});
+
+test('performance proof fails closed when locked resource samples are absent', () => {
+  let proof = buildRenderPerformanceProof({
+    frameCount: 300,
+    fps: 30,
+    captureDurationMs: 9000,
+    encodeDurationMs: 8000,
+    requireResourceSamples: true,
+  });
+
+  assert.equal(proof.ok, false);
+  assert.equal(proof.checks.resourceSamplesRecorded, false);
+  assert.equal(proof.checks.previewSamplesRecorded, false);
+});
+
+test('worker capacity proof admits or rejects measured pools without silent downgrade', () => {
+  let base = {
+    requestedWorkers: 4,
+    totalMemoryBytes: 8_000,
+    systemReserveBytes: 2_000,
+    fixedOverheadBytes: 500,
+    perWorkerPeakRssBytes: 1_000,
+    safetyFactor: 1.25,
+    maxPerWorkerRssBytes: 3_000,
+  };
+  let pass = buildRenderWorkerCapacityProof({ ...base, availableMemoryBytes: 6_000 });
+  let fail = buildRenderWorkerCapacityProof({ ...base, availableMemoryBytes: 4_000 });
+
+  assert.equal(pass.version, RENDER_WORKER_CAPACITY_PROOF_VERSION);
+  assert.equal(pass.ok, true);
+  assert.equal(pass.admittedWorkers, 4);
+  assert.equal(pass.requiredMemoryBytes, 5_500);
+  assert.equal(fail.ok, false);
+  assert.equal(fail.admittedWorkers, 2);
+  assert.equal(fail.requestedWorkers, 4);
+  assert.match(fail.errors.join('\n'), /availableMemoryBytes/);
+});
 
 function ffprobe({ videoDuration = '1.000000', audioDuration = '1.000000', videoCodec = 'h264', audioCodec = 'aac' } = {}) {
   let streams = [
@@ -259,4 +408,192 @@ test('render proof falls through authority sources when includeAudio has no audi
 
   assert.equal(proof.ok, true);
   assert.equal(proof.expectedDurationMs, 1500);
+});
+
+test('segment seam proof accepts an exact seam with proven boundary pixels and correct ownership', () => {
+  let proof = buildRenderSegmentSeamProof({
+    segments: [
+      seamSegment('a', 0, 2),
+      seamSegment('b', 3, 5, { exactPixelsMatch: true, overlapOwner: 'trailing' }),
+    ],
+    policy: { type: 'exact', owner: 'trailing' },
+  });
+  assert.equal(proof.version, RENDER_SEGMENT_SEAM_PROOF_VERSION);
+  assert.equal(proof.ok, true);
+  assert.equal(proof.seams.length, 1);
+  assert.equal(proof.seams[0].ok, true);
+});
+
+test('segment seam proof rejects overlap, ownership mismatch and unproven exact seams', () => {
+  let proof = buildRenderSegmentSeamProof({
+    segments: [
+      seamSegment('a', 0, 5),
+      seamSegment('b', 3, 8, { overlapOwner: 'leading' }),
+    ],
+    policy: { type: 'exact', owner: 'trailing' },
+  });
+  assert.equal(proof.ok, false);
+  let reasons = proof.seams[0].errors;
+  assert.ok(reasons.includes('pts-overlap'));
+  assert.ok(reasons.includes('overlap-ownership-mismatch'));
+  assert.ok(reasons.includes('exact-seam-unproven'));
+});
+
+test('segment seam proof enforces the perceptual ssim threshold', () => {
+  let pass = buildRenderSegmentSeamProof({
+    segments: [seamSegment('a', 0, 2), seamSegment('b', 3, 5, { ssim: 0.99 })],
+    policy: { type: 'perceptual', owner: 'trailing', requiredSsim: 0.98 },
+  });
+  assert.equal(pass.ok, true);
+  let fail = buildRenderSegmentSeamProof({
+    segments: [seamSegment('a', 0, 2), seamSegment('b', 3, 5, { ssim: 0.5 })],
+    policy: { type: 'perceptual', owner: 'trailing', requiredSsim: 0.98 },
+  });
+  assert.equal(fail.ok, false);
+  assert.ok(fail.seams[0].errors.includes('perceptual-ssim-below-threshold'));
+});
+
+test('segment seam proof rejects a duplicate boundary PTS', () => {
+  let proof = buildRenderSegmentSeamProof({
+    segments: [
+      seamSegment('a', 0, 3, { exactPixelsMatch: true, overlapOwner: 'trailing' }),
+      seamSegment('b', 4, 7, { exactPixelsMatch: true, overlapOwner: 'trailing' }, {
+        firstPts: 3,
+        lastPts: 6,
+        timeRange: { startTicks: 3, endTicks: 6 },
+        keyframePts: [3],
+      }),
+    ],
+    policy: { type: 'exact', owner: 'trailing' },
+  });
+  assert.equal(proof.ok, false);
+  assert.ok(proof.seams[0].errors.includes('duplicate-boundary-pts'));
+});
+
+test('segment seam proof rejects a boundary missing its version or owner', () => {
+  let next = seamSegment('b', 3, 5, { exactPixelsMatch: true });
+  assert.throws(() => buildRenderSegmentSeamProof({
+    segments: [seamSegment('a', 0, 2), { ...next, boundary: { overlapOwner: 'trailing', exactPixelsMatch: true } }],
+    policy: { type: 'exact', owner: 'trailing' },
+  }), /version/);
+  assert.throws(() => buildRenderSegmentSeamProof({
+    segments: [seamSegment('a', 0, 2), { ...next, boundary: { version: 'render-seam-input/1', exactPixelsMatch: true } }],
+    policy: { type: 'exact', owner: 'trailing' },
+  }), /overlapOwner/);
+});
+
+test('segment seam proof keeps canonical ownership singular across three overlapping capture windows', () => {
+  let proof = buildRenderSegmentSeamProof({
+    segments: [
+      seamSegment('a', 0, 2, null, { captureRange: { start: 0, end: 4 }, prerollFrames: 0, postrollFrames: 2 }),
+      seamSegment('b', 3, 5, { exactPixelsMatch: true }, {
+        captureRange: { start: 1, end: 7 }, prerollFrames: 2, postrollFrames: 2,
+      }),
+      seamSegment('c', 6, 8, { exactPixelsMatch: true }, {
+        captureRange: { start: 4, end: 10 }, prerollFrames: 2, postrollFrames: 2,
+      }),
+    ],
+    policy: { type: 'exact', owner: 'trailing' },
+  });
+  assert.equal(proof.ok, true);
+  assert.deepEqual(proof.unownedFrames, []);
+  assert.deepEqual(proof.doubleOwnedFrames, []);
+});
+
+test('segment seam proof rejects a canonical logical frame owned by no segment', () => {
+  let proof = buildRenderSegmentSeamProof({
+    segments: [
+      seamSegment('a', 0, 2),
+      seamSegment('b', 5, 7, { exactPixelsMatch: true }, {
+        firstPts: 5, lastPts: 7, timeRange: { startTicks: 5, endTicks: 7 }, keyframePts: [5],
+      }),
+    ],
+    policy: { type: 'exact', owner: 'trailing' },
+  });
+  assert.equal(proof.ok, false);
+  assert.ok(proof.errors.includes('logical-frame-unowned'));
+  assert.deepEqual(proof.unownedFrames, [3, 4]);
+});
+
+test('stream PTS proof fails closed on an empty frame stream', () => {
+  let proof = buildRenderStreamPtsProof({ ptsStep: 100, frames: [] });
+  assert.equal(proof.ok, false);
+  assert.ok(proof.errors.includes('empty-frame-stream'));
+});
+
+test('stream PTS proof passes a static scene with unique identity, index and PTS', () => {
+  let proof = buildRenderStreamPtsProof({
+    ptsStep: 100,
+    frames: [
+      { index: 0, pts: 0, identity: 'f0', pixelHash: 'static' },
+      { index: 1, pts: 100, identity: 'f1', pixelHash: 'static' },
+      { index: 2, pts: 200, identity: 'f2', pixelHash: 'static' },
+      { index: 3, pts: 300, identity: 'f3', pixelHash: 'moved' },
+    ],
+  });
+  assert.equal(proof.version, RENDER_STREAM_PTS_PROOF_VERSION);
+  assert.equal(proof.ok, true);
+  assert.deepEqual(proof.errors, []);
+  assert.equal(proof.staticRuns.length, 1);
+  assert.deepEqual(proof.staticRuns[0].positions, [0, 1, 2]);
+});
+
+test('stream PTS proof fails closed when the cadence step is missing', () => {
+  let proof = buildRenderStreamPtsProof({
+    frames: [{ index: 0, pts: 0, identity: 'f0' }, { index: 1, pts: 100, identity: 'f1' }],
+  });
+  assert.equal(proof.ok, false);
+  assert.ok(proof.errors.includes('missing-cadence-evidence'));
+});
+
+test('stream PTS proof rejects a frame that is missing an identity', () => {
+  let proof = buildRenderStreamPtsProof({
+    ptsStep: 100,
+    frames: [
+      { index: 0, pts: 0, identity: 'f0' },
+      { index: 1, pts: 100, identity: '' },
+    ],
+  });
+  assert.equal(proof.ok, false);
+  assert.equal(proof.missingIdentities.length, 1);
+});
+
+test('stream PTS proof rejects an index gap in the contiguous cadence', () => {
+  let proof = buildRenderStreamPtsProof({
+    ptsStep: 100,
+    frames: [
+      { index: 0, pts: 0, identity: 'f0' },
+      { index: 2, pts: 100, identity: 'f1' },
+    ],
+  });
+  assert.equal(proof.ok, false);
+  assert.equal(proof.indexGaps.length, 1);
+});
+
+test('stream PTS proof rejects a PTS gap against the exact cadence', () => {
+  let proof = buildRenderStreamPtsProof({
+    ptsStep: 100,
+    frames: [
+      { index: 0, pts: 0, identity: 'f0' },
+      { index: 1, pts: 250, identity: 'f1' },
+    ],
+  });
+  assert.equal(proof.ok, false);
+  assert.equal(proof.ptsGaps.length, 1);
+});
+
+test('stream PTS proof rejects duplicate PTS, duplicate identity and reordering', () => {
+  let proof = buildRenderStreamPtsProof({
+    ptsStep: 50,
+    frames: [
+      { index: 0, pts: 0, identity: 'f0', pixelHash: 'a' },
+      { index: 1, pts: 0, identity: 'f0', pixelHash: 'b' },
+      { index: 2, pts: 50, identity: 'f2', pixelHash: 'c' },
+      { index: 3, pts: 40, identity: 'f3', pixelHash: 'd' },
+    ],
+  });
+  assert.equal(proof.ok, false);
+  assert.equal(proof.duplicatePts.length, 1);
+  assert.equal(proof.duplicateIdentities.length, 1);
+  assert.ok(proof.ptsOverlaps.length >= 1);
 });

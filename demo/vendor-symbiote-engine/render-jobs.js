@@ -62,6 +62,16 @@ function errorFromAbort(signal) {
   return error;
 }
 
+function renderErrorRecord(error) {
+  let record = { message: error?.message || String(error), code: error?.code };
+  if (isObject(error?.proof)) {
+    let proof = cloneJson(error.proof);
+    delete proof.paths;
+    record.proof = proof;
+  }
+  return record;
+}
+
 function stageFor(type, extra = {}) {
   if (type === 'render-job:accepted') return 'accepted';
   if (type === 'render-job:queued') return 'queued';
@@ -268,7 +278,7 @@ export function createRenderProviderJobQueue(options = {}) {
           record.cancelReason = error?.message || errorFromAbort(controller.signal).message;
           await finish(record, 'canceled');
         } else {
-          let err = { message: error?.message || String(error), code: error?.code };
+          let err = renderErrorRecord(error);
           await finish(record, 'failed', { error: err });
         }
       } finally {

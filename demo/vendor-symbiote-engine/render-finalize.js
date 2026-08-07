@@ -1,5 +1,5 @@
 import { cleanString, finiteNonNegativeNumber, finitePositiveNumber, isObject } from './render-utils.js';
-import { resolveCaptionStyle } from './render-captions.js';
+import { resolveCaptionProfile } from './render-captions.js';
 
 function compact(value) {
   if (Array.isArray(value)) {
@@ -44,18 +44,22 @@ export function buildCaptionOverlayFilter(options = {}) {
   let captionsPath = rawPath(options.captionsPath || options.path);
   if (!captionsPath) return '';
   if (/\.ass$/i.test(captionsPath)) return `subtitles=${escapeFfmpegFilterValue(captionsPath)}`;
-  let style = resolveCaptionStyle(isObject(options.captionStyle) ? options.captionStyle : { preset: options.preset });
+  let style = resolveCaptionProfile(
+    isObject(options.captionStyle) ? options.captionStyle : { preset: options.preset },
+    options.width,
+    options.height
+  );
   let forceStyle = [
     `Fontname=${style.fontName}`,
-    `Fontsize=${Math.round(finitePositiveNumber(style.fontSize, 24))}`,
-    `PrimaryColour=${style.primaryColor}`,
-    `OutlineColour=${style.outlineColor}`,
-    `BackColour=${style.backColor}`,
+    `Fontsize=${style.fontSize}`,
+    `PrimaryColour=${style.primaryColorAss}`,
+    `OutlineColour=${style.outlineColorAss}`,
+    `BackColour=${style.backColorAss}`,
     'BorderStyle=3',
     'Outline=1',
     'Shadow=1',
     'Alignment=2',
-    `MarginV=${Math.round(finiteNonNegativeNumber(style.marginV, 70))}`,
+    `MarginV=${style.margins.bottom}`,
     'Bold=1',
   ].join(',');
   return `subtitles=${escapeFfmpegFilterValue(captionsPath)}:force_style='${escapeFfmpegFilterValue(forceStyle)}'`;
@@ -137,9 +141,10 @@ export function buildFrameSequenceEncodeArgs(options = {}) {
   }
   let filters = [
     resolvedScaleFilter,
-    buildCaptionOverlayFilter({ captionsPath: captionsBurnPath || captionsPath, captionStyle }),
+    buildCaptionOverlayFilter({ captionsPath: captionsBurnPath || captionsPath, captionStyle, width: safeWidth, height: safeHeight }),
   ].filter(Boolean);
   if (filters.length) args.push('-vf', filters.join(','));
+  args.push('-fps_mode', 'cfr', '-r', String(Math.max(1, Number(fps) || 1)));
   if (safeAudioPath) {
     args.push('-c:a', codecValue(audioCodec, 'aac'), '-b:a', codecValue(audioBitrate, '192k'));
   }
@@ -169,6 +174,44 @@ export function buildAudioConcatArgs(options = {}) {
     '-c:a', codecValue(audioCodec, 'pcm_s16le'),
     safeOutputPath,
   ];
+}
+
+export function buildSegmentConcatListLine(filePath) {
+  return buildAudioConcatListLine(filePath);
+}
+
+export function buildSegmentConcatArgs(options = {}) {
+  let {
+    concatListPath = '',
+    outputPath = '',
+    mode = 'stream-copy',
+    videoCodec = 'libx264',
+    audioCodec = 'aac',
+    crf = '18',
+    preset = 'fast',
+  } = options || {};
+  let safeConcatListPath = rawPath(concatListPath);
+  let safeOutputPath = rawPath(outputPath);
+  if (!safeConcatListPath) throw new Error('segment concat requires concatListPath');
+  if (!safeOutputPath) throw new Error('segment concat requires outputPath');
+  let safeMode = cleanString(mode, 'stream-copy') || 'stream-copy';
+  if (safeMode !== 'stream-copy' && safeMode !== 're-encode') {
+    throw new Error('segment concat mode must be stream-copy or re-encode');
+  }
+  let args = ['-y', '-f', 'concat', '-safe', '0', '-i', safeConcatListPath];
+  if (safeMode === 'stream-copy') {
+    args.push('-c', 'copy');
+  } else {
+    args.push(
+      '-c:v', codecValue(videoCodec, 'libx264'),
+      '-crf', String(crf ?? '18'),
+      '-preset', codecValue(preset, 'fast'),
+    );
+    let safeAudioCodec = cleanString(audioCodec, '');
+    if (safeAudioCodec) args.push('-c:a', safeAudioCodec);
+  }
+  args.push(safeOutputPath);
+  return args;
 }
 
 export function buildAudioOverlapMixArgs(options = {}) {

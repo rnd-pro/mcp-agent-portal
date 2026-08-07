@@ -1,6 +1,6 @@
 {
   "name": "symbiote-engine",
-  "version": "0.3.0-alpha.12",
+  "version": "0.3.0-alpha.14",
   "description": "Run portable workflow graphs with a domain-agnostic Symbiote runtime.",
   "private": false,
   "type": "module",
@@ -24,6 +24,9 @@
     "./render-progress": "./render-progress.js",
     "./render-workers": "./render-workers.js",
     "./render-jobs": "./render-jobs.js",
+    "./render-selection": "./render-selection.js",
+    "./render-segments": "./render-segments.js",
+    "./render-admission": "./render-admission.js",
     "./providers/*": "./providers/*",
     "./packs/*": "./packs/*",
     "./package.json": "./package.json"
@@ -32,13 +35,10 @@
     "symbiote-engine": "cli.js"
   },
   "scripts": {
-    "test": "BASE_PATH=${BASE_PATH:-/symbiote-engine} BASE_URL=${BASE_URL:-https://rnd-pro.github.io/symbiote-engine} npm run site:build && node --test --test-concurrency=1 tests/*.test.js",
-    "site:build": "rm -rf _site && jsda build && node site/build-discovery.js && node site/build-manifest.js",
-    "site:dev": "jsda ssg"
+    "test": "node --test tests/*.test.js"
   },
   "files": [
     "*.js",
-    "!project.cfg.js",
     "contracts/",
     "providers/",
     "packs/",
@@ -75,12 +75,5 @@
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
-  },
-  "devDependencies": {
-    "@symbiotejs/symbiote": "3.8.0-webmcp.2",
-    "jsda-kit": "1.6.0",
-    "library-pages": "0.1.0-alpha.13",
-    "linkedom": "0.18.13",
-    "symbiote-ui": "0.3.0-alpha.67"
   }
 }

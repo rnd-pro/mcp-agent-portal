@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { canonicalAudioSynthesisJson } from './contracts/audio-provider.js';
+
 const MIME_EXTENSIONS = Object.freeze({
   'audio/wav': 'wav',
   'audio/x-wav': 'wav',
@@ -40,6 +42,16 @@ function hashFromRef(artifactId) {
   let hash = id.slice('sha256:'.length);
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('artifactId must include a sha256 hex digest');
   return hash;
+}
+
+function sameJson(left, right) {
+  return canonicalAudioSynthesisJson(left) === canonicalAudioSynthesisJson(right);
+}
+
+function receiptConflictError() {
+  let error = new Error('content-addressed artifact already has a different synthesis receipt');
+  error.code = 'AUDIO_ARTIFACT_RECEIPT_CONFLICT';
+  return error;
 }
 
 async function readJsonIfExists(path) {
@@ -86,16 +98,24 @@ export function createFileArtifactStore(options = {}) {
       let metadataPath = join(root, `${hash}.meta.json`);
 
       await mkdir(root, { recursive: true });
-      await writeFile(path, bytes);
-
       let existing = await readJsonIfExists(metadataPath);
-      let sidecar = existing || {
+      if (existing?.synthesisReceipt && metadata.synthesisReceipt
+        && !sameJson(existing.synthesisReceipt, metadata.synthesisReceipt)) {
+        throw receiptConflictError();
+      }
+      let sidecar = existing ? {
+        ...existing,
+        ...(!existing.synthesisReceipt && metadata.synthesisReceipt
+          ? { synthesisReceipt: cloneJson(metadata.synthesisReceipt) }
+          : {}),
+      } : {
         ...cloneJson(metadata),
         artifactId,
         mimeType,
         bytes: bytes.length,
       };
-      if (!existing) {
+      await writeFile(path, bytes);
+      if (!existing || sidecar.synthesisReceipt !== existing.synthesisReceipt) {
         await writeFile(metadataPath, `${JSON.stringify(sidecar, null, 2)}\n`);
       }
 

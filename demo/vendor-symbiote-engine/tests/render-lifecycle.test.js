@@ -10,6 +10,7 @@ import {
   isRenderTimeout,
   isTerminalRenderStatus,
   mapRenderEventToProgress,
+  reconcileTerminalRenderStatus,
 } from '../render-lifecycle.js';
 
 test('render lifecycle maps provider events to engine progress phases', () => {
@@ -188,7 +189,7 @@ test('render lifecycle builds neutral queue snapshots with default sanitization'
     cacheHit: 'yes',
     cancelReason: 'operator canceled',
     cleanup: { removed: [{ path: 'frames' }] },
-    error: { message: 'provider failed', code: 'E_PROVIDER' },
+    error: { message: 'provider failed', code: 'E_PROVIDER', proof: { frame: 12, contentMatches: false } },
   }, { jobId: 'submitted-1' }), {
     jobId: 'render-1',
     status: 'failed',
@@ -198,7 +199,7 @@ test('render lifecycle builds neutral queue snapshots with default sanitization'
     timeoutReason: '',
     cancelReason: 'operator canceled',
     cleanup: { removed: [{ path: 'frames' }] },
-    error: { message: 'provider failed', code: 'E_PROVIDER' },
+    error: { message: 'provider failed', code: 'E_PROVIDER', proof: { frame: 12, contentMatches: false } },
   });
   assert.deepEqual(buildRenderQueueSnapshot({}, { jobId: 'submitted-1', status: 'queued' }), {
     jobId: 'submitted-1',
@@ -296,4 +297,27 @@ test('render lifecycle queue snapshots route only free-text fields through sanit
     { value: 'waited too long', fallback: 'render job timed out' },
     { value: 'operator canceled', fallback: '' },
   ]);
+});
+
+test('reconcile maps both the queue representation and the lifecycle patch of a timeout to one canonical status', () => {
+  assert.deepEqual(reconcileTerminalRenderStatus({ status: 'failed', timeout: true }), { status: 'timeout', timeout: true });
+  assert.deepEqual(reconcileTerminalRenderStatus({ status: 'timeout' }), { status: 'timeout', timeout: true });
+  let raw = reconcileTerminalRenderStatus({ code: 'RENDER_JOB_TIMEOUT', timeout: true });
+  assert.deepEqual(raw, { status: 'timeout', timeout: true });
+});
+
+test('reconcile never reports a timeout as both terminal failure and active cancellation', () => {
+  let reconciled = reconcileTerminalRenderStatus({ status: 'failed', timeout: true, canceled: true });
+  assert.equal(reconciled.status, 'timeout');
+  assert.equal(reconciled.canceled, undefined);
+  assert.equal('canceled' in reconciled, false);
+});
+
+test('reconcile distinguishes cancellation, success and plain failure', () => {
+  assert.deepEqual(reconcileTerminalRenderStatus({ status: 'canceled' }), { status: 'canceled', canceled: true });
+  assert.deepEqual(reconcileTerminalRenderStatus({ canceled: true }), { status: 'canceled', canceled: true });
+  assert.deepEqual(reconcileTerminalRenderStatus({ status: 'succeeded' }), { status: 'succeeded' });
+  let failure = reconcileTerminalRenderStatus({ status: 'failed', error: { message: 'boom' } });
+  assert.deepEqual(failure, { status: 'failed' });
+  assert.equal(failure.timeout, undefined);
 });

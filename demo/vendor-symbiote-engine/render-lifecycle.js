@@ -136,6 +136,22 @@ export function buildTerminalRenderJobPatch(errorOrRecord = {}, jobContext = {})
   };
 }
 
+export function reconcileTerminalRenderStatus(record = {}) {
+  let source = isObject(record) ? record : {};
+  let status = cleanString(source.status, '');
+  let classification = classifyRenderError(source);
+  if (status === 'timeout' || source.timeout === true || classification.kind === 'timeout') {
+    return { status: 'timeout', timeout: true };
+  }
+  if (status === 'canceled' || source.canceled === true || classification.kind === 'canceled') {
+    return { status: 'canceled', canceled: true };
+  }
+  if (status === 'succeeded') {
+    return { status: 'succeeded' };
+  }
+  return { status: 'failed' };
+}
+
 export function buildRenderQueueSnapshot(record = {}, submitted = {}, options = {}) {
   let sanitizeMessage = typeof options.sanitizeMessage === 'function'
     ? options.sanitizeMessage
@@ -148,6 +164,9 @@ export function buildRenderQueueSnapshot(record = {}, submitted = {}, options = 
     ? {
       message: sanitizeMessage(record.error?.message, String(record.error || failureFallback)),
       code: cleanString(record.error?.code, ''),
+      ...(record.error?.proof && typeof record.error.proof === 'object'
+        ? { proof: structuredClone(record.error.proof) }
+        : {}),
     }
     : null;
   let snapshot = {

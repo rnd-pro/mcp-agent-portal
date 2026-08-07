@@ -12,7 +12,9 @@ import {
   createRenderOutputCacheKey,
   createRenderSeedProjection,
   createRenderRetentionCleanup,
+  createRenderSegmentCacheKey,
   didCleanupRemovePaths,
+  invalidateRenderSegmentRanges,
   normalizeRenderSeed,
 } from '../render-cache.js';
 
@@ -350,4 +352,30 @@ test('render retention cleanup is idempotent and skips unsafe paths', async () =
   assert.ok(first.skipped.some((item) => item.reason === 'outside-root'));
   assert.ok(first.skipped.some((item) => item.reason === 'invalid-path'));
   assert.ok(second.skipped.some((item) => item.reason === 'missing'));
+});
+
+test('segment cache keys are range-addressed so unrelated ranges keep distinct keys', () => {
+  let seed = baseSeed();
+  let first = createRenderSegmentCacheKey(seed, { start: 0, end: 99 });
+  let second = createRenderSegmentCacheKey(seed, { start: 100, end: 199 });
+  let firstAgain = createRenderSegmentCacheKey(seed, { start: 0, end: 99 });
+  assert.match(first, /^segment:[0-9a-f]+:0-99$/);
+  assert.equal(first, firstAgain);
+  assert.notEqual(first, second);
+  assert.throws(() => createRenderSegmentCacheKey(seed, { start: 5, end: 1 }), /segmentRange\.end/);
+});
+
+test('range invalidation only invalidates segments overlapping the changed range', () => {
+  let segments = [
+    { id: 'seg-a', frameRange: { start: 0, end: 99 } },
+    { id: 'seg-b', frameRange: { start: 100, end: 199 } },
+    { id: 'seg-c', frameRange: { start: 200, end: 299 } },
+  ];
+  let result = invalidateRenderSegmentRanges(segments, { start: 150, end: 210 });
+  assert.deepEqual(result.invalidated, ['seg-b', 'seg-c']);
+  assert.deepEqual(result.retained, ['seg-a']);
+
+  let untouched = invalidateRenderSegmentRanges(segments, { start: 100, end: 199 });
+  assert.deepEqual(untouched.invalidated, ['seg-b']);
+  assert.deepEqual(untouched.retained, ['seg-a', 'seg-c']);
 });

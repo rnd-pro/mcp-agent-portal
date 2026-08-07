@@ -156,6 +156,11 @@ test('render provider job queue records cleanup failures without hiding provider
       execute: async () => {
         let error = new Error('provider exploded');
         error.code = 'E_PROVIDER';
+        error.proof = {
+          frame: 12,
+          contentMatches: false,
+          paths: ['/private/leader.webp', '/private/peer.webp'],
+        };
         throw error;
       },
     },
@@ -181,6 +186,7 @@ test('render provider job queue records cleanup failures without hiding provider
 
   assert.equal(completed.status, 'failed');
   assert.equal(completed.error.code, 'E_PROVIDER');
+  assert.deepEqual(completed.error.proof, { frame: 12, contentMatches: false });
   assert.equal(completed.cleanupError.code, 'E_CLEANUP');
   assert.ok(events.some((event) => event.type === 'render-job:cleanup-failed'));
 });

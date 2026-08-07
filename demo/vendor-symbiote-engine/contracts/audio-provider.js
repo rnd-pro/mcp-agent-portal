@@ -8,6 +8,11 @@ const PROVIDER_JOB_KIND = Object.freeze({
   'local-transcribe': 'transcribe',
 });
 const SHA256_ARTIFACT_RE = /^sha256:[a-f0-9]{64}$/;
+const SHA256_DIGEST_RE = /^[a-f0-9]{64}$/;
+const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+export const AUDIO_SYNTHESIS_RECEIPT_VERSION = 'symbiote-audio-synthesis-receipt-v2';
+export const AUDIO_SYNTHESIS_RECEIPT_HEADER = 'X-Audio-Receipt';
 
 function fail(path, message) {
   throw new Error(`${path}: ${message}`);
@@ -78,6 +83,52 @@ function positiveInteger(value, fallback, path) {
   return Math.round(positiveNumber(value, fallback, path));
 }
 
+function strictPositiveInteger(value, path) {
+  let number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) fail(path, 'must be a positive integer');
+  return number;
+}
+
+function requireExactKeys(value, keys, path) {
+  let actual = Object.keys(value).sort();
+  let expected = [...keys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    fail(path, `must contain exactly: ${expected.join(', ')}`);
+  }
+}
+
+function requireDigest(value, path) {
+  let digest = cleanString(value, '');
+  if (!SHA256_DIGEST_RE.test(digest)) fail(path, 'must be a lowercase 64-character hex digest');
+  return digest;
+}
+
+function requireString(value, path) {
+  let text = cleanString(value, '');
+  if (!text) fail(path, 'is required');
+  return text;
+}
+
+function requireSafeToken(value, path) {
+  let token = requireString(value, path);
+  if (!SAFE_TOKEN_RE.test(token)) fail(path, 'must be a safe token');
+  return token;
+}
+
+function requireBoolean(value, path) {
+  if (typeof value !== 'boolean') fail(path, 'must be a boolean');
+  return value;
+}
+
+function requireFiniteNumberInRange(value, min, max, path, inclusive = true) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) fail(path, 'must be a finite number');
+  let inRange = inclusive ? value >= min && value <= max : value > min && value < max;
+  if (!inRange) {
+    fail(path, `must be ${inclusive ? 'between' : 'strictly between'} ${min} and ${max}`);
+  }
+  return value;
+}
+
 function assertPortableId(value, path) {
   let id = cleanString(value, '');
   if (!id) fail(path, 'is required');
@@ -102,6 +153,101 @@ export function normalizeVoiceReference(reference = {}) {
   return {
     ...cloneJson(reference),
     id: assertPortableId(reference.id, 'voiceReference.id'),
+  };
+}
+
+export function canonicalAudioSynthesisJson(value) {
+  return stableJson(value);
+}
+
+export function normalizeAudioSynthesisReceipt(receipt = {}) {
+  requireObject(receipt, 'synthesisReceipt');
+  requireExactKeys(receipt, [
+    'receiptVersion',
+    'requestHash',
+    'requestedVoiceRef',
+    'resolvedVoiceRef',
+    'speakerAttestation',
+    'speakerProbe',
+    'normalization',
+    'model',
+    'language',
+    'sampleRate',
+    'durationMs',
+    'artifactHash',
+    'receiptHmac',
+  ], 'synthesisReceipt');
+  if (receipt.receiptVersion !== AUDIO_SYNTHESIS_RECEIPT_VERSION) {
+    fail('synthesisReceipt.receiptVersion', `must be "${AUDIO_SYNTHESIS_RECEIPT_VERSION}"`);
+  }
+  let model = requireObject(receipt.model, 'synthesisReceipt.model');
+  requireExactKeys(model, ['family', 'versionToken'], 'synthesisReceipt.model');
+  let speakerProbe = requireObject(receipt.speakerProbe, 'synthesisReceipt.speakerProbe');
+  requireExactKeys(speakerProbe, [
+    'probeFamily',
+    'probeVersionToken',
+    'enrollmentRevision',
+    'segmentationRevision',
+    'segmentCount',
+    'enrolledVoiceMatch',
+    'segmentsConsistent',
+    'maxEnrolledDistance',
+    'minOtherVoiceMargin',
+    'maxSegmentDistance',
+    'thresholds',
+  ], 'synthesisReceipt.speakerProbe');
+  let thresholds = requireObject(speakerProbe.thresholds, 'synthesisReceipt.speakerProbe.thresholds');
+  requireExactKeys(thresholds, [
+    'enrolledDistanceMax',
+    'otherVoiceMarginMin',
+    'segmentDistanceMax',
+  ], 'synthesisReceipt.speakerProbe.thresholds');
+  let normalization = requireObject(receipt.normalization, 'synthesisReceipt.normalization');
+  requireExactKeys(normalization, [
+    'version',
+    'applied',
+    'targetLufs',
+    'truePeakLimitDbfs',
+  ], 'synthesisReceipt.normalization');
+  let speakerAttestation = requireDigest(receipt.speakerAttestation, 'synthesisReceipt.speakerAttestation');
+  return {
+    receiptVersion: AUDIO_SYNTHESIS_RECEIPT_VERSION,
+    requestHash: requireDigest(receipt.requestHash, 'synthesisReceipt.requestHash'),
+    requestedVoiceRef: assertPortableId(receipt.requestedVoiceRef, 'synthesisReceipt.requestedVoiceRef'),
+    resolvedVoiceRef: assertPortableId(receipt.resolvedVoiceRef, 'synthesisReceipt.resolvedVoiceRef'),
+    speakerAttestation,
+    speakerProbe: {
+      probeFamily: requireSafeToken(speakerProbe.probeFamily, 'synthesisReceipt.speakerProbe.probeFamily'),
+      probeVersionToken: requireDigest(speakerProbe.probeVersionToken, 'synthesisReceipt.speakerProbe.probeVersionToken'),
+      enrollmentRevision: requireDigest(speakerProbe.enrollmentRevision, 'synthesisReceipt.speakerProbe.enrollmentRevision'),
+      segmentationRevision: requireSafeToken(speakerProbe.segmentationRevision, 'synthesisReceipt.speakerProbe.segmentationRevision'),
+      segmentCount: strictPositiveInteger(speakerProbe.segmentCount, 'synthesisReceipt.speakerProbe.segmentCount'),
+      enrolledVoiceMatch: requireBoolean(speakerProbe.enrolledVoiceMatch, 'synthesisReceipt.speakerProbe.enrolledVoiceMatch'),
+      segmentsConsistent: requireBoolean(speakerProbe.segmentsConsistent, 'synthesisReceipt.speakerProbe.segmentsConsistent'),
+      maxEnrolledDistance: requireFiniteNumberInRange(speakerProbe.maxEnrolledDistance, 0, 2, 'synthesisReceipt.speakerProbe.maxEnrolledDistance'),
+      minOtherVoiceMargin: requireFiniteNumberInRange(speakerProbe.minOtherVoiceMargin, -2, 2, 'synthesisReceipt.speakerProbe.minOtherVoiceMargin'),
+      maxSegmentDistance: requireFiniteNumberInRange(speakerProbe.maxSegmentDistance, 0, 2, 'synthesisReceipt.speakerProbe.maxSegmentDistance'),
+      thresholds: {
+        enrolledDistanceMax: requireFiniteNumberInRange(thresholds.enrolledDistanceMax, 0, 2, 'synthesisReceipt.speakerProbe.thresholds.enrolledDistanceMax'),
+        otherVoiceMarginMin: requireFiniteNumberInRange(thresholds.otherVoiceMarginMin, -2, 2, 'synthesisReceipt.speakerProbe.thresholds.otherVoiceMarginMin'),
+        segmentDistanceMax: requireFiniteNumberInRange(thresholds.segmentDistanceMax, 0, 2, 'synthesisReceipt.speakerProbe.thresholds.segmentDistanceMax'),
+      },
+    },
+    normalization: {
+      version: requireSafeToken(normalization.version, 'synthesisReceipt.normalization.version'),
+      applied: requireBoolean(normalization.applied, 'synthesisReceipt.normalization.applied'),
+      targetLufs: requireFiniteNumberInRange(normalization.targetLufs, -40, -5, 'synthesisReceipt.normalization.targetLufs', false),
+      truePeakLimitDbfs: requireFiniteNumberInRange(normalization.truePeakLimitDbfs, -12, 0, 'synthesisReceipt.normalization.truePeakLimitDbfs', false),
+    },
+    model: {
+      family: requireString(model.family, 'synthesisReceipt.model.family'),
+      versionToken: requireDigest(model.versionToken, 'synthesisReceipt.model.versionToken'),
+    },
+    language: requireString(receipt.language, 'synthesisReceipt.language'),
+    sampleRate: strictPositiveInteger(receipt.sampleRate, 'synthesisReceipt.sampleRate'),
+    durationMs: strictPositiveInteger(receipt.durationMs, 'synthesisReceipt.durationMs'),
+    artifactHash: requireDigest(receipt.artifactHash, 'synthesisReceipt.artifactHash'),
+    receiptHmac: requireDigest(receipt.receiptHmac, 'synthesisReceipt.receiptHmac'),
   };
 }
 
@@ -201,10 +347,14 @@ export function normalizeAudioArtifact(result = {}) {
   }
   if (result.text !== undefined) output.text = cleanString(result.text, '');
   if (Array.isArray(result.words)) output.words = cloneJson(result.words);
+  if (result.synthesisReceipt !== undefined) {
+    output.synthesisReceipt = normalizeAudioSynthesisReceipt(result.synthesisReceipt);
+  }
   return output;
 }
 
 export function createAudioCacheKey({
+  synthesisReceiptVersion = AUDIO_SYNTHESIS_RECEIPT_VERSION,
   kind = 'tts',
   providerId = '',
   profile = '',
@@ -213,6 +363,9 @@ export function createAudioCacheKey({
   input = {},
 } = {}) {
   let normalizedKind = normalizeKind(kind, AUDIO_JOB_KINDS, 'tts', 'audioCache.kind');
+  if (normalizedKind === 'tts' && synthesisReceiptVersion !== AUDIO_SYNTHESIS_RECEIPT_VERSION) {
+    fail('audioCache.synthesisReceiptVersion', `must be "${AUDIO_SYNTHESIS_RECEIPT_VERSION}"`);
+  }
   let normalizedInput = cloneJson(input);
   if (normalizedInput?.voiceRef) {
     normalizedInput.voiceRef = normalizeVoiceReference(normalizedInput.voiceRef).id;
@@ -220,14 +373,16 @@ export function createAudioCacheKey({
   if (normalizedInput?.voiceReference) {
     normalizedInput.voiceReference = normalizeVoiceReference(normalizedInput.voiceReference).id;
   }
-  return `audio:${stableHash({
+  let identity = {
     kind: normalizedKind,
     providerId: cleanString(providerId, ''),
     profile: cleanString(profile, ''),
     modelVersion: cleanString(modelVersion, ''),
     providerSettings: cloneJson(isObject(providerSettings) ? providerSettings : {}),
     input: normalizedInput,
-  })}`;
+  };
+  if (normalizedKind === 'tts') identity.synthesisReceiptVersion = synthesisReceiptVersion;
+  return `audio:${stableHash(identity)}`;
 }
 
 export function createAudioProviderRegistry(providers = []) {

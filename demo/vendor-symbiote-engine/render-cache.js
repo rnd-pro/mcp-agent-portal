@@ -320,6 +320,34 @@ export function createRenderOutputCacheKey(seed = {}, extra = {}, options = {}) 
   return `render:${stableHash(createRenderSeedProjection(seed, extra, options))}`;
 }
 
+function segmentRangeBounds(range, path) {
+  let source = isObject(range) ? range : {};
+  let start = Number(source.start);
+  let end = Number(source.end);
+  if (!Number.isInteger(start) || start < 0) throw new Error(`${path}.start must be a non-negative integer`);
+  if (!Number.isInteger(end) || end < start) throw new Error(`${path}.end must be an integer >= ${path}.start`);
+  return { start, end };
+}
+
+export function createRenderSegmentCacheKey(seed = {}, segmentRange = {}, extra = {}, options = {}) {
+  let { start, end } = segmentRangeBounds(segmentRange, 'segmentRange');
+  return `segment:${stableHash(createRenderSeedProjection(seed, extra, options))}:${start}-${end}`;
+}
+
+export function invalidateRenderSegmentRanges(segments = [], changedRange = {}) {
+  let { start: changedStart, end: changedEnd } = segmentRangeBounds(changedRange, 'changedRange');
+  let invalidated = [];
+  let retained = [];
+  for (let segment of Array.isArray(segments) ? segments : []) {
+    let id = cleanString(segment?.id, '');
+    if (!id) throw new Error('render segment requires id for range invalidation');
+    let { start, end } = segmentRangeBounds(segment?.frameRange, `segment ${id} frameRange`);
+    if (start <= changedEnd && end >= changedStart) invalidated.push(id);
+    else retained.push(id);
+  }
+  return { invalidated, retained };
+}
+
 export function createMemoryFrameCacheStore(options = {}) {
   let entries = options.entries instanceof Map ? options.entries : new Map();
   return {

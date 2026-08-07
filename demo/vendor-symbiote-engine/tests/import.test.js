@@ -48,6 +48,26 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.buildRenderAudioLayerProof, 'function');
   assert.equal(typeof engine.buildRenderAvSyncProof, 'function');
   assert.equal(typeof engine.createStageProgressTracker, 'function');
+  assert.equal(typeof engine.selectRenderAcceleration, 'function');
+  assert.equal(typeof engine.planSegmentConcat, 'function');
+  assert.equal(typeof engine.admitRenderRequest, 'function');
+  assert.equal(typeof engine.buildSegmentConcatArgs, 'function');
+  assert.equal(typeof engine.buildRenderSegmentSeamProof, 'function');
+  assert.equal(typeof engine.buildRenderStreamPtsProof, 'function');
+  assert.equal(typeof engine.createRenderSegmentCacheKey, 'function');
+  assert.equal(typeof engine.invalidateRenderSegmentRanges, 'function');
+  assert.equal(typeof engine.reconcileTerminalRenderStatus, 'function');
+  assert.equal(typeof engine.normalizeNativeSegment, 'function');
+  assert.equal(typeof engine.normalizeNativeSegmentJob, 'function');
+  assert.equal(typeof engine.normalizeSeamBoundary, 'function');
+  assert.equal(typeof engine.accelerationCandidateProven, 'function');
+  assert.equal(typeof engine.normalizeCapabilityRequest, 'function');
+  assert.equal(typeof engine.normalizeBrowserCodecSupport, 'function');
+  assert.ok(Array.isArray(engine.RENDER_EXECUTION_TIERS));
+  assert.ok(Array.isArray(engine.UI_CLOCK_MODES));
+  assert.equal(engine.NATIVE_SEGMENT_JOB_VERSION, 'native-segment-job/1');
+  assert.equal(engine.RENDER_SEAM_INPUT_VERSION, 'render-seam-input/1');
+  assert.equal(engine.CAPTION_PRESENTATION_TRACK_VERSION, 'caption-presentation-track-v3');
 });
 
 test('graph can be constructed without browser runtime', async () => {
@@ -105,6 +125,39 @@ test('render lifecycle subpath imports in Node', async () => {
   assert.equal(typeof renderLifecycle.createRenderTimeoutError, 'function');
 });
 
+test('render selection, segments, and admission subpaths import in Node', async () => {
+  let selection = await import('symbiote-engine/render-selection');
+  assert.equal(typeof selection.selectRenderAcceleration, 'function');
+  assert.equal(selection.RENDER_SELECTION_VERSION, 'render-capability/1');
+
+  let segments = await import('symbiote-engine/render-segments');
+  assert.equal(typeof segments.planSegmentConcat, 'function');
+
+  let admission = await import('symbiote-engine/render-admission');
+  assert.equal(typeof admission.admitRenderRequest, 'function');
+  assert.equal(admission.RENDER_ADMISSION_VERSION, 'render-admission-v1');
+});
+
+test('render capability and segment contracts import through the contracts entrypoint', async () => {
+  let contracts = await import('../contracts/index.js');
+
+  assert.equal(typeof contracts.normalizeExecutionTier, 'function');
+  assert.equal(typeof contracts.normalizeCapabilityRequest, 'function');
+  assert.equal(typeof contracts.normalizeAccelerationSelection, 'function');
+  assert.equal(typeof contracts.normalizeNativeSegment, 'function');
+  assert.equal(typeof contracts.normalizeNativeSegmentJob, 'function');
+  assert.equal(typeof contracts.normalizeSeamBoundary, 'function');
+  assert.equal(typeof contracts.accelerationCandidateProven, 'function');
+  assert.equal(typeof contracts.segmentCompatibilityKey, 'function');
+  assert.equal(typeof contracts.normalizeSeamPolicy, 'function');
+  assert.equal(typeof contracts.normalizeBrowserCodecSupport, 'function');
+  assert.deepEqual(contracts.RENDER_EXECUTION_TIERS, [
+    'sequential-realtime',
+    'replayable-segment',
+    'checkpointed-deterministic',
+  ]);
+});
+
 test('engine sources do not import symbiote-workspace', async () => {
   let files = await listSourceFiles(new URL('../', import.meta.url));
 
@@ -112,6 +165,24 @@ test('engine sources do not import symbiote-workspace', async () => {
     let source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /from ['"]symbiote-workspace(?:\/|['"])/, file.pathname);
     assert.doesNotMatch(source, /import\(['"]symbiote-workspace(?:\/|['"])/, file.pathname);
+  }
+});
+
+test('contract modules stay Node-safe and browser-safe', async () => {
+  let contractsUrl = new URL('../contracts/', import.meta.url);
+  let files = await listSourceFiles(contractsUrl);
+
+  for (let file of files) {
+    let source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from ['"]node:/, `${file.pathname} must not import node:* builtins`);
+    assert.doesNotMatch(source, /\bimport\(['"]node:/, `${file.pathname} must not dynamic-import node:* builtins`);
+    // Unambiguous browser globals only; `document` is a legitimate local
+    // identifier in source-document.js, so it is intentionally excluded here.
+    assert.doesNotMatch(
+      source,
+      /\b(?:window|navigator|VideoEncoder|VideoDecoder|VideoFrame)\b/,
+      `${file.pathname} must not reference browser globals`,
+    );
   }
 });
 
@@ -137,6 +208,17 @@ test('browser engine API excludes Node-only runtime modules', async () => {
   assert.equal(engine.createLocalBrowserScreencastProvider, undefined);
   assert.equal(engine.createRenderRetentionCleanup, undefined);
   assert.equal(typeof engine.createRenderProviderRegistry, 'function');
+  assert.equal(typeof engine.normalizeNativeSegment, 'function');
+  assert.equal(typeof engine.normalizeNativeSegmentJob, 'function');
+  assert.equal(typeof engine.normalizeSeamBoundary, 'function');
+  assert.equal(typeof engine.accelerationCandidateProven, 'function');
+  assert.equal(typeof engine.normalizeCapabilityRequest, 'function');
+  assert.equal(typeof engine.normalizeBrowserCodecSupport, 'function');
+  assert.ok(Array.isArray(engine.RENDER_EXECUTION_TIERS));
+  assert.ok(Array.isArray(engine.UI_CLOCK_MODES));
+  assert.equal(engine.selectRenderAcceleration, undefined);
+  assert.equal(engine.planSegmentConcat, undefined);
+  assert.equal(engine.admitRenderRequest, undefined);
 });
 
 test('video pack stays on the browser-safe registry path', async () => {
