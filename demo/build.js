@@ -213,39 +213,93 @@ fs.writeFileSync(path.join(DIST, 'packages', 'three-shim.js'), threeShim);
 // ── Step 6: Generate import map ─────────────────────────────────
 console.log('  → Generating import map');
 
-let importMap = {
-  imports: {
-    // @symbiotejs/symbiote — core framework
-    '@symbiotejs/symbiote': `${basePath}packages/@symbiotejs/symbiote/core/index.js`,
-    '@symbiotejs/symbiote/': `${basePath}packages/@symbiotejs/symbiote/`,
+// Auto-discover extensionless bare imports from all source files
+function scanBareImports(dir) {
+  let specifiers = new Set();
+  if (!fs.existsSync(dir)) return specifiers;
+  for (let entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    let full = path.join(dir, entry.name);
+    if (SKIP.has(entry.name) || entry.name.startsWith('.')) continue;
+    if (entry.isDirectory()) {
+      for (let s of scanBareImports(full)) specifiers.add(s);
+    } else if (entry.name.endsWith('.js')) {
+      let src = fs.readFileSync(full, 'utf-8');
+      let re = /from\s+['"]([^.'"][^'"]*)['"]/g;
+      let m;
+      while ((m = re.exec(src))) specifiers.add(m[1]);
+      // Also catch dynamic imports
+      let dyn = /import\(['"]([^.'"][^'"]*)['"]\)/g;
+      while ((m = dyn.exec(src))) specifiers.add(m[1]);
+    }
+  }
+  return specifiers;
+}
 
-    // symbiote-ui — UI library (submodule)
-    'symbiote-ui': `${basePath}packages/symbiote-ui/index.js`,
-    'symbiote-ui/': `${basePath}packages/symbiote-ui/`,
-    // Extensionless subpath imports (directory → index.js, file → file.js)
-    'symbiote-ui/core': `${basePath}packages/symbiote-ui/core/index.js`,
-    'symbiote-ui/ui': `${basePath}packages/symbiote-ui/ui/index.js`,
-    'symbiote-ui/graph': `${basePath}packages/symbiote-ui/graph/index.js`,
-    'symbiote-ui/locale': `${basePath}packages/symbiote-ui/locale/index.js`,
-    'symbiote-ui/xr': `${basePath}packages/symbiote-ui/xr/index.js`,
-    'symbiote-ui/manifest': `${basePath}packages/symbiote-ui/manifest/index.js`,
-    'symbiote-ui/display/event-feed-adapter': `${basePath}packages/symbiote-ui/display/event-feed-adapter.js`,
-    'symbiote-ui/display/format-utils': `${basePath}packages/symbiote-ui/display/format-utils.js`,
-    'symbiote-ui/display/highlight': `${basePath}packages/symbiote-ui/display/highlight.js`,
-    'symbiote-ui/display/icons': `${basePath}packages/symbiote-ui/display/icons.js`,
-    'symbiote-ui/display/markdown-formatter': `${basePath}packages/symbiote-ui/display/markdown-formatter.js`,
+let allSpecs = new Set();
+for (let s of scanBareImports(path.join(ROOT, 'web'))) allSpecs.add(s);
+for (let s of scanBareImports(path.join(ROOT, 'src', 'iso'))) allSpecs.add(s);
+for (let s of scanBareImports(path.join(ROOT, 'packages', 'symbiote-ui'))) allSpecs.add(s);
+for (let s of scanBareImports(path.join(ROOT, 'packages', 'symbiote-engine'))) allSpecs.add(s);
 
-    // symbiote-engine — runtime engine (submodule)
-    'symbiote-engine': `${basePath}packages/symbiote-engine/index.js`,
-    'symbiote-engine/': `${basePath}packages/symbiote-engine/`,
-    'symbiote-engine/contracts': `${basePath}packages/symbiote-engine/contracts/index.js`,
-    'symbiote-engine/render-captions': `${basePath}packages/symbiote-engine/render-captions.js`,
+// Resolve specifier → file path in dist
+function kebabToPascal(s) {
+  return s.replace(/(^|-)(\w)/g, (_, _d, c) => c.toUpperCase());
+}
 
-    // three.js — shimmed (XR not used in demo)
-    'three': `${basePath}packages/three-shim.js`,
-  },
+function resolveSpecifier(spec, pkgName, pkgDir) {
+  if (!spec.startsWith(pkgName + '/')) return null;
+  if (spec.endsWith('.js')) return null; // trailing-slash entry handles these
+  let sub = spec.slice(pkgName.length + 1);
+  let base = path.join(pkgDir, sub);
+  // 1. dir/index.js
+  if (fs.existsSync(path.join(base, 'index.js'))) return `${sub}/index.js`;
+  // 2. sub.js
+  if (fs.existsSync(base + '.js')) return `${sub}.js`;
+  // 3. PascalCase: display/code-block → display/CodeBlock/CodeBlock.js
+  let parts = sub.split('/');
+  let last = parts[parts.length - 1];
+  let pascal = kebabToPascal(last);
+  let parent = parts.slice(0, -1).join('/');
+  let pascalPath = parent ? `${parent}/${pascal}/${pascal}.js` : `${pascal}/${pascal}.js`;
+  if (fs.existsSync(path.join(pkgDir, pascalPath))) return pascalPath;
+  return null;
+}
+
+let imports = {
+  // @symbiotejs/symbiote — core framework
+  '@symbiotejs/symbiote': `${basePath}packages/@symbiotejs/symbiote/core/index.js`,
+  '@symbiotejs/symbiote/': `${basePath}packages/@symbiotejs/symbiote/`,
+
+  // symbiote-ui — UI library (submodule)
+  'symbiote-ui': `${basePath}packages/symbiote-ui/index.js`,
+  'symbiote-ui/': `${basePath}packages/symbiote-ui/`,
+
+  // symbiote-engine — runtime engine (submodule)
+  'symbiote-engine': `${basePath}packages/symbiote-engine/index.js`,
+  'symbiote-engine/': `${basePath}packages/symbiote-engine/`,
+
+  // three.js — shimmed (XR not used in demo)
+  'three': `${basePath}packages/three-shim.js`,
 };
 
+let uiDir = path.join(ROOT, 'packages', 'symbiote-ui');
+let engineDir = path.join(ROOT, 'packages', 'symbiote-engine');
+let autoCount = 0;
+
+for (let spec of allSpecs) {
+  if (imports[spec]) continue; // already defined
+  let resolved = resolveSpecifier(spec, 'symbiote-ui', uiDir)
+    || resolveSpecifier(spec, 'symbiote-engine', engineDir);
+  if (resolved) {
+    let pkg = spec.startsWith('symbiote-engine/') ? 'symbiote-engine' : 'symbiote-ui';
+    imports[spec] = `${basePath}packages/${pkg}/${resolved}`;
+    autoCount++;
+  }
+}
+
+console.log(`    Auto-resolved ${autoCount} extensionless imports`);
+
+let importMap = { imports };
 let importMapJson = JSON.stringify(importMap, null, 2);
 
 // ── Step 7: Generate index.html ─────────────────────────────────
