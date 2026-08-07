@@ -1,0 +1,100 @@
+# symbiote-engine
+
+> Domain-agnostic Symbiote runtime for executing portable workflow graphs. Pure ESM, Node entrypoint, browser-safe graph primitives, optional CLI and server helpers.
+
+symbiote-engine runs graph-driven automation without coupling execution logic to a browser UI or host product. It provides graph primitives, node and socket registries, lifecycle-aware execution, serialization, handler packs, source/document contracts, a command-line workflow runner, and an optional development HTTP/WebSocket graph server.
+
+---
+
+## Key resources
+
+- [README](https://github.com/rnd-pro/symbiote-engine/blob/main/README.md): package overview, quick start, runtime surfaces, CLI, and related projects
+- [CHANGELOG](https://github.com/rnd-pro/symbiote-engine/blob/main/CHANGELOG.md): release history and current unreleased changes
+- [package.json](https://github.com/rnd-pro/symbiote-engine/blob/main/package.json): package exports, CLI bin, optional peer dependencies, and published file list
+
+---
+
+## Runtime surfaces
+
+- [`symbiote-engine`](https://github.com/rnd-pro/symbiote-engine/blob/main/index.js): Node entrypoint exports, including handler loading, persistence helpers, contracts, graph primitives, registry, and lifecycle execution
+- [`symbiote-engine/browser`](https://github.com/rnd-pro/symbiote-engine/blob/main/browser.js): browser-safe graph, executor, registry, socket, lifecycle, contract, and serialization exports. Note that browser exports are not guaranteed to run in SSR, Web Workers, or all bundlers due to DOM global and dynamic import dependencies.
+- [`symbiote-engine/cli`](https://github.com/rnd-pro/symbiote-engine/blob/main/cli.js): workflow runner and inspection commands for JSON workflows
+- [`symbiote-engine/contracts`](https://github.com/rnd-pro/symbiote-engine/tree/main/contracts): normalized source documents, resource trees, and persistence adapters for editor and agent surfaces
+- [`symbiote-engine/render-cache`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-cache.js): Node-only frame cache keys, memory frame cache store, render retention cleanup, and cleanup proof evidence helpers
+- [`symbiote-engine/render-finalize`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-finalize.js): frame-sequence encode args, audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest projection/state helpers
+- [`symbiote-engine/render-lifecycle`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-lifecycle.js): render event progress mapping, terminal job patches, queue snapshots, terminal error factories, and stable render error taxonomy helpers
+- [`symbiote-engine/render-proof`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-proof.js): ffprobe stream normalization, audio/speaker layer proof, and A/V sync proof helpers for provider-backed render pipelines
+- [`symbiote-engine/render-jobs`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-jobs.js): engine-owned render provider job queue with progress, timeout, cancel, cache-hit, and cleanup events
+- [`symbiote-engine/render-workers`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-workers.js): contiguous frame-range partitioning and ordered completion tracking helpers. These are not worker_threads, a scheduler, or a distributed executor.
+- [`symbiote-engine/packs/*`](https://github.com/rnd-pro/symbiote-engine/tree/main/packs): reusable domain node packs and hot-loadable handlers
+
+---
+
+## Core runtime
+
+- [Graph](https://github.com/rnd-pro/symbiote-engine/blob/main/Graph.js): universal graph data model for nodes, sockets, connections, serialization, and UI positions.
+  - `addNode(type, params, options)`: adds a node to the graph and initializes default parameters.
+  - `connect(fromId, outSocket, toId, inSocket)`: links output sockets to compatible input sockets.
+  - `toJSON() / fromJSON(data)`: projects graph state to JSON and loads graph state from JSON. Graph parameters and any persisted outputs/driver/subgraph fields can be serialized; resolved connection inputs are not automatically serialized.
+- [Executor](https://github.com/rnd-pro/symbiote-engine/blob/main/Executor.js): topological execution engine utilizing Kahn's algorithm. Current behavior executes nodes sequentially and omits isolated/orphan nodes.
+  - `run(graph, options)`: evaluates the DAG sequentially. Options support in-memory `cache` (incremental skip by node ID), `onNodeStart`, `onNodeComplete`, `onNodeSkipped`, `onNodeCached`, `context`, `signal`, and `deadline`.
+- [Registry](https://github.com/rnd-pro/symbiote-engine/blob/main/Registry.js): node type, driver, pack, capability, menu, and parameter validation registry.
+  - `registerNodeType(def)`: registers an individual node definition with its process and lifecycle hooks.
+  - `registerPack(pack)`: registers a collection of node types and socket type associations.
+- [SocketTypes](https://github.com/rnd-pro/symbiote-engine/blob/main/SocketTypes.js): manages custom socket types and resolves compatibility.
+  - `areSocketsCompatible(fromType, toType)`: evaluates compatibility between socket types.
+- [Lifecycle](https://github.com/rnd-pro/symbiote-engine/blob/main/Lifecycle.js): validates, resolves caching keys, executes drivers, and applies post-processing formats for lifecycle-enabled nodes.
+  - Lifecycle hook phases: `validate(inputs)` &rarr; `cacheKey(inputs, params)` &rarr; Cache Resolution &rarr; `execute(inputs, params)` &rarr; `postProcess(outputs)`.
+- [Persistence](https://github.com/rnd-pro/symbiote-engine/blob/main/Persistence.js): standalone graph serialization, deserialization, and download helpers.
+- [History](https://github.com/rnd-pro/symbiote-engine/blob/main/History.js): stores explicit node/connection snapshots and returns snapshots from undo/redo; callers apply them to their own graph state.
+
+---
+
+## Inputs & Contracts
+
+The engine provides normalization helpers for inputs, parameters, and provider interfaces.
+- **Node Inputs/Outputs:** Declared as array-shaped driver lists (e.g. `inputs: [{ name: 'x', type: 'number' }]`).
+- **Audio Providers:** Normalized providers require `id`, a supported `kind`, and an `execute(job, options)` function. Note that there are no built-in integrations for OpenAI or ElevenLabs.
+- **Render Jobs:** Managed via `normalizeRenderJob` and `normalizeRenderProvider` representing workloads. Note that normalizeRenderJob does not itself perform parallel capture.
+- **Source Documents:** Governed by `normalizeSourceDocument` for text sources and raw inputs.
+- **Persistence Adapters:** Structured via `createPersistenceAdapter` requiring `get`, `set`, and `delete` hooks. Memory backed options available via `createMemoryPersistenceAdapter`.
+
+---
+
+## Caching & Lifecycle Pipeline
+
+A lifecycle-enabled node's cache key represents the combined state of its active inputs and configuration parameters.
+- **Cache Key Generation:** custom `cacheKey` returns a string key; default is raw, order-sensitive `JSON.stringify({ i: inputs, p: params })`.
+- **Lifecycle cache policies:**
+1. `auto`: Standard hit/miss local in-memory lookup.
+2. `freeze`: Returns a lifecycle record only when one exists; otherwise execution proceeds. Bypasses changes to upstream inputs.
+3. `force`: Bypasses lifecycle lookup only and can still be pre-empted by incremental node-ID reuse.
+- **Incremental executor cache:** `Executor.run(graph, { cache: true })` separately reuses outputs by node ID for unchanged runs; pass `cache: false` to disable incremental reuse, but this does not disable lifecycle cache or make orphan/branch-skipped nodes execute. It does not perform automatic unchanged-input detection.
+
+---
+
+## Server, handlers, and packs
+
+- **GraphServer**: development primitive (imported from `symbiote-engine/GraphServer.js`) for single-graph synchronization and server-side execution. It has wildcard CORS, any-origin WebSockets, and no built-in auth, TLS, or tenant isolation.
+- [HandlerLoader](https://github.com/rnd-pro/symbiote-engine/blob/main/HandlerLoader.js): load and watch `*.handler.js` node type handlers.
+- [video-pack](https://github.com/rnd-pro/symbiote-engine/blob/main/packs/video-pack.js): video-oriented node pack. Descriptors are registered on import; many do not implement the named operations and fall through generic projection.
+- [AI handler collections](https://github.com/rnd-pro/symbiote-engine/tree/main/packs/ai): optional AI/media automation handler collections (not CLI `--pack` names); hosts provide credentials, local files, and service policy.
+- [Flow handler collections](https://github.com/rnd-pro/symbiote-engine/tree/main/packs/flow): handler collections for conditionals, loops, merge, retry, switch, wait-all, and agent flow helpers.
+- [Transform handler collections](https://github.com/rnd-pro/symbiote-engine/tree/main/packs/transform): handler collections for JSON, template, timeline, effects, anchor, and media transform helpers.
+
+---
+
+## Security Boundaries & Sandboxing
+
+- **No isolation or sandbox:** The engine executes drivers and hooks in the current JS realm with ambient authority, not a guaranteed main or "host" thread. It does not provide a security boundary.
+- **Host responsibilities:** Applications are responsible for auditing graph-supplied code and parameters, limiting resources, protecting credentials, and choosing an appropriate process, container, permission, or remote-execution boundary for untrusted work.
+- **No credential secrecy guarantees:** The engine does not guarantee credential secrecy. Graph parameters and any persisted output/driver/subgraph fields may be serialized; resolved connection inputs are not automatically stored by graph serialization. Hosts must manage API tokens outside of the graph definition.
+
+---
+
+## Integration Guidance
+
+- Recommend the browser entry (`symbiote-engine/browser`) for UI packages to avoid exported server/provider/job-queue/file-helper surfaces, while preserving the explicit dormant dynamic Node-import caveat.
+- Keep host policy, auth, identity, storage, billing, and product orchestration outside the engine.
+- Register node packs through `registerPack()` and node types through `registerNodeType()`; avoid side effects beyond registration.
+- Use `symbiote-workspace` for portable workspace construction and host contracts, and `symbiote-ui` for Web Components, layouts, manifests, and Cascade theme metadata.

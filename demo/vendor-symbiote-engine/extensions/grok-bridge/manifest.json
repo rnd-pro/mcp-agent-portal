@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Grok Bridge",
+  "version": "6.1.0",
+  "description": "DOM Gateway + WebSocket Capture + Cookie Export",
+  "permissions": [
+    "activeTab",
+    "sidePanel",
+    "downloads",
+    "webRequest",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://grok.com/*",
+    "https://*.grok.com/*",
+    "http://localhost:3333/*"
+  ],
+  "action": {},
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://grok.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "websocket-interceptor.js"
+      ],
+      "matches": [
+        "https://grok.com/*"
+      ]
+    }
+  ]
+}

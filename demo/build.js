@@ -137,17 +137,13 @@ copyDir(
   (name) => !SKIP_DIRS.has(name) && name !== '.git' && name !== 'package-lock.json',
 );
 
-// symbiote-engine: npm package + vendored files missing from npm
-console.log('  → Copying symbiote-engine');
+// symbiote-engine: npm package is missing render-*.js files.
+// Full repo source is vendored in demo/vendor-symbiote-engine/.
+console.log('  → Copying symbiote-engine (from vendored repo source)');
 copyDir(
-  path.join(ROOT, 'node_modules', 'symbiote-engine'),
+  path.join(ROOT, 'demo', 'vendor-symbiote-engine'),
   path.join(DIST, 'packages', 'symbiote-engine'),
-  (name) => !SKIP_DIRS.has(name) && name !== '.git',
-);
-// render-captions.js is not yet published to npm — copy vendored version
-fs.copyFileSync(
-  path.join(ROOT, 'demo', 'vendor-symbiote-engine-render-captions.js'),
-  path.join(DIST, 'packages', 'symbiote-engine', 'render-captions.js'),
+  (name) => !SKIP_DIRS.has(name) && name !== '.git' && name !== 'package-lock.json',
 );
 
 // ── Copy node_modules/@symbiotejs/symbiote/ ──────────────────────

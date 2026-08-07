@@ -1,0 +1,86 @@
+{
+  "name": "symbiote-engine",
+  "version": "0.3.0-alpha.12",
+  "description": "Run portable workflow graphs with a domain-agnostic Symbiote runtime.",
+  "private": false,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./browser": "./browser.js",
+    "./cli": "./cli.js",
+    "./contracts": "./contracts/index.js",
+    "./contracts/*": "./contracts/*",
+    "./artifacts": "./artifacts.js",
+    "./FocusController.js": "./FocusController.js",
+    "./Graph.js": "./Graph.js",
+    "./GraphServer.js": "./GraphServer.js",
+    "./provider-jobs": "./provider-jobs.js",
+    "./render-cache": "./render-cache.js",
+    "./render-captions": "./render-captions.js",
+    "./render-finalize": "./render-finalize.js",
+    "./render-lifecycle": "./render-lifecycle.js",
+    "./render-proof": "./render-proof.js",
+    "./render-progress": "./render-progress.js",
+    "./render-workers": "./render-workers.js",
+    "./render-jobs": "./render-jobs.js",
+    "./providers/*": "./providers/*",
+    "./packs/*": "./packs/*",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "symbiote-engine": "cli.js"
+  },
+  "scripts": {
+    "test": "BASE_PATH=${BASE_PATH:-/symbiote-engine} BASE_URL=${BASE_URL:-https://rnd-pro.github.io/symbiote-engine} npm run site:build && node --test --test-concurrency=1 tests/*.test.js",
+    "site:build": "rm -rf _site && jsda build && node site/build-discovery.js && node site/build-manifest.js",
+    "site:dev": "jsda ssg"
+  },
+  "files": [
+    "*.js",
+    "!project.cfg.js",
+    "contracts/",
+    "providers/",
+    "packs/",
+    "README.md",
+    "llms.txt",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "graph",
+    "nodes",
+    "workflow",
+    "dag",
+    "automation",
+    "execution-engine"
+  ],
+  "peerDependencies": {
+    "ws": ">=8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RND-PRO/symbiote-engine.git"
+  },
+  "homepage": "https://github.com/RND-PRO/symbiote-engine#readme",
+  "bugs": {
+    "url": "https://github.com/RND-PRO/symbiote-engine/issues"
+  },
+  "author": "RND-PRO <nicothin@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@symbiotejs/symbiote": "3.8.0-webmcp.2",
+    "jsda-kit": "1.6.0",
+    "library-pages": "0.1.0-alpha.13",
+    "linkedom": "0.18.13",
+    "symbiote-ui": "0.3.0-alpha.67"
+  }
+}
