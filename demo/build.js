@@ -243,6 +243,7 @@ for (let s of scanBareImports(path.join(ROOT, 'web'))) allSpecs.add(s);
 for (let s of scanBareImports(path.join(ROOT, 'src', 'iso'))) allSpecs.add(s);
 for (let s of scanBareImports(path.join(ROOT, 'packages', 'symbiote-ui'))) allSpecs.add(s);
 for (let s of scanBareImports(path.join(ROOT, 'packages', 'symbiote-engine'))) allSpecs.add(s);
+for (let s of scanBareImports(path.join(ROOT, 'node_modules', '@symbiotejs', 'symbiote'))) allSpecs.add(s);
 
 // Resolve specifier → file path in dist
 function kebabToPascal(s) {
@@ -287,14 +288,19 @@ let imports = {
 
 let uiDir = path.join(ROOT, 'packages', 'symbiote-ui');
 let engineDir = path.join(ROOT, 'packages', 'symbiote-engine');
+let symbioteDir = path.join(ROOT, 'node_modules', '@symbiotejs', 'symbiote');
 let autoCount = 0;
 
 for (let spec of allSpecs) {
   if (imports[spec]) continue; // already defined
   let resolved = resolveSpecifier(spec, 'symbiote-ui', uiDir)
-    || resolveSpecifier(spec, 'symbiote-engine', engineDir);
+    || resolveSpecifier(spec, 'symbiote-engine', engineDir)
+    || resolveSpecifier(spec, '@symbiotejs/symbiote', symbioteDir);
   if (resolved) {
-    let pkg = spec.startsWith('symbiote-engine/') ? 'symbiote-engine' : 'symbiote-ui';
+    let pkg;
+    if (spec.startsWith('symbiote-engine/')) pkg = 'symbiote-engine';
+    else if (spec.startsWith('@symbiotejs/symbiote/')) pkg = '@symbiotejs/symbiote';
+    else pkg = 'symbiote-ui';
     imports[spec] = `${basePath}packages/${pkg}/${resolved}`;
     autoCount++;
   }
