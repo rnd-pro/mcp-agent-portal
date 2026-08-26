@@ -10,6 +10,7 @@
  * Usage:
  *   node demo/build.js                     # builds to dist/
  *   node demo/build.js --base /my-repo/    # custom base path
+ *   node demo/build.js --out /tmp/demo     # custom output directory
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +26,10 @@ for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === '--base' && process.argv[i + 1]) {
     basePath = process.argv[i + 1];
     if (!basePath.endsWith('/')) basePath += '/';
+    i++;
+  } else if (process.argv[i] === '--out' && process.argv[i + 1]) {
+    DIST = path.resolve(process.argv[i + 1]);
+    i++;
   }
 }
 
@@ -252,8 +257,10 @@ function kebabToPascal(s) {
 
 function resolveSpecifier(spec, pkgName, pkgDir) {
   if (!spec.startsWith(pkgName + '/')) return null;
-  if (spec.endsWith('.js')) return null; // trailing-slash entry handles these
   let sub = spec.slice(pkgName.length + 1);
+  // Exact `.js` package imports must remain exact. A package-prefix fallback bypasses the package's
+  // public export boundary and can resolve private files that were never intended for consumers.
+  if (sub.endsWith('.js')) return fs.existsSync(path.join(pkgDir, sub)) ? sub : null;
   let base = path.join(pkgDir, sub);
   // 1. dir/index.js
   if (fs.existsSync(path.join(base, 'index.js'))) return `${sub}/index.js`;
@@ -272,18 +279,17 @@ function resolveSpecifier(spec, pkgName, pkgDir) {
 let imports = {
   // @symbiotejs/symbiote — core framework
   '@symbiotejs/symbiote': `${basePath}packages/@symbiotejs/symbiote/core/index.js`,
-  '@symbiotejs/symbiote/': `${basePath}packages/@symbiotejs/symbiote/`,
 
   // symbiote-ui — UI library (submodule)
   'symbiote-ui': `${basePath}packages/symbiote-ui/index.js`,
-  'symbiote-ui/': `${basePath}packages/symbiote-ui/`,
+  'symbiote-ui/layout': `${basePath}packages/symbiote-ui/layout/index.js`,
 
   // symbiote-engine — runtime engine (submodule)
   'symbiote-engine': `${basePath}packages/symbiote-engine/index.js`,
-  'symbiote-engine/': `${basePath}packages/symbiote-engine/`,
+  "symbiote-engine/": `${basePath}packages/symbiote-engine/`,
 
   // three.js — shimmed (XR not used in demo)
-  'three': `${basePath}packages/three-shim.js`,
+  "three": `${basePath}packages/three-shim.js`,
 };
 
 let uiDir = path.join(ROOT, 'packages', 'symbiote-ui');

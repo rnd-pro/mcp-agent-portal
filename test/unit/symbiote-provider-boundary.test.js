@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,7 +12,7 @@ const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package
 const SCAN_ROOTS = ['web', 'src', 'demo', 'scripts'];
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'build', 'coverage']);
 const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html']);
-const IMPORT_MAP_FILES = ['web/index.html', 'demo/index.html', 'demo/build.js'];
+const IMPORT_MAP_FILES = ['web/index.html', 'demo/index.html'];
 const REQUIRED_BROWSER_IMPORTS = ['three'];
 const REQUIRED_TRANSITIVE_IMPORTS = new Map([
   ['symbiote-engine/contracts', 'contracts/index.js'],
@@ -128,46 +130,67 @@ describe('symbiote-ui provider consumer boundary', () => {
       }
     }
 
-    let violations = [];
-    for (let repoPath of IMPORT_MAP_FILES) {
-      let source = fs.readFileSync(path.join(ROOT, repoPath), 'utf8');
-      let entries = importMapEntries(source);
-	      if (entries.has(`${PACKAGE_JSON.name}/`)) {
-	        violations.push(`${repoPath} exposes broad ${PACKAGE_JSON.name}/ import-map fallback`);
-	      }
-	      for (let specifier of BROWSER_FORBIDDEN_SPECIFIERS) {
-	        if (entries.has(specifier)) {
-	          violations.push(`${repoPath} maps browser-forbidden ${specifier}`);
-	        }
-	      }
-      for (let specifier of usedSpecifiers) {
-        if (!isPublicSpecifier(specifier, publicExports)) continue;
-        if (!entries.has(specifier)) {
-          violations.push(`${repoPath} is missing exact import-map entry for ${specifier}`);
-        }
-      }
-      for (let specifier of entries) {
-        if (!isPublicSpecifier(specifier, publicExports)) {
-          violations.push(`${repoPath} maps non-exported ${specifier}`);
-        }
-      }
-      for (let specifier of REQUIRED_BROWSER_IMPORTS) {
-        if (!source.includes(`"${specifier}":`)) {
-          violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
-        }
-      }
-      for (let [specifier, targetSuffix] of REQUIRED_TRANSITIVE_IMPORTS) {
-        let escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        let pattern = new RegExp(`"${escaped}"\\s*:\\s*"([^"]+)"`);
-        let match = pattern.exec(source);
-        if (!match) {
-          violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
-        } else if (!match[1].endsWith(targetSuffix)) {
-          violations.push(`${repoPath} maps ${specifier} to ${match[1]} instead of ${targetSuffix}`);
-        }
-      }
-    }
+    let buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-portal-demo-build-'));
+    let generatedRoot = path.join(buildRoot, 'dist');
+    let generated;
+    try {
+      generated = spawnSync(process.execPath, [path.join(ROOT, 'demo', 'build.js'), '--base', '/contract/', '--out', generatedRoot], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      assert.equal(generated.status, 0, generated.stderr || generated.stdout);
 
-    assert.deepEqual(violations, []);
+      let sources = IMPORT_MAP_FILES.map(repoPath => ({
+        repoPath,
+        source: fs.readFileSync(path.join(ROOT, repoPath), 'utf8'),
+      }));
+      sources.push({
+        repoPath: 'generated demo index.html',
+        source: fs.readFileSync(path.join(generatedRoot, 'index.html'), 'utf8'),
+      });
+
+      let violations = [];
+      for (let { repoPath, source } of sources) {
+      let entries = importMapEntries(source);
+        if (entries.has(`${PACKAGE_JSON.name}/`)) {
+          violations.push(`${repoPath} exposes broad ${PACKAGE_JSON.name}/ import-map fallback`);
+        }
+        for (let specifier of BROWSER_FORBIDDEN_SPECIFIERS) {
+          if (entries.has(specifier)) {
+            violations.push(`${repoPath} maps browser-forbidden ${specifier}`);
+          }
+        }
+        for (let specifier of usedSpecifiers) {
+          if (!isPublicSpecifier(specifier, publicExports)) continue;
+          if (!entries.has(specifier)) {
+            violations.push(`${repoPath} is missing exact import-map entry for ${specifier}`);
+          }
+        }
+        for (let specifier of entries) {
+          if (!isPublicSpecifier(specifier, publicExports)) {
+            violations.push(`${repoPath} maps non-exported ${specifier}`);
+          }
+        }
+        for (let specifier of REQUIRED_BROWSER_IMPORTS) {
+          if (!source.includes(`"${specifier}":`)) {
+            violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
+          }
+        }
+        for (let [specifier, targetSuffix] of REQUIRED_TRANSITIVE_IMPORTS) {
+          let escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          let pattern = new RegExp(`"${escaped}"\\s*:\\s*"([^"]+)"`);
+          let match = pattern.exec(source);
+          if (!match) {
+            violations.push(`${repoPath} is missing browser import-map entry for ${specifier}`);
+          } else if (!match[1].endsWith(targetSuffix)) {
+            violations.push(`${repoPath} maps ${specifier} to ${match[1]} instead of ${targetSuffix}`);
+          }
+        }
+      }
+
+      assert.deepEqual(violations, []);
+    } finally {
+      fs.rmSync(buildRoot, { recursive: true, force: true });
+    }
   });
 });

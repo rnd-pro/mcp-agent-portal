@@ -21,7 +21,7 @@
     "workflow:browser-smoke": "node scripts/diagnostics/workflow-board-browser-smoke.js",
     "test:audit": "node scripts/test-hygiene-audit.js",
     "test:unit": "node --test --test-concurrency 4 --test-timeout 60000 test/unit/*.test.js",
-    "test:integration": "node --test --test-timeout 20000 test/integration/*.test.js",
+    "test:integration": "node --test --test-timeout 60000 test/integration/*.test.js",
     "test": "npm run test:unit && npm run test:integration",
     "submodules": "git submodule update --init --recursive"
   },

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -276,40 +277,47 @@ function auditSymbioteImportMaps() {
 	    '"three":',
 	  ];
 
-  const importMapFiles = [
-    'web/index.html',
-    'demo/index.html',
-    'demo/build.js',
-  ];
+  const importMapFiles = ['web/index.html', 'demo/index.html'];
+  const buildRoot = mkdtempSync(path.join(os.tmpdir(), 'agent-portal-hygiene-demo-'));
+  try {
+    execFileSync(process.execPath, [path.join(repoRoot, 'demo', 'build.js'), '--base', '/audit/', '--out', buildRoot], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+    importMapFiles.push({ repoPath: 'generated demo index.html', absolutePath: path.join(buildRoot, 'index.html') });
 
-  for (const repoPath of importMapFiles) {
-    const absolutePath = path.join(repoRoot, repoPath);
-    let content;
-    try {
-      content = readFileSync(absolutePath, 'utf8');
-    } catch (error) {
-      if (error && error.code === 'ENOENT') continue;
-      throw error;
+    for (const input of importMapFiles) {
+      const repoPath = typeof input === 'string' ? input : input.repoPath;
+      const absolutePath = typeof input === 'string' ? path.join(repoRoot, input) : input.absolutePath;
+      let content;
+      try {
+        content = readFileSync(absolutePath, 'utf8');
+      } catch (error) {
+        if (error && error.code === 'ENOENT') continue;
+        throw error;
+      }
+
+      for (const entry of requiredImportMapEntries) {
+        if (!content.includes(entry)) {
+          addViolation(
+            'symbiote-importmap-entry',
+            repoPath,
+            `browser import maps must include exact package-export-shaped ${entry} mapping`,
+          );
+        }
+      }
+      if (content.includes('"symbiote-node"') || content.includes('"symbiote-node/')) {
+        addViolation(
+          'symbiote-node-importmap',
+          repoPath,
+          'browser import maps must not include the terminal symbiote-node facade',
+        );
+      }
     }
-
-	    for (const entry of requiredImportMapEntries) {
-	      if (!content.includes(entry)) {
-	        addViolation(
-	          'symbiote-importmap-entry',
-	          repoPath,
-	          `browser import maps must include exact package-export-shaped ${entry} mapping`,
-	        );
-	      }
-	    }
-	    if (content.includes('"symbiote-node"') || content.includes('"symbiote-node/')) {
-	      addViolation(
-	        'symbiote-node-importmap',
-	        repoPath,
-	        'browser import maps must not include the terminal symbiote-node facade',
-	      );
-	    }
-	  }
-	}
+  } finally {
+    rmSync(buildRoot, { recursive: true, force: true });
+  }
+}
 
 auditTrackedPaths();
 auditUntrackedPermanentTests();

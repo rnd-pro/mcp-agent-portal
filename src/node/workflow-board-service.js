@@ -6858,7 +6858,9 @@ export function createWorkflowBoardService(opts = {}) {
 
         if (needsCardUpdate) {
           // Record an auto-advance so on_enter automation can be driven post-commit (inv: drive).
-          if (nextColumnId !== latestCard.columnId) advanced.push({ cardId: latestCard.id, toColumnId: nextColumnId });
+          if (nextColumnId !== latestCard.columnId) {
+            advanced.push({ cardId: latestCard.id, toColumnId: nextColumnId, runStatus: nextStatus });
+          }
           latestCard = normalizeWorkflowCardInput({
             ...latestCard,
             columnId: nextColumnId,
@@ -6990,8 +6992,10 @@ export function createWorkflowBoardService(opts = {}) {
     }
     // on_enter drive (opt-in): an auto-advanced card (e.g. into quality-audit) only fires its
     // destination column's on_enter automation on the explicit transition/create paths today. The
-    // autonomous reconcile loop owns this drive so a runtime-completed card actually starts its audit
-    // instead of sitting needs_audit forever. Best-effort and idempotent — maybeAutoOrchestrateCard's
+    // autonomous reconcile loop owns this drive so a successfully completed card actually starts its
+    // audit instead of sitting needs_audit forever. A failed execution may move into the audit/recovery
+    // lane, but it must not launch a reviewer as if it had supplied auditable work. Best-effort and
+    // idempotent — maybeAutoOrchestrateCard's
     // candidate gate (board mode/pickup, audit-already-passed) is the authority, and we skip a card
     // that still has a live run. Read-side projection callers pass drive=false (no agent spawns).
     let driven = [];
@@ -7001,6 +7005,7 @@ export function createWorkflowBoardService(opts = {}) {
         if (!card) continue;
         let automation = cardAutomation(board, card);
         if (automation.trigger !== 'on_enter' || !['orchestrate', 'audit'].includes(automation.action)) continue;
+        if (automation.action === 'audit' && entry.runStatus !== 'completed') continue;
         if (getRunsForCard(card.id).some(run => RUNNING_RUN_STATUSES.has(run.status))) continue;
         let outcome = null;
         try {

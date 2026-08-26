@@ -57,10 +57,11 @@ describe('adapters-registry', () => {
     assert.ok(types.includes('antigravity'), 'should include antigravity');
     assert.ok(types.includes('claude'), 'should include claude');
     assert.ok(types.includes('codex'), 'should include codex');
+    assert.ok(types.includes('kimi'), 'should include kimi');
     assert.ok(types.includes('opencode'), 'should include opencode (metadata only)');
     assert.ok(types.includes('pool'), 'should include pool');
     assert.ok(metadata, 'should return metadata');
-    assert.equal(types.length, 5, 'should have exactly 5 adapter types in metadata');
+    assert.equal(types.length, 6, 'should have exactly 6 adapter types in metadata');
   });
 
   it('exposes DeepSeek models for OpenCode provider selection only', async () => {

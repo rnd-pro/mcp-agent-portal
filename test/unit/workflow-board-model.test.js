@@ -2199,9 +2199,11 @@ links:
   it('reconciles errored done runtime tasks and backfills run chat id', async () => {
     let taskId = '44444444-4444-4444-8444-444444444445';
     let chatId = 'chat-runtime-error';
+    let calls = [];
     let proxyManager = {
       projectRoot: tmpDir,
       requestFromChild: async (_server, _method, payload) => {
+        calls.push(payload);
         if (payload.name === 'list_tasks') return { content: [{ type: 'text', text: '[]' }] };
         return { content: [{ type: 'text', text: `Started task ${taskId}` }] };
       },
@@ -2232,6 +2234,7 @@ links:
     });
 
     assert.equal(started.run.chatId, null);
+    calls.length = 0;
     sg.merge(`tasks/${taskId}`, {
       status: 'done',
       hasError: true,
@@ -2240,10 +2243,10 @@ links:
       completedAt: 9000,
     }, 'test');
 
-    let projection = await service.getBoardProjectionWithRuntime({
-      projectId: 'agent-portal',
-      reconcileRuntime: true,
-    });
+    let reconciled = await service.reconcileWorkflowRuntimeTasks(
+      { projectId: 'agent-portal' }, undefined, { drive: true },
+    );
+    let projection = await service.getBoardProjectionWithRuntime({ projectId: 'agent-portal' });
     let card = projection.cards.find(item => item.id === created.card.id);
     let run = card.runs.find(item => item.id === started.run.id);
 
@@ -2252,6 +2255,12 @@ links:
     assert.equal(run.status, 'error');
     assert.equal(run.chatId, chatId);
     assert.equal(card.lease, null);
+    assert.deepEqual(reconciled.driven, [], 'an errored execution does not auto-launch a quality-audit run');
+    assert.equal(
+      calls.filter(payload => payload.name === 'delegate_task').length,
+      0,
+      'no follow-on agent is delegated for an errored execution',
+    );
   });
 
   it('creates a stage child chat when column routing chooses a different agent', async () => {
